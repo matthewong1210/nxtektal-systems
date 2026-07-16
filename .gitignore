@@ -1,0 +1,6 @@
+.DS_Store
+nohup.out
+node_modules/
+.impeccable/
+.claude/settings.local.json
+.claude/council-cache/
