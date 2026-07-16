@@ -1,0 +1,306 @@
+{
+  "model_version": "1.0",
+  "assessment_id": "assess_section11",
+  "scenario": "expected",
+  "currency": "USD",
+  "outputs": {
+    "current_direct_operating_cash_cost": 99864,
+    "post_direct_operating_cash_cost": 78407.25,
+    "direct_gross_cash_savings": 53866.75,
+    "net_direct_cash_savings_after_vendor": 21456.75,
+    "total_revenue_recovery_value": 11700,
+    "customer_incremental_operating_cost": 8410,
+    "annual_vendor_recurring_fee": 24000,
+    "base_vendor_recurring_fee": 24000,
+    "performance_fee": 0,
+    "initial_customer_investment": 0,
+    "core_value_pre_vendor_fee": 57156.75,
+    "core_annual_customer_net_benefit": 33156.75,
+    "expanded_annual_customer_value": 33156.75,
+    "risk_reduction_value": 0,
+    "released_capacity_value_total": 0,
+    "released_capacity_hours_total": 839.39,
+    "technical_hours_removed_total": 2679.69,
+    "cash_saved_hours_total": 1840.31,
+    "cash_labor_savings_total": 40486.75,
+    "equipment_cash_savings": 9480,
+    "ball_replacement_cash_savings": 2400,
+    "refund_and_credit_cash_savings": 1500,
+    "recovered_contribution_margin": 11700,
+    "incremental_sales_margin": 0,
+    "direct_cost_reduction_rate": 0.2149,
+    "current_daily_direct_cost": 285.33,
+    "post_daily_direct_cost": 224.02,
+    "current_monthly_direct_cost": 8322,
+    "post_monthly_direct_cost": 6533.94,
+    "monthly_core_net_benefit": 2763.06,
+    "current_cost_per_1000_balls": 9.51,
+    "post_cost_per_1000_balls": 7.47,
+    "net_benefit_per_1000_balls": 3.16,
+    "current_cost_per_basket": null,
+    "post_cost_per_basket": null,
+    "vendor_value_capture_rate": 0.4199,
+    "customer_value_retention_rate": 0.5801,
+    "technical_fte_released": 1.288,
+    "cash_fte_avoided": 0.885
+  },
+  "capacity": {
+    "annual_balls_processed": 10500000,
+    "avg_daily_ball_demand": 30000,
+    "peak_daily_ball_demand": null,
+    "target_daily_ball_throughput": null,
+    "operational_collection_rate_bph": null,
+    "operational_daily_capacity_per_robot": null,
+    "required_robot_count": null,
+    "robot_count": null,
+    "daily_capacity_fit": null,
+    "peak_window_capacity_fit": 1,
+    "capacity_fit": 1,
+    "robot_utilization": null,
+    "annual_robot_scheduled_hours": null
+  },
+  "labor_tasks": [
+    {
+      "task_id": "regular_collection",
+      "occurrences_year": 2100,
+      "annual_task_person_hours": 2625,
+      "current_task_activity_cost": 57750,
+      "effective_automation_rate": 0.813694,
+      "technical_hours_removed": 2135.95,
+      "residual_task_person_hours": 489.05,
+      "technical_labor_value_released": 46990.83,
+      "cash_labor_savings": 32893.58,
+      "cash_saved_hours": 1495.16,
+      "released_capacity_hours": 640.78,
+      "released_capacity_value": 0,
+      "incomplete": false
+    },
+    {
+      "task_id": "unloading",
+      "occurrences_year": 2100,
+      "annual_task_person_hours": 525,
+      "current_task_activity_cost": 11550,
+      "effective_automation_rate": 0.866761,
+      "technical_hours_removed": 455.05,
+      "residual_task_person_hours": 69.95,
+      "technical_labor_value_released": 10011.09,
+      "cash_labor_savings": 7007.76,
+      "cash_saved_hours": 318.53,
+      "released_capacity_hours": 136.51,
+      "released_capacity_value": 0,
+      "incomplete": false
+    },
+    {
+      "task_id": "special_recovery",
+      "occurrences_year": 52,
+      "annual_task_person_hours": 312,
+      "current_task_activity_cost": 6864,
+      "effective_automation_rate": 0.284288,
+      "technical_hours_removed": 88.7,
+      "residual_task_person_hours": 223.3,
+      "technical_labor_value_released": 1951.35,
+      "cash_labor_savings": 585.4,
+      "cash_saved_hours": 26.61,
+      "released_capacity_hours": 62.09,
+      "released_capacity_value": 0,
+      "incomplete": false
+    }
+  ],
+  "multi_year": {
+    "analysis_years": 5,
+    "core_cash_flow_by_year": [
+      0,
+      33156.75,
+      33156.75,
+      33156.75,
+      33156.75,
+      33156.75
+    ],
+    "core_net_benefit_by_year": [
+      null,
+      33156.75,
+      33156.75,
+      33156.75,
+      33156.75,
+      33156.75
+    ],
+    "cumulative_core_net_benefit": 165783.74,
+    "npv": null,
+    "irr": null,
+    "irr_note": "IRR undefined: cash flows do not change sign.",
+    "payback_month": 0,
+    "payback_note": null,
+    "approximate_payback_months": null,
+    "simple_roi": 1.023,
+    "bcr": null,
+    "first_year_cash_roi": null
+  },
+  "pricing": {
+    "break_even_annual_vendor_fee": 57156.75,
+    "max_vendor_fee_for_target_savings": null,
+    "annual_vendor_fee_by_value_share": null,
+    "max_hardware_purchase_price": null,
+    "max_fixed_monthly_fee": null
+  },
+  "warnings": [
+    {
+      "code": "capacity_fit_assumed_estimated",
+      "entity_id": null,
+      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+    },
+    {
+      "code": "capacity_fit_assumed_estimated",
+      "entity_id": null,
+      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+    },
+    {
+      "code": "capacity_fit_assumed_estimated",
+      "entity_id": null,
+      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+    },
+    {
+      "code": "capacity_fit_assumed_estimated",
+      "entity_id": null,
+      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+    },
+    {
+      "code": "capacity_fit_assumed_estimated",
+      "entity_id": null,
+      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+    }
+  ],
+  "raw": {
+    "current_direct_operating_cash_cost": "99864",
+    "post_direct_operating_cash_cost": "78407.252545",
+    "direct_gross_cash_savings": "53866.747455",
+    "net_direct_cash_savings_after_vendor": "21456.747455",
+    "core_value_pre_vendor_fee": "57156.747455",
+    "core_annual_customer_net_benefit": "33156.747455",
+    "expanded_annual_customer_value": "33156.747455",
+    "cash_labor_savings_total": "40486.747455",
+    "total_revenue_recovery_value": "11700"
+  },
+  "formula_trace": [
+    {
+      "formula_id": "F-T03",
+      "entity_id": null,
+      "inputs": [
+        10500000
+      ],
+      "result": 10500000
+    },
+    {
+      "formula_id": "F-C08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        1
+      ],
+      "result": 1
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2100,
+        1.25,
+        1
+      ],
+      "result": 2625
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        22
+      ],
+      "result": 22
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        22,
+        0,
+        22
+      ],
+      "result": 57750
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "regular_collection",
+      "inputs": [
+        0.92,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.813694
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        0.813694
+      ],
+      "result": 2135.94675
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2135.94675,
+        22
+      ],
+      "result": 46990.8285
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "regular_collection",
+      "inputs": [
+        46990.8285,
+        0.7
+      ],
+      "result": 32893.57995
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "regular_collection",
+      "inputs": [
+        640.784025,
+        null,
+        null
+      ],
+      "result": 0
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "unloading",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100
+    },
+    {
+      "formula_id": "…",
+      "entity_id": null,
+      "inputs": [
+        "trace truncated in sample; full trace is always emitted by the engine"
+      ],
+      "result": null
+    }
+  ]
+}
