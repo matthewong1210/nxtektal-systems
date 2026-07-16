@@ -1,0 +1,118 @@
+{
+  "model_version": "1.0",
+  "assessment_id": "assess_section11",
+  "site": {
+    "site_id": "site_example",
+    "assessment_date": "2026-07-15",
+    "currency": "USD",
+    "analysis_years": 5,
+    "operating_days_per_year": 350,
+    "operating_hours_per_day": 12,
+    "active_weeks_per_year": 52,
+    "annual_balls_processed_override": 10500000,
+    "tax_treatment": "cash_inclusive"
+  },
+  "labor_tasks": [
+    {
+      "task_id": "regular_collection",
+      "task_type": "current_task",
+      "frequency_basis": "per_day",
+      "frequency_value": 6,
+      "duration_hours_per_occurrence": 1.25,
+      "headcount": 1,
+      "loaded_regular_rate_override": 22,
+      "coverage_rate": 0.92,
+      "system_uptime": 0.95,
+      "capacity_fit_override": 1,
+      "workflow_success_rate": 0.98,
+      "adoption_rate": 0.95,
+      "cash_realization_method": "simple_factor",
+      "simple_cash_realization_factor": 0.7
+    },
+    {
+      "task_id": "unloading",
+      "task_type": "current_task",
+      "frequency_basis": "per_day",
+      "frequency_value": 6,
+      "duration_hours_per_occurrence": 0.25,
+      "headcount": 1,
+      "loaded_regular_rate_override": 22,
+      "coverage_rate": 0.98,
+      "system_uptime": 0.95,
+      "capacity_fit_override": 1,
+      "workflow_success_rate": 0.98,
+      "adoption_rate": 0.95,
+      "cash_realization_method": "simple_factor",
+      "simple_cash_realization_factor": 0.7
+    },
+    {
+      "task_id": "special_recovery",
+      "task_type": "current_task",
+      "frequency_basis": "per_week",
+      "frequency_value": 1,
+      "duration_hours_per_occurrence": 6,
+      "headcount": 1,
+      "loaded_regular_rate_override": 22,
+      "coverage_rate": 0.35,
+      "system_uptime": 0.95,
+      "capacity_fit_override": 1,
+      "workflow_success_rate": 0.9,
+      "adoption_rate": 0.95,
+      "cash_realization_method": "simple_factor",
+      "simple_cash_realization_factor": 0.3
+    }
+  ],
+  "equipment_components": [
+    {
+      "asset_id": "picker_cart_01",
+      "cost_component_id": "fuel",
+      "component_type": "variable",
+      "annual_current_cash_cost": 7200,
+      "usage_reduction_rate": 0.9
+    },
+    {
+      "asset_id": "picker_cart_01",
+      "cost_component_id": "maintenance",
+      "component_type": "periodic",
+      "annual_current_cash_cost": 5000,
+      "avoidability_override": 0.6
+    },
+    {
+      "asset_id": "picker_cart_01",
+      "cost_component_id": "insurance",
+      "component_type": "fixed_contractual",
+      "annual_current_cash_cost": 1500,
+      "retirement_fraction": 0,
+      "contractual_avoidability_rate": 0
+    }
+  ],
+  "ball_loss_causes": [
+    {
+      "loss_cause_id": "all_causes",
+      "annual_current_lost_balls": 10000,
+      "landed_cost_per_ball": 0.8,
+      "loss_reduction_override": 0.3
+    }
+  ],
+  "revenue_event_groups": [
+    {
+      "revenue_event_group_id": "stockout_missed_sales",
+      "annual_missed_baskets_override": 1200,
+      "price_per_basket": 14,
+      "variable_cost_per_basket": 1,
+      "stockout_reduction_override": 0.75
+    },
+    {
+      "revenue_event_group_id": "refunds",
+      "annual_refund_count": 1,
+      "average_net_refund_cost": 2000,
+      "stockout_reduction_override": 0.75
+    }
+  ],
+  "system_costs": {
+    "annual_other_customer_ops_cost": 8410
+  },
+  "pricing": {
+    "annual_fixed_service_fee": 24000
+  }
+}

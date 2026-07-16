@@ -1,0 +1,8 @@
+{
+  "config_version": "1.0.0",
+  "model_version": "1.0",
+  "description": "Versioned default data file. INTENTIONALLY EMPTY of product numbers: uptime, collection-rate, coverage, benchmark, discount-rate and pricing defaults are business data, not formulas (spec §1.2, §16 rule 11). Populate per release with source and version; never hard-code defaults in engine code.",
+  "scenario_defaults": {},
+  "benchmarks": {},
+  "pricing_defaults": {}
+}
