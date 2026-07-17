@@ -149,6 +149,28 @@ export function computeRevenue(
     }
 
     if (countRefund) {
+      if (
+        g.annual_refund_count !== null &&
+        !g.annual_refund_count.isZero() &&
+        g.average_net_refund_cost === null
+      ) {
+        warnings.add(
+          "missing_input",
+          id,
+          `average_net_refund_cost missing for group "${id}" despite a nonzero refund count; refund loss is EXCLUDED and reported missing, not zero (§4).`,
+        );
+      }
+      if (
+        g.annual_service_credit_count !== null &&
+        !g.annual_service_credit_count.isZero() &&
+        g.average_service_credit_cost === null
+      ) {
+        warnings.add(
+          "missing_input",
+          id,
+          `average_service_credit_cost missing for group "${id}" despite a nonzero credit count; credit cost is EXCLUDED and reported missing, not zero (§4).`,
+        );
+      }
       // F-R04 — refund & service credit cash losses.
       const refunds =
         g.annual_refund_count !== null && g.average_net_refund_cost !== null

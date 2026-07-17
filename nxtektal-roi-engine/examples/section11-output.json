@@ -146,27 +146,3289 @@
     {
       "code": "capacity_fit_assumed_estimated",
       "entity_id": null,
-      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+      "message": "Daily capacity fit could not be computed (demand/capacity inputs missing); capacity_fit falls back to 1 (no peak-window data either) and must be treated as an ESTIMATE, not a confirmed fit (§8.2)."
     },
     {
       "code": "capacity_fit_assumed_estimated",
       "entity_id": null,
-      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+      "message": "Daily capacity fit could not be computed (demand/capacity inputs missing); capacity_fit falls back to 1 (no peak-window data either) and must be treated as an ESTIMATE, not a confirmed fit (§8.2)."
     },
     {
       "code": "capacity_fit_assumed_estimated",
       "entity_id": null,
-      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+      "message": "Daily capacity fit could not be computed (demand/capacity inputs missing); capacity_fit falls back to 1 (no peak-window data either) and must be treated as an ESTIMATE, not a confirmed fit (§8.2)."
     },
     {
       "code": "capacity_fit_assumed_estimated",
       "entity_id": null,
-      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+      "message": "Daily capacity fit could not be computed (demand/capacity inputs missing); capacity_fit falls back to 1 (no peak-window data either) and must be treated as an ESTIMATE, not a confirmed fit (§8.2)."
     },
     {
       "code": "capacity_fit_assumed_estimated",
       "entity_id": null,
-      "message": "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2)."
+      "message": "Daily capacity fit could not be computed (demand/capacity inputs missing); capacity_fit falls back to 1 (no peak-window data either) and must be treated as an ESTIMATE, not a confirmed fit (§8.2)."
+    }
+  ],
+  "formula_trace": [
+    {
+      "formula_id": "F-T03",
+      "entity_id": null,
+      "inputs": [
+        10500000
+      ],
+      "result": 10500000,
+      "result_raw": "10500000"
+    },
+    {
+      "formula_id": "F-C08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        1
+      ],
+      "result": 1,
+      "result_raw": "1"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2100,
+        1.25,
+        1
+      ],
+      "result": 2625,
+      "result_raw": "2625"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        22,
+        0,
+        22
+      ],
+      "result": 57750,
+      "result_raw": "57750"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "regular_collection",
+      "inputs": [
+        0.92,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.813694,
+      "result_raw": "0.813694"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        0.813694
+      ],
+      "result": 2135.94675,
+      "result_raw": "2135.94675"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2135.94675,
+        22
+      ],
+      "result": 46990.8285,
+      "result_raw": "46990.8285"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "regular_collection",
+      "inputs": [
+        46990.8285,
+        0.7
+      ],
+      "result": 32893.57995,
+      "result_raw": "32893.57995"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "regular_collection",
+      "inputs": [
+        640.784025,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "unloading",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "unloading",
+      "inputs": [
+        2100,
+        0.25,
+        1
+      ],
+      "result": 525,
+      "result_raw": "525"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "unloading",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        22,
+        0,
+        22
+      ],
+      "result": 11550,
+      "result_raw": "11550"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "unloading",
+      "inputs": [
+        0.98,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.866761,
+      "result_raw": "0.866761"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        0.866761
+      ],
+      "result": 455.049525,
+      "result_raw": "455.049525"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "unloading",
+      "inputs": [
+        455.049525,
+        22
+      ],
+      "result": 10011.08955,
+      "result_raw": "10011.08955"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "unloading",
+      "inputs": [
+        10011.08955,
+        0.7
+      ],
+      "result": 7007.762685,
+      "result_raw": "7007.762685"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "unloading",
+      "inputs": [
+        136.5148575,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1,
+        52
+      ],
+      "result": 52,
+      "result_raw": "52"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "special_recovery",
+      "inputs": [
+        52,
+        6,
+        1
+      ],
+      "result": 312,
+      "result_raw": "312"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        22,
+        0,
+        22
+      ],
+      "result": 6864,
+      "result_raw": "6864"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "special_recovery",
+      "inputs": [
+        0.35,
+        0.95,
+        1,
+        0.9,
+        0.95
+      ],
+      "result": 0.2842875,
+      "result_raw": "0.2842875"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        0.2842875
+      ],
+      "result": 88.6977,
+      "result_raw": "88.6977"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "special_recovery",
+      "inputs": [
+        88.6977,
+        22
+      ],
+      "result": 1951.3494,
+      "result_raw": "1951.3494"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1951.3494,
+        0.3
+      ],
+      "result": 585.40482,
+      "result_raw": "585.40482"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "special_recovery",
+      "inputs": [
+        62.08839,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-L11",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        0.9
+      ],
+      "result": 0.9,
+      "result_raw": "0.9"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        7200,
+        0.9
+      ],
+      "result": 6480,
+      "result_raw": "6480"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        0.6
+      ],
+      "result": 0.6,
+      "result_raw": "0.6"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        5000,
+        0.6
+      ],
+      "result": 3000,
+      "result_raw": "3000"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        0,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        1500,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E01",
+      "entity_id": null,
+      "inputs": [
+        3
+      ],
+      "result": 13700,
+      "result_raw": "13700"
+    },
+    {
+      "formula_id": "F-E04",
+      "entity_id": null,
+      "inputs": [
+        13700,
+        9480
+      ],
+      "result": 4220,
+      "result_raw": "4220"
+    },
+    {
+      "formula_id": "F-B01",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.8
+      ],
+      "result": 8000,
+      "result_raw": "8000"
+    },
+    {
+      "formula_id": "F-B02",
+      "entity_id": "all_causes",
+      "inputs": [
+        0.3
+      ],
+      "result": 0.3,
+      "result_raw": "0.3"
+    },
+    {
+      "formula_id": "F-B03",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.3,
+        0
+      ],
+      "result": 7000,
+      "result_raw": "7000"
+    },
+    {
+      "formula_id": "F-B04",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        7000,
+        0.8
+      ],
+      "result": 2400,
+      "result_raw": "2400"
+    },
+    {
+      "formula_id": "F-R01",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200
+      ],
+      "result": 1200,
+      "result_raw": "1200"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R02",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        14,
+        1
+      ],
+      "result": 13,
+      "result_raw": "13"
+    },
+    {
+      "formula_id": "F-R03",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200,
+        13
+      ],
+      "result": 15600,
+      "result_raw": "15600"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        15600,
+        0.75
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "refunds",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R04",
+      "entity_id": "refunds",
+      "inputs": [
+        1,
+        2000,
+        null,
+        null
+      ],
+      "result": 2000,
+      "result_raw": "2000"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "refunds",
+      "inputs": [
+        2000,
+        0.75
+      ],
+      "result": 1500,
+      "result_raw": "1500"
+    },
+    {
+      "formula_id": "F-R08",
+      "entity_id": null,
+      "inputs": [
+        11700,
+        0
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-S01",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-S02",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-S03",
+      "entity_id": null,
+      "inputs": [
+        0,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P01",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        350,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P02",
+      "entity_id": null,
+      "inputs": [
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P03",
+      "entity_id": null,
+      "inputs": [
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P04",
+      "entity_id": null,
+      "inputs": [
+        0,
+        0,
+        0,
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P05",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        null,
+        null,
+        10500000,
+        null,
+        null,
+        24000
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-P07",
+      "entity_id": null,
+      "inputs": [
+        24000,
+        0
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-A01",
+      "entity_id": null,
+      "inputs": [
+        76164,
+        13700,
+        8000,
+        2000,
+        0,
+        0
+      ],
+      "result": 99864,
+      "result_raw": "99864"
+    },
+    {
+      "formula_id": "F-A02",
+      "entity_id": null,
+      "inputs": [
+        40486.747455,
+        9480,
+        2400,
+        1500,
+        0
+      ],
+      "result": 53866.747455,
+      "result_raw": "53866.747455"
+    },
+    {
+      "formula_id": "F-A03",
+      "entity_id": null,
+      "inputs": [
+        99864,
+        53866.747455,
+        8410,
+        24000
+      ],
+      "result": 78407.252545,
+      "result_raw": "78407.252545"
+    },
+    {
+      "formula_id": "F-A04",
+      "entity_id": null,
+      "inputs": [
+        99864,
+        78407.252545
+      ],
+      "result": 21456.747455,
+      "result_raw": "21456.747455"
+    },
+    {
+      "formula_id": "F-A05",
+      "entity_id": null,
+      "inputs": [
+        53866.747455,
+        11700,
+        8410
+      ],
+      "result": 57156.747455,
+      "result_raw": "57156.747455"
+    },
+    {
+      "formula_id": "F-A06",
+      "entity_id": null,
+      "inputs": [
+        57156.747455,
+        24000
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-A07",
+      "entity_id": null,
+      "inputs": [
+        33156.747455,
+        0,
+        0
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-A08",
+      "entity_id": null,
+      "inputs": [
+        21456.747455,
+        99864
+      ],
+      "result": 0.214859683719859,
+      "result_raw": "0.214859683719859008251221661459585"
+    },
+    {
+      "formula_id": "F-A09",
+      "entity_id": null,
+      "inputs": [
+        99864,
+        78407.252545,
+        33156.747455
+      ],
+      "result": 2763.0622879166667,
+      "result_raw": "2763.062287916666666666666666666667"
+    },
+    {
+      "formula_id": "F-A10",
+      "entity_id": null,
+      "inputs": [
+        99864,
+        78407.252545,
+        10500000
+      ],
+      "result": 9.510857142857143,
+      "result_raw": "9.510857142857142857142857142857143"
+    },
+    {
+      "formula_id": "F-A12",
+      "entity_id": null,
+      "inputs": [
+        24000,
+        33156.747455,
+        57156.747455
+      ],
+      "result": 0.4198979310167257,
+      "result_raw": "0.4198979310167256612310323423388718"
+    },
+    {
+      "formula_id": "F-P08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-M02",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-M03",
+      "entity_id": "year_1",
+      "inputs": [
+        33156.747455,
+        0,
+        0,
+        0
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-T03",
+      "entity_id": null,
+      "inputs": [
+        10500000
+      ],
+      "result": 10500000,
+      "result_raw": "10500000"
+    },
+    {
+      "formula_id": "F-C08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        1
+      ],
+      "result": 1,
+      "result_raw": "1"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2100,
+        1.25,
+        1
+      ],
+      "result": 2625,
+      "result_raw": "2625"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        22,
+        0,
+        22
+      ],
+      "result": 57750,
+      "result_raw": "57750"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "regular_collection",
+      "inputs": [
+        0.92,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.813694,
+      "result_raw": "0.813694"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        0.813694
+      ],
+      "result": 2135.94675,
+      "result_raw": "2135.94675"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2135.94675,
+        22
+      ],
+      "result": 46990.8285,
+      "result_raw": "46990.8285"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "regular_collection",
+      "inputs": [
+        46990.8285,
+        0.7
+      ],
+      "result": 32893.57995,
+      "result_raw": "32893.57995"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "regular_collection",
+      "inputs": [
+        640.784025,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "unloading",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "unloading",
+      "inputs": [
+        2100,
+        0.25,
+        1
+      ],
+      "result": 525,
+      "result_raw": "525"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "unloading",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        22,
+        0,
+        22
+      ],
+      "result": 11550,
+      "result_raw": "11550"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "unloading",
+      "inputs": [
+        0.98,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.866761,
+      "result_raw": "0.866761"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        0.866761
+      ],
+      "result": 455.049525,
+      "result_raw": "455.049525"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "unloading",
+      "inputs": [
+        455.049525,
+        22
+      ],
+      "result": 10011.08955,
+      "result_raw": "10011.08955"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "unloading",
+      "inputs": [
+        10011.08955,
+        0.7
+      ],
+      "result": 7007.762685,
+      "result_raw": "7007.762685"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "unloading",
+      "inputs": [
+        136.5148575,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1,
+        52
+      ],
+      "result": 52,
+      "result_raw": "52"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "special_recovery",
+      "inputs": [
+        52,
+        6,
+        1
+      ],
+      "result": 312,
+      "result_raw": "312"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        22,
+        0,
+        22
+      ],
+      "result": 6864,
+      "result_raw": "6864"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "special_recovery",
+      "inputs": [
+        0.35,
+        0.95,
+        1,
+        0.9,
+        0.95
+      ],
+      "result": 0.2842875,
+      "result_raw": "0.2842875"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        0.2842875
+      ],
+      "result": 88.6977,
+      "result_raw": "88.6977"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "special_recovery",
+      "inputs": [
+        88.6977,
+        22
+      ],
+      "result": 1951.3494,
+      "result_raw": "1951.3494"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1951.3494,
+        0.3
+      ],
+      "result": 585.40482,
+      "result_raw": "585.40482"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "special_recovery",
+      "inputs": [
+        62.08839,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-L11",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        0.9
+      ],
+      "result": 0.9,
+      "result_raw": "0.9"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        7200,
+        0.9
+      ],
+      "result": 6480,
+      "result_raw": "6480"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        0.6
+      ],
+      "result": 0.6,
+      "result_raw": "0.6"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        5000,
+        0.6
+      ],
+      "result": 3000,
+      "result_raw": "3000"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        0,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        1500,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E01",
+      "entity_id": null,
+      "inputs": [
+        3
+      ],
+      "result": 13700,
+      "result_raw": "13700"
+    },
+    {
+      "formula_id": "F-E04",
+      "entity_id": null,
+      "inputs": [
+        13700,
+        9480
+      ],
+      "result": 4220,
+      "result_raw": "4220"
+    },
+    {
+      "formula_id": "F-B01",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.8
+      ],
+      "result": 8000,
+      "result_raw": "8000"
+    },
+    {
+      "formula_id": "F-B02",
+      "entity_id": "all_causes",
+      "inputs": [
+        0.3
+      ],
+      "result": 0.3,
+      "result_raw": "0.3"
+    },
+    {
+      "formula_id": "F-B03",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.3,
+        0
+      ],
+      "result": 7000,
+      "result_raw": "7000"
+    },
+    {
+      "formula_id": "F-B04",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        7000,
+        0.8
+      ],
+      "result": 2400,
+      "result_raw": "2400"
+    },
+    {
+      "formula_id": "F-R01",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200
+      ],
+      "result": 1200,
+      "result_raw": "1200"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R02",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        14,
+        1
+      ],
+      "result": 13,
+      "result_raw": "13"
+    },
+    {
+      "formula_id": "F-R03",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200,
+        13
+      ],
+      "result": 15600,
+      "result_raw": "15600"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        15600,
+        0.75
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "refunds",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R04",
+      "entity_id": "refunds",
+      "inputs": [
+        1,
+        2000,
+        null,
+        null
+      ],
+      "result": 2000,
+      "result_raw": "2000"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "refunds",
+      "inputs": [
+        2000,
+        0.75
+      ],
+      "result": 1500,
+      "result_raw": "1500"
+    },
+    {
+      "formula_id": "F-R08",
+      "entity_id": null,
+      "inputs": [
+        11700,
+        0
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-P01",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        350,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P02",
+      "entity_id": null,
+      "inputs": [
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P03",
+      "entity_id": null,
+      "inputs": [
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P04",
+      "entity_id": null,
+      "inputs": [
+        0,
+        0,
+        0,
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P05",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        null,
+        null,
+        10500000,
+        null,
+        null,
+        24000
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-P07",
+      "entity_id": null,
+      "inputs": [
+        24000,
+        0
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-M03",
+      "entity_id": "year_2",
+      "inputs": [
+        33156.747455,
+        0,
+        0,
+        0
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-T03",
+      "entity_id": null,
+      "inputs": [
+        10500000
+      ],
+      "result": 10500000,
+      "result_raw": "10500000"
+    },
+    {
+      "formula_id": "F-C08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        1
+      ],
+      "result": 1,
+      "result_raw": "1"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2100,
+        1.25,
+        1
+      ],
+      "result": 2625,
+      "result_raw": "2625"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        22,
+        0,
+        22
+      ],
+      "result": 57750,
+      "result_raw": "57750"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "regular_collection",
+      "inputs": [
+        0.92,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.813694,
+      "result_raw": "0.813694"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        0.813694
+      ],
+      "result": 2135.94675,
+      "result_raw": "2135.94675"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2135.94675,
+        22
+      ],
+      "result": 46990.8285,
+      "result_raw": "46990.8285"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "regular_collection",
+      "inputs": [
+        46990.8285,
+        0.7
+      ],
+      "result": 32893.57995,
+      "result_raw": "32893.57995"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "regular_collection",
+      "inputs": [
+        640.784025,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "unloading",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "unloading",
+      "inputs": [
+        2100,
+        0.25,
+        1
+      ],
+      "result": 525,
+      "result_raw": "525"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "unloading",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        22,
+        0,
+        22
+      ],
+      "result": 11550,
+      "result_raw": "11550"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "unloading",
+      "inputs": [
+        0.98,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.866761,
+      "result_raw": "0.866761"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        0.866761
+      ],
+      "result": 455.049525,
+      "result_raw": "455.049525"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "unloading",
+      "inputs": [
+        455.049525,
+        22
+      ],
+      "result": 10011.08955,
+      "result_raw": "10011.08955"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "unloading",
+      "inputs": [
+        10011.08955,
+        0.7
+      ],
+      "result": 7007.762685,
+      "result_raw": "7007.762685"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "unloading",
+      "inputs": [
+        136.5148575,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1,
+        52
+      ],
+      "result": 52,
+      "result_raw": "52"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "special_recovery",
+      "inputs": [
+        52,
+        6,
+        1
+      ],
+      "result": 312,
+      "result_raw": "312"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        22,
+        0,
+        22
+      ],
+      "result": 6864,
+      "result_raw": "6864"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "special_recovery",
+      "inputs": [
+        0.35,
+        0.95,
+        1,
+        0.9,
+        0.95
+      ],
+      "result": 0.2842875,
+      "result_raw": "0.2842875"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        0.2842875
+      ],
+      "result": 88.6977,
+      "result_raw": "88.6977"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "special_recovery",
+      "inputs": [
+        88.6977,
+        22
+      ],
+      "result": 1951.3494,
+      "result_raw": "1951.3494"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1951.3494,
+        0.3
+      ],
+      "result": 585.40482,
+      "result_raw": "585.40482"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "special_recovery",
+      "inputs": [
+        62.08839,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-L11",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        0.9
+      ],
+      "result": 0.9,
+      "result_raw": "0.9"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        7200,
+        0.9
+      ],
+      "result": 6480,
+      "result_raw": "6480"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        0.6
+      ],
+      "result": 0.6,
+      "result_raw": "0.6"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        5000,
+        0.6
+      ],
+      "result": 3000,
+      "result_raw": "3000"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        0,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        1500,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E01",
+      "entity_id": null,
+      "inputs": [
+        3
+      ],
+      "result": 13700,
+      "result_raw": "13700"
+    },
+    {
+      "formula_id": "F-E04",
+      "entity_id": null,
+      "inputs": [
+        13700,
+        9480
+      ],
+      "result": 4220,
+      "result_raw": "4220"
+    },
+    {
+      "formula_id": "F-B01",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.8
+      ],
+      "result": 8000,
+      "result_raw": "8000"
+    },
+    {
+      "formula_id": "F-B02",
+      "entity_id": "all_causes",
+      "inputs": [
+        0.3
+      ],
+      "result": 0.3,
+      "result_raw": "0.3"
+    },
+    {
+      "formula_id": "F-B03",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.3,
+        0
+      ],
+      "result": 7000,
+      "result_raw": "7000"
+    },
+    {
+      "formula_id": "F-B04",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        7000,
+        0.8
+      ],
+      "result": 2400,
+      "result_raw": "2400"
+    },
+    {
+      "formula_id": "F-R01",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200
+      ],
+      "result": 1200,
+      "result_raw": "1200"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R02",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        14,
+        1
+      ],
+      "result": 13,
+      "result_raw": "13"
+    },
+    {
+      "formula_id": "F-R03",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200,
+        13
+      ],
+      "result": 15600,
+      "result_raw": "15600"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        15600,
+        0.75
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "refunds",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R04",
+      "entity_id": "refunds",
+      "inputs": [
+        1,
+        2000,
+        null,
+        null
+      ],
+      "result": 2000,
+      "result_raw": "2000"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "refunds",
+      "inputs": [
+        2000,
+        0.75
+      ],
+      "result": 1500,
+      "result_raw": "1500"
+    },
+    {
+      "formula_id": "F-R08",
+      "entity_id": null,
+      "inputs": [
+        11700,
+        0
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-P01",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        350,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P02",
+      "entity_id": null,
+      "inputs": [
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P03",
+      "entity_id": null,
+      "inputs": [
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P04",
+      "entity_id": null,
+      "inputs": [
+        0,
+        0,
+        0,
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P05",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        null,
+        null,
+        10500000,
+        null,
+        null,
+        24000
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-P07",
+      "entity_id": null,
+      "inputs": [
+        24000,
+        0
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-M03",
+      "entity_id": "year_3",
+      "inputs": [
+        33156.747455,
+        0,
+        0,
+        0
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-T03",
+      "entity_id": null,
+      "inputs": [
+        10500000
+      ],
+      "result": 10500000,
+      "result_raw": "10500000"
+    },
+    {
+      "formula_id": "F-C08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        1
+      ],
+      "result": 1,
+      "result_raw": "1"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2100,
+        1.25,
+        1
+      ],
+      "result": 2625,
+      "result_raw": "2625"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        22,
+        0,
+        22
+      ],
+      "result": 57750,
+      "result_raw": "57750"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "regular_collection",
+      "inputs": [
+        0.92,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.813694,
+      "result_raw": "0.813694"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        0.813694
+      ],
+      "result": 2135.94675,
+      "result_raw": "2135.94675"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2135.94675,
+        22
+      ],
+      "result": 46990.8285,
+      "result_raw": "46990.8285"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "regular_collection",
+      "inputs": [
+        46990.8285,
+        0.7
+      ],
+      "result": 32893.57995,
+      "result_raw": "32893.57995"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "regular_collection",
+      "inputs": [
+        640.784025,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "unloading",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "unloading",
+      "inputs": [
+        2100,
+        0.25,
+        1
+      ],
+      "result": 525,
+      "result_raw": "525"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "unloading",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        22,
+        0,
+        22
+      ],
+      "result": 11550,
+      "result_raw": "11550"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "unloading",
+      "inputs": [
+        0.98,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.866761,
+      "result_raw": "0.866761"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        0.866761
+      ],
+      "result": 455.049525,
+      "result_raw": "455.049525"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "unloading",
+      "inputs": [
+        455.049525,
+        22
+      ],
+      "result": 10011.08955,
+      "result_raw": "10011.08955"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "unloading",
+      "inputs": [
+        10011.08955,
+        0.7
+      ],
+      "result": 7007.762685,
+      "result_raw": "7007.762685"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "unloading",
+      "inputs": [
+        136.5148575,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1,
+        52
+      ],
+      "result": 52,
+      "result_raw": "52"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "special_recovery",
+      "inputs": [
+        52,
+        6,
+        1
+      ],
+      "result": 312,
+      "result_raw": "312"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        22,
+        0,
+        22
+      ],
+      "result": 6864,
+      "result_raw": "6864"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "special_recovery",
+      "inputs": [
+        0.35,
+        0.95,
+        1,
+        0.9,
+        0.95
+      ],
+      "result": 0.2842875,
+      "result_raw": "0.2842875"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        0.2842875
+      ],
+      "result": 88.6977,
+      "result_raw": "88.6977"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "special_recovery",
+      "inputs": [
+        88.6977,
+        22
+      ],
+      "result": 1951.3494,
+      "result_raw": "1951.3494"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1951.3494,
+        0.3
+      ],
+      "result": 585.40482,
+      "result_raw": "585.40482"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "special_recovery",
+      "inputs": [
+        62.08839,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-L11",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        0.9
+      ],
+      "result": 0.9,
+      "result_raw": "0.9"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        7200,
+        0.9
+      ],
+      "result": 6480,
+      "result_raw": "6480"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        0.6
+      ],
+      "result": 0.6,
+      "result_raw": "0.6"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        5000,
+        0.6
+      ],
+      "result": 3000,
+      "result_raw": "3000"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        0,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        1500,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E01",
+      "entity_id": null,
+      "inputs": [
+        3
+      ],
+      "result": 13700,
+      "result_raw": "13700"
+    },
+    {
+      "formula_id": "F-E04",
+      "entity_id": null,
+      "inputs": [
+        13700,
+        9480
+      ],
+      "result": 4220,
+      "result_raw": "4220"
+    },
+    {
+      "formula_id": "F-B01",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.8
+      ],
+      "result": 8000,
+      "result_raw": "8000"
+    },
+    {
+      "formula_id": "F-B02",
+      "entity_id": "all_causes",
+      "inputs": [
+        0.3
+      ],
+      "result": 0.3,
+      "result_raw": "0.3"
+    },
+    {
+      "formula_id": "F-B03",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.3,
+        0
+      ],
+      "result": 7000,
+      "result_raw": "7000"
+    },
+    {
+      "formula_id": "F-B04",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        7000,
+        0.8
+      ],
+      "result": 2400,
+      "result_raw": "2400"
+    },
+    {
+      "formula_id": "F-R01",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200
+      ],
+      "result": 1200,
+      "result_raw": "1200"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R02",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        14,
+        1
+      ],
+      "result": 13,
+      "result_raw": "13"
+    },
+    {
+      "formula_id": "F-R03",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200,
+        13
+      ],
+      "result": 15600,
+      "result_raw": "15600"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        15600,
+        0.75
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "refunds",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R04",
+      "entity_id": "refunds",
+      "inputs": [
+        1,
+        2000,
+        null,
+        null
+      ],
+      "result": 2000,
+      "result_raw": "2000"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "refunds",
+      "inputs": [
+        2000,
+        0.75
+      ],
+      "result": 1500,
+      "result_raw": "1500"
+    },
+    {
+      "formula_id": "F-R08",
+      "entity_id": null,
+      "inputs": [
+        11700,
+        0
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-P01",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        350,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P02",
+      "entity_id": null,
+      "inputs": [
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P03",
+      "entity_id": null,
+      "inputs": [
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P04",
+      "entity_id": null,
+      "inputs": [
+        0,
+        0,
+        0,
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P05",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        null,
+        null,
+        10500000,
+        null,
+        null,
+        24000
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-P07",
+      "entity_id": null,
+      "inputs": [
+        24000,
+        0
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-M03",
+      "entity_id": "year_4",
+      "inputs": [
+        33156.747455,
+        0,
+        0,
+        0
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-T03",
+      "entity_id": null,
+      "inputs": [
+        10500000
+      ],
+      "result": 10500000,
+      "result_raw": "10500000"
+    },
+    {
+      "formula_id": "F-C08",
+      "entity_id": null,
+      "inputs": [
+        null,
+        1
+      ],
+      "result": 1,
+      "result_raw": "1"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2100,
+        1.25,
+        1
+      ],
+      "result": 2625,
+      "result_raw": "2625"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "regular_collection",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        22,
+        0,
+        22
+      ],
+      "result": 57750,
+      "result_raw": "57750"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "regular_collection",
+      "inputs": [
+        0.92,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.813694,
+      "result_raw": "0.813694"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2625,
+        0.813694
+      ],
+      "result": 2135.94675,
+      "result_raw": "2135.94675"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "regular_collection",
+      "inputs": [
+        2135.94675,
+        22
+      ],
+      "result": 46990.8285,
+      "result_raw": "46990.8285"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "regular_collection",
+      "inputs": [
+        46990.8285,
+        0.7
+      ],
+      "result": 32893.57995,
+      "result_raw": "32893.57995"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "regular_collection",
+      "inputs": [
+        640.784025,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "unloading",
+      "inputs": [
+        6,
+        350
+      ],
+      "result": 2100,
+      "result_raw": "2100"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "unloading",
+      "inputs": [
+        2100,
+        0.25,
+        1
+      ],
+      "result": 525,
+      "result_raw": "525"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "unloading",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        22,
+        0,
+        22
+      ],
+      "result": 11550,
+      "result_raw": "11550"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "unloading",
+      "inputs": [
+        0.98,
+        0.95,
+        1,
+        0.98,
+        0.95
+      ],
+      "result": 0.866761,
+      "result_raw": "0.866761"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "unloading",
+      "inputs": [
+        525,
+        0.866761
+      ],
+      "result": 455.049525,
+      "result_raw": "455.049525"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "unloading",
+      "inputs": [
+        455.049525,
+        22
+      ],
+      "result": 10011.08955,
+      "result_raw": "10011.08955"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "unloading",
+      "inputs": [
+        10011.08955,
+        0.7
+      ],
+      "result": 7007.762685,
+      "result_raw": "7007.762685"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "unloading",
+      "inputs": [
+        136.5148575,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-T01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1,
+        52
+      ],
+      "result": 52,
+      "result_raw": "52"
+    },
+    {
+      "formula_id": "F-L03",
+      "entity_id": "special_recovery",
+      "inputs": [
+        52,
+        6,
+        1
+      ],
+      "result": 312,
+      "result_raw": "312"
+    },
+    {
+      "formula_id": "F-L01",
+      "entity_id": "special_recovery",
+      "inputs": [
+        22
+      ],
+      "result": 22,
+      "result_raw": "22"
+    },
+    {
+      "formula_id": "F-L04",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        22,
+        0,
+        22
+      ],
+      "result": 6864,
+      "result_raw": "6864"
+    },
+    {
+      "formula_id": "F-L05",
+      "entity_id": "special_recovery",
+      "inputs": [
+        0.35,
+        0.95,
+        1,
+        0.9,
+        0.95
+      ],
+      "result": 0.2842875,
+      "result_raw": "0.2842875"
+    },
+    {
+      "formula_id": "F-L06",
+      "entity_id": "special_recovery",
+      "inputs": [
+        312,
+        0.2842875
+      ],
+      "result": 88.6977,
+      "result_raw": "88.6977"
+    },
+    {
+      "formula_id": "F-L07",
+      "entity_id": "special_recovery",
+      "inputs": [
+        88.6977,
+        22
+      ],
+      "result": 1951.3494,
+      "result_raw": "1951.3494"
+    },
+    {
+      "formula_id": "F-L09",
+      "entity_id": "special_recovery",
+      "inputs": [
+        1951.3494,
+        0.3
+      ],
+      "result": 585.40482,
+      "result_raw": "585.40482"
+    },
+    {
+      "formula_id": "F-L10",
+      "entity_id": "special_recovery",
+      "inputs": [
+        62.08839,
+        null,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-L11",
+      "entity_id": null,
+      "inputs": [
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        0.9
+      ],
+      "result": 0.9,
+      "result_raw": "0.9"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.fuel",
+      "inputs": [
+        7200,
+        0.9
+      ],
+      "result": 6480,
+      "result_raw": "6480"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        0.6
+      ],
+      "result": 0.6,
+      "result_raw": "0.6"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.maintenance",
+      "inputs": [
+        5000,
+        0.6
+      ],
+      "result": 3000,
+      "result_raw": "3000"
+    },
+    {
+      "formula_id": "F-E02",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        0,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E03",
+      "entity_id": "picker_cart_01.insurance",
+      "inputs": [
+        1500,
+        0
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-E01",
+      "entity_id": null,
+      "inputs": [
+        3
+      ],
+      "result": 13700,
+      "result_raw": "13700"
+    },
+    {
+      "formula_id": "F-E04",
+      "entity_id": null,
+      "inputs": [
+        13700,
+        9480
+      ],
+      "result": 4220,
+      "result_raw": "4220"
+    },
+    {
+      "formula_id": "F-B01",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.8
+      ],
+      "result": 8000,
+      "result_raw": "8000"
+    },
+    {
+      "formula_id": "F-B02",
+      "entity_id": "all_causes",
+      "inputs": [
+        0.3
+      ],
+      "result": 0.3,
+      "result_raw": "0.3"
+    },
+    {
+      "formula_id": "F-B03",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        0.3,
+        0
+      ],
+      "result": 7000,
+      "result_raw": "7000"
+    },
+    {
+      "formula_id": "F-B04",
+      "entity_id": "all_causes",
+      "inputs": [
+        10000,
+        7000,
+        0.8
+      ],
+      "result": 2400,
+      "result_raw": "2400"
+    },
+    {
+      "formula_id": "F-R01",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200
+      ],
+      "result": 1200,
+      "result_raw": "1200"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R02",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        14,
+        1
+      ],
+      "result": 13,
+      "result_raw": "13"
+    },
+    {
+      "formula_id": "F-R03",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        1200,
+        13
+      ],
+      "result": 15600,
+      "result_raw": "15600"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "stockout_missed_sales",
+      "inputs": [
+        15600,
+        0.75
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-R05",
+      "entity_id": "refunds",
+      "inputs": [
+        0.75
+      ],
+      "result": 0.75,
+      "result_raw": "0.75"
+    },
+    {
+      "formula_id": "F-R04",
+      "entity_id": "refunds",
+      "inputs": [
+        1,
+        2000,
+        null,
+        null
+      ],
+      "result": 2000,
+      "result_raw": "2000"
+    },
+    {
+      "formula_id": "F-R06",
+      "entity_id": "refunds",
+      "inputs": [
+        2000,
+        0.75
+      ],
+      "result": 1500,
+      "result_raw": "1500"
+    },
+    {
+      "formula_id": "F-R08",
+      "entity_id": null,
+      "inputs": [
+        11700,
+        0
+      ],
+      "result": 11700,
+      "result_raw": "11700"
+    },
+    {
+      "formula_id": "F-P01",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        350,
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P02",
+      "entity_id": null,
+      "inputs": [
+        null
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-P03",
+      "entity_id": null,
+      "inputs": [
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P04",
+      "entity_id": null,
+      "inputs": [
+        0,
+        0,
+        0,
+        0,
+        8410
+      ],
+      "result": 8410,
+      "result_raw": "8410"
+    },
+    {
+      "formula_id": "F-P05",
+      "entity_id": null,
+      "inputs": [
+        null,
+        null,
+        null,
+        null,
+        10500000,
+        null,
+        null,
+        24000
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-P07",
+      "entity_id": null,
+      "inputs": [
+        24000,
+        0
+      ],
+      "result": 24000,
+      "result_raw": "24000"
+    },
+    {
+      "formula_id": "F-M03",
+      "entity_id": "year_5",
+      "inputs": [
+        33156.747455,
+        0,
+        0,
+        0
+      ],
+      "result": 33156.747455,
+      "result_raw": "33156.747455"
+    },
+    {
+      "formula_id": "F-M06",
+      "entity_id": null,
+      "inputs": [
+        5
+      ],
+      "result": 0,
+      "result_raw": "0"
+    },
+    {
+      "formula_id": "F-M07",
+      "entity_id": null,
+      "inputs": [
+        5
+      ],
+      "result": 165783.737275,
+      "result_raw": "165783.737275"
+    },
+    {
+      "formula_id": "F-M08",
+      "entity_id": null,
+      "inputs": [
+        327833.737275,
+        162050
+      ],
+      "result": 1.0230406496451712,
+      "result_raw": "1.023040649645171243443381672323357"
+    },
+    {
+      "formula_id": "F-Q01",
+      "entity_id": null,
+      "inputs": [
+        57156.747455
+      ],
+      "result": 57156.747455,
+      "result_raw": "57156.747455"
+    },
+    {
+      "formula_id": "F-L12",
+      "entity_id": "technical_fte_released",
+      "inputs": [
+        2679.693975,
+        2080
+      ],
+      "result": 1.2883144110576923,
+      "result_raw": "1.288314411057692307692307692307692"
+    },
+    {
+      "formula_id": "F-L12",
+      "entity_id": "cash_fte_avoided",
+      "inputs": [
+        1840.3067025,
+        2080
+      ],
+      "result": 0.8847628377403847,
+      "result_raw": "0.8847628377403846153846153846153846"
     }
   ],
   "raw": {
@@ -179,128 +3441,5 @@
     "expanded_annual_customer_value": "33156.747455",
     "cash_labor_savings_total": "40486.747455",
     "total_revenue_recovery_value": "11700"
-  },
-  "formula_trace": [
-    {
-      "formula_id": "F-T03",
-      "entity_id": null,
-      "inputs": [
-        10500000
-      ],
-      "result": 10500000
-    },
-    {
-      "formula_id": "F-C08",
-      "entity_id": null,
-      "inputs": [
-        null,
-        1
-      ],
-      "result": 1
-    },
-    {
-      "formula_id": "F-T01",
-      "entity_id": "regular_collection",
-      "inputs": [
-        6,
-        350
-      ],
-      "result": 2100
-    },
-    {
-      "formula_id": "F-L03",
-      "entity_id": "regular_collection",
-      "inputs": [
-        2100,
-        1.25,
-        1
-      ],
-      "result": 2625
-    },
-    {
-      "formula_id": "F-L01",
-      "entity_id": "regular_collection",
-      "inputs": [
-        22
-      ],
-      "result": 22
-    },
-    {
-      "formula_id": "F-L04",
-      "entity_id": "regular_collection",
-      "inputs": [
-        2625,
-        22,
-        0,
-        22
-      ],
-      "result": 57750
-    },
-    {
-      "formula_id": "F-L05",
-      "entity_id": "regular_collection",
-      "inputs": [
-        0.92,
-        0.95,
-        1,
-        0.98,
-        0.95
-      ],
-      "result": 0.813694
-    },
-    {
-      "formula_id": "F-L06",
-      "entity_id": "regular_collection",
-      "inputs": [
-        2625,
-        0.813694
-      ],
-      "result": 2135.94675
-    },
-    {
-      "formula_id": "F-L07",
-      "entity_id": "regular_collection",
-      "inputs": [
-        2135.94675,
-        22
-      ],
-      "result": 46990.8285
-    },
-    {
-      "formula_id": "F-L09",
-      "entity_id": "regular_collection",
-      "inputs": [
-        46990.8285,
-        0.7
-      ],
-      "result": 32893.57995
-    },
-    {
-      "formula_id": "F-L10",
-      "entity_id": "regular_collection",
-      "inputs": [
-        640.784025,
-        null,
-        null
-      ],
-      "result": 0
-    },
-    {
-      "formula_id": "F-T01",
-      "entity_id": "unloading",
-      "inputs": [
-        6,
-        350
-      ],
-      "result": 2100
-    },
-    {
-      "formula_id": "…",
-      "entity_id": null,
-      "inputs": [
-        "trace truncated in sample; full trace is always emitted by the engine"
-      ],
-      "result": null
-    }
-  ]
+  }
 }

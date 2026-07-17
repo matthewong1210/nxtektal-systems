@@ -52,11 +52,43 @@ describe("Quick Estimate adapter (§9)", () => {
     );
   });
 
-  it("aggregate equipment enters as estimated_allowed, counted as estimated input", () => {
+  it("aggregate equipment enters as estimated_allowed, annualized ×12, and reaches outputs", () => {
     expect(quick.equipment_components).toHaveLength(1);
     const cost = quick.equipment_components![0]!.annual_current_cash_cost;
     expect(typeof cost).toBe("object");
     expect((cost as { input_status: string }).input_status).toBe("estimated_allowed");
+    // $1,000/month → $12,000/year (§9.2).
+    expect((cost as { value_base: number }).value_base).toBe(12000);
+    // And it lands in the current cost: labor (57,750 + 6,864) + equipment 12,000.
+    const r = calculateScenario(quick, "expected");
+    expect(r.outputs.current_direct_operating_cash_cost).toBe(57750 + 6864 + 12000);
+  });
+
+  it("rejects zero or two regular-collection schedules (§9.1)", () => {
+    const base = {
+      assessment_id: "a3",
+      site_id: "s3",
+      assessment_date: "2026-07-16",
+      currency: "USD",
+      loaded_regular_rate_override: 22,
+      operating_days_per_year: 350,
+      operating_hours_per_day: 12,
+      regular_collection_duration_hours: 1,
+      regular_collection_headcount: 1,
+      special_recovery_hours_per_week: 4,
+      special_recovery_headcount: 1,
+      labor_disposition: "unknown" as const,
+      coverage_rate: 0.9,
+      system_uptime: 0.95,
+    };
+    expect(() => buildQuickEstimateSnapshot(base)).toThrow(/exactly one/);
+    expect(() =>
+      buildQuickEstimateSnapshot({
+        ...base,
+        regular_collection_cycles_per_day: 6,
+        regular_collection_interval_hours: 2,
+      }),
+    ).toThrow(/exactly one/);
   });
 
   it("reduce_overtime disposition maps to overtime_first with avoidable hours", () => {

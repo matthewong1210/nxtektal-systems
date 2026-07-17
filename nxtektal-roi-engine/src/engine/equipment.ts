@@ -96,6 +96,7 @@ export function computeEquipment(
           total = total.add(c.replacement_capex.mul(clamp01(c.replacement_avoidance_rate)));
         }
       }
+      if (!total.isZero()) trace.add("F-E05", `year_${t}`, [t], total);
       return total;
     },
     salvageCashFlow(t: number): Decimal {
@@ -105,6 +106,7 @@ export function computeEquipment(
           total = total.add(c.salvage_value);
         }
       }
+      if (!total.isZero()) trace.add("F-E06", `year_${t}`, [t], total);
       return total;
     },
   };

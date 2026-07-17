@@ -34,13 +34,22 @@ export function safeDiv(num: Decimal, den: Decimal): Decimal | null {
   return num.div(den);
 }
 
+/** Compound growth factor (1+rate)^(t-1): year 1 uses base values (F-M01). */
+export function growthFactor(rate: Decimal, t: number): Decimal {
+  return ONE.add(rate).pow(t - 1);
+}
+
 /** Presentation-layer rounding only (spec §4: intermediate results keep full precision). */
 export function toMoney(x: Decimal | null): number | null {
-  return x === null ? null : Number(x.toDecimalPlaces(2, Decimal.ROUND_HALF_EVEN));
+  if (x === null) return null;
+  const n = Number(x.toDecimalPlaces(2, Decimal.ROUND_HALF_EVEN));
+  return n === 0 ? 0 : n; // normalize -0 so output survives JSON round-trips
 }
 
 export function toRate(x: Decimal | null, dp = 4): number | null {
-  return x === null ? null : Number(x.toDecimalPlaces(dp, Decimal.ROUND_HALF_EVEN));
+  if (x === null) return null;
+  const n = Number(x.toDecimalPlaces(dp, Decimal.ROUND_HALF_EVEN));
+  return n === 0 ? 0 : n;
 }
 
 /** Full-precision string for audit / determinism checks. */

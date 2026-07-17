@@ -92,10 +92,9 @@ export function computeAggregate(
   trace.add("F-A06", null, [preVendor, b.annual_vendor_recurring_fee], core);
 
   // F-A07 — expanded value (must be displayed separately from Core).
-  const expanded = core
-    .add(b.include_risk_in_expanded_value ? b.risk_reduction_value : ZERO)
-    .add(b.released_capacity_value_total);
-  trace.add("F-A07", null, [core, b.risk_reduction_value, b.released_capacity_value_total], expanded);
+  const includedRisk = b.include_risk_in_expanded_value ? b.risk_reduction_value : ZERO;
+  const expanded = core.add(includedRisk).add(b.released_capacity_value_total);
+  trace.add("F-A07", null, [core, includedRisk, b.released_capacity_value_total], expanded);
 
   // F-A08 — direct cost reduction rate (null denominator ⇒ null; negatives allowed).
   const reductionRate = safeDiv(netDirect, currentCost);

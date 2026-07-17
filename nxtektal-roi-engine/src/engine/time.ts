@@ -54,12 +54,12 @@ export function occurrencesYear(
     }
     case "interval_hours": {
       // F-T02 — CEILING result is only a suggestion; a confirmed field count
-      // must be stored as cycles_per_day_override.
-      if (fv === null || fv.isZero()) break;
+      // (cycles_per_day_override) has priority and needs no interval to be usable.
       let cyclesPerDay: Decimal;
       if (task.cycles_per_day_override !== null) {
         cyclesPerDay = task.cycles_per_day_override;
       } else {
+        if (fv === null || fv.isZero()) break;
         if (site.operating_hours_per_day === null) break;
         cyclesPerDay = site.operating_hours_per_day.div(fv).ceil();
       }

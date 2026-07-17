@@ -7,9 +7,11 @@
  * docs/AMBIGUITIES.md under F-M01.
  */
 
-import { Decimal, ONE, ZERO, safeDiv } from "./decimal.js";
+import { Decimal, ONE, ZERO, growthFactor, safeDiv } from "./decimal.js";
 import type { TraceCollector, WarningCollector } from "./trace.js";
 import type { ResolvedGrowth, ResolvedSnapshot } from "./resolve.js";
+
+export { growthFactor };
 
 /** Per-year component results the multi-year model needs (from the year pipeline). */
 export interface YearComponents {
@@ -37,11 +39,6 @@ export interface MultiYearComputation {
   simple_roi: Decimal | null;
   bcr: Decimal | null;
   first_year_cash_roi: Decimal | null;
-}
-
-/** Growth factor (1+rate)^(t-1): year 1 uses base values. */
-export function growthFactor(rate: Decimal, t: number): Decimal {
-  return ONE.add(rate).pow(t - 1);
 }
 
 /** Deployment ramp for year t (default 1 when not provided). */
@@ -202,6 +199,22 @@ function solveIrr(flows: Decimal[]): { irr: Decimal | null; note: string | null 
   if (!hasNegative || !hasPositive) {
     return { irr: null, note: "IRR undefined: cash flows do not change sign." };
   }
+  // Non-conventional flows (multiple sign changes) can have multiple IRRs —
+  // report null with an explanation rather than an arbitrary root (F-M05 rule).
+  let signChanges = 0;
+  let prevSign = 0;
+  for (const f of flows) {
+    if (f.isZero()) continue;
+    const sign = f.gt(ZERO) ? 1 : -1;
+    if (prevSign !== 0 && sign !== prevSign) signChanges++;
+    prevSign = sign;
+  }
+  if (signChanges > 1) {
+    return {
+      irr: null,
+      note: `IRR ambiguous: cash flows change sign ${signChanges} times, so multiple IRRs may exist. Use NPV instead.`,
+    };
+  }
   const npvAt = (r: Decimal): Decimal => {
     let v = ZERO;
     for (let t = 0; t < flows.length; t++) {
@@ -214,7 +227,10 @@ function solveIrr(flows: Decimal[]): { irr: Decimal | null; note: string | null 
   let fLo = npvAt(lo);
   const fHi = npvAt(hi);
   if (fLo.mul(fHi).gt(ZERO)) {
-    return { irr: null, note: "IRR undefined: no sign change of NPV on [-99.99%, 1000%]." };
+    return {
+      irr: null,
+      note: "IRR not reported: no NPV sign change on the supported range [-99.99%, 1000%] (the root, if any, lies outside it).",
+    };
   }
   for (let i = 0; i < 200; i++) {
     const mid = lo.add(hi).div(2);

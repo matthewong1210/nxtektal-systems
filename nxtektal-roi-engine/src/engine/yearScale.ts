@@ -4,8 +4,7 @@
  * docs/AMBIGUITIES.md under F-M01.
  */
 
-import { Decimal } from "./decimal.js";
-import { growthFactor } from "./multiyear.js";
+import { Decimal, growthFactor } from "./decimal.js";
 import type { ResolvedLaborTask, ResolvedSnapshot } from "./resolve.js";
 
 const scale = (v: Decimal | null, f: Decimal): Decimal | null => (v === null ? null : v.mul(f));
@@ -43,6 +42,10 @@ export function scaleResolvedForYear(resolved: ResolvedSnapshot, t: number): Res
       peak_baskets_per_day: scale(resolved.site.peak_baskets_per_day, demand),
       annual_balls_processed_override: scale(resolved.site.annual_balls_processed_override, demand),
       peak_daily_balls_override: scale(resolved.site.peak_daily_balls_override, demand),
+    },
+    system: {
+      ...resolved.system,
+      peak_hourly_ball_demand: scale(resolved.system.peak_hourly_ball_demand, demand),
     },
     current_tasks: resolved.current_tasks.map((task) => scaleTask(task, wage)),
     new_system_tasks: resolved.new_system_tasks.map((task) => scaleTask(task, wage)),

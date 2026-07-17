@@ -32,7 +32,7 @@ rate touches which variable. The engine applies:
 - `equipment_cost_inflation_rate` → `annual_current_cash_cost` (replacement_capex kept at its planned nominal amount)
 - `ball_cost_inflation_rate` → `landed_cost_per_ball`
 - `basket_price_growth_rate` → `price_per_basket` only (variable cost per basket unscaled; refund/credit averages unscaled)
-- `demand_growth_rate` → baskets/balls demand fields (missed-basket and stockout counts unscaled)
+- `demand_growth_rate` → baskets/balls demand fields including `peak_hourly_ball_demand` (missed-basket and stockout counts unscaled)
 - `energy_inflation_rate` → `electricity_rate`
 - `maintenance_growth_rate` → planned maintenance, repair, consumables
 - `vendor_fee_escalation_rate` → all base fee components (not the performance-fee rate)
@@ -62,6 +62,21 @@ hard validation error, and non-primary tasks are excluded with a warning.
 A group carrying both missed-sale and refund data requires `dedup_resolution`
 ("missed_sale" | "refund" | "both_verified_distinct"). Absent ⇒ hard error
 (`RevenueDedupError`), matching §14 "block or require selection".
+
+## F-G03 / F-G05 — zero-weight inputs in confidence scoring
+The locked formulas give impact-based weights (F-G03) and use those same weights
+for completeness (F-G05). Consequently, inputs with no low/high range carry zero
+weight whenever at least one ranged input has impact — their presence or absence
+does not move the scores. This is a literal reading of the locked formulas; if
+fixed inputs should contribute to completeness, that is a v1.1 formula change,
+not an implementation choice.
+
+## F-M05 — multiple-IRR cash flows
+When core cash flows change sign more than once, multiple IRRs may exist. The
+engine returns `irr: null` with an explanatory note (per the F-M05 "output null
+and explain" rule) instead of picking one root arbitrarily. Roots outside the
+search range [-99.99%, 1000%] are likewise reported as not-found, with a note
+distinguishing this from mathematical non-existence.
 
 ## F-Q05 — annual_variable_vendor_fees derivation
 Derived as total recurring fee minus (platform fee × 12 + annual fixed service

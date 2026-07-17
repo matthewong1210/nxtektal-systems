@@ -157,8 +157,27 @@ export function computeLaborTask(
 
   const regularRate = loadedRegularRate(task, trace);
   if (regularRate === null) {
-    warnings.add("incomplete_task", task.task_id, `Task "${task.task_id}" has no usable loaded regular rate; marked incomplete.`);
-    return incompleteResult(occ);
+    warnings.add(
+      "incomplete_task",
+      task.task_id,
+      `Task "${task.task_id}" has no usable loaded regular rate; monetary figures are null (rate-independent hours are still reported).`,
+    );
+    if (task.task_type === "new_system_task") {
+      return { ...incompleteResult(occ), annual_task_person_hours: annualHours };
+    }
+    // Current task: hours-based metrics (F-L05/F-L06) do not need a wage.
+    const eaNoRate = effectiveAutomationRate(task, capacityFit, trace, warnings);
+    const removedNoRate = eaNoRate === null ? null : annualHours.mul(eaNoRate);
+    if (removedNoRate !== null) {
+      trace.add("F-L06", task.task_id, [annualHours, eaNoRate], removedNoRate);
+    }
+    return {
+      ...incompleteResult(occ),
+      annual_task_person_hours: annualHours,
+      effective_automation_rate: eaNoRate,
+      technical_hours_removed: removedNoRate,
+      residual_task_person_hours: removedNoRate === null ? null : annualHours.sub(removedNoRate),
+    };
   }
   const overtimeShare = clamp01(task.overtime_share);
   const overtimeRate = loadedOvertimeRate(task, regularRate, trace);
@@ -277,7 +296,8 @@ export function computeLaborTask(
     cash_saved_hours: cashSavedHours,
     released_capacity_hours: releasedHours,
     released_capacity_value: releasedValue,
-    incomplete: false,
+    // Cash realization not computable ⇒ the task's economics are incomplete (§8.1).
+    incomplete: cashSavings === null,
   };
 }
 
@@ -290,6 +310,7 @@ export function fteConversions(
 ): { technical_fte_released: Decimal | null; cash_fte_avoided: Decimal | null } {
   const tech = safeDiv(totalTechnicalHoursRemoved, paidHoursPerFte);
   const cash = safeDiv(totalCashSavedHours, paidHoursPerFte);
-  trace.add("F-L12", null, [totalTechnicalHoursRemoved, totalCashSavedHours, paidHoursPerFte], tech);
+  trace.add("F-L12", "technical_fte_released", [totalTechnicalHoursRemoved, paidHoursPerFte], tech);
+  trace.add("F-L12", "cash_fte_avoided", [totalCashSavedHours, paidHoursPerFte], cash);
   return { technical_fte_released: tech, cash_fte_avoided: cash };
 }

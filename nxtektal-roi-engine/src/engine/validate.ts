@@ -47,7 +47,7 @@ export function validateResolved(
       if (!t.overlap_primary) {
         excluded.add(t.task_id);
         warnings.add(
-          "missing_input",
+          "overlap_non_primary_excluded",
           t.task_id,
           `Task "${t.task_id}" excluded from totals: overlap_group "${group}" is counted through primary record "${primaries[0]!.task_id}" (§8.1).`,
         );
@@ -55,26 +55,32 @@ export function validateResolved(
     }
   }
 
-  // §8.1 — cash realization method must exist and its factor must match.
+  // §8.1 / §5.2 — cash_realization_method is required per current task; F-L08
+  // and F-L09 are mutually exclusive, so exactly the matching factor must be set.
   for (const t of resolved.current_tasks) {
     if (excluded.has(t.task_id)) continue;
+    if (t.cash_realization_method === null) {
+      throw new EngineValidationError(
+        `Task "${t.task_id}" has no cash_realization_method (required per current task — §5.2). ` +
+          `Technical release is not cash: choose overtime_first or simple_factor (§8.1).`,
+      );
+    }
     if (
       t.cash_realization_method === "overtime_first" &&
-      t.simple_cash_realization_factor !== null &&
-      t.regular_cash_realization_factor === null
+      (t.regular_cash_realization_factor === null || t.simple_cash_realization_factor !== null)
     ) {
       throw new EngineValidationError(
-        `Task "${t.task_id}": cash_realization_method is overtime_first but only simple_cash_realization_factor was supplied. ` +
-          `F-L08 and F-L09 are mutually exclusive — supply regular_cash_realization_factor or switch the method (§8.1).`,
+        `Task "${t.task_id}": overtime_first requires regular_cash_realization_factor and no ` +
+          `simple_cash_realization_factor — F-L08 and F-L09 are mutually exclusive (§8.1).`,
       );
     }
     if (
       t.cash_realization_method === "simple_factor" &&
-      t.regular_cash_realization_factor !== null &&
-      t.simple_cash_realization_factor === null
+      (t.simple_cash_realization_factor === null || t.regular_cash_realization_factor !== null)
     ) {
       throw new EngineValidationError(
-        `Task "${t.task_id}": cash_realization_method is simple_factor but only regular_cash_realization_factor was supplied (§8.1).`,
+        `Task "${t.task_id}": simple_factor requires simple_cash_realization_factor and no ` +
+          `regular_cash_realization_factor — F-L08 and F-L09 are mutually exclusive (§8.1).`,
       );
     }
   }
