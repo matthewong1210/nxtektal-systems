@@ -141,12 +141,15 @@ export function computeMultiYear(
   }
   if (paybackMonth !== null) trace.add("F-M06", null, [N], paybackMonth);
 
-  // Approximate fallback (labelled) using stable year-1 recurring net.
+  // Approximate figure (labelled) using stable year-1 recurring net. The
+  // F-M06 fallback warning fires only when no exact monthly payback exists.
   let approxPayback: Decimal | null = null;
   const year1 = coreByYear[1];
   if (year1 && year1.gt(ZERO) && initialInvestment.gt(ZERO)) {
     approxPayback = initialInvestment.div(year1.div(12));
-    warnings.add("approximate_payback", null, `approximate_payback_months (${approxPayback.toFixed(1)}) uses initial_investment / (annual_recurring_net/12); labelled approximate per F-M06.`);
+    if (paybackMonth === null) {
+      warnings.add("approximate_payback", null, `approximate_payback_months (${approxPayback.toFixed(1)}) uses initial_investment / (annual_recurring_net/12); labelled approximate per F-M06.`);
+    }
   }
 
   // F-M07 — cumulative core net benefit including t0.
