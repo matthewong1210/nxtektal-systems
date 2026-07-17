@@ -51,6 +51,7 @@ describe("§14 acceptance tests", () => {
             effective_automation_override: 0.5,
             cash_realization_method: "overtime_first",
             regular_cash_realization_factor: 0.5,
+            simple_cash_realization_factor: undefined, // F-L08/F-L09 are mutually exclusive
             avoidable_overtime_hours: 100,
           }),
         ],
@@ -93,17 +94,19 @@ describe("§14 acceptance tests", () => {
   });
 
   it("6. No uptime duplication: uptime .90 → .80 changes automation by exactly 8/9 once", () => {
+    // Capacity is deliberately UNDER-provisioned (fit 0.6 < 1) so a duplicated
+    // uptime multiplication inside capacity_fit could not hide behind saturation.
     const run = (uptime: number) =>
       calculateScenario(
         baseSnapshot({
-          site: { ...baseSnapshot().site, peak_daily_balls_override: 5000, safety_buffer_rate: 0 },
+          site: { ...baseSnapshot().site, peak_daily_balls_override: 10000, safety_buffer_rate: 0 },
           system: {
             nominal_collection_rate_bph: 1000,
             route_efficiency: 1,
             terrain_efficiency: 1,
             ball_density_efficiency: 1,
             productive_time_fraction: 1,
-            scheduled_robot_hours_per_day: 10,
+            scheduled_robot_hours_per_day: 6,
             robot_count: 1,
             actual_uptime: uptime,
             design_uptime: 1,
@@ -114,7 +117,8 @@ describe("§14 acceptance tests", () => {
       );
     const at90 = run(0.9);
     const at80 = run(0.8);
-    // capacity_fit excludes actual uptime, so it must be identical...
+    // capacity_fit excludes actual uptime, so it must be identical (and < 1)...
+    expect(at90.capacity.capacity_fit).toBeCloseTo(0.6, 6);
     expect(at80.capacity.capacity_fit).toBe(at90.capacity.capacity_fit);
     // ...and effective automation scales by exactly 0.8/0.9 — applied once, in F-L05.
     const ratio =

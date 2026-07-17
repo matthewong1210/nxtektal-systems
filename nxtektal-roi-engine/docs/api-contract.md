@@ -49,7 +49,14 @@ POST /v1/quick-estimate
 6. **Core vs Expanded separation** — `core_annual_customer_net_benefit` never contains risk or released-capacity value; `expanded_annual_customer_value` is reported separately.
 7. **Versioning** — the engine refuses snapshots whose `model_version` it does not implement; formula changes ship as a new model_version, old results stay recomputable.
 
-## Output shape (abridged — see `examples/section11-output.json`)
+## Output shape
+
+`calculateAssessment` returns an `AssessmentResult`: per-scenario results live under
+`scenarios.conservative` / `scenarios.expected` / `scenarios.high_performance`, with
+top-level `sensitivity`, `confidence`, and `cross_scenario_warnings`.
+
+The example below (and `examples/section11-output.json`) is a **single
+`calculateScenario` result** — the same object found at `scenarios.<name>`:
 
 ```jsonc
 {

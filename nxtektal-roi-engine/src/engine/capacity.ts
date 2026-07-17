@@ -89,7 +89,11 @@ export function computeCapacity(
 
   // F-C04 — design robot count (design_uptime only used for sizing).
   let requiredCount: Decimal | null = null;
-  if (
+  if (targetThroughput !== null && targetThroughput.isZero()) {
+    // Confirmed zero demand ⇒ zero robots required (0 is confirmed, not estimated — §4).
+    requiredCount = ZERO;
+    trace.add("F-C04", null, [targetThroughput], requiredCount);
+  } else if (
     targetThroughput !== null &&
     opDailyCapacity !== null &&
     system.design_uptime !== null &&
@@ -171,7 +175,9 @@ export function computeCapacity(
     warnings.add(
       "capacity_fit_assumed_estimated",
       null,
-      "capacity_fit defaulted to 1 because demand/capacity inputs are missing; treat as an ESTIMATE, not a confirmed fit (§8.2).",
+      `Daily capacity fit could not be computed (demand/capacity inputs missing); capacity_fit falls back to ${
+        windowFit.eq(ONE) ? "1 (no peak-window data either)" : `the peak-window fit ${windowFit.toFixed(4)}`
+      } and must be treated as an ESTIMATE, not a confirmed fit (§8.2).`,
     );
   }
   trace.add("F-C08", null, [dailyFit, windowFit], finalFit);

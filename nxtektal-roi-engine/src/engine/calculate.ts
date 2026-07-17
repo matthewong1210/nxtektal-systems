@@ -259,9 +259,12 @@ export function calculateScenario(
     trace,
   );
 
+  // Year-1 hour totals carry the same deployment ramp as their value counterparts.
+  const techHoursRamped = labor.technicalHoursRemoved.mul(ramp1);
+  const cashHoursRamped = labor.cashSavedHours.mul(ramp1);
   const fte = fteConversions(
-    labor.technicalHoursRemoved,
-    labor.cashSavedHours,
+    techHoursRamped,
+    cashHoursRamped,
     resolved.site.annual_paid_hours_per_fte,
     trace,
   );
@@ -283,8 +286,8 @@ export function calculateScenario(
     risk_reduction_value: toMoney(risk.risk_reduction_value),
     released_capacity_value_total: toMoney(labor.releasedCapacityValue.mul(ramp1)),
     released_capacity_hours_total: toRate(labor.releasedCapacityHours.mul(ramp1), 2),
-    technical_hours_removed_total: toRate(labor.technicalHoursRemoved, 2),
-    cash_saved_hours_total: toRate(labor.cashSavedHours, 2),
+    technical_hours_removed_total: toRate(techHoursRamped, 2),
+    cash_saved_hours_total: toRate(cashHoursRamped, 2),
     cash_labor_savings_total: toMoney(cashLabor),
     equipment_cash_savings: toMoney(equipSavings),
     ball_replacement_cash_savings: toMoney(ballSavings),

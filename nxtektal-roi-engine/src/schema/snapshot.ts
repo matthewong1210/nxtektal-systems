@@ -1,11 +1,13 @@
 /** zod validation schema for assessment input snapshots — units/ranges/required-by-mode. */
 
 import { z } from "zod";
+import type { AssessmentSnapshot } from "../types/inputs.js";
 
 const scenarioEnum = z.enum(["conservative", "expected", "high_performance"]);
 
-const evidenceValue = z.object({
-  value_base: z.number().finite(),
+const evidenceValue = z
+  .object({
+    value_base: z.number().finite(),
   value_low: z.number().finite().nullable().optional(),
   value_high: z.number().finite().nullable().optional(),
   scenario_direction: z
@@ -31,16 +33,36 @@ const evidenceValue = z.object({
   confirmed_by: z.string().optional(),
   meeting_id: z.string().optional(),
   captured_at: z.string().optional(),
-  input_value_id: z.string().optional(),
-  valid_from: z.string().nullable().optional(),
-  valid_to: z.string().nullable().optional(),
-});
+    input_value_id: z.string().optional(),
+    valid_from: z.string().nullable().optional(),
+    valid_to: z.string().nullable().optional(),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    // Range ordering: low ≤ base ≤ high (F-G01 scenario bounds must bracket base).
+    if (v.value_low != null && v.value_low > v.value_base) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["value_low"],
+        message: "value_low must be ≤ value_base",
+      });
+    }
+    if (v.value_high != null && v.value_high < v.value_base) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["value_high"],
+        message: "value_high must be ≥ value_base",
+      });
+    }
+  });
 
 /** Missing ≠ 0: null/undefined mean unknown; explicit 0 means confirmed none. */
 const numericInput = z.union([z.number().finite(), evidenceValue]).nullable().optional();
 const requiredNumericInput = z.union([z.number().finite(), evidenceValue]);
+/** Key must be present (the question must be answered), but the value may be null = unknown. */
+const requiredNullableNumericInput = z.union([z.number().finite(), evidenceValue]).nullable();
 
-const laborTask = z.object({
+const laborTask = z.strictObject({
   task_id: z.string().min(1),
   task_name: z.string().optional(),
   task_type: z.enum(["current_task", "new_system_task"]),
@@ -83,11 +105,13 @@ const laborTask = z.object({
   shadow_value_per_hour: numericInput,
 });
 
-export const assessmentSnapshotSchema = z.object({
+// Explicit annotation keeps the declaration emit tractable (TS7056) and pins
+// the parse result to the canonical AssessmentSnapshot input type.
+export const assessmentSnapshotSchema: z.ZodType<AssessmentSnapshot, z.ZodTypeDef, unknown> = z.strictObject({
   model_version: z.literal("1.0"),
   assessment_id: z.string().min(1),
   mode: z.enum(["quick_estimate", "full_assessment"]).optional(),
-  site: z.object({
+  site: z.strictObject({
     site_id: z.string().min(1),
     assessment_date: z.string().min(1),
     currency: z.string().length(3),
@@ -107,7 +131,7 @@ export const assessmentSnapshotSchema = z.object({
     tax_treatment: z.enum(["cash_inclusive", "recoverable_excluded"]),
   }),
   system: z
-    .object({
+    .strictObject({
       nominal_collection_rate_bph: numericInput,
       scheduled_robot_hours_per_day: numericInput,
       route_efficiency: numericInput,
@@ -128,11 +152,11 @@ export const assessmentSnapshotSchema = z.object({
   labor_tasks: z.array(laborTask),
   equipment_components: z
     .array(
-      z.object({
+      z.strictObject({
         asset_id: z.string().min(1),
         cost_component_id: z.string().min(1),
         component_type: z.enum(["variable", "fixed_contractual", "periodic", "replacement_capex"]),
-        annual_current_cash_cost: numericInput,
+        annual_current_cash_cost: requiredNullableNumericInput,
         usage_reduction_rate: numericInput,
         retirement_fraction: numericInput,
         contractual_avoidability_rate: numericInput,
@@ -147,10 +171,10 @@ export const assessmentSnapshotSchema = z.object({
     .optional(),
   ball_loss_causes: z
     .array(
-      z.object({
+      z.strictObject({
         loss_cause_id: z.string().min(1),
-        annual_current_lost_balls: numericInput,
-        landed_cost_per_ball: numericInput,
+        annual_current_lost_balls: requiredNullableNumericInput,
+        landed_cost_per_ball: requiredNullableNumericInput,
         loss_area_coverage: numericInput,
         retrieval_success_rate: numericInput,
         loss_capacity_fit: numericInput,
@@ -163,7 +187,7 @@ export const assessmentSnapshotSchema = z.object({
     .optional(),
   revenue_event_groups: z
     .array(
-      z.object({
+      z.strictObject({
         revenue_event_group_id: z.string().min(1),
         stockout_events_per_year: numericInput,
         affected_customers_per_event: numericInput,
@@ -187,7 +211,7 @@ export const assessmentSnapshotSchema = z.object({
     .optional(),
   risk_items: z
     .array(
-      z.object({
+      z.strictObject({
         incident_type_id: z.string().min(1),
         annual_incident_frequency: numericInput,
         average_cost_per_incident: numericInput,
@@ -196,7 +220,7 @@ export const assessmentSnapshotSchema = z.object({
     )
     .optional(),
   system_costs: z
-    .object({
+    .strictObject({
       energy_kwh_per_robot_day: numericInput,
       electricity_rate: numericInput,
       monthly_connectivity_cost: numericInput,
@@ -208,7 +232,7 @@ export const assessmentSnapshotSchema = z.object({
       current_other_direct_cash_cost: numericInput,
       other_direct_cash_savings: numericInput,
       included_in_vendor_fee: z
-        .object({
+        .strictObject({
           energy: z.boolean().optional(),
           connectivity: z.boolean().optional(),
           maintenance: z.boolean().optional(),
@@ -223,7 +247,7 @@ export const assessmentSnapshotSchema = z.object({
     })
     .optional(),
   pricing: z
-    .object({
+    .strictObject({
       monthly_platform_fee: numericInput,
       monthly_fee_per_robot: numericInput,
       fee_per_ball: numericInput,
@@ -247,7 +271,7 @@ export const assessmentSnapshotSchema = z.object({
     })
     .optional(),
   growth: z
-    .object({
+    .strictObject({
       vendor_fee_escalation_rate: numericInput,
       wage_growth_rate: numericInput,
       equipment_cost_inflation_rate: numericInput,

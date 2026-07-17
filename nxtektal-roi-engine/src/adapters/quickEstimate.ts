@@ -49,6 +49,12 @@ export interface QuickEstimateInputs {
   /** What happens to freed labor (§9.2 mapping). */
   labor_disposition: LaborDisposition;
   avoidable_overtime_hours_per_year?: number;
+  /**
+   * Cash-realization factor for cancel_shifts / avoid_hiring, supplied by the
+   * manager. No product default exists (§16 rule 11): when omitted, the
+   * conservative value 0 is used — nothing counts until confirmed (§9.2).
+   */
+  cash_realization_factor?: number;
 
   /** NXTektal scenario factors & offer. */
   coverage_rate: number;
@@ -69,10 +75,9 @@ const estimated = (value: number): EvidenceValue => ({
  * §9.2 labor-disposition mapping:
  * - redeploy       → regular cash realization 0 (freed hours are capacity only)
  * - reduce_overtime→ overtime_first with avoidable overtime hours
- * - cancel_shifts / avoid_hiring → simple factor 1 on the affected share is NOT
- *   assumed; Conservative counts nothing until confirmed, Expected uses 0.7 as
- *   an estimated_allowed placeholder ONLY if explicitly provided upstream — here
- *   we require the caller's own factor; default is the conservative 0.
+ * - cancel_shifts / avoid_hiring → caller-supplied cash_realization_factor
+ *   (no product default may be invented — §16 rule 11); absent ⇒ 0, nothing
+ *   counts until confirmed.
  * - unknown        → 0 (Conservative counts nothing — §9.2)
  */
 function cashRealization(q: QuickEstimateInputs): {
@@ -90,7 +95,10 @@ function cashRealization(q: QuickEstimateInputs): {
       };
     case "cancel_shifts":
     case "avoid_hiring":
-      return { method: "simple_factor", simple_factor: estimated(0.7) };
+      return {
+        method: "simple_factor",
+        simple_factor: estimated(q.cash_realization_factor ?? 0),
+      };
     case "redeploy":
       return { method: "simple_factor", simple_factor: 0 };
     case "unknown":
@@ -99,6 +107,15 @@ function cashRealization(q: QuickEstimateInputs): {
 }
 
 export function buildQuickEstimateSnapshot(q: QuickEstimateInputs): AssessmentSnapshot {
+  const hasCycles = q.regular_collection_cycles_per_day !== undefined;
+  const hasInterval = q.regular_collection_interval_hours !== undefined;
+  if (hasCycles === hasInterval) {
+    throw new Error(
+      "Quick Estimate requires exactly one of regular_collection_cycles_per_day or " +
+        "regular_collection_interval_hours (§9.1); " +
+        (hasCycles ? "both were supplied." : "neither was supplied."),
+    );
+  }
   const wage = cashRealization(q);
   const rateFields =
     q.loaded_regular_rate_override !== undefined
@@ -135,10 +152,10 @@ export function buildQuickEstimateSnapshot(q: QuickEstimateInputs): AssessmentSn
       {
         task_id: "regular_collection",
         task_type: "current_task",
-        ...(q.regular_collection_cycles_per_day !== undefined
+        ...(hasCycles
           ? {
               frequency_basis: "per_day" as const,
-              frequency_value: q.regular_collection_cycles_per_day,
+              frequency_value: q.regular_collection_cycles_per_day!,
             }
           : {
               frequency_basis: "interval_hours" as const,

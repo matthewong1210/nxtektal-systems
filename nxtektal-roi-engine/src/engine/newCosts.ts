@@ -34,7 +34,12 @@ export function computeCustomerOps(
       .mul(site.operating_days_per_year)
       .mul(sc.electricity_rate);
   }
-  trace.add("F-P01", null, [robotCount, sc.energy_kwh_per_robot_day, sc.electricity_rate], energy);
+  trace.add(
+    "F-P01",
+    null,
+    [robotCount, sc.energy_kwh_per_robot_day, site.operating_days_per_year, sc.electricity_rate],
+    energy,
+  );
 
   // F-P02 — connectivity.
   let connectivity = ZERO;
@@ -117,7 +122,21 @@ export function computeVendorFee(
     }
   }
   if (pricing.annual_fixed_service_fee !== null) base = base.add(pricing.annual_fixed_service_fee);
-  trace.add("F-P05", null, [pricing.monthly_platform_fee, pricing.monthly_fee_per_robot, pricing.fee_per_ball, pricing.fee_per_robot_hour, pricing.annual_fixed_service_fee], base);
+  trace.add(
+    "F-P05",
+    null,
+    [
+      pricing.monthly_platform_fee,
+      pricing.monthly_fee_per_robot,
+      robotCount,
+      pricing.fee_per_ball,
+      annualBallsProcessed,
+      pricing.fee_per_robot_hour,
+      annualRobotScheduledHours,
+      pricing.annual_fixed_service_fee,
+    ],
+    base,
+  );
 
   // F-P06 — performance fee on MAX(0, pre-fee eligible value); min default 0, cap default +inf.
   let performance = ZERO;
@@ -157,7 +176,22 @@ export function computeInitialInvestment(
     .add(add(pricing.initial_contingency_cost))
     .sub(add(pricing.rebate_or_grant))
     .sub(add(pricing.trade_in_proceeds));
-  trace.add("F-P08", null, [pricing.hardware_purchase_price, pricing.installation_cost, pricing.rebate_or_grant, pricing.trade_in_proceeds], v);
+  trace.add(
+    "F-P08",
+    null,
+    [
+      pricing.hardware_purchase_price,
+      pricing.installation_cost,
+      pricing.site_preparation_cost,
+      pricing.integration_cost,
+      pricing.training_cost,
+      pricing.shipping_and_tax_cost,
+      pricing.initial_contingency_cost,
+      pricing.rebate_or_grant,
+      pricing.trade_in_proceeds,
+    ],
+    v,
+  );
   if (v.lt(ZERO)) {
     warnings.add("negative_initial_investment", null, `Initial customer investment is negative (${v}); value kept as-is and flagged for review (F-P08).`);
   }

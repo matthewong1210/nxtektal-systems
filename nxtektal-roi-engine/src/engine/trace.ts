@@ -5,6 +5,8 @@ export interface TraceEntry {
   entity_id: string | null;
   inputs: (number | string | null)[];
   result: number | null;
+  /** Full-precision decimal string of the result — audit-grade, reproduces the formula output (§15.1). */
+  result_raw: string | null;
 }
 
 /** Collects formula traces for auditable output (spec §13, §15.1). */
@@ -24,12 +26,14 @@ export class TraceCollector {
         v === null || v === undefined ? null : v instanceof Decimal ? Number(v) : v,
       ),
       result: result === null ? null : result instanceof Decimal ? Number(result) : result,
+      result_raw: result === null ? null : result.toString(),
     });
   }
 }
 
 export type WarningCode =
   | "capacity_warning"
+  | "overlap_non_primary_excluded"
   | "capacity_fit_assumed_estimated"
   | "scenario_monotonicity_warning"
   | "payback_not_achieved"
