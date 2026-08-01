@@ -1,0 +1,57 @@
+# =============================================================================
+# PLACEHOLDER ROBOT CONFIG — NOT REAL SPECIFICATIONS
+#
+# Every value below is tagged `source: placeholder`. Numbers were chosen only
+# for internal consistency so the mock pipeline runs end-to-end; they are NOT
+# AgileX data and NOT design targets. Replace with supplier/measured values
+# (see docs/missing_inputs.md), changing `source:` to `supplier` or `measured`.
+# Reports count remaining placeholders so results can't masquerade as
+# validated engineering data.
+# =============================================================================
+
+robot_geometry:
+  name: agilex_chassis_placeholder
+  chassis_length_m: {value: 0.90, source: placeholder, note: "awaiting AgileX CAD/datasheet"}
+  chassis_width_m: {value: 0.70, source: placeholder, note: "awaiting AgileX CAD/datasheet"}
+  chassis_height_m: {value: 0.40, source: placeholder, note: "awaiting AgileX CAD/datasheet"}
+  wheelbase_m: {value: 0.60, source: placeholder, note: "awaiting AgileX datasheet"}
+  track_width_m: {value: 0.55, source: placeholder, note: "awaiting AgileX datasheet"}
+  chassis_mass_kg: {value: 60.0, source: placeholder, note: "awaiting AgileX datasheet"}
+  max_payload_kg: {value: 80.0, source: placeholder, note: "awaiting AgileX datasheet"}
+  com_height_unloaded_m: {value: 0.25, source: placeholder, note: "awaiting CAD-derived CoM"}
+  max_speed_mps: {value: 1.0, source: placeholder, note: "conservative site speed, TBD"}
+  max_decel_mps2: {value: 2.0, source: placeholder, note: "awaiting chassis brake/decel spec"}
+  drive_type: differential
+  drive_type_note: "PLACEHOLDER assumption — confirm against the AgileX SDK docs"
+  sensors:
+    - name: front_marker_camera
+      sensor_type: apriltag_camera
+      mount: {x_m: 0.40, y_m: 0.0, z_m: 0.35, yaw_deg: 0.0}
+      note: "PLACEHOLDER mount pose — sensor selection not final"
+    - name: front_left_contact_switch
+      sensor_type: contact_switch
+      mount: {x_m: 0.45, y_m: 0.20, z_m: 0.15, yaw_deg: 0.0}
+      note: "PLACEHOLDER mount pose — docking contact confirmation concept"
+    - name: front_right_contact_switch
+      sensor_type: contact_switch
+      mount: {x_m: 0.45, y_m: -0.20, z_m: 0.15, yaw_deg: 0.0}
+      note: "PLACEHOLDER mount pose — docking contact confirmation concept"
+    - name: front_ultrasonic
+      sensor_type: ultrasonic
+      mount: {x_m: 0.45, y_m: 0.0, z_m: 0.20, yaw_deg: 0.0}
+      note: "PLACEHOLDER — short-range obstacle sensing for e-stop concept"
+
+handoff_mechanism:
+  # Low-cost concept: adjustable lifting platform + controlled basket tilt.
+  # A robotic arm is intentionally NOT the architecture.
+  mechanism_type: lift_and_tilt
+  basket_length_m: {value: 0.60, source: placeholder, note: "custom basket TBD"}
+  basket_width_m: {value: 0.50, source: placeholder, note: "custom basket TBD"}
+  basket_depth_m: {value: 0.30, source: placeholder, note: "custom basket TBD"}
+  basket_empty_mass_kg: {value: 8.0, source: placeholder, note: "custom basket TBD"}
+  basket_full_mass_kg: {value: 38.0, source: placeholder, note: "ball count x mass TBD"}
+  lift_travel_m: {value: 1.20, source: placeholder, note: "mechanism design TBD"}
+  lift_speed_mps: {value: 0.15, source: placeholder, note: "actuator selection TBD"}
+  max_dump_angle_deg: {value: 120.0, source: placeholder, note: "mechanism design TBD"}
+  dump_speed_deg_per_s: {value: 30.0, source: placeholder, note: "actuator selection TBD"}
+  com_height_lifted_m: {value: 0.90, source: placeholder, note: "CoM at full lift, loaded — CAD TBD"}

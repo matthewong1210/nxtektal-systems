@@ -1,0 +1,31 @@
+# Emergency-stop demonstration: an obstacle sits on the navigation path.
+# The robot must trigger a latching e-stop at the configured trigger distance
+# and the report records trigger/stopping/clearance distances.
+
+scenario:
+  name: emergency_stop_demo
+  description: obstacle on the path to staging triggers a latching e-stop mid-navigation
+  adapter: mock
+  robot_config: ../robot/agilex_chassis_placeholder.yaml
+  equipment_config: ../equipment/generic_ball_washer_placeholder.yaml
+  safety_config: ../safety/safety_defaults.yaml
+  facility:
+    zone_length_m: 10.0
+    zone_width_m: 10.0
+    ground_slope_deg: {value: 1.0, source: placeholder, note: "site survey required"}
+  start_pose: {x_m: 1.0, y_m: 1.0, yaw_deg: 0.0}
+  staging_pose: {x_m: 6.0, y_m: 5.0, yaw_deg: 0.0}
+  station_pose: {x_m: 8.0, y_m: 5.0, yaw_deg: 0.0}
+  charge_pose: {x_m: 1.0, y_m: 9.0, yaw_deg: 90.0}
+  initial_error:
+    lateral_m: 0.10
+    longitudinal_m: 0.05
+    yaw_deg: 2.0
+  payload_kg: {value: 25.0, source: placeholder, note: "full-basket ball mass TBD"}
+  lift_target_height_m: {value: 1.00, source: placeholder, note: "mechanism TBD"}
+  dump_angle_deg: {value: 60.0, source: placeholder, note: "TBD"}
+  obstacle:
+    distance_along_path_m: 3.0
+    description: test obstacle (e.g. a stray range cart) 3 m along the path
+  mock:
+    random_seed: 20260731

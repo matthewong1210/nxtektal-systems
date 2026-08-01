@@ -1,0 +1,21 @@
+# Safety parameters. Physical quantities are placeholders; timeouts/retries
+# are engineering config.
+
+safety:
+  emergency_stop_distance_m: {value: 0.50, source: placeholder, note: "obstacle trigger distance — site policy TBD"}
+  max_ground_slope_deg: {value: 5.0, source: placeholder, note: "site survey required"}
+  tipping_margin_threshold: 0.25
+  max_docking_retries: 2
+  max_dump_retries: 1
+  step_timeouts_s:
+    navigate_s: 120.0
+    approach_s: 60.0
+    dock_s: 30.0
+    verify_dock_s: 10.0
+    lift_s: 30.0
+    dump_s: 30.0
+    verify_unload_s: 10.0
+    lower_s: 30.0
+    undock_s: 20.0
+    return_s: 120.0
+    recovery_s: 30.0

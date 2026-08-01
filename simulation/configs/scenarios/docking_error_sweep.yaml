@@ -1,0 +1,29 @@
+# Phase 0 parameter sweep: initial lateral / longitudinal / yaw error grid.
+#
+# Retries are disabled here (static override) so the sweep exposes the raw
+# single-attempt docking tolerance cliff. Remove the override to study how
+# recovery + retries expand the tolerated error envelope.
+#
+# Any bundle path can be swept the same way, e.g.:
+#   equipment.inlet_height_m.value        equipment.inlet_width_m.value
+#   equipment.docking_guide.capture_half_width_m.value
+#   scenario.payload_kg.value             mechanism.com_height_lifted_m.value
+#   scenario.facility.ground_slope_deg.value
+#   scenario.lift_target_height_m.value   scenario.dump_angle_deg.value
+#   mechanism.dump_speed_deg_per_s.value  robot.sensors.0.mount.x_m
+#   safety.emergency_stop_distance_m.value
+
+sweep:
+  name: docking_error_sweep_v0
+  base_scenario: nominal_docking.yaml
+  overrides:
+    safety.max_docking_retries: 0
+  axes:
+    - path: scenario.initial_error.lateral_m
+      values: [-0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6]
+    - path: scenario.initial_error.yaw_deg
+      values: [-15.0, -10.0, -5.0, 0.0, 5.0, 10.0, 15.0]
+    - path: scenario.initial_error.longitudinal_m
+      values: [-0.2, 0.0, 0.2]
+  repeats_per_point: 2
+  base_seed: 1000
