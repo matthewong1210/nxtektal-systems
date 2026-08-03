@@ -12,6 +12,16 @@ physical robot's ROS 2 stack (Phase 2) plug in behind the same
 `RobotTaskInterface` — see [docs/isaac_sim_integration.md](docs/isaac_sim_integration.md)
 and [docs/ros2_integration.md](docs/ros2_integration.md).
 
+**Phase 0.5** adds `nxt_range_ops` — the **Range Operations Training
+Environment**: a SimPy discrete-event operational digital twin of a whole
+driving range (dispenser → demand → zones → collection → handoff → washing →
+dispenser) with a Gymnasium `RangeOpsEnv`, a non-bypassable SafetyShield,
+four baseline policies, ten scenario generators, Parquet decision logging,
+and an evaluation harness. Install with `uv sync --extra range-ops`; see
+[docs/range_ops.md](docs/range_ops.md). It reuses only Phase 0's pure
+vocabulary (`interfaces/types`, `config/models`) and changes nothing in
+`nxt_sim`.
+
 ## Honest-scope disclaimers
 
 * **Every physical value is a placeholder.** No AgileX, basket, or equipment
