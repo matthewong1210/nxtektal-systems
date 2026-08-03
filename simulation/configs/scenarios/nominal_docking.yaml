@@ -1,0 +1,29 @@
+# Nominal handoff cycle in the 10 m x 10 m handoff/docking zone.
+# All physical values referenced from the placeholder config files.
+
+scenario:
+  name: nominal_docking
+  description: >-
+    Baseline cycle: navigate -> approach -> dock -> verify -> lift -> dump ->
+    verify -> lower -> undock -> return. Small initial alignment error.
+  adapter: mock
+  robot_config: ../robot/agilex_chassis_placeholder.yaml
+  equipment_config: ../equipment/generic_ball_washer_placeholder.yaml
+  safety_config: ../safety/safety_defaults.yaml
+  facility:
+    zone_length_m: 10.0
+    zone_width_m: 10.0
+    ground_slope_deg: {value: 1.0, source: placeholder, note: "site survey required"}
+  start_pose: {x_m: 1.0, y_m: 1.0, yaw_deg: 0.0}
+  staging_pose: {x_m: 6.0, y_m: 5.0, yaw_deg: 0.0}
+  station_pose: {x_m: 8.0, y_m: 5.0, yaw_deg: 0.0}
+  charge_pose: {x_m: 1.0, y_m: 9.0, yaw_deg: 90.0}
+  initial_error:
+    lateral_m: 0.10
+    longitudinal_m: 0.05
+    yaw_deg: 2.0
+  payload_kg: {value: 25.0, source: placeholder, note: "full-basket ball mass TBD"}
+  lift_target_height_m: {value: 1.00, source: placeholder, note: "inlet height + margin; mechanism TBD"}
+  dump_angle_deg: {value: 60.0, source: placeholder, note: ">= equipment required angle; TBD"}
+  mock:
+    random_seed: 20260731

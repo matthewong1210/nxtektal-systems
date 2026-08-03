@@ -1,0 +1,42 @@
+# =============================================================================
+# PLACEHOLDER EQUIPMENT PROFILE — NOT A REAL BALL WASHER
+#
+# This file is an instance of the modular equipment compatibility schema.
+# Request real inlet drawings/dimensions from each equipment manufacturer and
+# create one profile per supported model (see docs/missing_inputs.md).
+# =============================================================================
+
+equipment_profile:
+  manufacturer: PLACEHOLDER_MANUFACTURER
+  model: GENERIC_BALL_WASHER_PLACEHOLDER
+  inlet_height_m: {value: 0.90, source: placeholder, note: "request drawing from manufacturer"}
+  inlet_width_m: {value: 0.80, source: placeholder, note: "request drawing from manufacturer"}
+  inlet_depth_m: {value: 0.40, source: placeholder, note: "request drawing from manufacturer"}
+  preferred_approach_direction: front
+  required_dump_angle_deg: {value: 45.0, source: placeholder, note: "depends on hopper geometry"}
+  minimum_clearance_m: {value: 0.03, source: placeholder, note: "engineering margin TBD"}
+  maximum_lateral_error_m: {value: 0.05, source: placeholder, note: "to be established by physical trials"}
+  maximum_yaw_error_deg: {value: 5.0, source: placeholder, note: "to be established by physical trials"}
+  docking_marker_pose:
+    marker_type: apriltag
+    family_or_id: "tag36h11:0 (PLACEHOLDER)"
+    pose_relative_to_inlet: {x_m: 0.0, y_m: 0.0, z_m: -0.20, yaw_deg: 0.0}
+    note: "PLACEHOLDER — marker mounting to be designed with the station bracket"
+  docking_guide:
+    # Passive funnel guide concept mounted at the station (low-cost alignment aid).
+    guide_type: funnel
+    capture_half_width_m: {value: 0.25, source: placeholder, note: "guide design TBD"}
+    capture_yaw_deg: {value: 6.0, source: placeholder, note: "guide design TBD"}
+    guide_depth_m: {value: 0.35, source: placeholder, note: "guide design TBD"}
+    lateral_correction_factor: 0.2
+  safety_zone:
+    front_clearance_m: {value: 1.5, source: placeholder, note: "operational keep-out TBD"}
+    side_clearance_m: {value: 0.8, source: placeholder, note: "operational keep-out TBD"}
+    description: "keep-out envelope around the station while a robot is docking"
+  unloading_cycle:
+    required_dwell_s: {value: 4.0, source: placeholder, note: "ball drainage time — physical test"}
+    agitation_required: false
+    max_cycle_s: {value: 120.0, source: placeholder, note: "equipment throughput TBD"}
+  notes: >-
+    Schema instance with placeholder geometry. One profile per real equipment
+    model (washer/hopper) will replace this once manufacturer drawings arrive.
