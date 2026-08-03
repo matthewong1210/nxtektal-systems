@@ -250,10 +250,14 @@ class RangeSimulation:
         for zone_id in sorted(self._zones):
             zone = self._zones[zone_id]
             for start_min, end_min in _merge_windows(zone.cfg.closure_windows):
+                if end_min * 60.0 <= self.now:
+                    continue  # window already over before facility open
                 self.env.process(self._zone_closure_proc(zone, start_min, end_min))
         for station_id in sorted(self._stations):
             station = self._stations[station_id]
             for start_min, end_min in _merge_windows(station.cfg.outage_windows):
+                if end_min * 60.0 <= self.now:
+                    continue
                 self.env.process(self._station_outage_proc(station, start_min, end_min))
         self.env.process(self._demand_proc())
         self.env.process(self._washer_proc())
@@ -350,7 +354,13 @@ class RangeSimulation:
                 reading = value
                 break
         if reading is None:
-            reading = float(self.dispenser_count())
+            # Nothing old enough yet (start of day): fall back to the oldest
+            # retained *sensed* reading — never leak the true count.
+            reading = (
+                self._inventory_readings[0][1]
+                if self._inventory_readings
+                else 0.0
+            )
         return reading
 
     def sensed_zone_counts(self) -> dict[str, float]:
@@ -764,6 +774,8 @@ class RangeSimulation:
 
     def _do_travel(self, robot: _Robot, dest: Point2D, dest_label: str) -> Generator:
         """Travel leg; yields True into the caller via StopIteration value."""
+        origin = robot.pos  # kept for failure positioning: pro-rating
+        # rebases robot.travel, so the tuple's start drifts from the leg origin
         distance = robot.pos.distance_to(dest)
         outcome = self._sample_skill(
             self._skill_request(
@@ -786,7 +798,7 @@ class RangeSimulation:
             duration_s=round(outcome.duration_s, 2),
         )
         yield self.env.timeout(outcome.duration_s)
-        start, _, t0, duration, energy = robot.travel
+        _, _, _, duration, energy = robot.travel
         robot.travel = None
         self._drain(robot, energy)
         if robot.payload_balls == 0:
@@ -794,11 +806,12 @@ class RangeSimulation:
         else:
             self.metrics.loaded_travel_s += duration
         if not outcome.success:
-            # Stranded partway: the mock reports how far the robot got.
+            # Stranded partway: the completed fraction is relative to the
+            # whole leg, so interpolate from the original origin.
             frac = float(outcome.data.get("completed_fraction", 1.0))
             robot.pos = Point2D(
-                x_m=start.x_m + (dest.x_m - start.x_m) * frac,
-                y_m=start.y_m + (dest.y_m - start.y_m) * frac,
+                x_m=origin.x_m + (dest.x_m - origin.x_m) * frac,
+                y_m=origin.y_m + (dest.y_m - origin.y_m) * frac,
             )
             robot.location_label = "transit"
             robot.destination_label = None
@@ -982,6 +995,9 @@ class RangeSimulation:
         self._set_activity(robot, RobotActivity.QUEUED_CHARGER)
         with self._charger.request() as slot:
             yield slot
+            # Connecting is active work, not queue waiting: leave
+            # QUEUED_CHARGER (and its queue-time metric) at slot acquisition.
+            self._set_activity(robot, RobotActivity.CHARGING)
             outcome = self._sample_skill(
                 self._skill_request(robot, SkillType.CHARGE_CONNECT)
             )
@@ -991,7 +1007,6 @@ class RangeSimulation:
             rate_w = self.scenario.charger.charge_rate_w.value
             deficit_wh = max(0.0, target_wh - robot.battery_wh)
             duration_s = deficit_wh / rate_w * 3600.0
-            self._set_activity(robot, RobotActivity.CHARGING)
             robot.charging_since = self.now
             self.events.emit(
                 self.now,

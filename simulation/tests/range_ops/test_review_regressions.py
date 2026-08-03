@@ -72,8 +72,9 @@ def test_concurrent_unloaders_cannot_overflow_buffer():
     )
     sim = RangeSimulation(scenario, seed=2)
     for rid in ("R1", "R2", "R3"):
-        sim._robots[rid].payload_balls = 600
-        sim.ledger.move("zone:Z3", f"robot:{rid}", 600)
+        moved = sim.ledger.move("dispenser", f"robot:{rid}", 600)
+        assert moved == 600
+        sim._robots[rid].payload_balls = moved
         assert sim.apply_directive(SendToHandoff(robot_id=rid)).allowed
     for _ in range(240):
         sim.advance(30.0)
@@ -92,11 +93,14 @@ def test_inflight_travel_drains_battery_each_step():
     assert sim.apply_directive(AssignCollection(robot_id="R1", zone_id="Z6")).allowed
     sim.advance(60.0)
     r1 = sim.robot_or_none("R1")
-    if r1.activity is RobotActivity.TRAVELING:  # Z6 is ~210 m out: still en route
-        assert r1.battery_frac < start_battery, (
-            "mid-travel battery must already reflect pro-rated drain"
-        )
-        assert sim.metrics.empty_travel_s > 0
+    # Z6 is ~210 m out at 1.5 m/s: R1 must still be en route after 60 s.
+    assert r1.activity is RobotActivity.TRAVELING, (
+        f"precondition failed: R1 is {r1.activity.value}, not traveling"
+    )
+    assert r1.battery_frac < start_battery, (
+        "mid-travel battery must already reflect pro-rated drain"
+    )
+    assert sim.metrics.empty_travel_s > 0
 
 
 def test_merge_windows_handles_overlap_and_adjacency():

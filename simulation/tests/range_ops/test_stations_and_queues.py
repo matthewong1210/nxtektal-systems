@@ -63,10 +63,12 @@ def test_handoff_queueing_accumulates_queue_time():
     )
     sim = RangeSimulation(scenario, seed=5)
     for rid in ("R1", "R2", "R3"):
-        sim._robots[rid].payload_balls = 400
-        sim.ledger.move("zone:Z3", f"robot:{rid}", 400)
+        moved = sim.ledger.move("dispenser", f"robot:{rid}", 400)
+        assert moved == 400
+        sim._robots[rid].payload_balls = moved
     for rid in ("R1", "R2", "R3"):
         assert sim.apply_directive(SendToHandoff(robot_id=rid)).allowed
+    assert len(sim.station_snapshots()) == 1  # single-station scenario
     docked_seen = queue_seen = 0
     for _ in range(60):
         sim.advance(30.0)
@@ -96,8 +98,9 @@ def test_station_buffer_blocks_unload_until_washer_frees_space():
         ),
     )
     sim = RangeSimulation(scenario, seed=6)
-    sim._robots["R1"].payload_balls = 500
-    sim.ledger.move("zone:Z3", "robot:R1", 500)
+    moved = sim.ledger.move("dispenser", "robot:R1", 500)
+    assert moved == 500
+    sim._robots["R1"].payload_balls = moved
     assert sim.apply_directive(SendToHandoff(robot_id="R1")).allowed
     for _ in range(120):
         sim.advance(60.0)

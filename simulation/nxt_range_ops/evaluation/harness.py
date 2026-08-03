@@ -206,13 +206,18 @@ def _aggregate(results: list[EpisodeResult], seeds: list[int]) -> dict[str, Any]
             }
         )
 
-    census = placeholder_census(make_scenario(results[0].scenario)) if results else []
+    census_params: set[str] = set()
+    for scenario_name in dict.fromkeys(r.scenario for r in results):
+        census_params.update(
+            f"{scenario_name}:{p}"
+            for p in placeholder_census(make_scenario(scenario_name))
+        )
     return {
         "disclaimer": DISCLAIMER,
         "simulator_version": SIMULATOR_VERSION,
         "git_commit": current_git_commit(),
         "seeds": seeds,
-        "placeholder_parameter_count": len(census),
+        "placeholder_parameter_count": len(census_params),
         "comparisons": comparisons,
     }
 

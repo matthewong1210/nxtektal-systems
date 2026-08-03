@@ -50,6 +50,11 @@ class RangeOpsEnv(gym.Env):
         self._steps = 0
         self._metrics_prev = None
         self._last_obs = None
+        # Snapshot cache: filled by _build_obs, reused by _build_info so one
+        # step never snapshots the fleet twice.
+        self._last_zones = []
+        self._last_robots = []
+        self._last_stations = []
 
         n_zones = len(scenario.zone_ids)
         n_robots = len(scenario.robot_ids)
@@ -163,6 +168,9 @@ class RangeOpsEnv(gym.Env):
         zones = sim.zone_snapshots()
         robots = sim.robot_snapshots()
         stations = sim.station_snapshots()
+        self._last_zones = zones
+        self._last_robots = robots
+        self._last_stations = stations
         zone_index = {z: i for i, z in enumerate(sorted(s.zone_ids))}
         sensed_zones = sim.sensed_zone_counts()
         total = float(s.total_balls)
@@ -251,9 +259,9 @@ class RangeOpsEnv(gym.Env):
             "action_mask": self.action_masks(),
             "metrics": sim.metrics.to_dict(),
             "true_dispenser_count": sim.dispenser_count(),
-            "robots": [r.to_dict() for r in sim.robot_snapshots()],
-            "zones": [z.to_dict() for z in sim.zone_snapshots()],
-            "stations": [s.to_dict() for s in sim.station_snapshots()],
+            "robots": [r.to_dict() for r in self._last_robots],
+            "zones": [z.to_dict() for z in self._last_zones],
+            "stations": [s.to_dict() for s in self._last_stations],
             "termination_reason": termination_reason,
         }
         if action_taken is not None:

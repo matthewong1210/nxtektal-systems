@@ -73,12 +73,15 @@ def test_station_queue_capacity_is_hard():
         ]
     )
     sim = RangeSimulation(scenario, seed=1)
-    # Give robots payload (white-box) so handoff is otherwise legal.
+    # Give robots payload (white-box) so handoff is otherwise legal. Seed
+    # from the dispenser — zones only hold ~200 balls at reset — and keep
+    # payload consistent with what the ledger actually moved.
     for rid in ("R1", "R2", "R3"):
-        sim._robots[rid].payload_balls = 600
-        sim.ledger.move("zone:Z3", f"robot:{rid}", 600)
+        moved = sim.ledger.move("dispenser", f"robot:{rid}", 600)
+        assert moved == 600
+        sim._robots[rid].payload_balls = moved
     assert sim.apply_directive(SendToHandoff(robot_id="R1")).allowed
-    sim.advance(120.0)  # R1 reaches the station and takes the only dock slot
+    sim.advance(70.0)  # R1 has reached the station and holds the only dock
     r1 = sim.robot_or_none("R1")
     assert r1.activity in (RobotActivity.UNLOADING, RobotActivity.QUEUED_HANDOFF)
     # Dock occupied and max_queue_length == 0: further sends must be
@@ -97,8 +100,9 @@ def test_estop_is_latched_until_human_reset():
         safety=SafetyConfig(dock_incident_estop_prob=1.0),
     )
     sim = RangeSimulation(scenario, seed=2)
-    sim._robots["R1"].payload_balls = 50
-    sim.ledger.move("zone:Z3", "robot:R1", 50)
+    moved = sim.ledger.move("dispenser", "robot:R1", 50)
+    assert moved == 50
+    sim._robots["R1"].payload_balls = moved
     assert sim.apply_directive(SendToHandoff(robot_id="R1")).allowed
     for _ in range(30):
         sim.advance(60.0)

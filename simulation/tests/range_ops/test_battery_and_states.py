@@ -20,7 +20,7 @@ def test_battery_stays_within_bounds_all_day(policy_name):
     from nxt_range_ops.policies.baselines import make_baseline
 
     policy = make_baseline(policy_name, scenario, env.catalog, seed=17)
-    while True:
+    for _ in range(10_000):
         action = policy.act(obs, info)
         obs, _, terminated, truncated, info = env.step(action)
         for robot in info["robots"]:
@@ -29,6 +29,8 @@ def test_battery_stays_within_bounds_all_day(policy_name):
             assert 0.0 <= float(value) <= 1.0
         if terminated or truncated:
             break
+    else:
+        raise AssertionError("episode did not terminate within the step cap")
 
 
 def test_battery_depletion_fails_robot_and_needs_human():

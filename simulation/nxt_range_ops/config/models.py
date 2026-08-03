@@ -272,6 +272,16 @@ class RangeOpsScenario(StrictModel):
     episode: EpisodeConfig = Field(default_factory=EpisodeConfig)
 
     @model_validator(mode="after")
+    def _charge_target_above_reserve(self) -> "RangeOpsScenario":
+        if self.charger.charge_target_frac <= self.safety.min_battery_reserve_frac:
+            raise ValueError(
+                "charger.charge_target_frac must exceed "
+                "safety.min_battery_reserve_frac, or a fully charged robot "
+                "could still be barred from collection assignments"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _unique_ids(self) -> "RangeOpsScenario":
         zone_ids = [z.zone_id for z in self.zones]
         robot_ids = [r.robot_id for r in self.robots]
