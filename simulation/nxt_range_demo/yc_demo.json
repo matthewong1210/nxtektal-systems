@@ -1,0 +1,56 @@
+{
+  "schema": "nxt-range-demo/yc-demo/v1",
+  "label": "SIMULATION RESULTS",
+  "disclaimer": "All results are produced from placeholder-provenance parameters. They exercise the decision problem and the pipeline only and must NOT be presented as real facility performance. No real customer data exists anywhere in this pipeline.",
+  "scenario": "demand_spike",
+  "policy": "demand_forecast_dispatch",
+  "seed": 101,
+  "bundle_dir": "reports/demo_bundle",
+  "benchmark_report": "reports/range_agent_e1/report.json",
+  "playback_seconds": 60,
+  "regenerate": {
+    "1_install": "uv sync --extra range-ops --extra demo",
+    "2_benchmark_report_optional": "uv run --no-sync python -m nxt_range_agent.benchmark --out reports/range_agent_e1",
+    "3_export_bundle": "uv run --no-sync python -m nxt_range_viewer --out reports/demo_bundle --scenario demand_spike --policy demand_forecast_dispatch --seed 101 --benchmark-report reports/range_agent_e1/report.json",
+    "4_launch_viewer": "uv run --no-sync streamlit run nxt_range_demo/app.py"
+  },
+  "determinism_note": "The same (scenario, policy, seed) always regenerates identical frames, events, and KPIs; the only environment-dependent field is the meta.git_commit provenance stamp.",
+  "highlights": [
+    {
+      "beat": "demand_spike_detection",
+      "sim_time": "14:15-15:45",
+      "playback_s": 31,
+      "what_to_say": "An unforecast walk-in group hits mid-afternoon: demand jumps from ~20 to ~50 balls/min (peak 52.8/min at 15:07). The spike is deliberately absent from the forecast the AI sees - it has to react, not cheat."
+    },
+    {
+      "beat": "ai_operational_decision",
+      "sim_time": "14:30-15:30",
+      "playback_s": 32,
+      "what_to_say": "The dispatcher panel narrates each decision live: the policy reads the sensed inventory pipeline against the forecast, detects the shortfall, and staffs collection - every directive re-validated by the safety shield."
+    },
+    {
+      "beat": "robot_dispatch",
+      "sim_time": "15:00-16:00",
+      "playback_s": 34,
+      "what_to_say": "Both available robots cycle collect-and-handoff on the map (amber decision lines, trails). A dock failure at 15:26 is retried and absorbed without human help."
+    },
+    {
+      "beat": "inventory_recovery",
+      "sim_time": "15:28-16:30",
+      "playback_s": 36,
+      "what_to_say": "Dispenser inventory bottoms out at 1,578 balls at 15:28 - and recovers. The washer loop is kept fed, climbing back above 2,200 by 16:00 and staying positive to close."
+    },
+    {
+      "beat": "avoided_stockout",
+      "sim_time": "22:00",
+      "playback_s": 58,
+      "what_to_say": "Full-day result: 0.0 stockout minutes, 20,751 of 20,751 demanded balls served, 100% service availability, one human assist all day. SIMULATION RESULTS - placeholder parameters, real decision problem."
+    }
+  ],
+  "bonus_beat": {
+    "beat": "resilience_subplot",
+    "sim_time": "18:33-18:45",
+    "playback_s": 47,
+    "what_to_say": "Optional: R1 hard-fails in the evening (red ring on the map), the dispatcher requests human assistance, and the robot is recovered in 12 simulated minutes."
+  }
+}
