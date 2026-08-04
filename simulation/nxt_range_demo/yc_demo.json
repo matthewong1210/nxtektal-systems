@@ -25,18 +25,18 @@
   "counterfactual_note": "Same-seed runs of different policies do NOT share an identical exogenous event schedule (demand realization and failure/docking events diverge with policy execution), so no 'avoided X' counterfactual claims are made. Cross-policy statements must cite the paired-seed E1 benchmark statistics instead.",
   "highlights": [
     {
-      "beat": "demand_surge",
+      "beat": "configured_demand_spike_begins",
       "sim_time": "14:00-15:30",
       "frame": 479,
       "playback_s": 26.6,
-      "what_to_say": "An unforecast walk-in surge hits at 14:00: demand jumps 2.5x, from ~20 to ~50 balls/min (peak 52.8/min at 15:07). The spike is deliberately absent from the forecast the policy sees - it has to react, not cheat."
+      "what_to_say": "The unforecast demand spike begins at 2:00 PM (scenario config window 14:00-15:30): demand jumps 2.5x, from ~20 to ~50 balls/min (peak 52.8/min at 15:07). The spike is deliberately absent from the forecast the policy sees."
     },
     {
-      "beat": "autonomous_dispatch_decision",
-      "sim_time": "14:09",
-      "frame": 488,
-      "playback_s": 27.1,
-      "what_to_say": "The decision panel narrates each autonomous dispatch decision live: the forecast-based policy reads the sensed inventory pipeline against the forecast, detects the shortfall, and staffs collection - assign_collection(R1,Z4) at 14:09, every directive re-validated by the safety shield."
+      "beat": "post_spike_autonomous_dispatch_action",
+      "sim_time": "14:20",
+      "frame": 499,
+      "playback_s": 27.7,
+      "what_to_say": "The forecast-based autonomous dispatch policy responds to changing facility state: at 14:20 its public observation showed a sensed pipeline of ~2,400 balls against a ~2,562-ball forecast, and it assigned R2 (idle at station H1) to collect in Z3 - assign_collection(R2,Z3), safety shield allowed, R2 now traveling. No individual action is narrated as a response to the spike."
     },
     {
       "beat": "robot_dispatch_and_dock_failure",
@@ -57,14 +57,14 @@
       "sim_time": "15:54",
       "frame": 593,
       "playback_s": 32.9,
-      "what_to_say": "Inventory recovers to 2,200 by 15:54 and stays positive to close. The washer loop never starves."
+      "what_to_say": "Inventory recovers to 2,200 by 15:54 and stays positive to close. The policy maintains service through the simulated disruption."
     },
     {
-      "beat": "maintained_zero_simulated_stockout",
+      "beat": "final_simulated_result",
       "sim_time": "22:00",
       "frame": 959,
       "playback_s": 53.3,
-      "what_to_say": "Full-day result: maintained zero simulated stockout - 0.0 stockout minutes, 20,751 of 20,751 demanded balls served, 100% service availability, exactly one human assist all day. SIMULATION RESULTS - placeholder parameters, real decision problem."
+      "what_to_say": "The episode ends with zero simulated stockout minutes - 20,751 of 20,751 demanded balls served, 100% service availability, exactly one human assist all day. SIMULATION RESULTS - placeholder parameters, real decision problem."
     }
   ],
   "bonus_beat": {
