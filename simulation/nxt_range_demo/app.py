@@ -44,7 +44,9 @@ from nxt_range_demo.charts import (
 
 DEFAULT_BUNDLE = "reports/demo_bundle"
 PLAYBACK_SECONDS = {"60 s": 60, "90 s": 90, "30 s": 30}
-TICKS_PER_SECOND = 8
+# 6 ticks/s is the recording-stable rate: higher rates can intermittently
+# blank Plotly frames mid-capture.
+TICKS_PER_SECOND = 6
 
 
 def resolve_bundle_dir() -> Path:
@@ -100,7 +102,7 @@ def action_panel(frame: dict) -> None:
         f"""<div style="background:{PANEL}; border-left:3px solid {verdict_color};
         padding:10px 14px; border-radius:4px;">
         <div style="color:{INK_DIM}; font-size:0.7rem; letter-spacing:0.1em;
-        text-transform:uppercase;">dispatcher decision</div>
+        text-transform:uppercase;">autonomous dispatch decision</div>
         <div style="font-size:1.05rem; font-weight:600;">{pretty}{detail}</div>
         <div style="color:{verdict_color}; font-size:0.8rem;">shield: {verdict}</div>
         </div>""",
@@ -177,8 +179,9 @@ def main() -> None:
     with head_l:
         st.title("NXTektal Range Operations")
         st.caption(
-            f"AI dispatcher replay — scenario **{meta['scenario']}** · policy "
-            f"**{meta['policy']}** · seed {meta['seed']} · simulator "
+            f"Autonomous dispatch replay — scenario **{meta['scenario']}** · "
+            f"policy **{meta['policy']}** (forecast-based dispatch baseline) · "
+            f"seed {meta['seed']} · simulator "
             f"v{meta['simulator_version']} @ {meta['git_commit']}"
         )
     clock_slot = head_r.empty()
@@ -204,7 +207,10 @@ def main() -> None:
             )
         st.caption(
             "SIMULATION RESULTS from placeholder-provenance parameters — "
-            "not real facility performance."
+            "not real facility performance. This replay uses a forecast-based "
+            "autonomous dispatch policy (a rule-based baseline, not a learned "
+            "model); the environment is built to train and evaluate learned "
+            "policies."
         )
 
     stride = max(1, round(n / (PLAYBACK_SECONDS[duration_label] * TICKS_PER_SECOND)))

@@ -1,7 +1,7 @@
 # NXTektal Range Ops — Demo Viewer
 
-A read-only Streamlit replay of one simulated operating day: the AI
-dispatcher's decisions, the robot fleet on a 2D facility map, and the
+A read-only Streamlit replay of one simulated operating day: autonomous
+dispatch decisions, the robot fleet on a 2D facility map, and the
 resulting KPIs — built for a 60–90 second YC application demonstration.
 
 > **All numbers shown are SIMULATION RESULTS** from placeholder-provenance
@@ -37,6 +37,11 @@ produces a byte-identical bundle, and seed 101 of `demand_spike ×
 demand_forecast_dispatch` reproduces the exact episode published in the E1
 benchmark artifacts.
 
+`demand_forecast_dispatch` is a **forecast-based autonomous dispatch
+policy** — a rule-based baseline, not a learned or trained model. The
+`nxt_range_ops` environment is built to train and evaluate learned
+policies; this demo replays the strongest baseline from the E1 benchmark.
+
 ## Quick start
 
 From the `simulation/` directory:
@@ -70,10 +75,10 @@ or set `NXT_DEMO_BUNDLE=path/to/bundle`.
 ## Suggested 60–90 s demo script
 
 1. **Facility overview** (sidebar): zones, robots, stations, one day, one
-   AI dispatcher.
+   autonomous dispatch policy.
 2. Press **Play**: robots fan out on the map; the sim clock races through
-   the day; the dispatcher panel narrates each decision and its safety-shield
-   verdict; the KPI ticker climbs.
+   the day; the decision panel narrates each autonomous dispatch decision
+   and its safety-shield verdict; the KPI ticker climbs.
 3. Pause on an incident (Events tab lists them with timestamps — robot
    failure → human intervention → recovery).
 4. **Final summary** tab: full-day KPIs (availability, stockouts,
@@ -101,9 +106,10 @@ sidebar toggle is explicitly enabled.
 - Robot map positions are interpolated from symbolic node labels; the
   viewer's straight-line travel matches the simulator's own linear travel
   model but is not a physical trajectory.
-- During playback the map re-renders ~8×/s server-side; on slow machines
-  this can flash. Paused frames are always fully rendered; lower
-  `TICKS_PER_SECOND` in `app.py` if needed.
+- During playback the map re-renders 6×/s server-side — the recommended
+  recording rate; higher rates can intermittently blank Plotly frames.
+  Paused frames are always fully rendered. (At 6 ticks/s the "60 s"
+  playback setting completes in ~53 s.)
 - The play loop holds one Streamlit script run open; it is a single-viewer
   local demo tool by design, not a hosted dashboard.
 - Editing `charts.py`/`bundle.py` requires a server restart — Streamlit
