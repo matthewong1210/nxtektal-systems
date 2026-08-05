@@ -187,8 +187,15 @@ def main() -> None:
     clock_slot = head_r.empty()
 
     # Sidebar: facility overview + options.
+    render_path = Path(__file__).resolve().parent / "assets" / "collector-render.jpg"
     with st.sidebar:
         st.subheader("Facility")
+        if render_path.exists():
+            st.image(str(render_path), width="stretch")
+            st.caption(
+                "Concept render — product development visualization, "
+                "not deployed hardware."
+            )
         hours = layout["hours"]
         st.markdown(
             f"- **{len(layout['zones'])}** collection zones\n"

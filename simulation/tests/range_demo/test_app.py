@@ -58,6 +58,14 @@ def test_app_does_not_expose_debug_state_by_default(app, bundle_dir):
     assert debug_toggles and debug_toggles[0].value is False
 
 
+def test_app_sidebar_shows_concept_render_with_disclaimer_caption(app):
+    at = app.run()
+    assert not at.exception
+    # The product image ships with the package and must always be labeled a
+    # concept render, never presented as real hardware.
+    assert "Concept render" in _all_text(at)
+
+
 def test_app_shows_final_summary_kpis(app):
     at = app.run()
     text = _all_text(at)
