@@ -25,7 +25,9 @@ from nxt_range_ops.policies.baselines import make_baseline
 from nxt_range_ops.scenarios.generators import make_scenario
 
 from nxt_facility.analysis import classify_state, derive_indicators, estimate_stockout
+from nxt_facility.briefing import render_briefing
 from nxt_facility.build import build_facility_state
+from nxt_facility.decisions import recommend
 
 from .conftest import rng_states
 
@@ -73,21 +75,24 @@ def run_episode(scenario, seed: int, instrumented: bool):
     policy.reset()
     obs_digest = hashlib.sha256()
     _absorb_obs(obs_digest, obs)
-    if instrumented:
-        state = build_facility_state(env.sim)
+
+    def facility_layer(sim) -> None:
+        """Everything the facility layer offers, exercised every step."""
+        state = build_facility_state(sim)
         estimate_stockout(state)
         classify_state(state)
         derive_indicators(state)
+        render_briefing(state, recommend(state))
+
+    if instrumented:
+        facility_layer(env.sim)
     while True:
         action = policy.act(obs, info)
         obs, reward, terminated, truncated, info = env.step(action)
         _absorb_obs(obs_digest, obs)
         obs_digest.update(repr(float(reward)).encode())
         if instrumented:
-            state = build_facility_state(env.sim)
-            estimate_stockout(state)
-            classify_state(state)
-            derive_indicators(state)
+            facility_layer(env.sim)
         if terminated or truncated:
             event_log = json.dumps(env.sim.events.to_dicts(), sort_keys=True)
             final_metrics = json.dumps(env.sim.metrics.to_dict(), sort_keys=True)
@@ -117,6 +122,7 @@ def test_facility_layer_consumes_no_rng(sim):
     estimate_stockout(state)
     classify_state(state)
     derive_indicators(state)
+    render_briefing(state, recommend(state))
     state.to_dict()
     assert rng_states(sim) == before
 

@@ -22,6 +22,8 @@ from .analysis import (
     derive_indicators,
     estimate_stockout,
 )
+from .briefing import render_briefing
+from .decisions import Confidence, Recommendation, Urgency, recommend
 from .state import (
     BallFlow,
     ChargingState,
@@ -38,7 +40,12 @@ from .state import (
 __all__ = [
     "BallFlow",
     "ChargingState",
+    "Confidence",
     "Counts",
+    "Recommendation",
+    "Urgency",
+    "recommend",
+    "render_briefing",
     "CRITICAL_FLEET_OPERABLE_FRAC",
     "CRITICAL_STOCKOUT_HORIZON_MIN",
     "STRAINED_STOCKOUT_HORIZON_MIN",
