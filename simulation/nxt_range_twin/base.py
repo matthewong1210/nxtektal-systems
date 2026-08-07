@@ -51,7 +51,14 @@ def build_base_layer(layout: dict, meta: dict, out_path: Path) -> None:
     _mark_placeholder(terrain.GetPrim())
 
     # Dispenser (+ fill-scaled BallPile authored by overlay), zones, stations, charger.
-    _mark_placeholder(_xform_at(stage, "/World/Site/Dispenser", *index["dispenser"]))
+    dispenser = _xform_at(stage, "/World/Site/Dispenser", *index["dispenser"])
+    _mark_placeholder(dispenser)
+    ball_pile = UsdGeom.Cylinder.Define(stage, dispenser.GetPath().AppendChild("BallPile"))
+    ball_pile.GetRadiusAttr().Set(2.0)
+    ball_pile.GetHeightAttr().Set(1.0)
+    ball_pile.GetAxisAttr().Set(UsdGeom.Tokens.z)
+    ball_pile.AddScaleOp()  # authored per-sample by overlay.py; unit scale here
+    _mark_placeholder(ball_pile.GetPrim())
     for zone in layout["zones"]:
         prim = _xform_at(stage, f"/World/Site/Zones/{zone['zone_id']}",
                           *index[f"zone:{zone['zone_id']}"])
@@ -78,6 +85,19 @@ def build_base_layer(layout: dict, meta: dict, out_path: Path) -> None:
     _mark_placeholder(charger)
     charger.CreateAttribute("nxt:slots", Sdf.ValueTypeNames.Int).Set(
         int(layout["charger"]["slots"]))
+
+    # Robots: prim + placeholder body defined here so the overlay has something
+    # to attach timesampled opinions to; the translate VALUES stay overlay-only
+    # (no location is static — nothing to author as a default here).
+    for robot in layout["robots"]:
+        robot_xform = UsdGeom.Xform.Define(
+            stage, f"/World/Site/Robots/{robot['robot_id']}")
+        robot_xform.AddTranslateOp()  # op + xformOpOrder only; overlay authors values
+        _mark_placeholder(robot_xform.GetPrim())
+        body = UsdGeom.Cube.Define(
+            stage, robot_xform.GetPrim().GetPath().AppendChild("Body"))
+        body.AddScaleOp().Set(Gf.Vec3f(0.4, 0.4, 0.4))
+        _mark_placeholder(body.GetPrim())
 
     # Aspatial: attributes, NO transform (design §1 — washer/staff aspatial).
     UsdGeom.Scope.Define(stage, "/World/Site/Aspatial")
