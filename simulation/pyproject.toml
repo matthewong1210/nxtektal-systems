@@ -49,3 +49,6 @@ packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory"]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
+markers = [
+    "slow: full-episode re-runs (real time, minutes not seconds)",
+]
