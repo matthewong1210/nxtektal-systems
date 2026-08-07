@@ -33,7 +33,7 @@ from nxt_facility.state import (
 FACILITY_PKG = Path(__file__).resolve().parents[2] / "nxt_facility"
 
 # Modules that must stay importable without any simulation stack.
-CONTRACT_MODULES = ("state.py", "analysis.py")
+CONTRACT_MODULES = ("state.py", "analysis.py", "decisions.py", "briefing.py")
 FORBIDDEN_IMPORTS = {"simpy", "gymnasium", "numpy", "pandas", "nxt_sim"}
 
 
@@ -156,8 +156,12 @@ def test_contract_importable_without_simulation_stack():
         sys.meta_path.insert(0, Blocker())
         import nxt_facility.state
         import nxt_facility.analysis
+        import nxt_facility.decisions
+        import nxt_facility.briefing
         import nxt_facility
-        from nxt_facility import FacilityState, classify_state
+        from nxt_facility import (
+            FacilityState, classify_state, recommend, render_briefing,
+        )
         print("contract-ok")
         """
     )

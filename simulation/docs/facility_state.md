@@ -52,9 +52,8 @@ display would show); `clean_available` is ledger truth.
   per the house provenance policy): critical stockout horizon 30 min,
   strained horizon 120 min, critical fleet operable fraction 0.34. They gate
   demo classifications only.
-- **Advisory/recommendation functions are deliberately absent** this
-  milestone (they border on planners, which are out of scope). The directive
-  vocabulary + `SafetyShield` remain the sole control path.
+- **Recommendations are operational outcomes, not commands** (Phase 2, below).
+  The directive vocabulary + `SafetyShield` remain the sole control path.
 
 ## RNG discipline (load-bearing)
 
@@ -71,6 +70,37 @@ Guards in `tests/facility/test_regressions.py`:
 4. Upstream trees (`nxt_sim`, `nxt_range_ops`, `nxt_range_agent`,
    `nxt_range_viewer`, `nxt_range_demo`) byte-identical after facility use
    and never mentioning `nxt_facility`.
+
+## Phase 2 — decision rules and the manager briefing
+
+Architecture ladder: FacilityState → Decision Rules → Recommendation →
+Human/Agent Interface → *future execution layer (not built)*.
+
+```python
+from nxt_facility import recommend, render_briefing
+
+recs = recommend(state)          # tuple[Recommendation, ...] — pure, deterministic
+print(render_briefing(state))    # the 20-second manager briefing (computes recs itself)
+```
+
+`Recommendation` fields: `rule_id`, `urgency` (`NOW`/`SOON`/`WATCH`), `action`
+(imperative operational headline), `affected_resources` (sorted ids like
+`robot:R1`, `zone:Z4`, `station:H1`, `washer`), `expected_outcome`,
+`confidence`, `rationale`. `to_dict()` is the agent-interface serialization;
+`render_briefing` is the human interface (DO NOW / DO NEXT HOUR / KEEP AN EYE
+ON tiers, all-clear line when nothing fires).
+
+`confidence` is a deterministic evidence-provenance grade, not a probability:
+HIGH = ledger/snapshot facts; MEDIUM = projections over the frozen, possibly
+biased forecast. Eight rules, each pre-filtering the same conditions the
+`SafetyShield` enforces (reserve floor, no duplicate assist requests, no
+charge advice while charging, one robot per zone) so advice is achievable the
+moment it is given. When the facility is closed, only fleet-health rules run.
+Thresholds are placeholder-tagged module constants, overridable as keyword
+arguments to `recommend()`.
+
+Demo: `.venv/bin/python scripts/facility_briefing_demo.py --scenario
+demand_spike --seed 42 --every-min 120`.
 
 ## Boundary rules
 
