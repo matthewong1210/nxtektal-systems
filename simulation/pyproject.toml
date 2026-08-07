@@ -50,5 +50,5 @@ testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
 markers = [
-    "slow: full-episode re-runs (real time, minutes not seconds)",
+    "slow: full-episode re-runs (SimPy event clock: ~1s per simulated day, measured)",
 ]
