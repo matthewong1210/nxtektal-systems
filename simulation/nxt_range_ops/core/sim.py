@@ -339,6 +339,14 @@ class RangeSimulation:
     def charger_queue_length(self) -> int:
         return len(self._charger.queue)
 
+    def staff_summary(self) -> tuple[int, int, int]:
+        """(capacity, busy, queued) view of the human staff pool. Pure read, no RNG."""
+        return (
+            self.scenario.human_ops.staff_count,
+            self._human_staff.count,
+            len(self._human_staff.queue),
+        )
+
     def washer_wip(self) -> int:
         return self.ledger.count(ledger_mod.WASHER)
 
