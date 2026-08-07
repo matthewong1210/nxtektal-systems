@@ -40,7 +40,9 @@ build-backend = "hatchling.build"
 # nxt_range_agent (benchmarks) and nxt_range_viewer (demo replay exporter)
 # are deliberately in-repo-only tools and excluded from the wheel; they run
 # via `python -m ...` from the repo root (pytest pythonpath below).
-packages = ["nxt_sim", "nxt_range_ops"]
+# nxt_facility is the Site OS state contract consumed by future agents and
+# services, so it ships in the wheel alongside the simulator it projects.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
