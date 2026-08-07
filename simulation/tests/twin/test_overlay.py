@@ -26,6 +26,24 @@ def _three_states() -> list[dict]:
     return [s0, s1, s2]
 
 
+def _four_states() -> list[dict]:
+    import copy
+    s0 = copy.deepcopy(STATE)
+    s0["meta"]["t_s"] = 0.0
+    s0["robots"][0]["location"] = "dispenser"
+    s1 = copy.deepcopy(STATE)   # R1 at zone:Z1, t=60
+    s2 = copy.deepcopy(STATE)
+    s2["meta"]["t_s"] = 120.0
+    s2["robots"][0]["location"] = "transit"
+    s2["robots"][0]["destination"] = "station:H1"
+    s2["robots"][0]["activity"] = "traveling"
+    s3 = copy.deepcopy(STATE)
+    s3["meta"]["t_s"] = 180.0
+    s3["robots"][0]["location"] = "station:H1"
+    s3["robots"][0]["activity"] = "docking"
+    return [s0, s1, s2, s3]
+
+
 def _open(tmp_path: Path) -> Usd.Stage:
     path = build_episode_layer(LAYOUT, _three_states(), META, tmp_path)
     return Usd.Stage.Open(str(path))
@@ -68,3 +86,28 @@ def test_estimates_layer_exists_and_is_empty(tmp_path: Path):
     est = Sdf.Layer.FindOrOpen(str(path.parent / "estimates.usda"))
     assert est is not None
     assert not est.rootPrims  # zero prims
+
+
+def test_transit_frames_hold_last_position_on_composed_stage(tmp_path: Path):
+    """Regression guard: transit frames hold position from prior location anchor."""
+    path = build_episode_layer(LAYOUT, _four_states(), META, tmp_path)
+    stage = Usd.Stage.Open(str(path))
+    attr = stage.GetPrimAtPath("/World/Site/Robots/R1").GetAttribute("xformOp:translate")
+
+    # (b) value at t=120 equals value at t=60 (held through the transit frame)
+    at_60 = attr.Get(60.0)
+    at_120 = attr.Get(120.0)
+    assert at_120 == at_60, "transit frame should hold position from zone:Z1 anchor"
+
+    # (c) value at t=180 differs from t=120 (arrival re-stamp)
+    at_180 = attr.Get(180.0)
+    assert at_180 != at_120, "arrival at station:H1 should update position"
+
+    # (d) value at t=179 equals value at t=120 (held until the teleport lead)
+    at_179 = attr.Get(179.0)
+    assert at_179 == at_120, "position held until t=180-1.0"
+
+    # (e) nxt:location token at t=120 is "transit"
+    loc_attr = stage.GetPrimAtPath("/World/Site/Robots/R1").GetAttribute("nxt:location")
+    loc_at_120 = loc_attr.Get(120.0)
+    assert str(loc_at_120) == "transit", f"expected 'transit' at t=120, got {loc_at_120}"
