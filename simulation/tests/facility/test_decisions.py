@@ -55,6 +55,7 @@ def robot(
     capacity: int = 200,
     awaiting: bool = False,
     estop: bool = False,
+    assigned_zone: str | None = None,
 ) -> RobotStateSnapshot:
     return RobotStateSnapshot(
         robot_id=rid,
@@ -65,7 +66,7 @@ def robot(
         payload_capacity_balls=capacity,
         location="charger",
         destination=None,
-        assigned_zone=None,
+        assigned_zone=assigned_zone,
         estop_latched=estop,
         awaiting_human=awaiting,
     )
@@ -280,8 +281,62 @@ def test_low_battery_robot_never_dispatched():
         robots=(robot("R1", battery=0.16),),  # inside reserve+margin band
         zones=(zone("Z1", balls=400),),
     )
-    for rec in by_rule(recommend(state), "stockout_dirty_supply"):
-        assert "robot:R1" not in rec.affected_resources
+    recs = by_rule(recommend(state), "stockout_dirty_supply")
+    # the rule must fire its facility-level fallback, never a dispatch pair
+    assert len(recs) == 1
+    assert "washer" in recs[0].affected_resources
+    assert not any(res.startswith("robot:") for res in recs[0].affected_resources)
+
+
+def test_supply_limited_soon_urgency_beyond_critical_horizon():
+    # clean 600, no supply, demand 10/min -> eta 60 min: inside strained
+    # horizon (120) but beyond critical (30) -> SOON.
+    state = make_state(
+        clean=600,
+        forecast=(10.0, 10.0, 10.0, 10.0),
+        robots=(robot("R1"),),
+        zones=(zone("Z1", balls=400),),
+        stations=(station(buffer=0),),
+    )
+    recs = by_rule(recommend(state), "stockout_dirty_supply")
+    assert len(recs) == 1
+    assert recs[0].urgency is Urgency.SOON
+
+
+def test_dispatch_skips_zones_at_the_occupancy_cap():
+    # Z1 is richest but already has two robots COMMITTED (assigned_zone,
+    # one still traveling so robots_present would miss it) — the shield
+    # would reject a third assignment, so advice must target Z2.
+    state = make_state(
+        clean=200,
+        forecast=(10.0, 10.0, 10.0, 10.0),
+        robots=(
+            robot("R1", activity="collecting", assigned_zone="Z1"),
+            robot("R2", activity="traveling", assigned_zone="Z1"),
+            robot("R3"),
+        ),
+        zones=(zone("Z1", balls=900, present=1), zone("Z2", balls=100)),
+        stations=(station(buffer=0),),
+    )
+    recs = by_rule(recommend(state), "stockout_dirty_supply")
+    assert len(recs) == 1
+    assert set(recs[0].affected_resources) == {"robot:R3", "zone:Z2"}
+
+
+def test_fallback_names_zone_side_when_zones_are_the_constraint():
+    # An idle, charged, empty robot exists, but every zone is closed —
+    # the rationale must blame zone availability, not fleet readiness.
+    state = make_state(
+        clean=200,
+        forecast=(10.0, 10.0, 10.0, 10.0),
+        robots=(robot("R1"),),
+        zones=(zone("Z1", balls=800, is_open=False),),
+        stations=(station(buffer=0),),
+    )
+    recs = by_rule(recommend(state), "stockout_dirty_supply")
+    assert len(recs) == 1
+    assert "zone availability" in recs[0].rationale
+    assert "no idle, charged, non-full robot is available" not in recs[0].rationale
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +390,19 @@ def test_battery_reserve_ignores_charging_and_healthy_robots():
     assert by_rule(recommend(state), "battery_reserve") == []
 
 
+def test_battery_reserve_tells_manager_to_resume_paused_robot_first():
+    # The shield rejects a charge order for a paused robot ("resume it
+    # first"), so the advice must name the resume step to stay actionable.
+    state = make_state(
+        robots=(robot("R1", battery=0.18, activity="paused"),),
+        zones=(zone(balls=10),),
+    )
+    recs = by_rule(recommend(state), "battery_reserve")
+    assert len(recs) == 1
+    assert "Resume R1" in recs[0].action
+    assert "paused" in recs[0].rationale
+
+
 # ---------------------------------------------------------------------------
 # R5 robot_down / assist_backlog
 # ---------------------------------------------------------------------------
@@ -359,6 +427,21 @@ def test_pending_assist_becomes_backlog_watch_not_duplicate():
     backlog = by_rule(recs, "assist_backlog")
     assert len(backlog) == 1
     assert backlog[0].urgency is Urgency.WATCH
+
+
+def test_failed_robot_with_pending_request_is_not_asked_again():
+    # A FAILED robot that already has a pending assist request is exactly
+    # the duplicate the shield rejects — robot_down must stay silent and
+    # the backlog rule carries it instead (guards the `not awaiting_human`
+    # condition, which a vacuous fixture would miss).
+    state = make_state(
+        robots=(robot("R1", health="failed", awaiting=True),),
+        zones=(zone(balls=10),),
+        staff=StaffState(capacity=1, busy=1, queued_requests=1),
+    )
+    recs = recommend(state)
+    assert by_rule(recs, "robot_down") == []
+    assert len(by_rule(recs, "assist_backlog")) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -440,6 +523,37 @@ def test_near_full_buffer_watched_with_alternative_named():
 def test_buffer_below_threshold_silent():
     state = make_state(zones=(zone(balls=10),), stations=(station("H1", buffer=500),))
     assert by_rule(recommend(state), "station_buffer_pressure") == []
+
+
+def test_zero_capacity_buffer_never_crashes_recommend():
+    # Contract states may come from real telemetry with no pydantic
+    # validation upstream — a zero-capacity buffer must not take down the
+    # whole rule evaluation with a ZeroDivisionError.
+    state = make_state(
+        robots=(robot("R1", payload=190),),
+        zones=(zone(balls=10),),
+        stations=(station("H1", buffer=0, cap=0), station("H2", buffer=100)),
+    )
+    recs = recommend(state)  # must not raise
+    stranded = by_rule(recs, "payload_stranded")
+    assert len(stranded) == 1
+    assert "station:H2" in stranded[0].affected_resources  # zero-cap ranks full
+
+
+def test_unload_target_prefers_empty_queue_over_low_buffer():
+    # The shield gates handoff on dock/queue capacity, not buffer fill:
+    # H2 has the lower buffer but a saturated queue; H1 must win.
+    state = make_state(
+        robots=(robot("R1", payload=190),),
+        zones=(zone(balls=10),),
+        stations=(
+            station("H1", buffer=900, queue=0),
+            station("H2", buffer=100, queue=4, docked=1),
+        ),
+    )
+    recs = by_rule(recommend(state), "payload_stranded")
+    assert len(recs) == 1
+    assert "station:H1" in recs[0].affected_resources
 
 
 # ---------------------------------------------------------------------------

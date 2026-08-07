@@ -65,14 +65,16 @@ forecast → MEDIUM), consistent with the house placeholder/provenance policy.
 subjects)`. Thresholds are module constants (`source: placeholder`), overridable as keyword
 arguments — **not** a new FacilityState field group (that would break every hand-built
 fixture; recorded as the designated follow-up when real telemetry integration needs
-config-sourced limits): `MIN_BATTERY_RESERVE_FRAC = 0.15`, `CHARGE_TARGET_FRAC = 0.95`
-(mirrors config defaults), `BATTERY_MARGIN_FRAC = 0.05`, `ZONE_WORTH_COLLECTING_BALLS = 50`,
-`PAYLOAD_FULL_FRAC = 0.8`, `BUFFER_NEAR_FULL_FRAC = 0.9`.
+config-sourced limits): `MIN_BATTERY_RESERVE_FRAC = 0.15`, `BATTERY_MARGIN_FRAC = 0.05`,
+`ZONE_WORTH_COLLECTING_BALLS = 50`, `PAYLOAD_FULL_FRAC = 0.8`,
+`BUFFER_NEAR_FULL_FRAC = 0.9`, `MAX_ROBOTS_PER_ZONE = 2` (mirrors the shield's
+occupancy-cap default).
 
 Robot activities are matched as string literals (`"idle"`, `"failed"`, …) because importing
 `nxt_range_ops.core.entities` at runtime would drag the simulator into the contract modules
-(Phase 1 lesson); a pin test asserts every literal equals the real enum value, and a second
-pin test asserts every `directive_hint` verb maps to a real directive class name.
+(Phase 1 lesson); a pin test asserts every literal equals the real enum value. (An earlier
+draft carried a `directive_hint` field and its vocabulary pin test — both removed by the
+founder's adjustment: recommendations name resources and outcomes, not directives.)
 
 ## Rule catalog (8 rules, shield-aware)
 
@@ -84,9 +86,10 @@ it is given:
    N balls washable; get payloads to stations." Fixes the shared blind spot.
 2. **stockout_dirty_supply** (NOW if ETA ≤ 30 min, SOON if ≤ 120) — `limited_by ==
    "dirty_supply"`: dispatch idle, charged, non-full robots **one per zone** to the richest
-   open zones (sort: −balls, then fewer `robots_present`, then `zone_id`) — one-per-zone
-   because the shield enforces a per-zone occupancy cap that the argmax-zone designs
-   would have tripped.
+   open zones **below the occupancy cap**, counting *commitments* (`assigned_zone` across
+   robot snapshots, which includes robots still traveling — the shield's own accounting)
+   rather than physical `robots_present`. When no pair exists, the fallback rationale names
+   the actual binding side (fleet readiness vs zone availability).
 3. **stockout_demand_bound** (SOON) — `limited_by == "demand"`: the washer is the
    bottleneck; collection cannot help. Honest manager-level advice: "washer at max
    X balls/min vs forecast Y — brief the front desk on a possible shortfall."
@@ -120,13 +123,18 @@ FACILITY BRIEFING — normal_weekday, day minute 612 (10:12), seed 42
 Status: STRAINED · Clean stock 1,840/8,000 (23%) · Projected stockout: ~47 min (supply-limited)
 
 DO NOW
- 1. Send R3 to charge — battery 17%, within 5% of the 15% reserve; the shield will
-    block new assignments below reserve. (send_to_charge(R3))
+ 1. Get R3 charged — R3 battery at 17%, within 5% of the 15% reserve floor; 1 of 2
+    charger slots free. Outcome: Robot stays assignable — below the reserve floor,
+    new collection work is blocked until it recharges.
 DO NEXT HOUR
- 2. Assign R1 to zone Z4 — 3,120 balls on the field, no robot present; washer is
-    supply-starved (620 washable vs 1,140 on field). (assign_collection(R1,Z4))
+ 2. Get R1 collecting in zone Z4 — projected stockout in ~47 min is
+    washer-supply-limited; zone Z4 holds 3,120 balls (0 robots present) and R1 is
+    idle at 82% battery. Outcome: Washable supply rises. [confidence: medium —
+    forecast-derived]
 KEEP AN EYE ON
- 3. Station H1 buffer at 92% — route the next handoff to H2 (34%). (monitor)
+ 3. Relieve pressure on station H1 — buffer at 1,104/1,200 (92%); route the next
+    handoff to H2 (408/1,200, queue 0). Outcome: Unloading never blocks on a full
+    buffer.
 
 Thresholds are engineering placeholders; projections use the frozen day forecast.
 ```

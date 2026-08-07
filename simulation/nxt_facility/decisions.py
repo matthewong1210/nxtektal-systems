@@ -43,6 +43,7 @@ BATTERY_MARGIN_FRAC = 0.05       # warn before the shield's reserve floor bites
 ZONE_WORTH_COLLECTING_BALLS = 50
 PAYLOAD_FULL_FRAC = 0.8
 BUFFER_NEAR_FULL_FRAC = 0.9
+MAX_ROBOTS_PER_ZONE = 2          # mirrors SafetyConfig default occupancy cap
 
 # Activity vocabulary (string values of RobotActivity, pinned by test).
 DISPATCHABLE_ACTIVITY = "idle"
@@ -112,19 +113,51 @@ def _dispatchable(r, reserve_floor: float, payload_full_frac: float) -> bool:
     )
 
 
-def _worthwhile_zones(state: FacilityState, floor: int):
-    """Open zones worth collecting from, richest first, crowd-averse."""
-    zones = [z for z in state.zones if z.is_open and z.balls >= floor]
-    return sorted(zones, key=lambda z: (-z.balls, z.robots_present, z.zone_id))
+def _zone_commitments(state: FacilityState, zone_id: str) -> int:
+    """Robots committed to a zone — assigned to it, including in transit.
+
+    Mirrors the shield's occupancy accounting (``zone_commitments``), which
+    counts ``assigned_zone``, not physical presence: ``robots_present``
+    alone would miss robots still traveling toward the zone.
+    """
+    return sum(1 for r in state.robots if r.assigned_zone == zone_id)
 
 
-def _dispatch_pairs(state, reserve_floor, payload_full_frac, zone_floor):
-    robots = sorted(
+def _worthwhile_zones(state: FacilityState, floor: int, zone_cap: int):
+    """Open, un-capped zones worth collecting from, richest first."""
+    zones = [
+        z
+        for z in state.zones
+        if z.is_open
+        and z.balls >= floor
+        and _zone_commitments(state, z.zone_id) < zone_cap
+    ]
+    return sorted(
+        zones,
+        key=lambda z: (-z.balls, _zone_commitments(state, z.zone_id), z.zone_id),
+    )
+
+
+def _dispatchable_robots(state, reserve_floor, payload_full_frac):
+    return sorted(
         (r for r in state.robots if _dispatchable(r, reserve_floor, payload_full_frac)),
         key=lambda r: r.robot_id,
     )
-    zones = _worthwhile_zones(state, zone_floor)
-    return list(zip(robots, zones))
+
+
+def _station_fill(s) -> float:
+    """Buffer fill fraction; zero-capacity buffers count as full."""
+    if s.buffer_capacity_balls <= 0:
+        return 1.0
+    return s.buffer_balls / s.buffer_capacity_balls
+
+
+def _station_preference(s) -> tuple:
+    """Unload-target ordering: the shield gates on dock/queue capacity, not
+    buffer fill, so an empty handoff queue outranks a low buffer. The
+    snapshot lacks dock_slots/max_queue_length, so queue length is a
+    preference signal, not an exact shield check."""
+    return (s.queue_length, _station_fill(s), s.station_id)
 
 
 def recommend(
@@ -135,10 +168,10 @@ def recommend(
     zone_worth_collecting_balls: int = ZONE_WORTH_COLLECTING_BALLS,
     payload_full_frac: float = PAYLOAD_FULL_FRAC,
     buffer_near_full_frac: float = BUFFER_NEAR_FULL_FRAC,
+    max_robots_per_zone: int = MAX_ROBOTS_PER_ZONE,
 ) -> tuple[Recommendation, ...]:
     """Pure, deterministic rule evaluation. Same state -> same tuple."""
     recs: list[Recommendation] = []
-    flow = state.ball_flow
     reserve_band = min_battery_reserve_frac + battery_margin_frac
     est: Optional[StockoutEstimate] = None
 
@@ -146,13 +179,22 @@ def recommend(
         est = estimate_stockout(state)
         recs += _rule_stockout_in_progress(state)
         supply_dispatch = _rule_stockout_dirty_supply(
-            state, est, reserve_band, payload_full_frac, zone_worth_collecting_balls
+            state,
+            est,
+            reserve_band,
+            payload_full_frac,
+            zone_worth_collecting_balls,
+            max_robots_per_zone,
         )
         recs += supply_dispatch
         recs += _rule_stockout_demand_bound(state, est)
         if not supply_dispatch:
             recs += _rule_idle_capacity(
-                state, reserve_band, payload_full_frac, zone_worth_collecting_balls
+                state,
+                reserve_band,
+                payload_full_frac,
+                zone_worth_collecting_balls,
+                max_robots_per_zone,
             )
         recs += _rule_payload_stranded(state, payload_full_frac)
 
@@ -164,7 +206,6 @@ def recommend(
 
     order = {u: i for i, u in enumerate(Urgency)}
     recs.sort(key=lambda r: (order[r.urgency], r.rule_id, r.affected_resources))
-    _ = flow  # ball_flow accessed inside rules; keep name for readability
     return tuple(recs)
 
 
@@ -209,8 +250,24 @@ def _supply_limited(est: StockoutEstimate) -> bool:
     )
 
 
+def _blocked_side_rationale(robots, zones, zone_floor) -> str:
+    """Name the actual binding constraint when no dispatch pair exists."""
+    if not robots and not zones:
+        return (
+            "no idle, charged, non-full robot is available and no open zone "
+            f"holds {zone_floor}+ balls below its crowding cap"
+        )
+    if not zones:
+        return (
+            "zone availability, not fleet readiness, is the constraint: every "
+            f"open zone is below the {zone_floor}-ball collection floor or "
+            "already at its crowding cap"
+        )
+    return "no idle, charged, non-full robot is available"
+
+
 def _rule_stockout_dirty_supply(
-    state, est, reserve_band, payload_full_frac, zone_floor
+    state, est, reserve_band, payload_full_frac, zone_floor, zone_cap
 ) -> list[Recommendation]:
     if not _supply_limited(est):
         return []
@@ -219,23 +276,25 @@ def _rule_stockout_dirty_supply(
     )
     flow = state.ball_flow
     eta_txt = f"~{est.eta_minutes:.0f} min"
-    pairs = _dispatch_pairs(state, reserve_band, payload_full_frac, zone_floor)
+    robots = _dispatchable_robots(state, reserve_band, payload_full_frac)
+    zones = _worthwhile_zones(state, zone_floor, zone_cap)
+    pairs = list(zip(robots, zones))
     if not pairs:
         return [
             Recommendation(
                 rule_id="stockout_dirty_supply",
                 urgency=urgency,
-                action="Raise washable supply — no robot currently free to collect",
+                action="Raise washable supply — collection is currently blocked",
                 affected_resources=_resources("dispenser", "washer"),
                 expected_outcome=(
-                    "Projected stockout pushed out once collection capacity frees up"
+                    "Projected stockout pushed out once collection can resume"
                 ),
                 confidence=Confidence.MEDIUM,
                 rationale=(
                     f"Projected stockout in {eta_txt} is supply-limited "
                     f"({flow.in_wash + flow.dirty_buffered_total + flow.in_transit_total} "
-                    f"washable vs {flow.on_field_total} on field) and no idle, charged, "
-                    "non-full robot is available"
+                    f"washable vs {flow.on_field_total} on field); "
+                    f"{_blocked_side_rationale(robots, zones, zone_floor)}"
                 ),
             )
         ]
@@ -273,16 +332,22 @@ def _rule_stockout_demand_bound(state, est) -> list[Recommendation]:
         and est.limited_by == "demand"
     ):
         return []
+    # Urgency tracks imminence, matching the supply-limited path: the
+    # customer impact of an empty dispenser in 20 minutes is the same
+    # whichever constraint binds.
+    urgency = (
+        Urgency.NOW if est.eta_minutes <= CRITICAL_STOCKOUT_HORIZON_MIN else Urgency.SOON
+    )
     peak = max(state.demand.forecast_balls_per_minute, default=0.0)
     return [
         Recommendation(
             rule_id="stockout_demand_bound",
-            urgency=Urgency.SOON,
-            action="Prepare for a demand-driven shortfall — collection cannot prevent it",
+            urgency=urgency,
+            action="Prepare for a demand-driven shortfall — this stockout cannot be collected away",
             affected_resources=_resources("dispenser", "washer"),
             expected_outcome=(
-                "Customer impact contained through expectation-setting; no fleet "
-                "time wasted on collection that cannot help"
+                "Customer impact contained through expectation-setting; the washer, "
+                "not collection, is the binding constraint for this stockout"
             ),
             confidence=Confidence.MEDIUM,
             rationale=(
@@ -305,11 +370,20 @@ def _rule_battery_reserve(state, reserve, margin) -> list[Recommendation]:
             and r.activity.value not in ACTIVE_CHARGING_ACTIVITIES
             and r.battery_frac <= reserve + margin
         ):
+            # Paused robots must be resumed before the facility will accept
+            # a charge order — say so, or the advice is not actionable.
+            paused = r.activity.value == "paused"
+            action = (
+                f"Resume {r.robot_id} and get it charged"
+                if paused
+                else f"Get {r.robot_id} charged"
+            )
+            paused_note = " (currently paused — resume it first)" if paused else ""
             recs.append(
                 Recommendation(
                     rule_id="battery_reserve",
                     urgency=Urgency.NOW,
-                    action=f"Get {r.robot_id} charged",
+                    action=action,
                     affected_resources=_resources(f"robot:{r.robot_id}", "charger"),
                     expected_outcome=(
                         "Robot stays assignable — below the reserve floor, new "
@@ -318,7 +392,8 @@ def _rule_battery_reserve(state, reserve, margin) -> list[Recommendation]:
                     confidence=Confidence.HIGH,
                     rationale=(
                         f"{r.robot_id} battery at {_pct(r.battery_frac)}, within "
-                        f"{_pct(margin)} of the {_pct(reserve)} reserve floor; "
+                        f"{_pct(margin)} of the {_pct(reserve)} reserve floor"
+                        f"{paused_note}; "
                         f"{free_slots} of {state.charging.slots} charger slots free"
                     ),
                 )
@@ -372,10 +447,12 @@ def _rule_assist_backlog(state) -> list[Recommendation]:
 
 
 def _rule_idle_capacity(
-    state, reserve_band, payload_full_frac, zone_floor
+    state, reserve_band, payload_full_frac, zone_floor, zone_cap
 ) -> list[Recommendation]:
     recs = []
-    for robot, zone in _dispatch_pairs(state, reserve_band, payload_full_frac, zone_floor):
+    robots = _dispatchable_robots(state, reserve_band, payload_full_frac)
+    zones = _worthwhile_zones(state, zone_floor, zone_cap)
+    for robot, zone in zip(robots, zones):
         recs.append(
             Recommendation(
                 rule_id="idle_capacity",
@@ -411,9 +488,9 @@ def _rule_payload_stranded(state, payload_full_frac) -> list[Recommendation]:
             and r.health.value != _DOWN_HEALTH
             and r.payload_balls >= payload_full_frac * r.payload_capacity_balls
         ):
-            target = min(
-                open_stations,
-                key=lambda s: (s.buffer_balls / s.buffer_capacity_balls, s.station_id),
+            target = min(open_stations, key=_station_preference)
+            queue_note = (
+                f", queue {target.queue_length}" if target.queue_length else ""
             )
             recs.append(
                 Recommendation(
@@ -432,7 +509,7 @@ def _rule_payload_stranded(state, payload_full_frac) -> list[Recommendation]:
                         f"{r.robot_id} is idle carrying {r.payload_balls}/"
                         f"{r.payload_capacity_balls} balls; station "
                         f"{target.station_id} buffer at {target.buffer_balls}/"
-                        f"{target.buffer_capacity_balls}"
+                        f"{target.buffer_capacity_balls}{queue_note}"
                     ),
                 )
             )
@@ -443,19 +520,13 @@ def _rule_station_buffer_pressure(state, near_full_frac) -> list[Recommendation]
     recs = []
     open_stations = [s for s in state.stations if s.is_open]
     for s in open_stations:
-        if s.buffer_balls >= near_full_frac * s.buffer_capacity_balls:
+        if s.buffer_capacity_balls > 0 and s.buffer_balls >= near_full_frac * s.buffer_capacity_balls:
             others = [o for o in open_stations if o.station_id != s.station_id]
-            alt = (
-                min(
-                    others,
-                    key=lambda o: (o.buffer_balls / o.buffer_capacity_balls, o.station_id),
-                )
-                if others
-                else None
-            )
+            alt = min(others, key=_station_preference) if others else None
             alt_txt = (
                 f"; route the next handoff to {alt.station_id} "
-                f"({alt.buffer_balls}/{alt.buffer_capacity_balls})"
+                f"({alt.buffer_balls}/{alt.buffer_capacity_balls}, "
+                f"queue {alt.queue_length})"
                 if alt
                 else "; no alternative station is open"
             )
@@ -469,8 +540,7 @@ def _rule_station_buffer_pressure(state, near_full_frac) -> list[Recommendation]
                     confidence=Confidence.HIGH,
                     rationale=(
                         f"Station {s.station_id} buffer at {s.buffer_balls}/"
-                        f"{s.buffer_capacity_balls} "
-                        f"({_pct(s.buffer_balls / s.buffer_capacity_balls)})"
+                        f"{s.buffer_capacity_balls} ({_pct(_station_fill(s))})"
                         f"{alt_txt}"
                     ),
                 )

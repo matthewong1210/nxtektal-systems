@@ -40,6 +40,24 @@ def test_briefing_tiers_and_ordering():
     assert "R2" in text and "Z1" in text and "R3" in text
 
 
+def test_briefing_renders_all_three_tiers_with_continuous_numbering():
+    # NOW (low battery), SOON (stranded payload), WATCH (buffer pressure)
+    state = make_state(
+        robots=(robot("R1", battery=0.10), robot("R2", payload=190)),
+        zones=(zone(balls=10),),
+        stations=(station("H1", buffer=950), station("H2", buffer=100)),
+    )
+    text = render_briefing(state)
+    for heading in ("DO NOW", "DO NEXT HOUR", "KEEP AN EYE ON"):
+        assert heading in text
+    assert text.index("DO NOW") < text.index("DO NEXT HOUR") < text.index(
+        "KEEP AN EYE ON"
+    )
+    # numbering continues across tiers: 1., 2., 3. each appear exactly once
+    for n in (1, 2, 3):
+        assert text.count(f" {n}. ") == 1
+
+
 def test_briefing_all_clear_when_no_rules_fire():
     text = render_briefing(make_state(zones=(zone(balls=10),)))
     assert "No action needed" in text
