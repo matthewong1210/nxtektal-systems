@@ -12,11 +12,10 @@ sys.path.insert(0, str(SIM_ROOT / "scripts"))
 from facility_twin_capture import capture_episode  # noqa: E402
 from nxt_range_viewer.replay import replay_episode  # noqa: E402
 
-pytestmark = pytest.mark.slow
-
 ARGS = dict(scenario="handoff_station_outage", policy="inventory_threshold", seed=7)
 
 
+@pytest.mark.slow
 def test_capture_matches_viewer_replay_events_and_length(tmp_path: Path):
     """Trajectory neutrality + cross-harness consistency in one assertion set.
 
@@ -38,6 +37,7 @@ def test_capture_matches_viewer_replay_events_and_length(tmp_path: Path):
     assert len(states) == result.n_steps + 1  # initial + one per control step
 
 
+@pytest.mark.slow
 def test_capture_agrees_with_viewer_frames_on_shared_fields(tmp_path: Path):
     """episode.json frames vs facility_states.jsonl: shared per-entity fields agree."""
     episode_dir = capture_episode(
@@ -49,6 +49,7 @@ def test_capture_agrees_with_viewer_frames_on_shared_fields(tmp_path: Path):
         for line in (episode_dir / "facility_states.jsonl").read_text().splitlines()
     ]
     result = replay_episode(ARGS["scenario"], ARGS["policy"], ARGS["seed"], event_kinds=None)
+    assert len(states) - 1 == len(result.frames)
     # state[k+1] is the snapshot after control step k+1 == frame[k]
     for frame, state in zip(result.frames, states[1:]):
         frame_zone_balls = {z["zone_id"]: z["balls"] for z in frame["zones"]}
