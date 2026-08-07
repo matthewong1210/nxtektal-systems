@@ -36,3 +36,39 @@ def test_unknown_keys_fail_loud_both_directions():
     drifted2["robots"] = [dict(STATE["robots"][0], surprise=1)] + STATE["robots"][1:]
     with pytest.raises(ValueError, match="surprise"):
         frame_opinions(drifted2, index, ("R1", "R2"))
+
+
+def test_transit_robot_holds_last_position_no_translate_opinion():
+    # Real episodes emit robot.location == "transit" mid-travel (see
+    # nxt_range_ops/core/sim.py). "transit" is not a placement node, so the
+    # mapping must omit the xformOp:translate opinion for that robot/frame
+    # rather than resolve it — USD naturally holds the last authored
+    # translate sample. All other robot opinions, including the "transit"
+    # location token itself, are still emitted.
+    index = build_layout_index(LAYOUT)
+    transit_state = dict(STATE)
+    transit_state["robots"] = [
+        dict(STATE["robots"][0], location="transit", destination="station:H1"),
+        STATE["robots"][1],
+    ]
+    ops = frame_opinions(transit_state, index, ("R1", "R2"))
+
+    translate_prims = {o[0] for o in ops if o[1] == "xformOp:translate"}
+    assert "/World/Site/Robots/R1" not in translate_prims
+    assert "/World/Site/Robots/R2" in translate_prims  # unaffected robot untouched
+
+    r1_location = [o for o in ops if o[0] == "/World/Site/Robots/R1" and o[1] == "nxt:location"]
+    assert r1_location == [("/World/Site/Robots/R1", "nxt:location", "token", "transit")]
+
+
+def test_unknown_location_node_still_raises_key_error():
+    # Genuinely unknown location nodes (contract drift, not the known
+    # "transit" grammar) must still fail loud via resolve_location.
+    index = build_layout_index(LAYOUT)
+    drifted = dict(STATE)
+    drifted["robots"] = [
+        dict(STATE["robots"][0], location="warpgate"),
+        STATE["robots"][1],
+    ]
+    with pytest.raises(KeyError, match="warpgate"):
+        frame_opinions(drifted, index, ("R1", "R2"))
