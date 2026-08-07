@@ -101,6 +101,7 @@ def make_window(
     status: WindowStatus = WindowStatus.COMPLETE,
     eta: float | None = 45.0,
     t_start: float = 21600.0,
+    cursor_start: int | None = None,
 ) -> MemoryWindow:
     recs = sample_recommendations() if recommendations is None else recommendations
     if verdicts is None:
@@ -132,11 +133,14 @@ def make_window(
             verdicts=verdicts,
         ),
         execution=execution_section(
+            # Each default window carries one event; cursors chain window
+            # seq N over [N, N+1) so recorder continuity checks hold.
             events=events
             if events is not None
             else [{"t_s": 21660.0, "kind": "directive_applied", "payload": {}}],
-            cursor_start=0,
-            cursor_end=1,
+            cursor_start=cursor_start if cursor_start is not None else seq,
+            cursor_end=(cursor_start if cursor_start is not None else seq)
+            + len(events if events is not None else [1]),
         ),
         outcome=outcome_section(
             metrics_before=metrics_before or metrics(),

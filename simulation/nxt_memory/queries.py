@@ -58,40 +58,43 @@ def rule_acceptance_rates(windows: Iterable[dict]) -> dict:
 def stockout_eta_calibration(windows: Iterable[dict]) -> dict:
     """Predicted stockout ETA vs realized STOCKOUT events.
 
-    For every window whose observation carried a finite ETA, the realized
-    stockout time is the first ``stockout`` event at or after the
-    prediction instant, searched across all windows' execution sections.
-    Predictions with no realized stockout in the record are counted as
-    censored, not as errors.
+    Matching is strictly **within one episode**: every episode runs on the
+    same simulated day clock, so timestamps from different episodes
+    overlap and a global search would fabricate realizations for
+    predictions whose own episode never stocked out. For every window
+    whose observation carried a finite ETA, the realized stockout time is
+    the first ``stockout`` event at or after the prediction instant in the
+    *same episode's* execution sections. Predictions with no realized
+    stockout in their episode are counted as censored, not as errors.
     """
-    ordered = sorted(windows, key=lambda w: (w["episode_id"], w["seq"]))
-    stockout_times = sorted(
-        event["t_s"]
-        for window in ordered
-        for event in window["execution"].get("events", [])
-        if event.get("kind") == "stockout"
-    )
-
-    def first_stockout_at_or_after(t_s: float) -> Optional[float]:
-        for t in stockout_times:
-            if t >= t_s:
-                return t
-        return None
+    by_episode: dict[str, list[dict]] = {}
+    for window in windows:
+        by_episode.setdefault(window["episode_id"], []).append(window)
 
     n_predictions = 0
     errors: list[float] = []
     n_censored = 0
-    for window in ordered:
-        eta = window["observation"].get("stockout_eta_minutes")
-        if eta is None or eta <= 0:
-            continue
-        n_predictions += 1
-        t_start = window["t_start_s"]
-        realized = first_stockout_at_or_after(t_start)
-        if realized is None:
-            n_censored += 1
-            continue
-        errors.append((realized - t_start) / 60.0 - eta)
+    for episode_id in sorted(by_episode):
+        episode_windows = sorted(by_episode[episode_id], key=lambda w: w["seq"])
+        stockout_times = sorted(
+            event["t_s"]
+            for window in episode_windows
+            for event in window["execution"].get("events", [])
+            if event.get("kind") == "stockout"
+        )
+        for window in episode_windows:
+            eta = window["observation"].get("stockout_eta_minutes")
+            if eta is None or eta <= 0:
+                continue
+            n_predictions += 1
+            t_start = window["t_start_s"]
+            realized: Optional[float] = next(
+                (t for t in stockout_times if t >= t_start), None
+            )
+            if realized is None:
+                n_censored += 1
+                continue
+            errors.append((realized - t_start) / 60.0 - eta)
 
     return {
         "n_predictions": n_predictions,

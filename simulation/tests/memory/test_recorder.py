@@ -100,3 +100,28 @@ def test_no_silent_overwrite_of_existing_episode(tmp_path):
     record_episode(tmp_path)
     with pytest.raises(FileExistsError):
         EpisodeMemoryRecorder(tmp_path, make_meta())
+
+
+def test_orphaned_meta_also_blocks_reuse(tmp_path):
+    # A store where windows.jsonl was lost but episode.meta.json remains
+    # must not be silently rebuilt over.
+    paths = record_episode(tmp_path)
+    paths["windows"].unlink()
+    with pytest.raises(FileExistsError):
+        EpisodeMemoryRecorder(tmp_path, make_meta())
+
+
+def test_event_cursor_continuity_enforced(tmp_path):
+    recorder = EpisodeMemoryRecorder(tmp_path, make_meta())
+    recorder.record_window(make_window(seq=0))  # cursors [0, 1)
+    # gap: window 1 claiming cursors [5, 6) skips events 1-4
+    with pytest.raises(ValueError, match="cursor gap"):
+        recorder.record_window(make_window(seq=1, cursor_start=5))
+    # span mismatch: 1 event but cursor span of 2
+    bad_span = make_window(seq=1)
+    tampered = dict(bad_span.execution)
+    tampered["event_cursor_end"] = tampered["event_cursor_start"] + 2
+    import dataclasses as _dc
+
+    with pytest.raises(ValueError, match="cursor mismatch"):
+        recorder.record_window(_dc.replace(bad_span, execution=tampered))

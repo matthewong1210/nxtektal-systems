@@ -40,14 +40,16 @@ class EpisodeMemoryRecorder:
             Path(base_dir) / meta.site_id / meta.deployment_id / meta.episode_id
         )
         self._windows_path = self.episode_dir / "windows.jsonl"
-        if self._windows_path.exists():
+        if (self.episode_dir / "episode.meta.json").exists():
             raise FileExistsError(
-                f"episode store already exists (append-only, no overwrite): "
-                f"{self._windows_path}"
+                f"episode store already finalized (append-only, no overwrite): "
+                f"{self.episode_dir}"
             )
         self.episode_dir.mkdir(parents=True, exist_ok=True)
-        self._fh = self._windows_path.open("w", encoding="utf-8")
+        # mode "x" makes the no-overwrite guarantee atomic at the OS level
+        self._fh = self._windows_path.open("x", encoding="utf-8")
         self._next_seq = 0
+        self._next_cursor = 0
         self._truncated_seen = False
 
     def record_window(self, window: MemoryWindow) -> None:
@@ -64,10 +66,25 @@ class EpisodeMemoryRecorder:
             raise ValueError(
                 f"non-monotonic seq {window.seq}; expected {self._next_seq}"
             )
+        cursor_start = window.execution.get("event_cursor_start")
+        cursor_end = window.execution.get("event_cursor_end")
+        n_events = len(window.execution.get("events", []))
+        if cursor_start != self._next_cursor:
+            raise ValueError(
+                f"event cursor gap: window starts at {cursor_start}, "
+                f"expected {self._next_cursor} — execution truth must be "
+                "contiguous across windows"
+            )
+        if cursor_end != cursor_start + n_events:
+            raise ValueError(
+                f"event cursor mismatch: {n_events} events but cursor span "
+                f"[{cursor_start}, {cursor_end})"
+            )
         validate_window(window)
         self._fh.write(json.dumps(window.to_dict(), sort_keys=True) + "\n")
         self._fh.flush()
         self._next_seq += 1
+        self._next_cursor = cursor_end
         if window.status is WindowStatus.TRUNCATED:
             self._truncated_seen = True
 

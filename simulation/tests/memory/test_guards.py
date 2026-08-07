@@ -52,7 +52,10 @@ from nxt_memory.records import (
 SIMULATION_ROOT = Path(__file__).resolve().parents[2]
 UPSTREAM_PACKAGES = ("nxt_sim", "nxt_range_ops", "nxt_range_agent", "nxt_facility")
 
-WINDOW_STEPS = 30  # 30 one-minute control steps per memory window
+# 45 one-minute control steps per window: the 120-step short day yields
+# two COMPLETE windows and a final 30-step TRUNCATED one, so every guard
+# below also exercises the truncation path end-to-end.
+WINDOW_STEPS = 45
 
 
 def scripted_verdicts(recommendations) -> tuple[HumanVerdict, ...]:
@@ -209,10 +212,9 @@ def test_window_events_reassemble_the_full_log(tmp_path):
     episode_dir = tmp_path / "sim-test" / "guard" / f"{scenario.name}-seed11"
     windows = list(iter_windows(episode_dir))
     reassembled = [e for w in windows for e in w["execution"]["events"]]
-    # windows start after EPISODE_START; compare against the log minus
-    # events emitted before the first window opened
-    first_cursor = windows[0]["execution"]["event_cursor_start"]
-    env_events = None
+    # The first window must start at cursor 0 — comparing against a slice
+    # taken from the store itself would hide dropped pre-window events.
+    assert windows[0]["execution"]["event_cursor_start"] == 0
     # re-run bare to obtain the reference full log deterministically
     env = RangeOpsEnv(scenario)
     policy = make_baseline("inventory_threshold", scenario, env.catalog, seed=11)
@@ -224,8 +226,27 @@ def test_window_events_reassemble_the_full_log(tmp_path):
         if terminated or truncated:
             env_events = env.sim.events.to_dicts()
             break
-    assert reassembled == env_events[first_cursor:]
-    assert windows[-1]["status"] in ("complete", "truncated_by_episode_end")
+    assert reassembled == env_events  # the ENTIRE log, no slicing
+    # the 120-step day over 45-step windows ends mid-window: the final
+    # record must be honestly truncated, exercising that path end-to-end
+    assert [w["status"] for w in windows] == [
+        "complete",
+        "complete",
+        "truncated_by_episode_end",
+    ]
+
+
+def test_availability_formula_parity_with_ops_metrics():
+    """records._availability must stay formula-identical to
+    OpsMetrics.service_availability (it is reimplemented only because the
+    contract module must stay stdlib-pure)."""
+    from nxt_range_ops.core.metrics import OpsMetrics
+
+    from nxt_memory.records import _availability
+
+    for stockout, open_minutes in ((0.0, 0.0), (3.0, 90.0), (95.0, 60.0)):
+        m = OpsMetrics(stockout_minutes=stockout, open_minutes_elapsed=open_minutes)
+        assert _availability(m.to_dict()) == m.service_availability
 
 
 def test_contract_importable_without_simulation_stack():

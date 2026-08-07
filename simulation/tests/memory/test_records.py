@@ -100,6 +100,50 @@ def test_validate_window_rejects_bad_rec_index_and_echo():
         validate_window(bad_echo)
 
 
+def test_validate_window_rejects_duplicate_verdicts_for_one_recommendation():
+    # Two verdicts on the same rec_index would make the audit queries
+    # disagree about one immutable record (last-wins vs any-accepted).
+    window = make_window(
+        verdicts=(
+            HumanVerdict(rec_index=0, rule_id="battery_reserve", verdict=Verdict.ACCEPTED, decided_by="op"),
+            HumanVerdict(rec_index=0, rule_id="battery_reserve", verdict=Verdict.REJECTED, decided_by="op"),
+        )
+    )
+    with pytest.raises(ValueError, match="duplicate"):
+        validate_window(window)
+
+
+def test_validate_window_rejects_unknown_verdict_strings():
+    # Drivers can assemble sections from raw dicts; a typo'd verdict must
+    # die at write time, not crash the queries months later.
+    window = make_window()
+    tampered = json.loads(json.dumps(window.decision))
+    tampered["human"]["verdicts"][0]["verdict"] = "acepted"
+    with pytest.raises(ValueError, match="verdict"):
+        validate_window(dataclasses.replace(window, decision=tampered))
+
+
+def test_validate_window_pins_outcome_and_impact_key_sets():
+    # The schema must never grow scores/success/ratings: exact allowlists.
+    window = make_window()
+    scored = json.loads(json.dumps(window.outcome))
+    scored["score"] = 1.0
+    with pytest.raises(ValueError, match="outcome"):
+        validate_window(dataclasses.replace(window, outcome=scored))
+    rated = json.loads(json.dumps(window.outcome))
+    rated["impact"]["rating"] = "good"
+    with pytest.raises(ValueError, match="impact"):
+        validate_window(dataclasses.replace(window, outcome=rated))
+    assert set(window.outcome) == {"metrics_before", "metrics_after", "deltas", "impact"}
+    assert set(window.outcome["impact"]) == {
+        "availability_change",
+        "stockout_minutes",
+        "labor",
+        "energy_wh",
+        "safety",
+    }
+
+
 def test_validate_window_enforces_section_separation():
     window = make_window()
     tampered_decision = dict(window.decision)

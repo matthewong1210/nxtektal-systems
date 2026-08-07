@@ -68,6 +68,26 @@ def test_stockout_eta_calibration_realized_and_censored():
     assert result["mean_abs_error_minutes"] == pytest.approx(5.0)
 
 
+def test_calibration_never_matches_stockouts_across_episodes():
+    # Episodes share the same simulated day clock. A prediction in episode
+    # A with no stockout in A must stay CENSORED even when episode B logged
+    # a stockout at an overlapping sim time — the critical cross-episode
+    # pollution case caught by adversarial review.
+    predicted_a = make_window(seq=0, eta=5.0, t_start=21600.0, episode_id="ep-A")
+    stockout_b = make_window(
+        seq=0,
+        eta=None,
+        t_start=21600.0,
+        episode_id="ep-B",
+        events=[{"t_s": 21900.0, "kind": "stockout", "payload": {}}],
+    )
+    result = stockout_eta_calibration(dicts(predicted_a, stockout_b))
+    assert result["n_predictions"] == 1
+    assert result["n_realized"] == 0
+    assert result["n_censored"] == 1
+    assert result["mean_error_minutes"] is None
+
+
 def test_outcome_deltas_by_decision_partitions_and_caveats():
     accepted = make_window(
         seq=0,

@@ -219,6 +219,13 @@ def outcome_section(metrics_before: dict, metrics_after: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+_OUTCOME_KEYS = frozenset({"metrics_before", "metrics_after", "deltas", "impact"})
+_IMPACT_KEYS = frozenset(
+    {"availability_change", "stockout_minutes", "labor", "energy_wh", "safety"}
+)
+_VERDICT_VALUES = frozenset(v.value for v in Verdict)
+
+
 def validate_window(window: MemoryWindow) -> None:
     """Integrity checks; raises ValueError on the first violation."""
     if window.seq < 0:
@@ -234,16 +241,39 @@ def validate_window(window: MemoryWindow) -> None:
             )
     if "state" not in window.observation:
         raise ValueError("observation section must carry the full state")
+    if set(window.outcome) != _OUTCOME_KEYS:
+        raise ValueError(
+            f"outcome section keys must be exactly {sorted(_OUTCOME_KEYS)}; "
+            f"got {sorted(window.outcome)} — the schema has no room for "
+            "scores or success flags"
+        )
+    if set(window.outcome["impact"]) != _IMPACT_KEYS:
+        raise ValueError(
+            f"impact keys must be exactly {sorted(_IMPACT_KEYS)}; "
+            f"got {sorted(window.outcome['impact'])}"
+        )
     recommendations = window.decision.get("recommendations", [])
+    seen_indices: set[int] = set()
     for verdict in window.decision.get("human", {}).get("verdicts", []):
         index = verdict["rec_index"]
         if not 0 <= index < len(recommendations):
             raise ValueError(f"verdict rec_index {index} out of range")
+        if index in seen_indices:
+            raise ValueError(
+                f"duplicate verdict for rec_index {index}: one verdict per "
+                "recommendation, or audit queries would disagree"
+            )
+        seen_indices.add(index)
         expected = recommendations[index].get("rule_id")
         if verdict["rule_id"] != expected:
             raise ValueError(
                 f"verdict rule_id {verdict['rule_id']!r} does not echo "
                 f"recommendation {index} ({expected!r})"
+            )
+        if verdict["verdict"] not in _VERDICT_VALUES:
+            raise ValueError(
+                f"unknown verdict value {verdict['verdict']!r}; "
+                f"must be one of {sorted(_VERDICT_VALUES)}"
             )
 
 
