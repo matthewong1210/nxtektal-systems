@@ -1,0 +1,13 @@
+# Theme for the NXTektal Range Ops demo viewer (nxt_range_demo).
+[theme]
+base = "dark"
+primaryColor = "#F2B93B"
+backgroundColor = "#0B1510"
+secondaryBackgroundColor = "#12211A"
+textColor = "#E8EDE6"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false
