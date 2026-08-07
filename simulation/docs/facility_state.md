@@ -102,6 +102,15 @@ arguments to `recommend()`.
 Demo: `.venv/bin/python scripts/facility_briefing_demo.py --scenario
 demand_spike --seed 42 --every-min 120`.
 
+## Phase 3 — operational memory
+
+The auditable episode store lives in the sibling package `nxt_memory`
+(State → Recommendation → Human Decision → Execution → Outcome), strictly
+observational and write-only with respect to the live loop — nothing in
+this package or the simulator may reference it (test-enforced). See
+[facility_memory_design.md](facility_memory_design.md) and
+`scripts/facility_memory_demo.py`.
+
 ## Boundary rules
 
 - `nxt_facility` imports **only** `nxt_range_ops` (never `nxt_sim`, simpy,
