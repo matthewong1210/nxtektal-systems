@@ -57,7 +57,9 @@ def build_facility_state(sim: RangeSimulation) -> FacilityState:
     ball_flow = BallFlow(
         total_balls=scenario.total_balls,
         clean_available=sim.dispenser_count(),
-        clean_sensed=sim.sensed_dispenser_count(),
+        # float() coercions here and below keep numpy scalar types (which
+        # leak out of the sim's noise draws) out of the pure-Python contract.
+        clean_sensed=float(sim.sensed_dispenser_count()),
         in_wash=sim.washer_wip(),
         dirty_buffered=_ledger_group(counts, scenario.station_ids, ledger_mod.station_loc),
         on_field=_ledger_group(counts, scenario.zone_ids, ledger_mod.zone_loc),
@@ -82,7 +84,7 @@ def build_facility_state(sim: RangeSimulation) -> FacilityState:
             wip=ball_flow.in_wash,
         ),
         demand=DemandState(
-            forecast_balls_per_minute=tuple(sim.forecast_window()),
+            forecast_balls_per_minute=tuple(float(x) for x in sim.forecast_window()),
             forecast_bucket_minutes=scenario.demand.forecast_bucket_minutes,
             minutes_to_close=max(0.0, scenario.hours.close_minute - sim.minute_of_day),
             demand_balls_total=metrics.demand_balls_total,
