@@ -115,3 +115,10 @@ def test_base_layer_geometry_equals_layout_positions(tmp_path):
         prim = stage.GetPrimAtPath(f"/World/Site/Zones/{zone['zone_id']}")
         t = UsdGeom.Xformable(prim).GetOrderedXformOps()[0].Get()
         assert (t[0], t[1]) == (zone["position"]["x_m"], zone["position"]["y_m"])
+
+
+def test_blocker_negative_control():
+    """Verify the import blocker actually prevents blocked imports."""
+    result = _import_with_blocked("json", ["json"])
+    assert result.returncode != 0
+    assert "blocked by guard test: json" in result.stderr
