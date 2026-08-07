@@ -23,6 +23,7 @@ _ROOT = str(Path(__file__).resolve().parent.parent)
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+from nxt_range_demo.briefing_panel import load_briefings, render_panel
 from nxt_range_demo.bundle import (
     compute_robot_tracks,
     load_bundle,
@@ -61,6 +62,30 @@ def resolve_bundle_dir() -> Path:
         if (candidate / "episode.json").exists():
             return candidate
     return Path(DEFAULT_BUNDLE)
+
+
+def _default_briefings_path(bundle_dir: Path, meta: dict) -> str:
+    """Best-effort default for the briefings-sidecar sidebar input.
+
+    The bundle export dir (nxt_range_viewer) and the briefings capture dir
+    (scripts/facility_twin_capture.py, keyed by "<scenario>-seed<seed>") are
+    independent trees today, so try the bundle dir first (in case a sidecar
+    was copied alongside episode.json), then the capture script's default
+    location, before falling back to an empty string — the panel stays
+    silently absent until a path is supplied.
+    """
+    candidates = [
+        bundle_dir / "briefings.jsonl",
+        Path(_ROOT)
+        / "reports"
+        / "demo"
+        / f"{meta['scenario']}-seed{meta['seed']}"
+        / "briefings.jsonl",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return ""
 
 
 @st.cache_data(show_spinner="Loading demo bundle…")
@@ -219,6 +244,26 @@ def main() -> None:
             "model); the environment is built to train and evaluate learned "
             "policies."
         )
+        st.divider()
+        st.subheader("Manager briefing")
+        briefings_input = st.text_input(
+            "Briefings sidecar (briefings.jsonl)",
+            value=_default_briefings_path(bundle.path, meta),
+            help="Optional deterministic manager-briefing sidecar produced by "
+            "scripts/facility_twin_capture.py. Leave blank to hide the panel — "
+            "the replay is unaffected either way.",
+        )
+
+    briefings: list[dict] = []
+    if briefings_input:
+        briefings_path = Path(briefings_input)
+        if briefings_path.exists():
+            try:
+                briefings = load_briefings(briefings_path)
+            except (OSError, ValueError, KeyError) as exc:
+                st.sidebar.warning(f"Could not read briefings sidecar: {exc}")
+        else:
+            st.sidebar.caption(f"No briefings sidecar found at `{briefings_path}`.")
 
     stride = max(1, round(n / (PLAYBACK_SECONDS[duration_label] * TICKS_PER_SECOND)))
 
@@ -245,6 +290,11 @@ def main() -> None:
             label_visibility="collapsed",
         )
 
+    # Scrub-synced manager briefing (only rendered when a sidecar is loaded;
+    # placeholder so the play loop below can update it in place, same as the
+    # other live panels).
+    briefing_slot = st.empty()
+
     # Live panels (placeholders so the play loop can update them in place).
     map_col, rail_col = st.columns([5, 2])
     map_slot = map_col.empty()
@@ -257,6 +307,9 @@ def main() -> None:
     def render(idx: int) -> None:
         frame = frames[idx]
         clock_slot.markdown(clock_html(frame["t_s"]), unsafe_allow_html=True)
+        if briefings:
+            with briefing_slot.container():
+                render_panel(st, briefings, float(frame["t_s"]))
         debug_positions = (
             frame.get("debug", {}).get("robot_positions") if show_debug else None
         )
