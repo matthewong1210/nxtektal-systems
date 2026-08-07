@@ -24,7 +24,7 @@ from nxt_facility.state import (
 FACILITY_PKG = Path(__file__).resolve().parents[2] / "nxt_facility"
 
 # Modules that must stay importable without any simulation stack.
-CONTRACT_MODULES = ("state.py",)
+CONTRACT_MODULES = ("state.py", "analysis.py")
 FORBIDDEN_IMPORTS = {"simpy", "gymnasium", "numpy", "pandas", "nxt_sim"}
 
 
