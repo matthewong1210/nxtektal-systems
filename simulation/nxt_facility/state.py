@@ -15,13 +15,19 @@ facility telemetry rather than the simulator.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from nxt_range_ops.core.entities import (
-    RobotStateSnapshot,
-    StationStateSnapshot,
-    ZoneStateSnapshot,
-)
+if TYPE_CHECKING:
+    # Annotation-only: importing these at runtime would execute
+    # nxt_range_ops.core.__init__, which eagerly imports the simulator
+    # (simpy/numpy) and would break this module's no-simulation-stack
+    # contract. The snapshot classes are never instantiated here; to_dict()
+    # and robot_or_none() are duck-typed.
+    from nxt_range_ops.core.entities import (
+        RobotStateSnapshot,
+        StationStateSnapshot,
+        ZoneStateSnapshot,
+    )
 
 # (entity_id, ball_count) pairs, sorted by id for deterministic serialization.
 Counts = tuple[tuple[str, int], ...]

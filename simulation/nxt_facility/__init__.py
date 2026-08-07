@@ -22,7 +22,6 @@ from .analysis import (
     derive_indicators,
     estimate_stockout,
 )
-from .build import build_facility_state
 from .state import (
     BallFlow,
     ChargingState,
@@ -58,3 +57,14 @@ __all__ = [
     "derive_indicators",
     "estimate_stockout",
 ]
+
+
+def __getattr__(name: str):
+    # Lazy so the contract (state + analysis) stays importable without the
+    # simulation stack; the builder needs the simulator and is loaded only
+    # when actually requested (PEP 562).
+    if name == "build_facility_state":
+        from .build import build_facility_state
+
+        return build_facility_state
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

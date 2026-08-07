@@ -5,9 +5,18 @@ from __future__ import annotations
 import ast
 import dataclasses
 import json
+import subprocess
+import sys
+import textwrap
 from pathlib import Path
 
 import pytest
+
+from nxt_range_ops.core.entities import (
+    RobotActivity,
+    RobotHealth,
+    RobotStateSnapshot,
+)
 
 from nxt_facility.state import (
     BallFlow,
@@ -105,6 +114,61 @@ def test_to_dict_is_json_serializable_and_deterministic():
     payload = json.loads(a)
     assert payload["ball_flow"]["clean_available"] == 60
     assert payload["staff"]["capacity"] == 1
+
+
+def test_robot_or_none():
+    snapshot = RobotStateSnapshot(
+        robot_id="R1",
+        activity=RobotActivity.IDLE,
+        health=RobotHealth.OK,
+        battery_frac=1.0,
+        payload_balls=0,
+        payload_capacity_balls=200,
+        location="charger",
+        destination=None,
+        assigned_zone=None,
+        estop_latched=False,
+        awaiting_human=False,
+    )
+    state = dataclasses.replace(make_state(), robots=(snapshot,))
+    assert state.robot_or_none("R1") is snapshot
+    assert state.robot_or_none("R9") is None
+
+
+def test_contract_importable_without_simulation_stack():
+    """The real enforcement: state/analysis import fine with simpy, gymnasium,
+    numpy, and pandas blocked (the AST scan below cannot see transitive
+    leaks through package __init__ side effects — found by adversarial
+    review when nxt_range_ops.core.__init__ dragged in the simulator)."""
+    probe = textwrap.dedent(
+        """
+        import importlib.abc
+        import sys
+
+        class Blocker(importlib.abc.MetaPathFinder):
+            BLOCKED = {"simpy", "gymnasium", "numpy", "pandas"}
+
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname.split(".")[0] in self.BLOCKED:
+                    raise ImportError("blocked by contract test: " + fullname)
+                return None
+
+        sys.meta_path.insert(0, Blocker())
+        import nxt_facility.state
+        import nxt_facility.analysis
+        import nxt_facility
+        from nxt_facility import FacilityState, classify_state
+        print("contract-ok")
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        cwd=FACILITY_PKG.parent,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "contract-ok" in result.stdout
 
 
 def test_contract_modules_import_no_simulation_libraries():

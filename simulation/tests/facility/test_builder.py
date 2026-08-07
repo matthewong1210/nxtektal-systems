@@ -7,7 +7,7 @@ import json
 from nxt_range_ops.core import ledger as ledger_mod
 from nxt_range_ops.core.entities import RobotActivity
 
-from nxt_facility.build import build_facility_state
+from nxt_facility.build import _ledger_group, build_facility_state
 
 
 def advance_minutes(sim, minutes: float) -> None:
@@ -94,3 +94,11 @@ def test_consecutive_builds_are_identical(sim):
     first = json.dumps(build_facility_state(sim).to_dict(), sort_keys=True)
     second = json.dumps(build_facility_state(sim).to_dict(), sort_keys=True)
     assert first == second
+
+
+def test_ledger_group_sorts_ids_deterministically():
+    # The Counts contract promises id-sorted pairs regardless of input order;
+    # scenario ids happen to come pre-sorted, so pin it with unsorted input.
+    counts = {"zone:zb": 2, "zone:za": 1, "zone:zc": 3}
+    grouped = _ledger_group(counts, ["zc", "zb", "za"], lambda z: f"zone:{z}")
+    assert grouped == (("za", 1), ("zb", 2), ("zc", 3))

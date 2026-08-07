@@ -196,18 +196,31 @@ def test_classify_strained_by_eta():
     assert classify_state(state) is OperationalState.STRAINED
 
 
+# Abundant-supply baseline for the single-condition STRAINED tests: with
+# clean=5000, dirty=1000, demand 2/min the stockout ETA is None, so only the
+# condition under test can produce STRAINED (guards against the ETA branch
+# masking a deleted rule — found by adversarial review).
+ABUNDANT = dict(clean=5000, dirty=1000, forecast=(2.0, 2.0, 2.0, 2.0))
+
+
 def test_classify_strained_by_station_closure():
-    assert classify_state(make_state(stations_open=0)) is OperationalState.STRAINED
+    state = make_state(stations_open=0, **ABUNDANT)
+    assert estimate_stockout(state).eta_minutes is None
+    assert classify_state(state) is OperationalState.STRAINED
 
 
 def test_classify_strained_by_staff_saturation():
     staff = StaffState(capacity=1, busy=1, queued_requests=2)
-    assert classify_state(make_state(staff=staff)) is OperationalState.STRAINED
+    state = make_state(staff=staff, **ABUNDANT)
+    assert estimate_stockout(state).eta_minutes is None
+    assert classify_state(state) is OperationalState.STRAINED
 
 
 def test_classify_strained_by_inoperative_robot():
     fleet = FleetSummary(total=3, operable=2, inoperative=1, charging=0, awaiting_human=1)
-    assert classify_state(make_state(fleet=fleet)) is OperationalState.STRAINED
+    state = make_state(fleet=fleet, **ABUNDANT)
+    assert estimate_stockout(state).eta_minutes is None
+    assert classify_state(state) is OperationalState.STRAINED
 
 
 def test_classify_nominal():

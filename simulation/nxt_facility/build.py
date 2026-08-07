@@ -5,9 +5,9 @@ at any time without perturbing the simulation.
 
 RNG DISCIPLINE (load-bearing): this module must NEVER call
 ``RangeSimulation.sensed_zone_counts()`` or ``sensed_battery_frac()`` —
-each draws from the shared ``_rng_sensors`` stream per call (sim.py:371,
-:378), so calling them here would silently shift every subsequent sensed
-observation and break byte-identical seed+action replay.
+each body draws ``self._rng_sensors.normal(...)`` per call, so calling
+them here would silently shift every subsequent sensed observation and
+break byte-identical seed+action replay.
 ``sensed_dispenser_count()`` is a pure buffer read and is allowed.
 Enforced by tests/facility/test_regressions.py (RNG-state equality plus a
 static source scan of this file).

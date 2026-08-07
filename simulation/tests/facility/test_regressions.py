@@ -16,6 +16,9 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 from nxt_range_ops.config.models import OperatingHoursConfig
 from nxt_range_ops.env.range_ops_env import RangeOpsEnv
 from nxt_range_ops.policies.baselines import make_baseline
@@ -38,20 +41,38 @@ UPSTREAM_PACKAGES = (
 BANNED_ACCESSORS = {"sensed_zone_counts", "sensed_battery_frac"}
 
 
-def short_day_scenario():
-    """Two-hour operating day for fast full-episode runs."""
-    scenario = make_scenario("normal_weekday")
+def short_day_scenario(base: str = "normal_weekday"):
+    """Two-hour operating day for fast full-episode runs.
+
+    ``noisy_inventory_sensor`` matters as a base: its inventory_delay_s
+    exceeds the control interval, so observation-only side effects (e.g. a
+    builder mutating _inventory_readings) surface in the obs digest there
+    while staying invisible under normal_weekday's short delay.
+    """
+    scenario = make_scenario(base)
     return scenario.model_copy(
         update={"hours": OperatingHoursConfig(open_minute=360, close_minute=480)}
     )
 
 
+def _absorb_obs(digest, obs) -> None:
+    for key in sorted(obs):
+        digest.update(key.encode())
+        digest.update(np.asarray(obs[key]).tobytes())
+
+
 def run_episode(scenario, seed: int, instrumented: bool):
-    """One full baseline-driven episode; optionally snapshot every step."""
+    """One full baseline-driven episode; optionally snapshot every step.
+
+    Returns byte-level digests of the event log, final metrics, and the
+    full observation+reward sequence.
+    """
     env = RangeOpsEnv(scenario)
     policy = make_baseline("inventory_threshold", scenario, env.catalog, seed=seed)
     obs, info = env.reset(seed=seed)
     policy.reset()
+    obs_digest = hashlib.sha256()
+    _absorb_obs(obs_digest, obs)
     if instrumented:
         state = build_facility_state(env.sim)
         estimate_stockout(state)
@@ -60,6 +81,8 @@ def run_episode(scenario, seed: int, instrumented: bool):
     while True:
         action = policy.act(obs, info)
         obs, reward, terminated, truncated, info = env.step(action)
+        _absorb_obs(obs_digest, obs)
+        obs_digest.update(repr(float(reward)).encode())
         if instrumented:
             state = build_facility_state(env.sim)
             estimate_stockout(state)
@@ -68,7 +91,7 @@ def run_episode(scenario, seed: int, instrumented: bool):
         if terminated or truncated:
             event_log = json.dumps(env.sim.events.to_dicts(), sort_keys=True)
             final_metrics = json.dumps(env.sim.metrics.to_dict(), sort_keys=True)
-            return event_log, final_metrics
+            return event_log, final_metrics, obs_digest.hexdigest()
 
 
 def tree_digest(package: str) -> str:
@@ -103,12 +126,14 @@ def test_facility_layer_consumes_no_rng(sim):
 # ---------------------------------------------------------------------------
 
 
-def test_snapshots_do_not_change_trajectory():
-    scenario = short_day_scenario()
-    plain_events, plain_metrics = run_episode(scenario, seed=2026, instrumented=False)
-    instr_events, instr_metrics = run_episode(scenario, seed=2026, instrumented=True)
-    assert instr_events == plain_events
-    assert instr_metrics == plain_metrics
+@pytest.mark.parametrize("base", ["normal_weekday", "noisy_inventory_sensor"])
+def test_snapshots_do_not_change_trajectory(base):
+    scenario = short_day_scenario(base)
+    plain = run_episode(scenario, seed=2026, instrumented=False)
+    instrumented = run_episode(scenario, seed=2026, instrumented=True)
+    assert instrumented[0] == plain[0]  # event log, byte-identical
+    assert instrumented[1] == plain[1]  # final metrics
+    assert instrumented[2] == plain[2]  # full obs+reward sequence
 
 
 # ---------------------------------------------------------------------------
