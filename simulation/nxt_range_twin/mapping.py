@@ -155,10 +155,10 @@ def frame_opinions(
         prim = f"{SITE}/Robots/{robot['robot_id']}"
         dx, dy = robot_offset(robot["robot_id"], robot_ids)
         translate_ops: list[Opinion] = []
-        # "transit" is a real upstream location_label (nxt_range_ops/core/sim.py
-        # sets robot.location_label = "transit" mid-travel; the upstream
-        # entities.py location comment enumerates node ids and omits it) but it
-        # is not a placement node in the layout index. A robot in transit HOLDS
+        # "transit" is a real upstream location_label (the upstream simulator's
+        # core sim module sets robot.location_label = "transit" mid-travel; its
+        # entities module's location comment enumerates node ids and omits it)
+        # but it is not a placement node in the layout index. A robot in transit HOLDS
         # its last authored position: honest, no invented kinematics. So we
         # simply omit the xformOp:translate opinion for this frame; USD's
         # default held-timesample behavior keeps the last authored value until
