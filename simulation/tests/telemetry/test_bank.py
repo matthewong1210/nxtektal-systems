@@ -53,7 +53,17 @@ def test_perfect_bank_mirrors_sim_truth_exactly(sim):
 def test_sampling_consumes_no_sim_rng(sim):
     sim.advance(1800.0)
     before = rng_states(sim)
-    bank = perfect_bank(sim)
+    # an IMPERFECT bank — the perfect path never constructs a generator,
+    # so only noisy/dropout sampling actually exercises RNG isolation
+    bank = SyntheticSensorBank(
+        sim,
+        TelemetryConfig(
+            families={
+                "inventory": ChannelImperfection(noise_rel_sd=0.05, dropout_prob=0.3),
+                "scan": ChannelImperfection(delay_s=60.0, cadence_s=30.0),
+            }
+        ),
+    )
     for _ in range(5):
         bank.sample()
     assert rng_states(sim) == before
@@ -96,6 +106,109 @@ def test_noise_on_one_family_never_shifts_another(weekday):
     for channel in quiet:
         if not channel.startswith("scan."):
             assert noisy_scan[channel].to_dict() == quiet[channel].to_dict()
+
+
+def test_noisy_family_unshifted_by_noise_on_an_earlier_family(weekday):
+    """Kills the shared-generator mutant: 'inventory' sorts before 'scan',
+    so with one shared stream, inventory draws would shift every scan
+    value. The stateless per-measurement keying makes scan values
+    identical whether or not inventory is also noisy."""
+
+    def scan_values(config):
+        sim = RangeSimulation(weekday, seed=77)
+        bank = SyntheticSensorBank(sim, config)
+        sim.advance(1800.0)
+        return {
+            c: o.value
+            for c, o in bank.sample().by_channel().items()
+            if c.startswith("scan.")
+        }
+
+    scan_only = scan_values(
+        TelemetryConfig(families={"scan": ChannelImperfection(noise_rel_sd=0.2)})
+    )
+    both = scan_values(
+        TelemetryConfig(
+            families={
+                "inventory": ChannelImperfection(noise_rel_sd=0.2, dropout_prob=0.5),
+                "scan": ChannelImperfection(noise_rel_sd=0.2),
+            }
+        )
+    )
+    assert scan_only == both
+
+
+def test_held_measurement_keeps_one_noisy_value(sim, weekday):
+    """One measurement, one value: a delayed/held sample re-served on later
+    calls must render the identical noisy value (two-timestamp contract)."""
+    bank = SyntheticSensorBank(
+        sim,
+        TelemetryConfig(
+            families={"inventory": ChannelImperfection(noise_rel_sd=0.05, cadence_s=600.0)}
+        ),
+    )
+    first = bank.sample().by_channel()["inventory.dispenser.count"]
+    repeats = [
+        bank.sample().by_channel()["inventory.dispenser.count"] for _ in range(3)
+    ]
+    for repeat in repeats:
+        assert repeat.sample_timestamp_s == first.sample_timestamp_s
+        assert repeat.value == first.value
+
+
+def test_toggling_dropout_never_shifts_noise(weekday):
+    """Dropout and noise draw from independent keyed streams."""
+
+    def dispenser_value(dropout_prob):
+        sim = RangeSimulation(weekday, seed=13)
+        bank = SyntheticSensorBank(
+            sim,
+            TelemetryConfig(
+                families={
+                    "inventory": ChannelImperfection(
+                        noise_rel_sd=0.05, dropout_prob=dropout_prob
+                    )
+                }
+            ),
+        )
+        sim.advance(600.0)
+        return bank.sample().by_channel()["inventory.dispenser.count"].value
+
+    assert dispenser_value(0.0) == dispenser_value(1e-12)
+
+
+def test_large_delay_eventually_delivers(sim):
+    """delay_s beyond any fixed history cap must still deliver once data
+    ages in — the trim is by visibility, never a row-count cap."""
+    bank = SyntheticSensorBank(
+        sim,
+        TelemetryConfig(families={"wash": ChannelImperfection(delay_s=700.0)}),
+    )
+    truth_at_start = sim.washer_wip()
+    for _ in range(700):  # sample every sim-second
+        bank.sample()
+        sim.advance(1.0)
+    delivered = bank.sample().by_channel()["wash.washer.wip"]
+    assert delivered.status is ObservationStatus.OK
+    assert delivered.value == truth_at_start
+
+
+def test_stale_emitted_when_measurements_are_dropped(weekday):
+    """STALE end-to-end: cadence 60s, heavy dropout — once a delivered
+    measurement's age exceeds delay + 2*cadence, status must be STALE.
+    Dropout applies to measurements, so held data ages honestly."""
+    sim = RangeSimulation(weekday, seed=5)
+    bank = SyntheticSensorBank(
+        sim,
+        TelemetryConfig(
+            families={"wash": ChannelImperfection(cadence_s=60.0, dropout_prob=0.9)}
+        ),
+    )
+    statuses = []
+    for _ in range(40):
+        statuses.append(bank.sample().by_channel()["wash.washer.wip"].status)
+        sim.advance(60.0)
+    assert ObservationStatus.STALE in statuses
 
 
 def test_calibration_bias_applies_without_noise(sim):

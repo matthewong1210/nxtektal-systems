@@ -22,6 +22,7 @@ information.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from nxt_range_ops.core.entities import (
     INOPERATIVE_ACTIVITIES,
@@ -57,6 +58,13 @@ _GRADE_HIGH = "high"
 _GRADE_MEDIUM = "medium"
 _GRADE_LOW = "low"
 
+# Assembler-side staleness floor (source: placeholder): an OK-labeled
+# observation older than this is treated as stale regardless of what the
+# source claims — the contract's two timestamps exist so consumers can do
+# their own staleness math, and real external systems mislabel.
+ASSEMBLY_STALE_AGE_S = 900.0
+_STALE_CONFIDENCE_CAP = 0.5  # source: placeholder
+
 
 @dataclass(frozen=True)
 class AssemblyReport:
@@ -83,6 +91,7 @@ class _ChannelView:
 
     def __init__(self, frame: ObservationFrame, previous: FacilityState | None):
         self._by_channel = frame.by_channel()
+        self._frame_t = frame.t_s
         self._previous = previous
         self.missing: list[str] = []
         self.stale: list[str] = []
@@ -98,9 +107,13 @@ class _ChannelView:
             if previous_value is not None:
                 return previous_value
             return fallback
-        if observation.status is ObservationStatus.STALE:
+        confidence = observation.confidence
+        # independent staleness math: never trust the source's label alone
+        age = self._frame_t - observation.sample_timestamp_s
+        if observation.status is ObservationStatus.STALE or age > ASSEMBLY_STALE_AGE_S:
             self.stale.append(channel)
-        self.confidences.append(observation.confidence)
+            confidence = min(confidence, _STALE_CONFIDENCE_CAP)
+        self.confidences.append(confidence)
         return observation.value
 
     def count(self, channel: str, *, previous_value=None) -> int:
@@ -128,16 +141,23 @@ def assemble_from_observations(
     view = _ChannelView(frame, previous)
     prev = previous
 
-    # -- robots ---------------------------------------------------------
+    # -- robots (sorted ids: build_facility_state orders every entity
+    # collection lexically; the assembler must match regardless of the
+    # commissioning record's listing order) --------------------------------
     payload_capacity = dict(site.robot_payload_capacity)
     robots = []
-    for rid in site.robot_ids:
+    for rid in sorted(site.robot_ids):
         prev_robot = prev.robot_or_none(rid) if prev else None
 
         def rget(field_name: str, fallback, caster=lambda v: v):
             previous_value = (
                 getattr(prev_robot, field_name) if prev_robot is not None else None
             )
+            # enums must backfill as their string VALUES — RobotActivity is
+            # a (str, Enum) whose str() is "RobotActivity.IDLE", which
+            # would crash the constructor below
+            if isinstance(previous_value, Enum):
+                previous_value = previous_value.value
             raw = view.get(
                 f"robot.{rid}.{field_name}", fallback, previous_value=previous_value
             )
@@ -145,8 +165,8 @@ def assemble_from_observations(
 
         activity_raw = rget("activity", "idle", str)
         health_raw = rget("health", "ok", str)
-        destination = rget("destination", "", str)
-        assigned = rget("assigned_zone", "", str)
+        destination = rget("destination", "", lambda v: str(v) if v is not None else "")
+        assigned = rget("assigned_zone", "", lambda v: str(v) if v is not None else "")
         robots.append(
             RobotStateSnapshot(
                 robot_id=rid,
@@ -176,12 +196,22 @@ def assemble_from_observations(
 
     # -- zones (robots_present derived from robot locations) -------------
     prev_zone_balls = dict(prev.ball_flow.on_field) if prev else {}
+    prev_zones = {z.zone_id: z for z in prev.zones} if prev else {}
     zones = []
-    for zid in site.zone_ids:
+    for zid in sorted(site.zone_ids):
+        prev_zone = prev_zones.get(zid)
         balls = view.count(
             f"scan.zone.{zid}.balls", previous_value=prev_zone_balls.get(zid)
         )
-        is_open = bool(view.get(f"zone.{zid}.is_open", True))
+        # last-known-open is the conservative backfill: a dropout must
+        # never silently flip a closed zone open
+        is_open = bool(
+            view.get(
+                f"zone.{zid}.is_open",
+                True,
+                previous_value=(prev_zone.is_open if prev_zone else None),
+            )
+        )
         present = sum(1 for r in robots if r.location == f"zone:{zid}")
         zones.append(
             ZoneStateSnapshot(
@@ -193,14 +223,32 @@ def assemble_from_observations(
     # -- stations ---------------------------------------------------------
     buffer_capacity = dict(site.station_buffer_capacity)
     prev_buffers = dict(prev.ball_flow.dirty_buffered) if prev else {}
+    prev_stations = {s.station_id: s for s in prev.stations} if prev else {}
     stations = []
-    for sid in site.station_ids:
+    for sid in sorted(site.station_ids):
+        prev_station = prev_stations.get(sid)
         stations.append(
             StationStateSnapshot(
                 station_id=sid,
-                is_open=bool(view.get(f"station.{sid}.is_open", True)),
-                docked=view.count(f"station.{sid}.docked"),
-                queue_length=view.count(f"station.{sid}.queue_length"),
+                is_open=bool(
+                    view.get(
+                        f"station.{sid}.is_open",
+                        True,
+                        previous_value=(
+                            prev_station.is_open if prev_station else None
+                        ),
+                    )
+                ),
+                docked=view.count(
+                    f"station.{sid}.docked",
+                    previous_value=(prev_station.docked if prev_station else None),
+                ),
+                queue_length=view.count(
+                    f"station.{sid}.queue_length",
+                    previous_value=(
+                        prev_station.queue_length if prev_station else None
+                    ),
+                ),
                 buffer_balls=view.count(
                     f"inventory.station.{sid}.buffer_balls",
                     previous_value=prev_buffers.get(sid),
@@ -288,12 +336,21 @@ def assemble_from_observations(
         charging=ChargingState(
             slots=site.charger_slots,
             in_use=charging,
-            queue_length=view.count("charger.site.queue_length"),
+            queue_length=view.count(
+                "charger.site.queue_length",
+                previous_value=(prev.charging.queue_length if prev else None),
+            ),
         ),
         staff=StaffState(
             capacity=site.staff_capacity,
-            busy=view.count("staff.site.busy"),
-            queued_requests=view.count("staff.site.queued"),
+            busy=view.count(
+                "staff.site.busy",
+                previous_value=(prev.staff.busy if prev else None),
+            ),
+            queued_requests=view.count(
+                "staff.site.queued",
+                previous_value=(prev.staff.queued_requests if prev else None),
+            ),
         ),
         environment=EnvironmentState(
             wet_ground_speed_multiplier=site.wet_ground_speed_multiplier,

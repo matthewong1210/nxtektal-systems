@@ -32,28 +32,30 @@ adapters emitting the same `Reading` contract; nothing downstream changes.
 
 | File | Role | Imports |
 |---|---|---|
-| `readings.py` | **Contract**: `Reading`, `TelemetryFrame`, `ChannelSpec`, `SiteConfig`, `UpstreamInputs`, `SENSED_FIELDS` whitelist | stdlib only; subprocess-guarded |
-| `bank.py` | `SyntheticSensorBank(sim, config)` — samples sim truth, applies imperfection | designated sim-side (like `build.py`); numpy allowed |
-| `assemble.py` | `assemble_from_telemetry(frame, site, upstream) -> (FacilityState, AssemblyReport)` | designated sim-side (needs the snapshot classes, whose package init pulls the simulator) |
+| `observations.py` | **Contract**: `Observation`, `ObservationFrame`, `SiteConfig`, `UpstreamInputs`, `SENSED_FIELD_PREFIXES` whitelist | stdlib only; subprocess-guarded |
+| `bank.py` | `SyntheticSensorBank(sim, config)` — samples sim truth; dropout applies to measurements (so held data ages into STALE), noise is keyed per-measurement (one measurement, one value) | designated sim-side (like `build.py`); numpy allowed |
+| `assemble.py` | `assemble_from_observations(frame, site, upstream, previous=None) -> (FacilityState, AssemblyReport)` | designated sim-side (needs the snapshot classes, whose package init pulls the simulator) |
 | `tests/telemetry/…` | see test plan | — |
 
 ## Reading contract
 
 ```python
-class ReadingStatus(str, Enum): OK; STALE; MISSING   # MISSING is a real Reading, never an absent key
+class ObservationStatus(str, Enum): OK; STALE; MISSING   # MISSING is a real Observation, never an absent key
+class SourceType(str, Enum): SENSOR; SIMULATION; EXTERNAL_SYSTEM; HUMAN
 
 @dataclass(frozen=True)
-class Reading:
+class Observation:
     channel: str          # "<family>.<asset_id>.<measure>"
     value: float | int | str | bool | None   # None iff MISSING (union carries robot activity strings)
-    t_sample_s: float     # sim time the quantity was measured
-    t_avail_s: float      # sim time it became visible (delay = avail − sample; two timestamps
-                          # are locked now — conflating them corrupts staleness math forever)
-    status: ReadingStatus
-    source: str           # "synthetic.loadcell" now; "loadcell:<serial>" later
+    sample_timestamp_s: float     # sim time the quantity was measured
+    available_timestamp_s: float  # sim time it became visible (two timestamps are locked —
+                                  # conflating them corrupts staleness math forever)
+    status: ObservationStatus
+    source_type: SourceType       # synthetic bank always emits SIMULATION
+    source_id: str                # "synthetic.loadcell" now; "loadcell:<serial>" later
     calibration_id: str   # "cal:placeholder:v0" now; real cert id later (unrecoverable if absent)
     confidence: float     # 0..1, placeholder heuristic
-    reading_id: str       # derived: f"{channel}:r{seq:06d}" — no uuid, no wall-clock
+    observation_id        # derived: f"{channel}:o{seq:06d}" — no uuid, no wall-clock
 ```
 
 **Channel families map 1:1 to the five future real sources:**
@@ -91,7 +93,7 @@ AST ban extended: `sensed_zone_counts`, `sensed_battery_frac`, `_rng_*`, `spawn`
 
 ## Assembler: field sourcing (no second source of truth)
 
-`SENSED_FIELDS` — a frozen whitelist in `readings.py`, imported by the assembler, the docs,
+`SENSED_FIELD_PREFIXES` — a frozen whitelist in `observations.py`, imported by the assembler, the docs,
 and the tests as the *single* statement of which FacilityState fields come from sensors:
 ball-flow counts, all snapshot fields, fleet/charging derivations, staff busy/queued,
 `meta.t_s`. Everything else is explicit non-sensor input:

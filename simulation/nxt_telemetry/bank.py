@@ -103,9 +103,31 @@ def _channel_key(channel: str) -> int:
     return int.from_bytes(hashlib.sha256(channel.encode()).digest()[:8], "big")
 
 
-def _observation_rng(seed: int, channel: str, seq: int) -> np.random.Generator:
+# Distinct purpose tags keep the dropout and noise streams fully
+# independent: toggling dropout can never shift a noise realization.
+_PURPOSE_DROPOUT = 0
+_PURPOSE_NOISE = 1
+
+
+def _keyed_rng(seed: int, channel: str, seq: int, purpose: int) -> np.random.Generator:
     return np.random.default_rng(
-        np.random.SeedSequence([seed, TELEMETRY_TAG, _channel_key(channel), seq])
+        np.random.SeedSequence(
+            [seed, TELEMETRY_TAG, _channel_key(channel), seq, purpose]
+        )
+    )
+
+
+def _refresh_dropped(seed: int, channel: str, refresh_seq: int, prob: float) -> bool:
+    """Pure predicate: did transmission of this measurement fail?
+
+    Dropout applies to the MEASUREMENT (refresh), not the delivery: a
+    dropped measurement never enters history, so consumers see aging data
+    (STALE) or, with nothing visible yet, MISSING — matching how real
+    sensor links fail."""
+    if prob <= 0:
+        return False
+    return bool(
+        _keyed_rng(seed, channel, refresh_seq, _PURPOSE_DROPOUT).random() < prob
     )
 
 
@@ -115,9 +137,10 @@ class SyntheticSensorBank:
     def __init__(self, sim: RangeSimulation, config: TelemetryConfig | None = None):
         self._sim = sim
         self._config = config or TelemetryConfig()
-        self._seq: dict[str, int] = {}
-        # per-channel history of (t_sample, value) for delay/cadence
-        self._history: dict[str, list[tuple[float, object]]] = {}
+        self._seq: dict[str, int] = {}          # delivery counter (observation_id)
+        self._refresh_seq: dict[str, int] = {}  # measurement counter (noise identity)
+        # per-channel history of (t_sample, value, refresh_seq)
+        self._history: dict[str, list[tuple[float, object, int]]] = {}
 
     # -- truth gathering (RNG-free reads only) --------------------------
 
@@ -191,47 +214,55 @@ class SyntheticSensorBank:
             # No arithmetic at all: exact truth copy (the parity path).
             return build(raw, ObservationStatus.OK, now)
 
-        # history for delay/cadence
+        # -- measurement (refresh): cadence gates it, dropout can lose it --
         history = self._history.setdefault(channel, [])
-        if (
+        due = (
             imperfection.cadence_s <= 0
             or not history
             or now - history[-1][0] >= imperfection.cadence_s
-        ):
-            history.append((now, raw))
-            if len(history) > 512:
-                del history[:256]
+        )
+        if due:
+            refresh_seq = self._refresh_seq.get(channel, 0)
+            self._refresh_seq[channel] = refresh_seq + 1
+            if not _refresh_dropped(
+                self._sim.seed, channel, refresh_seq, imperfection.dropout_prob
+            ):
+                history.append((now, raw, refresh_seq))
 
-        # pick the newest sample old enough to be visible
-        visible = [
-            (t, v) for t, v in history if t <= now - imperfection.delay_s
-        ]
-        if not visible:
+        # -- delivery: newest measurement old enough to be visible ---------
+        visible_index = None
+        for index in range(len(history) - 1, -1, -1):
+            if history[index][0] <= now - imperfection.delay_s:
+                visible_index = index
+                break
+        if visible_index is None:
             return build(None, ObservationStatus.MISSING, now)
-        t_sample, value = visible[-1]
-
-        rng = None
-        if imperfection.dropout_prob > 0:
-            rng = _observation_rng(self._sim.seed, channel, seq)
-            if rng.random() < imperfection.dropout_prob:
-                return build(None, ObservationStatus.MISSING, now)
+        # trim by VISIBILITY, never a fixed cap: everything older than the
+        # currently visible measurement can never be served again
+        if visible_index > 0:
+            del history[:visible_index]
+        t_sample, value, measurement_seq = history[0]
 
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             adjusted = float(value) * (1.0 + imperfection.calibration_bias_rel)
             if imperfection.noise_rel_sd > 0 or imperfection.noise_abs_sd > 0:
-                if rng is None:
-                    rng = _observation_rng(self._sim.seed, channel, seq)
+                # keyed by the MEASUREMENT, not the delivery: a held sample
+                # re-served later renders the identical noisy value (the
+                # two-timestamp contract: one measurement, one value)
+                rng = _keyed_rng(
+                    self._sim.seed, channel, measurement_seq, _PURPOSE_NOISE
+                )
                 if imperfection.noise_rel_sd > 0:
                     adjusted *= 1.0 + rng.normal(0.0, imperfection.noise_rel_sd)
                 if imperfection.noise_abs_sd > 0:
                     adjusted += rng.normal(0.0, imperfection.noise_abs_sd)
             value = float(adjusted)
 
-        # staleness: sensor missed more than one reporting cycle
-        # (placeholder rule)
+        # staleness (placeholder rule): fresh data ages between delay and
+        # delay + cadence; anything older means a missed reporting cycle
         stale = (
             imperfection.cadence_s > 0
-            and now - t_sample > 2 * imperfection.cadence_s
+            and now - t_sample > imperfection.delay_s + 2 * imperfection.cadence_s
         )
         status = ObservationStatus.STALE if stale else ObservationStatus.OK
         return build(value, status, t_sample)
@@ -255,9 +286,11 @@ def site_config_from_scenario(scenario, seed: int) -> SiteConfig:
         open_minute=scenario.hours.open_minute,
         close_minute=scenario.hours.close_minute,
         forecast_bucket_minutes=scenario.demand.forecast_bucket_minutes,
-        zone_ids=tuple(scenario.zone_ids),
-        station_ids=tuple(scenario.station_ids),
-        robot_ids=tuple(scenario.robot_ids),
+        # sorted: entity ordering must match build_facility_state's lexical
+        # ordering regardless of how the commissioning record lists ids
+        zone_ids=tuple(sorted(scenario.zone_ids)),
+        station_ids=tuple(sorted(scenario.station_ids)),
+        robot_ids=tuple(sorted(scenario.robot_ids)),
         robot_payload_capacity=tuple(
             (r.robot_id, r.payload_capacity_balls)
             for r in sorted(scenario.robots, key=lambda r: r.robot_id)
