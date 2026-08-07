@@ -43,7 +43,8 @@ build-backend = "hatchling.build"
 # nxt_facility is the Site OS state contract consumed by future agents and
 # services, so it ships in the wheel alongside the simulator it projects.
 # nxt_memory is the auditable operational-memory layer (Phase 3).
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory"]
+# nxt_telemetry is the observation input boundary (Phase 4A).
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
