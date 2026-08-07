@@ -13,8 +13,27 @@ from typing import Optional
 
 
 def load_briefings(path: Path) -> list[dict]:
+    """Load the briefings sidecar, sorted by sim time t_s.
+
+    The sidecar is written by scripts/facility_twin_capture.py but read here
+    as untrusted user input (its path comes from a free-text sidebar field),
+    so each line is validated defensively: lines that parse as valid JSON
+    but are not a JSON object, or are an object missing a numeric "t_s", are
+    silently skipped rather than raising. This panel is presentation-tier —
+    a partial render beats a crash on a hand-edited or truncated sidecar.
+    """
+    records = []
     with open(path, "r", encoding="utf-8") as handle:
-        records = [json.loads(line) for line in handle if line.strip()]
+        for line in handle:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                continue
+            t_s = record.get("t_s")
+            if not isinstance(t_s, (int, float)) or isinstance(t_s, bool):
+                continue
+            records.append(record)
     return sorted(records, key=lambda r: r["t_s"])
 
 
@@ -30,7 +49,7 @@ def render_panel(st, briefings: list[dict], t_s: float) -> None:
         st.caption("No briefing yet at this time.")
         return
     st.subheader("Manager briefing (deterministic)")
-    st.text(record["briefing"])
-    for rec in record["recommendations"]:
+    st.text(record.get("briefing", "(briefing missing)"))
+    for rec in record.get("recommendations", []):
         st.markdown(f"- **{rec.get('urgency', '?')}** · {rec.get('rule_id', '?')}: "
                     f"{rec.get('action', rec.get('rationale', ''))}")
