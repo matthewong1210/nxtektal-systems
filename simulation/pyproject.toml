@@ -26,6 +26,9 @@ demo = [
     "streamlit>=1.37",
     "plotly>=5.22",
 ]
+# USD digital twin (nxt_range_twin) — optional gated by byte-determinism
+# release-blocker spike (design §4.3).
+twin = ["usd-core==26.8"]
 
 [dependency-groups]
 dev = [
@@ -44,9 +47,13 @@ build-backend = "hatchling.build"
 # services, so it ships in the wheel alongside the simulator it projects.
 # nxt_memory is the auditable operational-memory layer (Phase 3).
 # nxt_telemetry is the observation input boundary (Phase 4A).
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry"]
+# nxt_range_twin is the digital twin / spatial intelligence projection layer.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 pythonpath = ["."]
+markers = [
+    "slow: full-episode re-runs (SimPy event clock: ~1s per simulated day, measured)",
+]
