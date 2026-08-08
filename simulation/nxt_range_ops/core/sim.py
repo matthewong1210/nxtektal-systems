@@ -1155,6 +1155,8 @@ class RangeSimulation:
     ) -> Generator:
         # A window already active at episode start closes the zone
         # synchronously (before any demand draw); otherwise wait for it.
+        # self.now counts seconds since *midnight* (the env starts at
+        # open_seconds), so window minutes-of-day convert with a bare *60.
         delay = max(0.0, start_minute * 60.0 - self.now)
         if delay > 0:
             yield self.env.timeout(delay)
@@ -1171,6 +1173,8 @@ class RangeSimulation:
     def _station_outage_proc(
         self, station: _Station, start_minute: int, end_minute: int
     ) -> Generator:
+        # Same clock convention as _zone_closure_proc: minutes-of-day vs a
+        # seconds-since-midnight self.now.
         delay = max(0.0, start_minute * 60.0 - self.now)
         if delay > 0:
             yield self.env.timeout(delay)
