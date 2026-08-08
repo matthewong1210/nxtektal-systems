@@ -38,9 +38,11 @@ This is a heterogeneous repository with three independent surfaces:
 | `simulation/` | Python 3.11+, `uv`, Hatch, pytest | NXTektal virtual handoff, range operations, and Site OS layers |
 | `nxtektal-roi-engine/` | TypeScript, npm, Vitest | Formula-locked deterministic ROI model |
 
-The root README documents Jarvis and is not a monorepo architecture guide.
-There is no workspace-level dependency graph connecting these three surfaces.
-Do not add one without an explicit product requirement and architecture review.
+The root README is the NXTektal product and investor overview. The independent
+Jarvis surface is preserved in [`docs/JARVIS_PROTOTYPE.md`](JARVIS_PROTOTYPE.md)
+rather than presented as the current product. There is no workspace-level
+dependency graph connecting these three surfaces. Do not add one without an
+explicit product requirement and architecture review.
 
 There is no named human ownership file. Package ownership in this manual means
 responsibility for behavior and contracts.
@@ -370,6 +372,11 @@ The merge train then landed Shadow Ops PR #19 at
 `b055c9472737feb923c6ac48fad44a5b7e43333c`. The merged packages preserve the
 same one-way ownership model. Physical adapters/transports and a production
 real-site loop remain absent.
+
+AI Engineering Operating System PR #23 then merged at
+`192292735221e503915f286627dc64f001942881`, versioning this manual,
+`AGENTS.md`, the Claude Code entry point, and `.agent/` context, workflows, and
+skills without changing production contracts.
 
 The audit found no formal human GitHub reviews or test/build CI checks on those
 merges. Test totals and adversarial-review results in PR descriptions were
