@@ -48,7 +48,7 @@ build-backend = "hatchling.build"
 # nxt_memory is the auditable operational-memory layer (Phase 3).
 # nxt_telemetry is the observation input boundary (Phase 4A).
 # nxt_range_twin is the digital twin / spatial intelligence projection layer.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin"]
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_commissioning"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
