@@ -14,6 +14,7 @@ META = {
     "site_id": "s", "deployment_id": "d", "episode_id": "fixture-seed7",
     "scenario_name": "fixture", "seed": 7, "disclaimer": "placeholder disclaimer",
     "washer_static": {"throughput_balls_per_minute": 40.0, "batch_size_balls": 200},
+    "simulator_version": "0.5.0", "git_commit": "abc1234",
 }
 
 
@@ -46,12 +47,22 @@ def test_geometry_matches_layout_and_aspatial_has_no_transform(tmp_path: Path):
     assert washer.GetAttribute("nxt:throughput_balls_per_minute").Get() == 40.0
 
 
+def test_robot_payload_capacity_authored_statically(tmp_path: Path):
+    stage = _build(tmp_path)
+    r1 = stage.GetPrimAtPath("/World/Site/Robots/R1")
+    assert r1.GetAttribute("nxt:payload_capacity_balls").Get() == 600
+
+
 def test_provenance_and_disclaimer(tmp_path: Path):
     stage = _build(tmp_path)
     layer_data = stage.GetRootLayer().customLayerData
     assert layer_data["disclaimer"] == "placeholder disclaimer"
     assert layer_data["schema"] == "nxt-range-twin/stage/v1"
+    assert layer_data["simulator_version"] == "0.5.0"
+    assert layer_data["git_commit"] == "abc1234"
     terrain = stage.GetPrimAtPath("/World/Site/Terrain")
     assert terrain.GetCustomDataByKey("nxt:provenance") == "placeholder"
     zone = stage.GetPrimAtPath("/World/Site/Zones/Z1")
     assert zone.GetCustomDataByKey("nxt:provenance") == "placeholder"
+    sun = stage.GetPrimAtPath("/World/Env/SunLight")
+    assert sun.GetCustomDataByKey("nxt:provenance") == "placeholder"

@@ -61,6 +61,32 @@ def test_transit_robot_holds_last_position_no_translate_opinion():
     assert r1_location == [("/World/Site/Robots/R1", "nxt:location", "token", "transit")]
 
 
+def test_scalar_subgroup_drift_raises():
+    # A new key inside a scalar sub-group (e.g. "washer") must fail loud too,
+    # not just top-level state groups and per-entity dicts.
+    index = build_layout_index(LAYOUT)
+    drifted = dict(STATE)
+    drifted["washer"] = dict(STATE["washer"], surprise_field=1)
+    with pytest.raises(ValueError, match="surprise_field"):
+        frame_opinions(drifted, index, ("R1", "R2"))
+
+
+def test_zone_entity_drift_raises():
+    index = build_layout_index(LAYOUT)
+    drifted = dict(STATE)
+    drifted["zones"] = [dict(STATE["zones"][0], surprise=1)] + STATE["zones"][1:]
+    with pytest.raises(ValueError, match="surprise"):
+        frame_opinions(drifted, index, ("R1", "R2"))
+
+
+def test_station_entity_drift_raises():
+    index = build_layout_index(LAYOUT)
+    drifted = dict(STATE)
+    drifted["stations"] = [dict(STATE["stations"][0], surprise=1)]
+    with pytest.raises(ValueError, match="surprise"):
+        frame_opinions(drifted, index, ("R1", "R2"))
+
+
 def test_unknown_location_node_still_raises_key_error():
     # Genuinely unknown location nodes (contract drift, not the known
     # "transit" grammar) must still fail loud via resolve_location.

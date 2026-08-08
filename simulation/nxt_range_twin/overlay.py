@@ -129,6 +129,15 @@ def build_episode_layer(
             if attr_name == "xformOp:translate":
                 # 5. Held-translate rule: re-stamp the OLD value one sim-second
                 # before a changed sample, before authoring the new one.
+                # Edge case (unreachable today): if a robot's very FIRST
+                # record were "transit", mapping.py omits the translate
+                # opinion for that frame, so prev_translate would still be
+                # empty when the robot next lands on a node — this rule finds
+                # no old value to re-stamp, and USD holds that first authored
+                # sample BACKWARD to StartTimeCode, making the robot appear
+                # parked at its landing spot since t=0 instead of in transit.
+                # Not reachable today because env.reset() always places every
+                # robot at a named node, never "transit".
                 prev = prev_translate.get(prim_path)
                 if prev is not None and prev != cast:
                     attr.Set(prev, t_s - TELEPORT_LEAD_S)

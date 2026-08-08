@@ -50,6 +50,6 @@ def render_panel(st, briefings: list[dict], t_s: float) -> None:
         return
     st.subheader("Manager briefing (deterministic)")
     st.text(record.get("briefing", "(briefing missing)"))
-    for rec in record.get("recommendations", []):
+    for rec in record.get("recommendations", []) or []:
         st.markdown(f"- **{rec.get('urgency', '?')}** · {rec.get('rule_id', '?')}: "
                     f"{rec.get('action', rec.get('rationale', ''))}")

@@ -94,6 +94,9 @@ def build_base_layer(layout: dict, meta: dict, out_path: Path) -> None:
             stage, f"/World/Site/Robots/{robot['robot_id']}")
         robot_xform.AddTranslateOp()  # op + xformOpOrder only; overlay authors values
         _mark_placeholder(robot_xform.GetPrim())
+        robot_xform.GetPrim().CreateAttribute(
+            "nxt:payload_capacity_balls", Sdf.ValueTypeNames.Int).Set(
+            int(robot["payload_capacity_balls"]))
         body = UsdGeom.Cube.Define(
             stage, robot_xform.GetPrim().GetPath().AppendChild("Body"))
         body.AddScaleOp().Set(Gf.Vec3f(0.4, 0.4, 0.4))
@@ -110,7 +113,8 @@ def build_base_layer(layout: dict, meta: dict, out_path: Path) -> None:
     stage.DefinePrim("/World/Site/Aspatial/Staff")
 
     # One light + one camera so a remote render works out of the box.
-    UsdLux.DistantLight.Define(stage, "/World/Env/SunLight")
+    sun = UsdLux.DistantLight.Define(stage, "/World/Env/SunLight")
+    _mark_placeholder(sun.GetPrim())
     cam = UsdGeom.Camera.Define(stage, "/World/Env/MainCamera")
     cam.AddTranslateOp().Set(Gf.Vec3d(120.0, -140.0, 90.0))
     _mark_placeholder(cam.GetPrim())
@@ -124,6 +128,8 @@ def build_base_layer(layout: dict, meta: dict, out_path: Path) -> None:
         "episode_id": str(meta["episode_id"]),
         "scenario_name": str(meta["scenario_name"]),
         "seed": int(meta["seed"]),
+        "simulator_version": meta.get("simulator_version", ""),
+        "git_commit": meta.get("git_commit") or "",
     }
     world.GetPrim().SetDocumentation(str(meta["disclaimer"]))
     stage.GetRootLayer().Save()

@@ -31,6 +31,44 @@ STATION_KEYS = frozenset(
      "buffer_capacity_balls"}
 )
 
+# Scalar sub-group allowed keys, copied key-for-key from the real contract
+# (see tests/twin/fixtures.py::STATE, verified against FacilityState). Every
+# scalar group is checked so a new key added upstream fails loud here rather
+# than flowing through silently (contract drift, both directions).
+META_KEYS = frozenset(
+    {"t_s", "minute_of_day", "facility_open", "scenario_name", "seed"}
+)
+BALL_FLOW_KEYS = frozenset(
+    {"total_balls", "clean_available", "clean_sensed", "in_wash",
+     "dirty_buffered", "on_field", "in_transit", "conserved"}
+)
+WASHER_KEYS = frozenset({"throughput_balls_per_minute", "batch_size_balls", "wip"})
+DEMAND_KEYS = frozenset(
+    {"forecast_balls_per_minute", "forecast_bucket_minutes", "minutes_to_close",
+     "demand_balls_total", "demand_balls_served", "stockout_minutes",
+     "service_availability"}
+)
+FLEET_KEYS = frozenset(
+    {"total", "operable", "inoperative", "charging", "awaiting_human"}
+)
+CHARGING_KEYS = frozenset({"slots", "in_use", "queue_length"})
+STAFF_KEYS = frozenset({"capacity", "busy", "queued_requests"})
+ENVIRONMENT_KEYS = frozenset(
+    {"wet_ground_speed_multiplier", "zones_open", "zones_total",
+     "stations_open", "stations_total"}
+)
+
+SCALAR_GROUP_KEYS: dict[str, frozenset] = {
+    "meta": META_KEYS,
+    "ball_flow": BALL_FLOW_KEYS,
+    "washer": WASHER_KEYS,
+    "demand": DEMAND_KEYS,
+    "fleet": FLEET_KEYS,
+    "charging": CHARGING_KEYS,
+    "staff": STAFF_KEYS,
+    "environment": ENVIRONMENT_KEYS,
+}
+
 HEALTH_COLORS = {
     "ok": (0.20, 0.75, 0.30),
     "degraded": (0.95, 0.75, 0.10),
@@ -66,7 +104,12 @@ EMITTED_ATTRS = frozenset(
         "nxt:payload_capacity_balls", "nxt:location", "nxt:destination",
         "nxt:assigned_zone", "nxt:estop_latched", "nxt:awaiting_human",
         # static (base layer)
-        "nxt:landing_weight", "nxt:dock_slots", "nxt:provenance",
+        "nxt:landing_weight", "nxt:dock_slots",
+        # nxt:provenance is authored as prim customData (SetCustomDataByKey),
+        # not a USD attribute — intentionally unreachable by the
+        # attribute-only derivation-audit guard (test_guards_package.py);
+        # listed here for completeness only.
+        "nxt:provenance",
     }
 )
 
@@ -91,6 +134,8 @@ def frame_opinions(
     robot_ids: tuple[str, ...],
 ) -> list[Opinion]:
     _check_keys(state, CONSUMED_GROUPS, "state group")
+    for group, allowed in SCALAR_GROUP_KEYS.items():
+        _check_keys(state[group], allowed, group)
     ops: list[Opinion] = []
 
     meta, flow = state["meta"], state["ball_flow"]

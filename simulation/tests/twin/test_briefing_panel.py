@@ -26,6 +26,7 @@ def _write_malformed(tmp_path: Path) -> Path:
         '["not", "a", "dict"]',
         '{"seq":"no-t_s","note":"missing t_s key"}',
         '{"t_s":30.0,"seq":"no-briefing"}',
+        '{"t_s":45.0,"seq":"null-recs","briefing":"b-null","recommendations":null}',
     ]
     p = tmp_path / "briefings.jsonl"
     p.write_text("\n".join(lines) + "\n")
@@ -63,9 +64,9 @@ def test_load_and_lookup_by_time(tmp_path: Path):
 
 def test_load_briefings_skips_non_dict_and_no_t_s_lines(tmp_path: Path):
     briefings = load_briefings(_write_malformed(tmp_path))
-    # Only the two dict records that carry a numeric t_s survive, sorted.
-    assert [b.get("seq") for b in briefings] == [0, "no-briefing"]
-    assert [b["t_s"] for b in briefings] == [0.0, 30.0]
+    # Only the dict records that carry a numeric t_s survive, sorted.
+    assert [b.get("seq") for b in briefings] == [0, "no-briefing", "null-recs"]
+    assert [b["t_s"] for b in briefings] == [0.0, 30.0, 45.0]
 
 
 def test_render_panel_survives_missing_briefing_fields(tmp_path: Path):
@@ -74,4 +75,9 @@ def test_render_panel_survives_missing_briefing_fields(tmp_path: Path):
     # The record at t_s=30.0 has no "briefing"/"recommendations" keys — this
     # must not raise.
     render_panel(fake_st, briefings, 30.0)
+    assert any(call[0] == "text" for call in fake_st.calls)
+    # The record at t_s=45.0 has an explicit "recommendations": null (valid
+    # JSON, invalid contract shape) — this must not raise either.
+    fake_st.calls.clear()
+    render_panel(fake_st, briefings, 45.0)
     assert any(call[0] == "text" for call in fake_st.calls)
