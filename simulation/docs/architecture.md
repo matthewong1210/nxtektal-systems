@@ -84,3 +84,9 @@ Only two things change per backend: an adapter class implementing
 sweeps, reports, and tests are reused as-is. Integration plans:
 [isaac_sim_integration.md](isaac_sim_integration.md),
 [ros2_integration.md](ros2_integration.md).
+
+## Package map — sibling packages outside this layering
+
+`nxt_range_twin`: digital twin / spatial intelligence layer for managed outdoor facilities;
+projection-only consumer of `facility-state-stream/v1` + `layout.json`; stdlib+pxr;
+guard-tested boundaries. See [spatial_twin_design.md](spatial_twin_design.md).

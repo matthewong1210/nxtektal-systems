@@ -186,3 +186,5 @@ state stream. Visual realism is explicitly not the goal.
 - **Motion honesty:** 60 s held-sample cadence is narrated ("state snapshots every minute — an
   ops view, not a video game"). A 10 s-interval variant is a DIFFERENT operating day (6× decision
   cadence), default off.
+
+Status: implemented through Phase C (Tasks 1–11); hero 3D render deferred pending remote GPU (W1 book-or-cut).
