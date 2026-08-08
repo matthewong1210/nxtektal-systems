@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Working dir for all commands: `simulation (source location not versioned)`; run tests with the project venv (`.venv/bin/python -m pytest`).
+- Working dir for all commands: the repository's `simulation/` directory; run tests with the project venv (`.venv/bin/python -m pytest`).
 - Branch: `feature/digital-twin-phase0` (stacked on `feature/facility-memory`). Commit style: `feat(twin): …`, `test(twin): …`, `docs: …`.
 - `nxt_range_twin/` package modules import **stdlib + `pxr` only** — never `nxt_range_ops`, `nxt_sim`, `nxt_facility`, `nxt_memory`, `nxt_range_viewer`, simpy, gymnasium, numpy, pydantic. Only `scripts/facility_twin_capture.py` (script tier) may import simulation packages.
 - Upstream packages are untouched: no file under `nxt_range_ops/`, `nxt_sim/`, `nxt_facility/`, `nxt_memory/`, `nxt_range_viewer/` may be modified, and none may ever contain the string `nxt_range_twin`. `nxt_range_demo` is modified ONLY by Task 10 (additive panel).
