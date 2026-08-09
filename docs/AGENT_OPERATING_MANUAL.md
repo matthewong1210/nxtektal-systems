@@ -62,16 +62,22 @@ Current claims must remain honest:
   supplier/measured.
 - Integer facility ball inventory is simulated, but granular flow, bridging,
   friction, and jamming are not.
-- Synthetic observation and real-input contracts exist; a real production
-  telemetry runtime does not.
-- Commissioning is implemented on sibling draft PR #20, not in `main` or the
-  audited Shadow checkout; no commissioning-to-runtime integration exists.
-- Site Runtime is a future orchestration boundary, not an implemented package.
-- Mock robot execution exists. Isaac Sim and ROS 2 physical adapters are stubs.
+- Synthetic observations, real-input contracts, and a Site Runtime
+  orchestration library exist; concrete physical telemetry adapters/transports,
+  hardware/vendor integrations, production publishers/sinks, and a live site
+  service do not.
+- Shadow Ops, Commissioning, and Site Runtime are merged. Commissioning-to-
+  runtime setup exists through `bind_commissioned_site()` and an explicit
+  compatibility projection; this is not a live physical integration.
+- Mock robot execution exists. The Isaac Sim simulation adapter and ROS 2
+  physical adapter are stubs.
 - Facility and Shadow Ops recommendations are advisory; no production command
   bridge exists.
 - No LLM or generative agent has direct robot/actuator authority.
 - Digital-twin/USD output is projection only.
+- Site-level physical command admission, autonomous actuator execution, live
+  Omniverse/Nucleus delivery, and production real-site deployment are not
+  implemented.
 
 Read [product context](../.agent/context/product.md) for the short version.
 
@@ -82,8 +88,8 @@ Read [product context](../.agent/context/product.md) for the short version.
 1. **Simulation runtime truth:** `RangeSimulation` owns the mutable SimPy
    environment, resources, robots/zones/stations, named RNG streams, forecast,
    metrics, and event log. `BallLedger` owns conserved ball counts/locations.
-2. **Physical static truth:** where the unmerged commissioning package is
-   present, its validated immutable `CommissionedSite` owns site/deployment
+2. **Physical static truth:** the validated immutable
+   `nxt_commissioning.CommissionedSite` owns site/deployment
    identity, surveyed layout, assets/capabilities/safety constraints, sensor
    bindings/calibration, and provenance. It contains no live values.
 3. **Canonical downstream state:** `FacilityState` is a frozen point-in-time
@@ -91,15 +97,20 @@ Read [product context](../.agent/context/product.md) for the short version.
    consuming RNG. The telemetry assembler can produce the same contract from
    observations plus declared static/upstream inputs and returns quality
    evidence separately.
-4. **Advisory intelligence:** `nxt_facility` recommendations and Shadow Ops
+4. **Orchestration:** `nxt_site_runtime` validates and orders input, invokes the
+   existing telemetry assembler, applies mechanical publication-quality rules,
+   preserves the exact state/report in a deterministic envelope, and coordinates
+   checkpoint/recovery and idempotent state publication. It owns no domain
+   truth, advice, projection, command admission, or execution.
+5. **Advisory intelligence:** `nxt_facility` recommendations and Shadow Ops
    evaluations/recommendations consume downstream state and produce advice.
    They do not command execution.
-5. **Trust, trace, and learning evidence:** Shadow Ops traces/workflow ledger and
+6. **Trust, trace, and learning evidence:** Shadow Ops traces/workflow ledger and
    `nxt_memory` preserve decision/outcome history. They do not feed the live
    loop or become state truth.
-6. **Projection:** viewer bundles, JSONL captures, layout, briefings, reports,
+7. **Projection:** viewer bundles, JSONL captures, layout, briefings, reports,
    and USD stages are derived outputs. Fix/regenerate them if they drift.
-7. **Execution:** simulated directives enter only through
+8. **Execution:** simulated directives enter only through
    `RangeSimulation.apply_directive()` and `SafetyShield`. Robot task execution
    is sequenced by `HandoffController` through `RobotTaskInterface` and its
    selected adapter.
@@ -163,22 +174,30 @@ ObservationFrame + SiteConfig + UpstreamInputs + optional previous FacilityState
     -> FacilityState + AssemblyReport
 ```
 
-`SyntheticSensorBank` is the only implemented producer. Times are simulation
-seconds, `SiteConfig` remains simulation-centric, and no physical adapters,
-transport, scheduler, or production loop exists. `AssemblyReport` is separate
-quality evidence and must accompany deployment-path use; missing/backfilled
-values are not measurements.
+`SyntheticSensorBank` is the only implemented producer. The general telemetry
+assembler supports optional previous-state backfill, but `SiteRuntimePipeline`
+calls its three-argument path and rejects missing/stale required input before
+publication. `AssemblyReport` is separate quality evidence and must accompany
+deployment-path use; missing/backfilled values are not measurements.
 
 Commissioning answers what physically exists and projects static facts one way.
-Its draft-branch `project_site_config()` is static-only and not constructor-ready
-for the current `SiteConfig`; only `project_legacy_site_config()` supplies that
-shape, using explicit non-commissioned context.
+`project_site_config()` is static-only and not constructor-ready for the current
+`SiteConfig`; `project_legacy_site_config()` supplies that shape using explicit
+non-commissioned context. `bind_commissioned_site()` uses the existing
+projection once at runtime setup.
 
-The future Site Runtime may orchestrate selection of one commissioned
-deployment, observation assembly, quality preservation, and downstream fan-out.
-It owns no new state model, policy, projection, or execution behavior, and its
-package name/design is not approved merely because the boundary is named. See
-the [deployment contract](../.agent/context/deployment.md).
+The merged `nxt_site_runtime` coordinates `SequencedObservationFrame` input,
+validation, the existing assembler, the `AssemblyReport` quality gate, the exact
+`FacilityState` plus report in `nxt-site-runtime/facility-snapshot/v1`,
+checkpoint/recovery, and idempotent `StatePublisher` delivery. The quality gate
+admits state publication based on data quality; it is not recommendation policy,
+physical command admission, or robot safety authorization. `StatePublisher` and
+best-effort `RuntimeSink` are state/visibility protocols, not actuator ports.
+
+No concrete physical source/transport/publisher/sink, external long-running
+site service, live hardware/vendor integration, or production real-site loop is
+implemented. See the
+[deployment contract](../.agent/context/deployment.md).
 
 ### Robotics and AI-control rule
 
@@ -191,13 +210,18 @@ externally reset e-stop latching, and no motion after e-stop.
 not define whole-site physical collector dispatch, policy admission, or command
 translation. No such physical site-level contract or owner exists today.
 
-No LLM, generative agent, advisory engine, UI tool call, or future Site Runtime
+No LLM, generative agent, advisory engine, UI tool call, or Site Runtime
 may directly invoke `RangeSimulation.apply_directive()`, `RobotTaskInterface`,
 an adapter, ROS, an actuator, or an e-stop API. Existing simulator policies may
 choose only the closed directive vocabulary through `RangeOpsEnv`; it is
 revalidated by `RangeSimulation.apply_directive()` and `SafetyShield`. A
 physical command bridge would require a separately approved deterministic
 admission/controller boundary; none exists today.
+
+LLMs must not participate in execution, command admission, actuator control,
+e-stop handling, or safety loops. Site-level physical command admission,
+autonomous actuator execution, live Omniverse/Nucleus delivery, and production
+real-site deployment are explicitly outside the implemented system.
 
 ## Package responsibilities
 
@@ -213,11 +237,13 @@ The normative responsibility/dependency table is
 - `nxt_range_viewer` independently replays `RangeOpsEnv`; `nxt_range_demo`
   presents bundles; `nxt_range_twin` projects FacilityState streams/layout into
   USD. All remain derived/read-only surfaces.
+- `nxt_commissioning` owns immutable static physical facts and emits disposable
+  one-way projections without importing downstream/runtime packages.
+- `nxt_site_runtime` owns state orchestration metadata and behavior only; its
+  hot path uses telemetry/facility contracts and its setup-only composition seam
+  lazily uses commissioning's existing projection.
 - `simulation/scripts/` are composition roots. The ROI engine independently
   owns its versioned formulas and traces.
-- On a branch that contains it, `nxt_commissioning` owns immutable static
-  physical facts and emits disposable one-way projections without importing
-  downstream/runtime packages. Future Site Runtime remains orchestration only.
 
 ## Source selection and documentation discipline
 
@@ -269,8 +295,9 @@ Search current packages, exports, manifests, schemas, stores, rule IDs, tests,
 and open branches before choosing a new directory. Route simulation dynamics to
 `nxt_range_ops`, downstream state/broad advice to `nxt_facility`, observations
 to `nxt_telemetry`, policy trust/trace/workflow to `nxt_pilot_ops`, static
-physical facts to commissioning where present, projections to the twin/viewer,
-and robot task behavior to the handoff execution seam.
+physical facts to `nxt_commissioning`, state orchestration to
+`nxt_site_runtime`, projections to the twin/viewer, and robot task behavior to
+the handoff execution seam.
 
 A new package is allowed only when it owns a distinct fact class/lifecycle, no
 existing owner fits, its dependency position is explicit, architecture approval
@@ -315,8 +342,8 @@ do not count as coverage.
 
 ### Tooling gaps
 
-No Python formatter, linter, or static type checker is configured in the
-audited checkout. No repository-local GitHub Actions workflow was present. The
+No Python formatter, linter, or static type checker is configured at the
+merged-main baseline. No repository-local GitHub Actions workflow was present. The
 root Jarvis prototype has no automated test command. Report these as gaps; do
 not substitute unconfigured tools and imply repository endorsement.
 
@@ -331,16 +358,18 @@ remain visible through provenance/quality evidence.
 
 ## Recent-history lessons
 
-Merged PRs #5–#14 established the current one-way phase ladder: handoff seam,
+Merged PRs #5–#14 established the initial one-way phase ladder: handoff seam,
 whole-range runtime, benchmark/viewer, FacilityState, advisory decisions,
 memory, telemetry assembly, and projection-only twin. Repeated patterns were
 recon/design first, downstream siblings, guard tests, reproducibility, parity,
 and explicit honest-scope disclaimers.
 
-At the second-pass audit, Shadow Ops PR #19 and commissioning PR #20 were open
-draft sibling branches from the same `main` commit. Neither was merged and
-neither branch contained the other package. Site Runtime and physical telemetry
-adapters remained proposals only.
+The merge train then landed Shadow Ops PR #19 at
+`e84c5016a19d1d4aec0b4b183164c08bba5b164e`, Commissioning PR #20 at
+`89e93f6a8ea0cd469d6da907321eafe30318fa49`, and Site Runtime PR #22 at
+`b055c9472737feb923c6ac48fad44a5b7e43333c`. The merged packages preserve the
+same one-way ownership model. Physical adapters/transports and a production
+real-site loop remain absent.
 
 The audit found no formal human GitHub reviews or test/build CI checks on those
 merges. Test totals and adversarial-review results in PR descriptions were

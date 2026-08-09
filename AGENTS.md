@@ -49,18 +49,17 @@ architectural responsibility, not an inferred person or team.
    replay through public APIs. They are still read-only projections, but
    `FacilityState` is not their direct source contract.
 5. Physical-facility onboarding and static site facts belong to commissioning.
-   Where `nxt_commissioning` is present, its validated, immutable
-   `CommissionedSite` manifest is authoritative for site/deployment identity,
-   surveyed layout, assets, capabilities, safety limits, sensor bindings, and
-   their provenance. Scenarios, `SiteConfig`, telemetry, and USD are not
-   competing physical-static truth stores. At the 2026-08-09 audit this package
-   existed on draft PR #20, not on `main` or this checkout; verify branch status.
-6. The current observation path is `ObservationFrame` plus `SiteConfig`,
-   `UpstreamInputs`, and optional previous `FacilityState` through
-   `assemble_from_observations()`, producing `FacilityState` plus
-   `AssemblyReport`. A future Site Runtime is an orchestration boundary around
-   these contracts, not an implemented package, new state model, decision
-   engine, or command path. Do not create it without an approved design.
+   Its validated, immutable `CommissionedSite` manifest is authoritative for
+   site/deployment identity, surveyed layout, assets, capabilities, safety
+   limits, sensor bindings, and their provenance. Scenarios, `SiteConfig`,
+   telemetry, and USD are not competing physical-static truth stores.
+6. `nxt_telemetry` owns observations and the unchanged
+   `assemble_from_observations()` contract that produces `FacilityState` plus
+   `AssemblyReport`. `nxt_site_runtime` owns orchestration only: ordered input
+   validation, invocation of that assembler, the publication-quality gate, an
+   exact state/report envelope, checkpoint/recovery, and idempotent publication
+   coordination. It does not own observation semantics, a second assembler or
+   state model, advice, projection, or execution.
 7. Site-level decision outputs from `nxt_facility` and `nxt_pilot_ops` are
    advisory. They must not invoke directives, robots, ROS, actuators, charging,
    motion planning, or emergency-stop APIs.
@@ -73,7 +72,9 @@ architectural responsibility, not an inferred person or team.
    Existing ball-availability overlap is intentional non-parity: facility rules
    advise from the v1 state, while the Guardian traces a stricter policy and
    fails closed on unavailable permission/capability/ETA/yield/washer facts.
-   Keep their outputs identified by owner; no conflict resolver exists.
+   Keep their outputs identified by owner; no conflict resolver exists. Do not
+   silently aggregate, rank, deduplicate, or reconcile recommendations without
+   a separately approved and tested composition contract.
 9. Shadow Ops (`nxt_pilot_ops`) is the decision trust, trace, evaluation, human
    workflow, and tamper-evident record layer. It is not an execution layer.
 10. Robots and their adapters are the execution layer behind
@@ -81,8 +82,8 @@ architectural responsibility, not an inferred person or team.
     bounded retry/recovery, safe retract, the externally reset e-stop latch, and
     the rule that no motion follows e-stop. This interface covers the micro
     handoff cycle; it is not a site-level collector-dispatch API or physical
-    command gateway. Physical Isaac Sim and ROS 2 adapters are currently stubs;
-    do not claim deployed robot execution.
+   command gateway. The Isaac Sim simulation adapter and ROS 2 physical adapter
+   are currently stubs; do not claim deployed robot execution.
 11. The AI operating layer—the trusted state, advisory, trace, and evaluation
    system—is the strategic moat. Preserve its boundaries instead of collapsing
    it into the simulator, twin, or robot adapter.
@@ -90,12 +91,19 @@ architectural responsibility, not an inferred person or team.
     through `RangeSimulation.apply_directive()` and its non-bypassable
     `SafetyShield`. `nxt_range_ops.policies` control only the simulator; they are
     not production robot command engines.
-13. No LLM, generative agent, advisory engine, or future AI package may call
-    `RangeSimulation.apply_directive()`, `RobotTaskInterface`, an adapter, ROS,
-    or an actuator directly. LLM output is advisory only. Any physical execution
+13. No LLM, generative agent, advisory engine, Site Runtime component, or other
+    AI package may call `RangeSimulation.apply_directive()`,
+    `RobotTaskInterface`, an adapter, ROS, or an actuator directly. LLM output
+    is advisory only. Any physical execution
     integration requires a separately reviewed deterministic
     admission/controller boundary that preserves robot and hardware safety; no
-    such production bridge exists today.
+    such production bridge exists today. Concrete physical telemetry adapters,
+    live hardware/vendor integrations, production state publishers/sinks,
+    site-level physical command admission, autonomous actuator execution, live
+    Omniverse/Nucleus delivery, and production real-site deployment are also
+    unimplemented. Protocols and test doubles are not evidence otherwise, and
+    LLMs must remain outside execution, command-admission, actuator, e-stop, and
+    safety loops.
 14. Operational memory is append-only historical evidence and must not feed the
     live loop. Recommendation and workflow ledgers do not become state truth.
 15. Do not invent physical facts, demand, capabilities, ETAs, defaults, or
@@ -113,8 +121,8 @@ Use, in order:
 2. Current source, manifests, and behavioral tests.
 3. Stable package documentation such as `simulation/docs/facility_state.md`,
    `simulation/docs/range_ops.md`, `simulation/docs/spatial_twin_design.md`, and
-   the current-branch `simulation/docs/shadow_ops_v0.md` or
-   `simulation/docs/commissioning_v0.md` when those packages are present.
+   `simulation/docs/shadow_ops_v0.md`, `simulation/docs/commissioning_v0.md`,
+   and `simulation/docs/site_runtime_design.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -130,8 +138,8 @@ An untracked document is never repository authority by itself.
 - Let `nxt_range_ops` import only `nxt_sim.interfaces.types` and
   `nxt_sim.config.models` from Phase 0.
 - Keep upstream packages unaware of `nxt_facility`, `nxt_memory`,
-  `nxt_telemetry`, `nxt_range_twin`, and `nxt_pilot_ops` as required by their
-  guard tests.
+  `nxt_telemetry`, `nxt_range_twin`, `nxt_pilot_ops`, and `nxt_site_runtime` as
+  required by their guard tests.
 - Within downstream Site OS state/evidence/advisory packages, only designated
   seams may touch upstream implementation: `nxt_facility.build`,
   `nxt_memory.harvest`, `nxt_telemetry.bank`/`assemble`, and
@@ -139,10 +147,14 @@ An untracked document is never repository authority by itself.
   the public `nxt_range_ops` APIs described in the package map.
 - Keep `nxt_range_twin` coupled through serialized state/layout contracts, not
   Python imports. `pxr` belongs only in USD-authoring modules.
-- Where `nxt_commissioning` exists, keep it stdlib-only and independent of
-  runtime/downstream packages. Consumers receive deterministic one-way
-  projections; they do not write physical facts back from `SiteConfig`, a
-  scenario, telemetry, or USD.
+- Keep `nxt_commissioning` stdlib-only and independent of runtime/downstream
+  packages. Consumers receive deterministic one-way projections; they do not
+  write physical facts back from `SiteConfig`, a scenario, telemetry, or USD.
+- Keep the `nxt_site_runtime` hot path limited to `nxt_telemetry` input/assembly
+  contracts and `nxt_facility.state`. Only its setup-only composition seam may
+  lazily use commissioning's existing projection. It must not import simulator,
+  policy, Shadow Ops, memory, twin, viewer, or robot packages, and upstream or
+  downstream consumers must not depend on the runtime.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula
@@ -187,7 +199,8 @@ Reject or revise a change that:
 
 - creates another mutable facility truth or bypasses `FacilityState`;
 - treats a scenario, `SiteConfig`, telemetry, or USD as physical commissioning
-  truth, or presents an unmerged/future deployment boundary as implemented;
+  truth, misstates a component's verified merge status, or presents an absent
+  physical integration as implemented;
 - uses viewer/USD/memory/recommendation data as live input truth;
 - creates a duplicate package, decision engine, or recommendation rule without
   a named semantic owner and approved boundary;

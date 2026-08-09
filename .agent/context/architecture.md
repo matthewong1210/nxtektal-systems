@@ -10,7 +10,7 @@ flowchart LR
     SimPolicy["nxt_range_ops policy"] --> Directive["Directive + SafetyShield"]
     Directive --> Runtime
     Runtime --> State["FacilityState\ncanonical downstream state"]
-    Observations["ObservationFrame + static/upstream inputs"] --> Assembler["Telemetry assembler + AssemblyReport"]
+    Observations["ObservationFrame + static/upstream inputs"] --> Assembler["nxt_telemetry assembler"]
     Assembler --> State
     Assembler --> Quality["AssemblyReport\nquality evidence"]
     State --> Advice["nxt_facility recommendations\nadvisory"]
@@ -51,29 +51,35 @@ that boundary is not implemented.
 
 ## Physical deployment flow and status
 
-The deployment roles are stable even though their implementations have
-different maturity:
+Commissioning and Site Runtime are merged contracts. Concrete physical sources,
+transports, publishers, command admission, hardware execution, and live-site
+service operation are not:
 
 ```mermaid
 flowchart LR
-    Physical["Surveyed / inspected physical facility"] -.-> Commissioning["CommissionedSite\nstatic physical truth; draft PR #20"]
-    Commissioning -.-> Static["One-way static projections"]
-    Static -.-> SiteConfig["SiteConfig compatibility input\nexplicit non-static context required"]
-    Source["Synthetic producer today\nphysical adapters absent"] --> Frame["ObservationFrame"]
-    Frame --> Assemble["assemble_from_observations"]
-    SiteConfig --> Assemble
-    Upstream["UpstreamInputs"] --> Assemble
-    Previous["optional previous FacilityState"] --> Assemble
-    Assemble --> Facility["FacilityState"]
-    Assemble --> Report["AssemblyReport"]
-    Future["Future Site Runtime\norchestration only; not implemented"] -.-> Assemble
+    Physical["Surveyed / inspected physical facility"] --> Commissioning["CommissionedSite\nimmutable static truth"]
+    Context["Explicit LegacySiteConfigContext"] --> Binding["bind_commissioned_site()"]
+    Commissioning --> Binding
+    Binding --> RuntimeBinding["RuntimeSiteBinding\nidentity + SiteConfig"]
+    Synthetic["Synthetic producer"] --> Batch["SequencedObservationFrame"]
+    PhysicalSource["Physical ObservationSource\nnot implemented"] -.-> Batch
+    RuntimeBinding --> Pipeline["SiteRuntimePipeline\norchestration only"]
+    Batch --> Pipeline
+    Pipeline --> Assemble["existing telemetry assembler"]
+    Assemble --> Gate["AssemblyReport QualityGate\nstate-publication admission only"]
+    Gate --> Envelope["FacilitySnapshotEnvelope\nexact FacilityState + AssemblyReport"]
+    Envelope --> Checkpoint["checkpoint / recovery"]
+    Checkpoint --> Publisher["StatePublisher protocol\nidempotent state publication"]
 ```
 
-Dashed edges are not current-checkout integrations. `project_site_config()` on
-the commissioning branch is static-only and not the current `SiteConfig`
-constructor shape; `project_legacy_site_config()` requires explicit
-`LegacySiteConfigContext`. See [deployment.md](deployment.md) before changing
-this boundary.
+The dashed edge is an absent physical integration. The setup seam calls
+`project_legacy_site_config()` with explicit context; `project_site_config()`
+remains a static-only projection. Runtime invokes the existing telemetry
+assembler with the frame, projected `SiteConfig`, and bound upstream inputs. It
+does not pass a previous state, define an alternate assembler, change
+`FacilityState`, or perform decision/command admission. `StatePublisher` is an
+abstract state port, not a live transport or actuator API. See
+[deployment.md](deployment.md) before changing this boundary.
 
 ## Core principles
 
@@ -81,8 +87,8 @@ this boundary.
 
 Add a new layer as a downstream consumer whenever possible. Do not make stable
 upstream runtime packages import presentation, memory, state, telemetry, twin,
-or Shadow Ops packages. Keep any necessary privileged upstream read explicit,
-small, pure, and guard-tested.
+Shadow Ops, commissioning, or Site Runtime packages. Keep any necessary
+privileged upstream read explicit, small, pure, and guard-tested.
 
 ### Pure contracts, privileged adapters
 
@@ -94,6 +100,8 @@ coupling in named seams:
 - `nxt_memory.harvest`
 - `nxt_telemetry.bank` and `nxt_telemetry.assemble`
 - `nxt_pilot_ops.adapters`
+- `nxt_site_runtime.pipeline` for the existing telemetry assembly call
+- `nxt_site_runtime.composition` for setup-only lazy commissioning projection
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
@@ -142,18 +150,14 @@ type:
 | Telemetry purity, designated seams, and RNG discipline | `simulation/tests/telemetry/test_guards.py` |
 | Twin import isolation, derivation checks, no feedback | `simulation/tests/twin/test_guards_package.py`, `test_guards_stream.py` |
 | Shadow Ops adapter-only upstream access and no command surface | `simulation/tests/pilot_ops/test_boundaries.py` |
+| Commissioning independence, immutable/static ownership, and one-way projection | `simulation/tests/commissioning/test_guards.py` |
+| Site Runtime designated seams, no duplicate domain contracts, and no upstream/consumer dependency | `simulation/tests/site_runtime/test_architecture.py` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |
 
 The `nxt_range_agent` no-direct-`nxt_sim` rule and some viewer/demo presentation
 rules are documented but not exhaustively static-tested. Treat them as binding
 and add a guard when changing that boundary.
-
-Draft PR #20 adds `simulation/tests/commissioning/test_guards.py`. It guards the
-commissioning package from several runtime/downstream imports and checks some
-reverse imports, but does not exhaustively cover every telemetry/runtime
-direction. Describe that boundary as partially guard-tested until the guard is
-expanded and merged.
 
 ## Forbidden dependency outcomes
 
@@ -167,8 +171,11 @@ expanded and merged.
   facts/physics.
 - Physical static facts being reconstructed from `SiteConfig`, a simulation
   scenario, telemetry, viewer/layout output, or USD instead of commissioning.
-- A future Site Runtime owning state, policy, projection, or robot execution
-  rather than orchestrating existing public contracts.
+- Site Runtime owning observations, an assembler/state schema, policy,
+  projection, memory, or robot execution rather than orchestrating existing
+  public contracts.
+- Site Runtime's publication-quality gate being treated as decision policy,
+  physical command admission, or a robot safety gate.
 - An LLM/generative agent calling `RangeSimulation.apply_directive()`,
   `RobotTaskInterface`, adapters, ROS, actuators, or e-stop APIs directly.
 - Memory queries affecting current policy or runtime state.

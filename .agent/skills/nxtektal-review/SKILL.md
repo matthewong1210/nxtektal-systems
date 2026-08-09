@@ -22,15 +22,18 @@ description: Review NXTektal repository changes for architectural consistency, t
 Check first for:
 
 1. New or bypassed sources of truth.
-2. Incorrect commissioning/runtime maturity claims or lost assembly-quality
-   evidence.
-3. Duplicate packages, decision engines, policies, schemas, or stores.
-4. Advisory/LLM-to-execution or safety-boundary violations.
-5. Reverse imports and hidden cross-package coupling.
-6. Determinism, replay, canonical-byte, hash-chain, or provenance regressions.
-7. Schema/version compatibility and fail-closed behavior.
-8. Missing focused, boundary, parity, full-suite, or build evidence.
-9. Misleading physical-performance, telemetry, robot-control, causal, review,
+2. Incorrect maturity claims: Shadow Ops, Commissioning, and Site Runtime are
+   merged, while physical adapters/live integrations/deployment are absent.
+3. Site Runtime taking observation, assembler, state, policy, projection,
+   command-admission, or execution ownership, or losing assembly-quality,
+   envelope, sequence, checkpoint, recovery, or idempotency evidence.
+4. Duplicate packages, decision engines, policies, schemas, or stores.
+5. Advisory/LLM-to-execution or safety-boundary violations.
+6. Reverse imports and hidden cross-package coupling.
+7. Determinism, replay, canonical-byte, hash-chain, or provenance regressions.
+8. Schema/version compatibility and fail-closed behavior.
+9. Missing focused, boundary, parity, full-suite, or build evidence.
+10. Misleading physical-performance, telemetry, robot-control, causal, review,
    or CI claims.
 
 Distinguish mechanically enforced rules from conventions. When a documented

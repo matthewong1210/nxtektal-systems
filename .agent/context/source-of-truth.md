@@ -12,9 +12,10 @@ fact class and runtime boundary.
 | Simulated control admission | `RangeSimulation.apply_directive()` plus `SafetyShield` | A direct policy-to-robot call |
 | Canonical downstream operational snapshot | Frozen `nxt_facility.state.FacilityState` | A mutable store or simulation engine |
 | Simulation-to-state projection | `nxt_facility.build.build_facility_state()` using RNG-neutral public reads | A new dynamics implementation |
-| Observation-to-state rehearsal | `nxt_telemetry.assemble_from_observations()` returning `FacilityState` plus `AssemblyReport` | A second downstream state schema or proof of real telemetry |
+| Observation-to-state assembly | `nxt_telemetry.assemble_from_observations()` returning `FacilityState` plus `AssemblyReport` | A second downstream state schema or proof of real telemetry |
 | Observation evidence | `ObservationFrame`, source/timing/provenance fields, and `AssemblyReport` | Ground truth without assembly and quality context |
-| Physical deployment static facts, where commissioning is present | Validated immutable `nxt_commissioning.CommissionedSite` manifest | `RangeOpsScenario`, `SiteConfig`, observations, viewer/layout files, or USD |
+| Physical deployment static facts | Validated immutable `nxt_commissioning.CommissionedSite` manifest | `RangeOpsScenario`, `SiteConfig`, observations, viewer/layout files, or USD |
+| Site Runtime orchestration | `nxt_site_runtime` sequence/input validation, publication-quality gate, deterministic envelope/checkpoint/recovery, and idempotent state publication coordination | Observation semantics, a second assembler/state model, advice, projection, physical command admission, or execution |
 | Facility advice | `nxt_facility.decisions.Recommendation` | Directive or execution acknowledgement |
 | Shadow decision evaluation | `nxt_pilot_ops` snapshot, evaluation, trace, and recommendation | Command, actuator, safety shield, or live state |
 | Human/execution workflow evidence | Shadow Ops immutable workflow records and hash-chained ledger | Proof the physical act occurred beyond the recorded acknowledgement |
@@ -43,15 +44,20 @@ during simulation or create a competing state representation.
 
 Commissioning owns static physical-facility declarations, not live state. A
 validated `CommissionedSite` is immutable by `(site_id, deployment_id)` and
-projects one way into disposable configuration/layout/binding data. The
-implementation was on separate draft PR #20, not `main` or the audited Shadow
-checkout on 2026-08-09. Verify presence before importing or testing it; do not
-union sibling feature branches in a status claim.
+projects one way into disposable configuration/layout/binding data.
+`bind_commissioned_site()` uses the existing legacy `SiteConfig` projection and
+explicit non-commissioned context once during runtime setup; it does not move
+live values or orchestration into commissioning.
 
-The future Site Runtime is orchestration only. No package or production loop is
-implemented. It must coordinate existing commissioning, observation, assembly,
-state, quality, advisory, evidence, and projection contracts without becoming a
-second owner of any of them. See [deployment.md](deployment.md).
+The merged Site Runtime is orchestration only. It coordinates commissioned
+identity/configuration, sequenced observation batches, the existing telemetry
+assembler, publication-quality admission, the exact `FacilityState` and
+`AssemblyReport` in `nxt-site-runtime/facility-snapshot/v1`, checkpoint/recovery,
+and idempotent state publication. It owns none of the underlying facts or
+semantics. Its `QualityGate` admits a state envelope based on data quality; it
+is not decision policy, physical command admission, or a robot safety gate.
+`StatePublisher` and `RuntimeSink` are state/visibility ports, never actuator
+ports. See [deployment.md](deployment.md).
 
 ### Truth versus observation
 
@@ -69,6 +75,12 @@ ObservationFrame + SiteConfig + UpstreamInputs + optional previous FacilityState
 `SiteConfig` is a consumer input shape, not physical commissioning authority.
 `AssemblyReport` is separate from the state and must accompany deployment-path
 use so a backfilled/default value is never reported as a measurement.
+
+Site Runtime v0 calls the three-argument assembly path without a previous
+`FacilityState` and rejects missing/stale required input before publication. It
+then keeps the exact state and report together with runtime quality and source
+references in its deterministic envelope. This wrapper does not change
+telemetry ownership of assembly or FacilityState ownership of the state schema.
 
 ### Truth versus projection
 
@@ -103,11 +115,19 @@ policy evidence. No current component reconciles, ranks, or deduplicates the two
 outputs. A presentation must keep owner, policy/rule ID, evidence, and rationale
 distinct until an approved composition/conflict contract exists.
 
-No LLM, generative agent, advisory policy, or future Site Runtime has execution
+No LLM, generative agent, advisory policy, or Site Runtime component has execution
 authority. It must not directly invoke `RangeSimulation.apply_directive()`,
 `RobotTaskInterface`, adapters, ROS, actuators, or emergency-stop APIs. Existing
 simulator policies use the closed directive vocabulary through `RangeOpsEnv` and
 `SafetyShield`; a physical command boundary does not exist in the repository.
+
+Concrete physical observation sources/transports, live hardware/vendor
+integrations, production state publishers/consumer sinks, site-level physical
+command admission, autonomous actuator execution, live Omniverse/Nucleus
+delivery, and production real-site deployment are not implemented. Protocols
+and test doubles do not satisfy those boundaries, and LLMs must not participate
+in execution, command admission, actuator control, e-stop handling, or safety
+loops.
 
 ## Evidence and provenance policy
 

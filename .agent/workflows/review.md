@@ -20,12 +20,15 @@ PR description, bot comment, or historical test count.
 - Is ball accounting still owned by `BallLedger`?
 - Is `FacilityState` still frozen and canonical downstream?
 - For physical deployment, do static facts remain owned by the commissioned
-  manifest (where present), rather than a scenario, `SiteConfig`, observation,
-  viewer/layout file, or USD?
+  manifest, rather than a scenario, `SiteConfig`, observation, viewer/layout
+  file, or USD?
 - Are observations, estimates, memory, recommendations, viewer frames, and USD
   labeled and used according to their truth tier?
 - Does every deployment-path `FacilityState` retain its separate
   `AssemblyReport`/quality context instead of presenting backfill as measured?
+- Does Site Runtime keep the exact `FacilityState` rather than defining another
+  state model or assembler, and retain source, quality, envelope, sequence,
+  checkpoint, recovery, and idempotency evidence?
 - Does missing/default/backfill behavior match the owning contract, with
   missingness and provenance surfaced instead of masquerading as measured
   data?
@@ -35,9 +38,9 @@ PR description, bot comment, or historical test count.
 - Does every new import follow [the package map](../context/package-map.md)?
 - Is upstream still unaware of downstream packages?
 - Within downstream Site OS packages, is coupling isolated to a designated
-  builder/harvest/assembler/adapter or composition-root script? Do benchmark
-  and viewer tools use only the public `nxt_range_ops` APIs allowed by the
-  package map?
+  builder/harvest/assembler/adapter, Site Runtime pipeline/setup seam, or
+  composition-root script? Do benchmark and viewer tools use only the public
+  `nxt_range_ops` APIs allowed by the package map?
 - Are pure contracts still importable without optional simulation, UI, or USD
   dependencies?
 - Does a new boundary have a mechanical guard rather than prose alone?
@@ -60,9 +63,12 @@ PR description, bot comment, or historical test count.
   them without an approved composition contract?
 - Is there any directive, ROS, command-bus, actuator, motion, charging, or
   e-stop call in advisory code?
-- Can an LLM, generative agent, tool call, UI, or future Site Runtime directly
+- Can an LLM, generative agent, tool call, UI, or Site Runtime component directly
   reach `RangeSimulation.apply_directive()`, `RobotTaskInterface`, an adapter,
   ROS, an actuator, or e-stop API?
+- Is Site Runtime's `QualityGate` still publication-data-quality admission only,
+  rather than recommendation policy, physical command admission, or robot
+  safety authorization?
 - Do simulator actions still pass through `RangeSimulation.apply_directive()`
   and `SafetyShield`?
 - Does handoff execution remain behind `RobotTaskInterface` without controller
@@ -91,8 +97,11 @@ PR description, bot comment, or historical test count.
 - Does the change avoid claims of validated physical performance, production
   telemetry, or deployed robot control?
 - Does the twin refrain from inventing geometry, motion, physics, or facts?
-- Are commissioning and future Site Runtime claims honest about branch status,
-  missing physical adapters, simulation-time telemetry, and absent live loop?
+- Do claims state that Commissioning, Shadow Ops, and Site Runtime are merged
+  while concrete physical telemetry adapters/transports, live hardware/vendor
+  integrations, production publishers/sinks, site-level physical command
+  admission, autonomous actuator execution, live Omniverse/Nucleus delivery,
+  and production real-site deployment remain absent?
 - Does ROI code reuse the canonical engine rather than duplicating formulas?
 
 ## 7. Tests and documentation

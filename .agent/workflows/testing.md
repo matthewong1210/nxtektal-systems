@@ -2,7 +2,7 @@
 
 ## Python simulation and Site OS
 
-The audited feature branch declares `twin = ["usd-core==26.8"]`, but its
+The merged-main Python project declares `twin = ["usd-core==26.8"]`, but its
 `uv.lock` does not contain that extra. Consequently,
 `uv sync --locked --all-extras` fails. Do not silently regenerate and commit the
 lock during an unrelated task. Provision the current environment without lock
@@ -25,9 +25,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 ```
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
-`twin`, and `pilot_ops`; `commissioning` applies only on branches that contain
-that package. Root Phase 0 tests live directly under `tests/` and should be
-selected by file.
+`twin`, `pilot_ops`, `commissioning`, and `site_runtime`. Root Phase 0 tests
+live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
 
@@ -44,22 +43,23 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/range_viewer/test_protection.py \
   tests/range_demo/test_protection.py \
   tests/pilot_ops/test_boundaries.py \
+  tests/commissioning/test_guards.py \
+  tests/site_runtime/test_architecture.py \
+  tests/site_runtime/test_rejection.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
   tests/test_emergency_stop.py
 ```
 
-On a branch that contains commissioning, also run:
+For changes to merged Commissioning or Site Runtime, run the entire relevant
+package suites in addition to the architecture/safety subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
-  tests/commissioning/test_guards.py \
-  tests/commissioning
+  tests/commissioning \
+  tests/site_runtime
 ```
-
-Do not include a nonexistent branch-only path and call the resulting collection
-failure a product failure. Record the branch status and exact selected suites.
 
 Run the full suite before handing off a Python production/contract change:
 
@@ -91,6 +91,7 @@ safe. Do not build into the repository.
 | Simulator control | SafetyShield admission/rejection, deterministic replay, conservation, and downstream full suite |
 | Robot interface/controller/adapter | Timeouts, invalid sequencing, bounded retry/recovery, safe retract, latched e-stop, no post-e-stop motion, adapter/controller separation |
 | Commissioning contract/projection | Strict schema/provenance/immutability, canonical conflict-safe storage, one-way detached projections, forbidden-import guards, downstream integration review |
+| Site Runtime orchestration | Input/freshness and quality rejection; exact FacilityState/AssemblyReport retention; deterministic envelope ID; strict sequence/replay; checkpoint recovery and idempotent publication; setup-only commissioning seam; no duplicate domain contracts, policy, or execution imports |
 | AI/LLM integration | Proof outputs remain advisory; static/import tests prevent direct directive, robot-interface, adapter, ROS, actuator, or e-stop access |
 | Physical/config value | Provenance and placeholder census/validation |
 | Bug fix | A regression test that fails for the reproduced defect |

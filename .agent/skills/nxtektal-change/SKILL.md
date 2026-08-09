@@ -21,15 +21,17 @@ description: Execute architecture-safe changes in the NXTektal repository. Use f
 
 ## Route the task
 
-- Route mutable **simulation-runtime** behavior to `nxt_range_ops`; no physical
-  Site Runtime is implemented.
-- Route immutable physical onboarding/static facts to commissioning only on a
-  branch that contains `nxt_commissioning`; never infer them from sim config.
+- Route mutable **simulation-episode** behavior to `nxt_range_ops`.
+- Route immutable physical onboarding/static facts to `nxt_commissioning`;
+  never infer them from simulation config, telemetry, or USD.
 - Route canonical downstream state to `nxt_facility` without turning it into a
   mutable runtime.
 - Route observation evidence/assembly to `nxt_telemetry`.
-- Treat future Site Runtime work as unimplemented cross-contract orchestration,
-  not a state, policy, projection, or execution owner.
+- Route ordering/input validation, existing assembler invocation,
+  publication-quality admission, exact state/report envelopes,
+  checkpoint/recovery, and idempotent state publication coordination to the
+  merged `nxt_site_runtime`. Keep it orchestration only, not an observation,
+  state, policy, projection, command-admission, or execution owner.
 - Route historical evidence to `nxt_memory` without feedback.
 - Route viewer replay/export work to `nxt_range_viewer`, using public
   `nxt_range_ops` APIs without runtime ownership or hidden simulator facts.
@@ -52,11 +54,15 @@ dependency in the plan. Reject any design that:
 
 - creates a second live facility truth;
 - duplicates an existing package, decision engine, policy, schema, or store;
+- silently aggregates, ranks, deduplicates, or resolves advisory outputs without
+  an approved tested composition contract;
 - uses memory, recommendations, viewer frames, or USD as runtime input;
 - lets advisory code call execution APIs;
 - lets an LLM, generative agent, or tool call reach directives,
   `RobotTaskInterface`, adapters, ROS, actuators, or e-stop APIs directly;
 - bypasses `SafetyShield`;
+- treats Site Runtime's state-publication `QualityGate` as decision policy,
+  physical command admission, or robot safety authorization;
 - hides cross-layer coupling in a convenience import;
 - lets missing/default/backfill behavior masquerade as measured fact or erases
   provenance; or
@@ -69,6 +75,13 @@ canonical serialization, and content-derived identifiers where established.
 Search both decision surfaces before adding advice; when overlap is unavoidable,
 name one semantic owner and define tested reuse, parity, or intentional
 divergence.
+
+Concrete physical telemetry adapters/transports, live hardware/vendor
+integrations, production state publishers/sinks, site-level physical command
+admission, autonomous actuator execution, live Omniverse/Nucleus delivery, and
+production real-site deployment are not implemented. Do not present protocols,
+test doubles, or merged orchestration contracts as those integrations, and keep
+LLMs out of execution, admission, actuator, e-stop, and safety loops.
 
 ## Verify and hand off
 

@@ -33,14 +33,14 @@ Classify the feature before choosing a directory:
 | Canonical downstream snapshot | `nxt_facility.state` |
 | Broad deterministic manager advice over FacilityState | `nxt_facility.decisions` |
 | Observation contract/assembly/quality | `nxt_telemetry` |
-| Physical static onboarding facts | Commissioning, where the branch/package is present |
+| Physical static onboarding facts | `nxt_commissioning` |
 | Policy-specific trust, trace, evaluation, workflow, ledger | `nxt_pilot_ops` |
 | Historical evidence | `nxt_memory` |
 | Viewer replay/export | `nxt_range_viewer` |
 | State/layout-to-USD projection | `nxt_range_twin` |
 | Micro handoff task sequencing/execution | `HandoffController` and `RobotTaskInterface` |
 | Physical site-level task admission/translation | No implemented owner or contract; pause for design/approval |
-| Cross-package physical-site orchestration | Future Site Runtime boundary; not implemented |
+| Cross-package physical-site state orchestration | `nxt_site_runtime`: ordering/input validation, existing telemetry assembly invocation, publication-quality gate, exact state/report envelope, checkpoint/recovery, idempotent state publication |
 | ROI semantics | Versioned `@nxtektal/roi-engine` |
 
 If no row fits, stop and write the missing responsibility explicitly. Do not
@@ -77,8 +77,10 @@ mechanical dependency guard before implementation is considered complete.
   engines. If established overlap must change, name one semantic owner and
   specify whether the other reuses it, is parity-locked to it, or intentionally
   diverges for a documented reason. Test that contract.
-- Presentation or orchestration may aggregate advisory outputs; it must not
-  silently reconcile conflicting advice or become another policy owner.
+- Presentation or orchestration may display advisory outputs separately. Any
+  aggregation, ranking, deduplication, conflict resolution, or composition
+  requires an approved tested contract; it must not happen silently or create
+  another policy owner.
 
 Current ball-availability overlap is documented intentional divergence, not
 parity: facility rules use the v1 state/supply model; the Guardian owns its
@@ -110,7 +112,13 @@ Use a diagram only when it makes the data/dependency flow materially clearer.
 For physical-site work, verify the
 [deployment contract](../context/deployment.md): commissioning owns static facts,
 telemetry owns observations/assembly evidence, FacilityState remains the
-downstream contract, and the future Site Runtime owns orchestration only.
+downstream contract, and `nxt_site_runtime` owns orchestration only. The runtime
+must retain the exact `FacilityState` and separate `AssemblyReport`, own no
+observation/state/advice/projection/execution semantics, and keep its quality
+gate strictly about state-publication data quality—not physical command
+admission or robot safety. Concrete physical sources/transports/publishers,
+hardware/vendor integrations, live-site service operation, and production
+deployment remain absent.
 
 For robot/control work, reject a design unless it preserves:
 
