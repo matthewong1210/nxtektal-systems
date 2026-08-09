@@ -1,0 +1,153 @@
+# Deployment architecture and maturity
+
+This file separates binding architectural roles from implementation status.
+Recheck the current branch and merged history before making a release claim.
+
+## Merged-main baseline: 2026-08-09
+
+The baseline for this operating layer is `main` at
+`b055c9472737feb923c6ac48fad44a5b7e43333c`.
+
+| Boundary | Status at baseline | What is actually present |
+|---|---|---|
+| Observation contract and assembler | Merged | `Observation`, `ObservationFrame`, `SiteConfig`, `UpstreamInputs`, `assemble_from_observations()`, and `AssemblyReport`; only a synthetic producer exists |
+| Shadow Ops | Merged by PR #19 (`e84c5016a19d1d4aec0b4b183164c08bba5b164e`) | FacilityState adaptation, named-policy evaluation, trace, human workflow, and ledger; no live runner or command bridge |
+| Commissioning | Merged by PR #20 (`89e93f6a8ea0cd469d6da907321eafe30318fa49`) | Immutable `CommissionedSite`, strict validation/storage, one-way static projections, and setup-only Site Runtime binding |
+| Site Runtime | Merged by PR #22 (`b055c9472737feb923c6ac48fad44a5b7e43333c`) | Orchestration library, envelope schema, input/quality gates, source/publisher ports, checkpoints, recovery, and idempotent publication coordination |
+| Physical telemetry adapters and transport | Not implemented | No hardware, POS, weather, fleet, MQTT, Kafka, OPC-UA, or vendor source/transport implementation |
+| Physical state publisher or consumer delivery | Not implemented | `StatePublisher` and `RuntimeSink` are protocols/test seams; there is no live decision, memory, twin, or external-system delivery service |
+| Physical robot execution | Not implemented | Mock adapter works; Isaac Sim and ROS 2 adapters raise unavailable errors; no site-level physical command admission exists |
+| Live twin delivery and real-site deployment | Not implemented | No live Omniverse/Nucleus delivery, production site service, or real-site performance evidence |
+
+Merged library contracts are not proof of deployed physical integrations. Keep
+protocols, test doubles, and deterministic rehearsal separate from live-service
+claims.
+
+## Static truth versus dynamic evidence
+
+For a physical facility, commissioning owns **what exists and how it is
+configured**. A validated, immutable `CommissionedSite` manifest is
+authoritative for:
+
+- site and deployment identity, timezone, and location metadata;
+- surveyed coordinate/spatial references and zone definitions;
+- equipment and robot assets, declared capabilities, capacities, operating
+  constraints, and safety-relevant limits;
+- sensor/channel bindings and calibration evidence; and
+- provenance for every important declaration.
+
+Commissioning does not own live battery, pose, payload, inventory, task, demand,
+observation, availability, or transport state. A changed physical declaration
+receives a new deployment identity; do not rewrite an existing manifest or copy
+facts back from a scenario, `SiteConfig`, telemetry, viewer, or USD artifact.
+
+Commissioning projections are deterministic, disposable, and one-way:
+
+```text
+CommissionedSite
+    -> static site-configuration projection
+    -> commissioned digital-twin layout projection
+    -> telemetry-adapter binding/calibration projection
+```
+
+`project_site_config()` is a static JSON-ready projection, not the current
+`SiteConfig` constructor shape. `project_legacy_site_config()` requires an
+explicit `LegacySiteConfigContext` for non-commissioned simulation/service
+inputs. `bind_commissioned_site()` uses that existing compatibility projection
+once at setup to produce `RuntimeSiteBinding(site_id, deployment_id,
+SiteConfig)`. It does not make commissioning a runtime loop or authorize
+invented context.
+
+## Observation assembly and Site Runtime flow
+
+Telemetry continues to own the reusable assembly primitive:
+
+```text
+ObservationFrame + SiteConfig + UpstreamInputs
+    + optional previous FacilityState
+    -> assemble_from_observations()
+    -> FacilityState + AssemblyReport
+```
+
+Site Runtime v0 wraps that existing contract without redefining it:
+
+```text
+CommissionedSite + explicit LegacySiteConfigContext
+    -> bind_commissioned_site() -> RuntimeSiteBinding
+
+abstract ObservationSource
+    -> SequencedObservationFrame
+       (ObservationFrame + UpstreamInputs + source references + sequence)
+    -> SiteRuntimePipeline input/freshness validation
+    -> existing assemble_from_observations(frame, site_config, upstream)
+    -> exact FacilityState + AssemblyReport
+    -> mechanical QualityGate
+    -> nxt-site-runtime/facility-snapshot/v1 envelope
+    -> checkpoint / recovery / idempotent StatePublisher
+    -> source acknowledgement
+```
+
+Runtime v0 deliberately does not pass a previous `FacilityState` to the
+assembler. It rejects missing or stale required input before publication rather
+than presenting prior/default backfill as current physical truth. Its quality
+gate admits **state publication** based on input and assembly quality; it is not
+operational policy, site-level physical command admission, or a robot safety
+gate. `StatePublisher` publishes state envelopes, not commands. `RuntimeSink`
+is best-effort visibility, not control.
+
+`ObservationFrame` remains input evidence, not facility truth. Preserve source,
+sample/availability times, status, calibration, confidence, sequence,
+missingness, consistency, and provenance. `FacilityState` remains the exact
+canonical downstream state object inside the envelope; `AssemblyReport` and
+runtime-quality metadata remain separate evidence. In simulation,
+`RangeSimulation` and `BallLedger` remain mutable runtime truth.
+
+## Site Runtime ownership limits
+
+`nxt_site_runtime` owns orchestration metadata and behavior: site-level input
+ordering, validation, mechanical publication-quality admission, deterministic
+envelope identity, checkpoint/recovery, idempotent publication coordination,
+and source acknowledgement/rejection. It must not:
+
+- create a second assembler, mutable facility model, or replacement for
+  `FacilityState`;
+- own commissioning facts, telemetry semantics, recommendation semantics, USD
+  state, memory, or robot behavior;
+- reach into `RangeSimulation` or use viewer/USD/memory/recommendations as input
+  truth;
+- duplicate `nxt_facility` or `nxt_pilot_ops` decision logic, aggregate their
+  recommendations silently, or become a third decision engine;
+- turn `AssemblyReport` uncertainty into silent defaults; or
+- call directives, `RobotTaskInterface`, adapters, ROS, actuators, or e-stop
+  APIs, directly or through an LLM/tool call.
+
+The merged package defines source, state-publisher, and visibility-sink
+protocols; deterministic sequence/replay/idempotency behavior; an envelope; and
+in-memory/JSON checkpoints. It does **not** implement concrete physical sources,
+hardware/vendor transports, a production publisher/fan-out, an external
+long-running service scheduler, live site operations, physical command
+authorization/admission, actuator execution, or hardware acknowledgement.
+Those boundaries require separate recon, design, and architecture approval.
+
+The contract surface imports without the simulator or USD stack. Successful
+processing currently reaches the existing telemetry assembler, whose entity
+compatibility requires the `range-ops` extra. That packaging detail does not
+give Site Runtime ownership of simulation truth.
+
+## Placement rules for deployment work
+
+| Change | Owner/status |
+|---|---|
+| Surveyed/static physical site fact or calibration | `nxt_commissioning` |
+| Observation value, source metadata, or assembly quality | `nxt_telemetry` |
+| Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
+| Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
+| Broad state-derived manager advice | `nxt_facility.decisions` |
+| Policy trust, trace, evaluation, human workflow, or ledger | `nxt_pilot_ops` |
+| Facility visualization | `nxt_range_twin` projection from declared layout/state contracts |
+| Micro handoff task execution | `HandoffController` / `RobotTaskInterface` / selected adapter |
+| Concrete physical telemetry source/transport/publisher | Not implemented; requires approved integration design |
+| Physical site-level collector dispatch/command admission | Not implemented; no existing API or owner |
+
+Before changing any row, run the
+[pre-implementation architecture review](../workflows/architecture-review.md).

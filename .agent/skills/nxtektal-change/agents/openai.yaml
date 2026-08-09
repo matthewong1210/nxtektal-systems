@@ -1,0 +1,4 @@
+interface:
+  display_name: "NXTektal Change"
+  short_description: "Make architecture-safe repository changes"
+  default_prompt: "Use $nxtektal-change to implement this repository change safely."

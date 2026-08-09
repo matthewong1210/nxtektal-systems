@@ -1,0 +1,4 @@
+interface:
+  display_name: "NXTektal Review"
+  short_description: "Review changes against repository boundaries"
+  default_prompt: "Use $nxtektal-review to review this change for architectural consistency."
