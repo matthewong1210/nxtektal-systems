@@ -175,15 +175,13 @@ explicit without pretending the rename has occurred.
 
 ## Repository surfaces
 
-The checkout contains three independent surfaces:
+The standalone checkout contains two independent implementation surfaces:
 
 1. `simulation/`: the Python simulation and Site OS stack.
 2. `nxtektal-roi-engine/`: a standalone deterministic TypeScript package.
-3. Root HTML, JavaScript, voice, and 3D assets: an earlier Jarvis prototype with
-   no dependency on the Site OS.
 
-Sharing a repository does not create a runtime dependency. The legacy Jarvis
-surface is documented separately in [JARVIS_PROTOTYPE.md](JARVIS_PROTOTYPE.md).
+Root documentation and `.agent/` govern both surfaces without creating a
+runtime dependency between them.
 
 ## Stable technical references
 

@@ -1,9 +1,13 @@
 # Product milestones
 
-Status snapshot: **2026-08-09**, based on exact `main` commit
+Status snapshot: **2026-08-09**, based on the exact source-repository `main` commit
 `192292735221e503915f286627dc64f001942881` and the linked GitHub pull
 requests. An open branch is evidence of work in progress, not merged product
 capability.
+
+The linked pull requests belong to the source repository and are retained
+verbatim as historical provenance. They do not represent pull requests in this
+standalone repository.
 
 ## Merged on `main`
 

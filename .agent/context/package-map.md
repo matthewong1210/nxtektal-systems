@@ -7,9 +7,11 @@ responsible for a contract or behavior.
 
 | Path | Responsibility | Verification |
 |---|---|---|
-| Root Jarvis files | Dashboard, voice loop, landing page, and 3D assets | No automated root test suite; use scoped manual checks |
 | `simulation/` | Python virtual handoff, operations runtime, and Site OS layers | Pytest, config validation, optional wheel build |
 | `nxtektal-roi-engine/` | Deterministic formula-lock ROI engine | Typecheck, Vitest, package build |
+
+Root documentation and `.agent/` govern both implementation surfaces without
+owning production behavior or creating cross-surface runtime coupling.
 
 ## Python packages and tools
 

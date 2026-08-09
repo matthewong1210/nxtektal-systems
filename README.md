@@ -94,6 +94,11 @@ existing 60–90 second script is in
 
 ## Repository map
 
+This standalone repository retains two independent implementation surfaces:
+the Python simulation/Site OS stack and the TypeScript ROI engine. Repository
+governance and documentation apply across both without creating a runtime
+dependency between them.
+
 | Path | Purpose | Product status |
 |---|---|---|
 | `simulation/nxt_range_ops/` | Whole-site operating-day simulation and guarded directive path | Implemented simulation environment |
@@ -108,11 +113,11 @@ existing 60–90 second script is in
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `nxtektal-roi-engine/` | Versioned, deterministic ROI calculations | Implemented standalone package |
 | `AGENTS.md`, `.agent/`, `docs/AGENT_OPERATING_MANUAL.md` | AI engineering governance and architecture-safe workflows | Implemented repository operating system |
-| Root Jarvis files | Earlier voice/dashboard experiment | Independent prototype; not part of the Site OS |
 
-The distribution name `nxt-sim` and repository name `jarvis-ai-agent` are
-historical. They do not define the product architecture. Package responsibilities
-and naming are normalized in [Architecture](docs/ARCHITECTURE.md#package-and-name-map).
+The distribution name `nxt-sim` and source-repository name `jarvis-ai-agent`
+are historical provenance. They do not define the product architecture.
+Package responsibilities and naming are normalized in
+[Architecture](docs/ARCHITECTURE.md#package-and-name-map).
 
 ## Start here
 
@@ -125,10 +130,10 @@ For a product or investor review:
    not yet built.
 4. Run the [Demo guide](docs/DEMO.md).
 
-For engineering work, start with [`simulation/README.md`](simulation/README.md)
-and the stable contract docs linked from the architecture guide. The root
-dashboard and voice-loop setup has moved to
-[Legacy Jarvis prototype](docs/JARVIS_PROTOTYPE.md).
+For engineering work on the Site OS stack, start with
+[`simulation/README.md`](simulation/README.md) and the stable contract docs
+linked from the architecture guide. For ROI work, start with
+[`nxtektal-roi-engine/README.md`](nxtektal-roi-engine/README.md).
 
 ## Claims discipline
 

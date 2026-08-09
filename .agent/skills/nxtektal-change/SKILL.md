@@ -1,6 +1,6 @@
 ---
 name: nxtektal-change
-description: Execute architecture-safe changes in the NXTektal repository. Use for implementation, refactoring, bug fixes, contract or schema changes, package additions, tests, scripts, and architecture documentation across the simulation/Site OS stack, ROI engine, or root Jarvis surface.
+description: Execute architecture-safe changes in the NXTektal repository. Use for implementation, refactoring, bug fixes, contract or schema changes, package additions, tests, scripts, and architecture documentation across the simulation/Site OS stack or ROI engine.
 ---
 
 # Change NXTektal safely
@@ -44,8 +44,8 @@ description: Execute architecture-safe changes in the NXTektal repository. Use f
   `RobotTaskInterface`, preserving timeout/recovery/e-stop contracts. No
   site-level physical collector-dispatch contract exists.
 - Route ROI formulas exclusively through the versioned ROI engine.
-- Keep root Jarvis, Python simulation, and ROI changes independent unless an
-  existing contract explicitly connects them.
+- Keep Python simulation and ROI changes independent unless an existing
+  contract explicitly connects them.
 
 ## Preserve the architecture
 

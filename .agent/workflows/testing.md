@@ -111,12 +111,6 @@ Formula semantics are locked. Test exact formula IDs, evidence governance,
 worked examples, decimal precision, and backward recomputability when a new
 model version is intentionally introduced.
 
-## Root Jarvis prototype
-
-No automated root test command is configured. Use the narrowest relevant
-manual/server/browser smoke check and record exactly what was observed. Do not
-claim repository-wide automated coverage.
-
 ## Documentation and agent infrastructure
 
 At minimum run the hygiene workflow, validate skill metadata, verify internal

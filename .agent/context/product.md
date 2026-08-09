@@ -22,11 +22,11 @@ and robot adapters into one package.
 
 | Surface | Purpose | Coupling status |
 |---|---|---|
-| Root Jarvis prototype | Static dashboard, voice loop, and landing-page assets | Independent of NXTektal Python and ROI packages |
 | `simulation/` | Virtual handoff lab, whole-range runtime, Site OS state/advisory/evidence/projection layers | Python project managed with `uv` |
 | `nxtektal-roi-engine/` | Deterministic, formula-locked driving-range ROI calculations | Independent TypeScript package |
 
-Do not infer a dependency merely because these surfaces share a repository.
+These two implementation surfaces share governance and documentation, not a
+runtime dependency.
 
 ## Product-layer vocabulary
 

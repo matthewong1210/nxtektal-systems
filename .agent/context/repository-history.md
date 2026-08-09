@@ -3,6 +3,10 @@
 This file records the evidence used to create the operating layer. It is a
 dated orientation aid, not a substitute for checking current Git/GitHub state.
 
+Commit identities and pull-request links below refer to the source repository
+and are retained verbatim as historical provenance. They do not describe refs
+or pull requests created in this standalone repository.
+
 ## Current merged baseline before investor documentation refresh: 2026-08-09
 
 - Exact `main` and `origin/main` audited:
@@ -107,10 +111,10 @@ attestations. Future agents must report exact commands and observed results.
 
 ## Documentation status caveats
 
-- Before the investor-facing documentation refresh, root `README.md` described
-  Jarvis rather than the full repository. The current root README is the
-  NXTektal product overview; legacy Jarvis setup is preserved separately in
-  `docs/JARVIS_PROTOTYPE.md`.
+- Before the investor-facing documentation refresh, the source repository's
+  root `README.md` described the historical Jarvis prototype rather than the
+  full repository. That prototype is not part of this standalone extraction;
+  the current root README describes the retained NXTektal surfaces.
 - `simulation/docs/architecture.md` is primarily the micro handoff view and is
   not a complete Site OS package map.
 - Several `*_recon.md`, `*_design.md`, and `*_plan.md` files retain historical

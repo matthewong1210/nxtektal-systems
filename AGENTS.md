@@ -11,8 +11,8 @@ Before editing:
 1. Read [`docs/AGENT_OPERATING_MANUAL.md`](docs/AGENT_OPERATING_MANUAL.md).
 2. Inspect `git status --short --branch`, the current branch, and the relevant
    package's source, tests, and stable docs. Preserve unrelated worktree changes.
-3. Classify the request as root Jarvis, `simulation/`, ROI engine, or
-   documentation/agent infrastructure. These are independent surfaces.
+3. Classify the request as `simulation/`, ROI engine, or documentation/agent
+   infrastructure. The two implementation surfaces are independent.
 4. Read the matching files under [`.agent/context/`](.agent/context/) and
    [`.agent/workflows/`](.agent/workflows/).
 5. State the owner of every fact you will read or write. If ownership is
@@ -27,15 +27,13 @@ architectural responsibility, not an inferred person or team.
 
 ## Repository scopes
 
-- Root HTML, JavaScript, assets, and `scripts/jarvis_server.mjs` form the
-  independent Jarvis prototype described in
-  [`docs/JARVIS_PROTOTYPE.md`](docs/JARVIS_PROTOTYPE.md). The root `README.md`
-  is the NXTektal product and investor overview.
 - `simulation/` is the Python NXTektal simulation and Site OS stack.
 - `nxtektal-roi-engine/` is an independent deterministic TypeScript formula
   engine. It does not depend on the Python stack.
-- Cross these boundaries only through an already documented contract. Do not
-  create a monorepo-wide dependency merely for convenience.
+- Root documentation and `.agent/` provide repository-wide governance for both
+  implementation surfaces; they are not a third runtime surface.
+- Cross implementation boundaries only through an already documented contract.
+  Do not create a repository-wide dependency merely for convenience.
 
 ## Non-negotiable architecture
 
@@ -192,8 +190,7 @@ agent does not silently change the lock or skip USD coverage.
 
 No Python formatter, linter, or type checker and no repository-local CI
 workflow are currently configured; never claim those checks ran unless
-configuration is added and the commands actually pass. The root Jarvis
-prototype has no automated test command.
+configuration is added and the commands actually pass.
 
 ## Review standard
 

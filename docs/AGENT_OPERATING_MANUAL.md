@@ -16,8 +16,8 @@ workflow, testing expectations, and review standard.
 1. Read root [`AGENTS.md`](../AGENTS.md).
 2. Run `git status --short --branch` and identify whether the checkout is
    `main`, a feature branch, or a stacked branch.
-3. Classify the task as root Jarvis, Python `simulation/`, standalone ROI
-   engine, or docs/agent infrastructure.
+3. Classify the task as Python `simulation/`, standalone ROI engine, or
+   docs/agent infrastructure.
 4. Read the matching package source, tests, and stable docs—not only plans or
    PR prose.
 5. Open the relevant files in [`.agent/context/`](../.agent/context/) and
@@ -30,19 +30,18 @@ workflow, testing expectations, and review standard.
 
 ## Repository reality
 
-This is a heterogeneous repository with three independent surfaces:
+This standalone repository has two independent implementation surfaces:
 
 | Surface | Technology | Role |
 |---|---|---|
-| Root Jarvis prototype | HTML, browser JavaScript, dependency-free Node server, assets | Personal command-center/voice prototype |
 | `simulation/` | Python 3.11+, `uv`, Hatch, pytest | NXTektal virtual handoff, range operations, and Site OS layers |
 | `nxtektal-roi-engine/` | TypeScript, npm, Vitest | Formula-locked deterministic ROI model |
 
-The root README is the NXTektal product and investor overview. The independent
-Jarvis surface is preserved in [`docs/JARVIS_PROTOTYPE.md`](JARVIS_PROTOTYPE.md)
-rather than presented as the current product. There is no workspace-level
-dependency graph connecting these three surfaces. Do not add one without an
-explicit product requirement and architecture review.
+The root README is the NXTektal product and investor overview. Root
+documentation and `.agent/` form the shared governance layer; they do not add a
+third runtime surface. There is no workspace-level dependency graph connecting
+the two implementation surfaces. Do not add one without an explicit product
+requirement and architecture review.
 
 There is no named human ownership file. Package ownership in this manual means
 responsibility for behavior and contracts.
@@ -336,7 +335,7 @@ Use the exact commands in
 normative testing source. It covers all-extras Python setup, the current
 `uv.lock`/`twin`-extra gap, focused package tests, architecture guards, the full
 suite, config validation, package builds, ROI typecheck/tests/build, and root
-Jarvis manual-check expectations.
+documentation and agent-infrastructure checks.
 
 The core rule is evidence outward from the change: focused regression, package,
 boundary/parity/determinism, then the full surface. Optional dependency skips
@@ -345,9 +344,9 @@ do not count as coverage.
 ### Tooling gaps
 
 No Python formatter, linter, or static type checker is configured at the
-merged-main baseline. No repository-local GitHub Actions workflow was present. The
-root Jarvis prototype has no automated test command. Report these as gaps; do
-not substitute unconfigured tools and imply repository endorsement.
+merged-main baseline. No repository-local GitHub Actions workflow was present.
+Report these as gaps; do not substitute unconfigured tools and imply repository
+endorsement.
 
 ## Review checklist
 
