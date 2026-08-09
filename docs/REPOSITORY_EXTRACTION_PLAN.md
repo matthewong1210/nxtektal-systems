@@ -8,9 +8,9 @@ either repository's visibility.
 
 | Item | Recorded state |
 |---|---|
-| Audit date | 2026-08-09 |
+| Audit date | 2026-08-10 |
 | Source repository | `matthewong1210/jarvis-ai-agent` |
-| Audited source `main` | `c7abc1330033764d17964be2011887b79c1966ea` |
+| Audited source `main` | `3e2925ea4918615f09aba5e5fc717173dde80b9a` |
 | Target repository | `matthewong1210/nxtektal-systems` |
 | Target state | Private and empty; no refs may be created during planning |
 | Extraction method | `git filter-repo` in a disposable mirror clone |
@@ -38,7 +38,8 @@ structure only in later, ordinary commits in the target repository.
 ## Merged source baseline
 
 The audited source `main` contains the completed NXTektal product and governance
-merge train through investor-facing documentation:
+merge train through investor-facing documentation and the TimeWindow semantics
+pin:
 
 | Pull request | Milestone | Merge commit |
 |---|---|---|
@@ -48,14 +49,16 @@ merge train through investor-facing documentation:
 | #22 | Site Runtime | `b055c9472737feb923c6ac48fad44a5b7e43333c` |
 | #23 | AI Engineering Operating System | `192292735221e503915f286627dc64f001942881` |
 | #21 | Investor-facing repository documentation | `c7abc1330033764d17964be2011887b79c1966ea` |
+| #15 | TimeWindow minute-of-day semantics pin | `3e2925ea4918615f09aba5e5fc717173dde80b9a` |
 
 These commits establish merged-main truth. Earlier plans and PR descriptions
 that call Shadow Ops, Commissioning, Site Runtime, governance, or investor
-documentation unmerged are historical evidence only.
+documentation unmerged, or that omit the merged TimeWindow semantics pin, are
+historical evidence only.
 
 The eventual source tag should point to the merge commit that includes this
 reviewed extraction plan. That commit does not exist yet, so
-`c7abc1330033764d17964be2011887b79c1966ea` is the audit baseline, not an
+`3e2925ea4918615f09aba5e5fc717173dde80b9a` is the audit baseline, not an
 authorization to tag or extract.
 
 ## PR #24 decision
@@ -66,7 +69,7 @@ PR #24, `docs: add repository extraction plan`, is an open draft from
 `codex/repository-extraction-plan` at
 `f06085886f5bedcc837e0ed4a6f368fddc0f66b8`. It adds only
 `docs/REPOSITORY_EXTRACTION_PLAN.md`, but it is based directly on the old
-Digital Twin Phase 0 baseline and is 17 source-main commits behind this audit.
+Digital Twin Phase 0 baseline and is 19 source-main commits behind this audit.
 It describes Shadow Ops, Commissioning, Site Runtime, governance, and investor
 documentation as draft, uncommitted, or untracked. Those status claims are no
 longer safe extraction authority.
@@ -146,19 +149,24 @@ lands under the same reviewed tree before the source tag.
 No NXTektal Python or ROI build imports these paths. They remain in the source
 repository with their full history.
 
-### Decision required: shared or ambiguous
+### Shared, excluded, or deferred
 
 | Path or ref | Current decision for baseline v1 | Required follow-up |
 |---|---|---|
 | `.claude/skills/3d-asset-generator/` | Exclude | It is generic tooling currently colocated with Jarvis assets and has no current NXTektal contract; migrate later only after an ownership and portability review |
 | `.mcp.json` | Exclude | It configures a generic UI MCP server and is not required by either NXTektal package build |
 | Historical `README.md` blobs | Include the current path, keep target private | The current blob is NXTektal, but earlier blobs describe Jarvis; approve that retained history before tagging and review it again before any public release |
-| Open PR #3 | Exclude because it is not on `main` | Decide separately whether the ROI web calculator should merge, be refreshed, or remain source-only |
-| Open PR #4 | Exclude because it is not on `main` | Decide separately whether the ROI spec/review material is suitable for the target and for any future public boundary |
-| Open PR #13 | Exclude because it is not on `main` | Review the four-panel Site OS demo against the already merged viewer/demo and current architecture before any later merge |
-| Open PR #15 | Exclude because it is not on `main` | Decide whether to merge the TimeWindow comments/regression test before freezing the source tag |
+| Open PR #3 | Defer; exclude from extraction source v1 | Revisit the ROI Quick Estimate UI after its customer-facing economic semantics, portable tooling scope, and current UI/build verification are resolved |
+| Open PR #4 | Defer; exclude from extraction source v1 | Revisit the ROI specification council review after its unresolved version contract, formula ambiguities, and review findings are resolved |
+| Open PR #13 | Defer; exclude from extraction source v1 | Revisit the Site OS Demo after deciding how its distinct panels fit the merged viewer/demo, package map, Site Runtime, Commissioning, and Shadow Ops boundaries |
 | Open draft PR #24 | Supersede; exclude stale commit | Use the refreshed plan instead; close only as a separate authorized action |
 | Untracked files in any checkout | Exclude | Only committed objects reachable from the approved source tag are eligible |
+
+PR #15 is no longer an open-branch decision: its TimeWindow semantics pin is
+included through merge commit
+`3e2925ea4918615f09aba5e5fc717173dde80b9a`. PRs #3, #4, and #13 are
+intentionally deferred from extraction source v1, and PR #24 remains
+superseded.
 
 The baseline rule is simple: an open branch is not silently unioned into the
 extraction. If an open NXTektal PR is required for v1, it must first be reviewed
@@ -405,7 +413,7 @@ migration archive. Rewriting changes commit and tag objects, so source commit
 and tag signatures do not survive as valid signatures; preserve their source
 verification separately and create any target attestation only after review.
 
-All six milestone merge commits are mandatory preservation gates:
+All seven milestone merge commits are mandatory preservation gates:
 
 ```bash
 commit_map="filter-repo/commit-map"
@@ -420,7 +428,8 @@ for source_sha in \
   89e93f6a8ea0cd469d6da907321eafe30318fa49 \
   b055c9472737feb923c6ac48fad44a5b7e43333c \
   192292735221e503915f286627dc64f001942881 \
-  c7abc1330033764d17964be2011887b79c1966ea; do
+  c7abc1330033764d17964be2011887b79c1966ea \
+  3e2925ea4918615f09aba5e5fc717173dde80b9a; do
   filtered_sha="$(awk -v old="$source_sha" '$1 == old {print $2}' "$commit_map")"
   test -n "$filtered_sha"
   test "$filtered_sha" != "$zero_sha"
@@ -762,7 +771,7 @@ blocks the push.
 
 The migration is accepted only when a fresh target clone matches the recorded
 normalized target-main commit/tree, the extraction tag peels to the separately
-recorded raw filtered commit/tree and is its ancestor, all six milestone
+recorded raw filtered commit/tree and is its ancestor, all seven milestone
 mappings are nonzero and valid, all package/test/build/demo/link/secret/hygiene
 gates pass, GitHub metadata limitations are recorded, branch protections are
 active, and the source repository remains unchanged.
@@ -771,20 +780,18 @@ active, and the source repository remains unchanged.
 
 1. Approve and merge this replacement plan, then record its exact source merge
    commit.
-2. Decide whether open NXTektal PRs #3, #4, #13, and #15 must merge before the
-   source tag or are intentionally deferred from v1.
-3. Approve the source tag name and creation at the final reviewed source commit.
-4. Approve the final treatment of `.claude/skills/3d-asset-generator/` and
+2. Approve the source tag name and creation at the final reviewed source commit.
+3. Approve the final treatment of `.claude/skills/3d-asset-generator/` and
    `.mcp.json`; the current baseline decision is exclusion.
-5. Define the access-controlled location, retention policy, and redaction rules
+4. Define the access-controlled location, retention policy, and redaction rules
    for the GitHub metadata export, pre-filter bundle, commit map, and logs.
-6. Approve the one recorded all-history content-replacement rule for the
+5. Approve the one recorded all-history content-replacement rule for the
    machine-specific shorthand in the included ROI design document.
-7. Approve retention of the mixed Jarvis history on the current `README.md`
+6. Approve retention of the mixed Jarvis history on the current `README.md`
    path in the private target; review again before any public release.
-8. Confirm license strategy and binary demo/visual-asset provenance before any
+7. Confirm license strategy and binary demo/visual-asset provenance before any
    public release.
-9. Approve target-only rollback authority, branch protection, CI policy,
+8. Approve target-only rollback authority, branch protection, CI policy,
    maintainers, and the later public/private publication boundary.
 
 Until these decisions are recorded, do not create the source tag, run the
