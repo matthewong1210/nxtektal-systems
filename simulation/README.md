@@ -1,4 +1,13 @@
-# NXTektal Virtual Handoff Lab v0.1
+# NXTektal simulation and Site OS stack
+
+> **Repository orientation:** this directory began as the Virtual Handoff Lab
+> and the Python distribution is still named `nxt-sim`, but it now contains the
+> whole-site operations simulator and downstream Site OS packages as well. See
+> the root [product overview](../README.md), [architecture map](../docs/ARCHITECTURE.md),
+> and [milestones](../docs/MILESTONES.md) before reading the phase-specific
+> details below.
+
+## Virtual Handoff Lab v0.1
 
 Modular simulation and validation environment for the autonomous ball-collection
 robot's **docking, lifting, dumping, collision avoidance, and equipment
@@ -17,10 +26,29 @@ Environment**: a SimPy discrete-event operational digital twin of a whole
 driving range (dispenser → demand → zones → collection → handoff → washing →
 dispenser) with a Gymnasium `RangeOpsEnv`, a non-bypassable SafetyShield,
 four baseline policies, ten scenario generators, Parquet decision logging,
-and an evaluation harness. Install with `uv sync --extra range-ops`; see
+and an evaluation harness. Install with
+`uv sync --frozen --extra range-ops`; see
 [docs/range_ops.md](docs/range_ops.md). It reuses only Phase 0's pure
 vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 `nxt_sim`.
+
+## Site OS layers in this directory
+
+| Package | Responsibility |
+|---|---|
+| `nxt_range_ops` | Mutable whole-site simulation and the guarded simulator directive path |
+| `nxt_facility` | Frozen downstream `FacilityState`, analysis, advice, and briefing |
+| `nxt_telemetry` | Observation evidence, synthetic input, state assembly, and quality reporting |
+| `nxt_memory` | Append-only historical evidence with no live-loop feedback |
+| `nxt_range_twin` | Projection-only FacilityState/layout to USD mapping |
+| `nxt_pilot_ops` | Shadow policy evaluation, trace, human workflow, and tamper-evident advisory records |
+| `nxt_commissioning` | Immutable physical-site static truth and deterministic one-way projections |
+| `nxt_site_runtime` | Input sequencing, publication-quality state envelopes, checkpoint/recovery, and idempotent state-publication coordination |
+| `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
+
+The robot handoff packages and Site OS packages remain separate layers. The
+full dependency and truth map is in
+[`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
 
 ## Honest-scope disclaimers
 
@@ -29,15 +57,28 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
   count them. Results validate the *pipeline*, never the *design*.
   See [docs/assumptions.md](docs/assumptions.md) and
   [docs/missing_inputs.md](docs/missing_inputs.md).
-* **Ball flow is not simulated.** Granular flow, ball-to-ball friction,
-  bridging, and jamming are physical-test risks. The mock's unloading model is
-  a configured probability stand-in and is labeled as such everywhere.
+* **Granular physical flow is not simulated.** `nxt_range_ops` conserves integer
+  ball inventory around the facility, but ball-to-ball friction, bridging, and
+  jamming remain physical-test risks. The mock's unloading model is a configured
+  probability stand-in and is labeled as such everywhere.
+* **Merged contracts are not live physical integrations.** Commissioning owns
+  static facility declarations, and Site Runtime orchestrates sequenced state
+  assembly/publication, but only synthetic sources and abstract/test ports exist.
+  No physical telemetry transport, vendor adapter, production publisher, command
+  admission, automatic robot execution, or real-site service is implemented.
+* **Advice is not execution.** Facility recommendations and Shadow Ops records
+  are advisory. Native `FacilityState` lacks the ETA, yield, capabilities,
+  permission, current demand, and live washer availability needed for autonomous
+  collector dispatch, and no LLM participates in command or safety loops.
+* **USD is downstream projection only.** Digital-twin output is regenerated from
+  declared layout and the FacilityState stream; it is never operational truth or
+  policy input, and live Omniverse/Nucleus delivery is not implemented.
 * The tipping indicator is a static heuristic (`static_margin_heuristic_v0`),
   not validated dynamics.
 
 ## Environment requirements (documented before anything installs)
 
-* Any machine with [uv](https://docs.astral.sh/uv/). `uv sync` creates a
+* Any machine with [uv](https://docs.astral.sh/uv/). `uv sync --frozen` creates a
   **project-local** `simulation/.venv` and downloads three wheels (pydantic,
   PyYAML, pytest — a few MB). If no Python >= 3.11 is present, uv downloads a
   managed CPython (~35 MB) into `~/.local/share/uv`. **No system-level
@@ -53,7 +94,7 @@ python3 scripts/inspect_environment.py
 
 ```bash
 cd simulation
-uv sync                                     # one-time: project-local .venv
+uv sync --frozen                            # one-time: project-local .venv
 
 uv run pytest                               # full unit-test suite
 uv run python scripts/validate_configs.py   # validate every config

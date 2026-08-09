@@ -3,7 +3,18 @@
 This file records the evidence used to create the operating layer. It is a
 dated orientation aid, not a substitute for checking current Git/GitHub state.
 
-## Finalization baseline: 2026-08-09
+## Current merged baseline before investor documentation refresh: 2026-08-09
+
+- Exact `main` and `origin/main` audited:
+  `192292735221e503915f286627dc64f001942881`.
+- AI Engineering Operating System PR #23 merged at that commit, versioning
+  `AGENTS.md`, the Claude Code entry point, `.agent/` context/workflows/skills,
+  and `docs/AGENT_OPERATING_MANUAL.md` with the repository.
+- The product merge-train baseline below remains the implementation baseline
+  for Shadow Ops, Commissioning, and Site Runtime; PR #23 added governance and
+  did not change their production contracts.
+
+## Product merge-train baseline: 2026-08-09
 
 - Exact `main` and `origin/main` audited:
   `b055c9472737feb923c6ac48fad44a5b7e43333c`.
@@ -56,6 +67,7 @@ dated orientation aid, not a substitute for checking current Git/GitHub state.
 | [#19](https://github.com/matthewong1210/jarvis-ai-agent/pull/19) | 2026-08-09 | Shadow Ops adapter, policy evaluation/trace, human workflow, and ledger (`e84c5016a19d1d4aec0b4b183164c08bba5b164e`) |
 | [#20](https://github.com/matthewong1210/jarvis-ai-agent/pull/20) | 2026-08-09 | Static physical-facility manifest, validation/storage, one-way projections, and setup contract (`89e93f6a8ea0cd469d6da907321eafe30318fa49`) |
 | [#22](https://github.com/matthewong1210/jarvis-ai-agent/pull/22) | 2026-08-09 | Orchestration-only Site Runtime, deterministic FacilityState envelope, quality gate, checkpoints/recovery, and state-publication ports (`b055c9472737feb923c6ac48fad44a5b7e43333c`) |
+| [#23](https://github.com/matthewong1210/jarvis-ai-agent/pull/23) | 2026-08-09 | AI engineering operating system: repository truth, package, safety, testing, review, and agent/human workflow governance (`192292735221e503915f286627dc64f001942881`) |
 
 ROI precedent:
 
@@ -95,14 +107,18 @@ attestations. Future agents must report exact commands and observed results.
 
 ## Documentation status caveats
 
-- Root `README.md` describes Jarvis, not the full repository.
+- Before the investor-facing documentation refresh, root `README.md` described
+  Jarvis rather than the full repository. The current root README is the
+  NXTektal product overview; legacy Jarvis setup is preserved separately in
+  `docs/JARVIS_PROTOTYPE.md`.
 - `simulation/docs/architecture.md` is primarily the micro handoff view and is
   not a complete Site OS package map.
 - Several `*_recon.md`, `*_design.md`, and `*_plan.md` files retain historical
   "proposed", "no code", or unchecked-plan language after implementation.
-- `simulation/README.md` saying "ball flow is not simulated" refers to granular
-  physical flow/jamming; `nxt_range_ops` does simulate conserved integer ball
-  inventory.
+- An earlier `simulation/README.md` said "ball flow is not simulated" while
+  `nxt_range_ops` already simulated conserved integer inventory. The current
+  wording distinguishes that inventory model from unimplemented granular
+  physical flow, friction, bridging, and jamming.
 - `FacilityState` is downstream truth, not mutable runtime truth.
 - Shadow Ops, Commissioning, and Site Runtime are merged-main truth at the
   finalization baseline. Their earlier draft/sibling status is historical only.

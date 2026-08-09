@@ -48,7 +48,7 @@ From the `simulation/` directory:
 
 ```bash
 # 1. Install (one-time): simulator + demo extras
-uv sync --extra range-ops --extra demo
+uv sync --frozen --extra range-ops --extra demo
 
 # 2. Export a demo bundle (deterministic; replays a published E1 episode)
 uv run --no-sync python -m nxt_range_viewer \

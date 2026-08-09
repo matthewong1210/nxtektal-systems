@@ -1,5 +1,9 @@
 # Architecture — Virtual Handoff Lab v0.1
 
+> This document covers the robot handoff execution seam only. For the
+> repository-wide separation between AI operations, the digital twin, and robot
+> execution, start with [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md).
+
 ## Layering
 
 ```

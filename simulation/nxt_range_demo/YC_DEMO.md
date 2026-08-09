@@ -20,7 +20,7 @@ policies**; this demo replays its strongest rule-based baseline.
 
 ```bash
 # 1. Install
-uv sync --locked --extra range-ops --extra demo
+uv sync --frozen --extra range-ops --extra demo
 
 # 2. (only if reports/range_agent_e1/ is absent) regenerate the benchmark report
 uv run --no-sync python -m nxt_range_agent.benchmark --out reports/range_agent_e1

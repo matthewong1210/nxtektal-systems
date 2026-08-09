@@ -28,7 +28,9 @@ architectural responsibility, not an inferred person or team.
 ## Repository scopes
 
 - Root HTML, JavaScript, assets, and `scripts/jarvis_server.mjs` form the
-  independent Jarvis prototype described by the root `README.md`.
+  independent Jarvis prototype described in
+  [`docs/JARVIS_PROTOTYPE.md`](docs/JARVIS_PROTOTYPE.md). The root `README.md`
+  is the NXTektal product and investor overview.
 - `simulation/` is the Python NXTektal simulation and Site OS stack.
 - `nxtektal-roi-engine/` is an independent deterministic TypeScript formula
   engine. It does not depend on the Python stack.
