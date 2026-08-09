@@ -49,7 +49,10 @@ build-backend = "hatchling.build"
 # nxt_telemetry is the observation input boundary (Phase 4A).
 # nxt_range_twin is the digital twin / spatial intelligence projection layer.
 # nxt_pilot_ops is the downstream Shadow Ops recommendation/audit layer.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning"]
+# nxt_commissioning is the physical facility source-of-truth layer.
+# nxt_site_runtime orchestrates observation assembly, quality gates, recovery,
+# and downstream publication without owning any domain state or decisions.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
