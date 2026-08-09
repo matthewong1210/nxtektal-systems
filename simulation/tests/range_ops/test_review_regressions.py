@@ -9,6 +9,7 @@ from nxt_range_ops.core.directives import (
     SendToHandoff,
 )
 from nxt_range_ops.core.entities import HumanAssistReason, RobotActivity
+from nxt_range_ops.core.events import EventKind
 from nxt_range_ops.core.sim import RangeSimulation, _merge_windows
 from nxt_range_ops.scenarios.generators import make_scenario
 
@@ -143,6 +144,25 @@ def test_overlapping_closure_windows_keep_zone_closed():
             assert zone.is_open
             break
     assert closed_span_checked
+
+
+def test_time_windows_fire_on_minute_of_day_not_open_relative():
+    """TimeWindow minutes are minutes since midnight, and the sim clock
+    starts at ``open_seconds`` — so the handoff_station_outage window
+    (720-840) fires at 12:00-14:00 sharp, not 6 h late as it would if the
+    scheduler read window minutes as minutes-since-open."""
+    scenario = make_scenario("handoff_station_outage")
+    sim = RangeSimulation(scenario, seed=7)
+    assert sim.now == scenario.hours.open_seconds
+    while not sim.facility_closed:
+        sim.advance(600.0)
+    times = {
+        ev.kind: ev.t_s
+        for ev in sim.events.records
+        if ev.kind in (EventKind.STATION_OUTAGE, EventKind.STATION_RESTORED)
+    }
+    assert times[EventKind.STATION_OUTAGE] == 720 * 60.0
+    assert times[EventKind.STATION_RESTORED] == 840 * 60.0
 
 
 def test_demand_with_all_zones_closed_is_not_stockout():
