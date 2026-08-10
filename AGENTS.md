@@ -191,9 +191,10 @@ full suite, and config validation. ROI changes require typecheck, tests, and a
 build. The workflow also records the current `uv.lock`/`twin`-extra gap so an
 agent does not silently change the lock or skip USD coverage.
 
-No Python formatter, linter, or type checker and no repository-local CI
-workflow are currently configured; never claim those checks ran unless
-configuration is added and the commands actually pass.
+No Python formatter, linter, or type checker is currently configured. The
+repository CI workflow and exact local equivalents are documented in
+[`docs/CI.md`](docs/CI.md); never claim a check ran unless its command or
+GitHub Actions job actually passed.
 
 ## Review standard
 

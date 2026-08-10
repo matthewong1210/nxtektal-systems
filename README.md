@@ -137,7 +137,9 @@ For a product or investor review:
 For engineering work on the Site OS stack, start with
 [`simulation/README.md`](simulation/README.md) and the stable contract docs
 linked from the architecture guide. For ROI work, start with
-[`nxtektal-roi-engine/README.md`](nxtektal-roi-engine/README.md).
+[`nxtektal-roi-engine/README.md`](nxtektal-roi-engine/README.md). For continuous
+verification and exact local equivalents, read [CI and local
+verification](docs/CI.md).
 
 ## Claims discipline
 

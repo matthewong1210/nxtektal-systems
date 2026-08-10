@@ -348,9 +348,9 @@ do not count as coverage.
 ### Tooling gaps
 
 No Python formatter, linter, or static type checker is configured at the
-merged-main baseline. No repository-local GitHub Actions workflow was present.
-Report these as gaps; do not substitute unconfigured tools and imply repository
-endorsement.
+merged-main baseline. The post-migration verification workflow is documented
+in [`CI.md`](CI.md). Do not substitute unconfigured tools or describe local
+commands as GitHub Actions evidence.
 
 ## Review checklist
 
