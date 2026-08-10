@@ -1,0 +1,433 @@
+name: Verification
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-hygiene:
+    name: docs-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Test CI policy scripts
+        run: python -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Check committed change-set whitespace
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              diff_base="$PR_BASE_SHA"
+              diff_mode=merge-base
+              ;;
+            push)
+              diff_base="$PUSH_BEFORE_SHA"
+              diff_mode=direct
+              if [[ "$diff_base" =~ ^0+$ ]]; then
+                diff_base="$(git rev-parse HEAD^)"
+              fi
+              ;;
+            workflow_dispatch)
+              diff_base="$(git rev-parse HEAD^)"
+              diff_mode=direct
+              ;;
+            *)
+              echo "unsupported event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+          [[ "$diff_base" =~ ^[0-9a-f]{40}$ ]]
+          git cat-file -e "${diff_base}^{commit}"
+          if [[ "$diff_mode" == merge-base ]]; then
+            git diff --check "$diff_base"...HEAD --
+          else
+            git diff --check "$diff_base" HEAD --
+          fi
+      - name: Verify documentation and repository hygiene
+        run: python -B .github/scripts/verify_repository.py
+      - name: Verify the checkout was not mutated
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD --
+          git diff --exit-code HEAD --
+          untracked="$(git ls-files --others --exclude-standard)"
+          test -z "$untracked"
+
+  python-verification:
+    name: python-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      UV_NO_PROGRESS: "1"
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Set up pinned uv without dependency caching
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.29"
+          enable-cache: false
+      - name: Install locked Python environment with USD workaround
+        working-directory: simulation
+        run: |
+          uv sync --frozen --all-extras
+          uv pip install --python .venv/bin/python "usd-core==26.8"
+      - name: Prove optional coverage is installed
+        working-directory: simulation
+        run: |
+          uv run --no-sync python -B - <<'PY'
+          from importlib.metadata import version
+          from pxr import Usd
+          from streamlit.testing.v1 import AppTest
+
+          assert version("usd-core") == "26.8"
+          print("optional coverage imports passed:", Usd.__name__, AppTest.__name__)
+          PY
+          uv pip check --python .venv/bin/python
+      - name: Test Site Runtime
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider tests/site_runtime
+      - name: Test Shadow Ops
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider tests/pilot_ops
+      - name: Test Commissioning
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider tests/commissioning
+      - name: Test architecture, imports, and safety
+        working-directory: simulation
+        run: |
+          uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+            tests/test_architecture.py \
+            tests/range_ops/test_eval_and_architecture.py \
+            tests/facility/test_state.py \
+            tests/facility/test_regressions.py \
+            tests/memory/test_guards.py \
+            tests/telemetry/test_guards.py \
+            tests/twin/test_guards_package.py \
+            tests/twin/test_guards_stream.py \
+            tests/range_viewer/test_protection.py \
+            tests/range_demo/test_protection.py \
+            tests/pilot_ops/test_boundaries.py \
+            tests/commissioning/test_guards.py \
+            tests/site_runtime/test_architecture.py \
+            tests/site_runtime/test_rejection.py \
+            tests/test_state_machine.py \
+            tests/test_retry_recovery.py \
+            tests/test_unload_retry.py \
+            tests/test_emergency_stop.py
+      - name: Run complete Python suite
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider
+      - name: Validate configuration
+        working-directory: simulation
+        run: uv run --no-sync python -B scripts/validate_configs.py
+      - name: Compile Python sources
+        working-directory: simulation
+        run: |
+          PYTHONPYCACHEPREFIX="$RUNNER_TEMP/nxtektal-python-bytecode" \
+          uv run --no-sync python -m compileall -q -f \
+            nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
+            nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
+            nxt_pilot_ops nxt_commissioning nxt_site_runtime scripts \
+            ../.github/scripts
+      - name: Build and inspect wheel and source distribution
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_dist_dir="$RUNNER_TEMP/python-dist"
+          mkdir -p "$python_dist_dir"
+          uv build --out-dir "$python_dist_dir"
+          uv run --no-sync python -B \
+            ../.github/scripts/verify_python_distribution.py "$python_dist_dir"
+      - name: Install and import the wheel in isolation
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python_dist_dir="$RUNNER_TEMP/python-dist"
+          constraints="$RUNNER_TEMP/nxt-sim-constraints.txt"
+          isolated_env="$RUNNER_TEMP/nxt-sim-isolated"
+
+          uv export --frozen --no-dev --no-emit-project --no-hashes \
+            --output-file "$constraints"
+          uv venv --python 3.13.14 "$isolated_env"
+          set -- "$python_dist_dir"/*.whl
+          test "$#" -eq 1
+          wheel_path="$1"
+          uv pip install --python "$isolated_env/bin/python" \
+            --constraints "$constraints" "$wheel_path"
+
+          (
+            cd "$RUNNER_TEMP"
+            "$isolated_env/bin/python" -I - <<'PY'
+          from importlib import import_module
+          from importlib.metadata import version
+          from importlib.util import find_spec
+
+          shipped = (
+              "nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory",
+              "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
+              "nxt_commissioning", "nxt_site_runtime",
+          )
+          repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
+
+          for name in shipped:
+              import_module(name)
+          for name in repository_only:
+              assert find_spec(name) is None, f"repository-only package installed: {name}"
+          print("isolated wheel imports passed:", version("nxt-sim"))
+          PY
+          )
+          uv pip check --python "$isolated_env/bin/python"
+      - name: Verify lockfile and checkout were not mutated
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD --
+          git diff --exit-code HEAD --
+          untracked="$(git ls-files --others --exclude-standard)"
+          test -z "$untracked"
+
+  roi-verification:
+    name: roi-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python for audit policy verification
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Set up Node.js without dependency caching
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "24.14.1"
+          package-manager-cache: false
+      - name: Install locked ROI dependencies
+        working-directory: nxtektal-roi-engine
+        run: npm ci
+      - name: Typecheck ROI engine
+        working-directory: nxtektal-roi-engine
+        run: npm run typecheck
+      - name: Test ROI engine
+        working-directory: nxtektal-roi-engine
+        run: npm test
+      - name: Build ROI engine
+        working-directory: nxtektal-roi-engine
+        run: npm run build -- --outDir "$RUNNER_TEMP/roi-dist"
+      - name: Capture production and full npm audit evidence
+        working-directory: nxtektal-roi-engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_dir="$RUNNER_TEMP/roi-audit"
+          mkdir -p "$audit_dir"
+
+          set +e
+          npm audit --omit=dev --json > "$audit_dir/production.json"
+          production_status=$?
+          npm audit --json > "$audit_dir/development.json"
+          development_status=$?
+          set -e
+
+          printf '%s\n' "$production_status" > "$audit_dir/production.exit-code"
+          printf '%s\n' "$development_status" > "$audit_dir/development.exit-code"
+      - name: Enforce npm audit policy
+        working-directory: nxtektal-roi-engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          audit_dir="$RUNNER_TEMP/roi-audit"
+          production_status="$(<"$audit_dir/production.exit-code")"
+          development_status="$(<"$audit_dir/development.exit-code")"
+
+          python -B ../.github/scripts/verify_npm_audit.py \
+            production "$audit_dir/production.json"
+          test "$production_status" -eq 0
+          case "$development_status" in
+            0|1) ;;
+            *) exit "$development_status" ;;
+          esac
+          python -B ../.github/scripts/verify_npm_audit.py \
+            development "$audit_dir/development.json"
+      - name: Upload npm audit evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: roi-npm-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/roi-audit/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
+          include-hidden-files: false
+      - name: Verify ROI manifests and checkout were not mutated
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD --
+          git diff --exit-code HEAD --
+          untracked="$(git ls-files --others --exclude-standard)"
+          test -z "$untracked"
+
+  replay-demo-verification:
+    name: replay-demo-verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      UV_NO_PROGRESS: "1"
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Set up pinned uv without dependency caching
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.29"
+          enable-cache: false
+      - name: Install locked replay environment with USD workaround
+        working-directory: simulation
+        run: |
+          uv sync --frozen --all-extras
+          uv pip install --python .venv/bin/python "usd-core==26.8"
+      - name: Test benchmark, viewer, demo, capture, and USD paths
+        working-directory: simulation
+        run: |
+          uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+            tests/range_agent \
+            tests/range_viewer \
+            tests/range_demo \
+            tests/twin/test_capture.py \
+            tests/twin/test_usd_determinism.py
+      - name: Run two complete benchmarks and compare every byte
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          replay_root="$RUNNER_TEMP/replay-demo"
+          mkdir -p "$replay_root"
+          for run_id in a b; do
+            uv run --no-sync python -B -m nxt_range_agent.benchmark \
+              --out "$replay_root/benchmark-$run_id" --quiet
+          done
+          diff -qr "$replay_root/benchmark-a" "$replay_root/benchmark-b"
+          uv run --no-sync python -B - \
+            "$replay_root/benchmark-a/episodes.parquet" <<'PY'
+          import sys
+
+          import pyarrow.parquet as pq
+
+          rows = pq.read_metadata(sys.argv[1]).num_rows
+          assert rows == 400, f"expected 400 benchmark episodes, found {rows}"
+          print("benchmark episodes:", rows)
+          PY
+      - name: Run two replay exports and compare every byte
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          replay_root="$RUNNER_TEMP/replay-demo"
+          for run_id in a b; do
+            uv run --no-sync python -B -m nxt_range_viewer \
+              --out "$replay_root/viewer-$run_id" \
+              --scenario demand_spike \
+              --policy demand_forecast_dispatch \
+              --seed 101 \
+              --benchmark-report "$replay_root/benchmark-$run_id/report.json"
+          done
+          diff -qr "$replay_root/viewer-a" "$replay_root/viewer-b"
+      - name: Run two state captures and compare every byte
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          replay_root="$RUNNER_TEMP/replay-demo"
+          for run_id in a b; do
+            uv run --no-sync python -B scripts/facility_twin_capture.py \
+              --scenario demand_spike \
+              --policy demand_forecast_dispatch \
+              --seed 101 \
+              --every-steps 1 \
+              --site-id sim-baseline \
+              --deployment-id ci \
+              --twin-root "$replay_root/capture-$run_id/twin" \
+              --demo-root "$replay_root/capture-$run_id/demo"
+          done
+          diff -qr "$replay_root/capture-a" "$replay_root/capture-b"
+      - name: Build two USD projections and compare every byte
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          replay_root="$RUNNER_TEMP/replay-demo"
+          episode_a="$replay_root/capture-a/twin/sim-baseline/ci/demand_spike-seed101"
+          episode_b="$replay_root/capture-b/twin/sim-baseline/ci/demand_spike-seed101"
+          uv run --no-sync python -B -m nxt_range_twin \
+            --episode-dir "$episode_a" --out "$replay_root/usd-a"
+          uv run --no-sync python -B -m nxt_range_twin \
+            --episode-dir "$episode_b" --out "$replay_root/usd-b"
+          diff -qr "$replay_root/usd-a" "$replay_root/usd-b"
+      - name: Smoke Streamlit health and HTTP surfaces
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B ../.github/scripts/smoke_streamlit.py
+          "$RUNNER_TEMP/replay-demo/viewer-a"
+      - name: Verify the checkout was not mutated
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD --
+          git diff --exit-code HEAD --
+          untracked="$(git ls-files --others --exclude-standard)"
+          test -z "$untracked"
