@@ -111,6 +111,24 @@ Formula semantics are locked. Test exact formula IDs, evidence governance,
 worked examples, decimal precision, and backward recomputability when a new
 model version is intentionally introduced.
 
+## Operational Replay web app
+
+From `apps/operational-replay/`:
+
+```bash
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run smoke
+npm audit --omit=dev
+```
+
+The tests must cover deterministic parsing, malformed and missing artifacts,
+advice/task/outcome separation, simulation/reference labeling, no invented
+motion, source-file mapping, forbidden imports, and machine-specific paths.
+
 ## Documentation and agent infrastructure
 
 At minimum run the hygiene workflow, validate skill metadata, verify internal

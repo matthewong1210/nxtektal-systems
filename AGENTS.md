@@ -11,8 +11,9 @@ Before editing:
 1. Read [`docs/AGENT_OPERATING_MANUAL.md`](docs/AGENT_OPERATING_MANUAL.md).
 2. Inspect `git status --short --branch`, the current branch, and the relevant
    package's source, tests, and stable docs. Preserve unrelated worktree changes.
-3. Classify the request as `simulation/`, ROI engine, or documentation/agent
-   infrastructure. The two implementation surfaces are independent.
+3. Classify the request as `simulation/`, ROI engine, Operational Replay web
+   app, or documentation/agent infrastructure. The implementation surfaces are
+   independent.
 4. Read the matching files under [`.agent/context/`](.agent/context/) and
    [`.agent/workflows/`](.agent/workflows/).
 5. State the owner of every fact you will read or write. If ownership is
@@ -30,8 +31,10 @@ architectural responsibility, not an inferred person or team.
 - `simulation/` is the Python NXTektal simulation and Site OS stack.
 - `nxtektal-roi-engine/` is an independent deterministic TypeScript formula
   engine. It does not depend on the Python stack.
-- Root documentation and `.agent/` provide repository-wide governance for both
-  implementation surfaces; they are not a third runtime surface.
+- `apps/operational-replay/` is an independent read-only Next.js presentation
+  over exported artifacts. It owns no operational truth, advice, or execution.
+- Root documentation and `.agent/` provide repository-wide governance; they are
+  not another runtime surface.
 - Cross implementation boundaries only through an already documented contract.
   Do not create a repository-wide dependency merely for convenience.
 
