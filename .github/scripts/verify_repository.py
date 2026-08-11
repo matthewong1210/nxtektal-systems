@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import stat
 import subprocess
@@ -45,6 +46,7 @@ GENERATED_DIRS = {
     ".tox",
     ".turbo",
     ".venv",
+    ".vercel",
     ".vscode",
     "__pycache__",
     "build",
@@ -52,6 +54,7 @@ GENERATED_DIRS = {
     "dist",
     "htmlcov",
     "node_modules",
+    "out",
     "venv",
 }
 GENERATED_NAMES = {".coverage", ".DS_Store", "nohup.out"}
@@ -92,6 +95,9 @@ HTML_ANCHOR_RE = re.compile(
     r"<[A-Za-z][^>]*\s(?:id|name)=[\"']([^\"']+)[\"']", re.I
 )
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+BLOCK_INTERRUPT_RE = re.compile(
+    r"^ {0,3}(?:>|(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$))"
+)
 INLINE_CODE_RE = re.compile(r"`+[^`]*`+")
 LINKED_TEXT_RE = re.compile(
     r"!?\[([^\]]*)\](?:\((?:[^()]|\([^()]*\))*\)|\[[^\]]*\])"
@@ -117,6 +123,44 @@ DEPENDENCY_FILENAMES = {
     "yarn.lock",
 }
 EXECUTABLE_SUFFIXES = {".cjs", ".js", ".mjs", ".py", ".sh", ".ts", ".tsx"}
+TEXT_SUFFIXES = {
+    ".cfg",
+    ".css",
+    ".csv",
+    ".html",
+    ".ini",
+    ".json",
+    ".jsonl",
+    ".lock",
+    ".md",
+    ".rst",
+    ".toml",
+    ".tsv",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+TEXT_FILENAMES = {
+    ".env",
+    ".gitattributes",
+    ".gitignore",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "containerfile",
+    "dockerfile",
+    "license",
+    "makefile",
+}
+CONFLICT_START_RE = re.compile(r"^(?:<{7,}|\|{7,})(?:\s.*)?$")
+CONFLICT_SEPARATOR_RE = re.compile(r"^={7,}$")
+CONFLICT_END_RE = re.compile(r"^>{7,}(?:\s.*)?$")
+SKILL_NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+SKILL_PLACEHOLDER_RE = re.compile(
+    r"\b(?:TODO|FIXME|Lorem ipsum)\b|\bplaceholder (?:instruction|text)\b",
+    re.IGNORECASE,
+)
 
 
 def git(*args: str) -> str:
@@ -140,6 +184,49 @@ def tracked_paths() -> list[Path]:
     return [ROOT / item for item in sorted(listed - deleted)]
 
 
+def gitlinks_from_index(index: str) -> list[str]:
+    """Return checkout-relative paths recorded as Git submodules."""
+    gitlinks: list[str] = []
+    for record in index.split("\0"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition("\t")
+        if not separator:
+            raise ValueError("malformed git index entry")
+        fields = metadata.split()
+        if len(fields) != 3:
+            raise ValueError("malformed git index metadata")
+        mode, object_id, stage = fields
+        if not re.fullmatch(r"[0-7]{6}", mode):
+            raise ValueError("malformed git index mode")
+        if not re.fullmatch(r"[0-9a-f]{40,64}", object_id):
+            raise ValueError("malformed git index object id")
+        if not stage.isdigit():
+            raise ValueError("malformed git index stage")
+        if mode == "160000":
+            gitlinks.append(path)
+    return sorted(gitlinks)
+
+
+def tracked_gitlinks() -> list[str]:
+    return gitlinks_from_index(git("ls-files", "--stage", "-z"))
+
+
+def tracked_ignored_paths() -> list[str]:
+    """Return force-tracked paths that still match effective ignore rules."""
+    return sorted(
+        item
+        for item in git(
+            "ls-files",
+            "--cached",
+            "--ignored",
+            "--exclude-per-directory=.gitignore",
+            "-z",
+        ).split("\0")
+        if item
+    )
+
+
 def text_content(path: Path) -> str | None:
     try:
         mode = path.lstat().st_mode
@@ -154,6 +241,17 @@ def text_content(path: Path) -> str | None:
         return data.decode("utf-8")
     except UnicodeDecodeError:
         return None
+
+
+def lossy_text_content(path: Path) -> str | None:
+    """Recover ASCII-compatible hygiene evidence from a regular file."""
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return None
+    if not stat.S_ISREG(mode):
+        return None
+    return path.read_bytes().decode("utf-8", errors="ignore")
 
 
 def github_slug(value: str) -> str:
@@ -178,60 +276,124 @@ def _is_escaped(value: str, index: int) -> bool:
     return backslashes % 2 == 1
 
 
-def _mask_inline_code(line: str) -> str:
-    """Blank complete CommonMark-style backtick spans while preserving offsets."""
-    masked = list(line)
-    cursor = 0
+def _blockquote_context(line: str) -> tuple[int, str]:
+    """Return the leading blockquote depth and its remaining source text."""
+    cursor = len(line) - len(line.lstrip(" "))
+    if cursor > 3:
+        return 0, line
+    depth = 0
+    while cursor < len(line) and line[cursor] == ">":
+        depth += 1
+        cursor += 1
+        if cursor < len(line) and line[cursor] in " \t":
+            cursor += 1
+    return depth, line[cursor:]
+
+
+def _next_backtick_run(
+    line: str, cursor: int, *, honor_escapes: bool = True
+) -> tuple[int, int] | None:
     while cursor < len(line):
-        if line[cursor] != "`" or _is_escaped(line, cursor):
-            cursor += 1
+        start = line.find("`", cursor)
+        if start < 0:
+            return None
+        if honor_escapes and _is_escaped(line, start):
+            cursor = start + 1
             continue
-        opener = cursor
-        while cursor < len(line) and line[cursor] == "`":
-            cursor += 1
-        delimiter_length = cursor - opener
-        closing = cursor
-        while closing < len(line):
-            if line[closing] != "`" or _is_escaped(line, closing):
-                closing += 1
-                continue
-            end = closing
-            while end < len(line) and line[end] == "`":
-                end += 1
-            if end - closing == delimiter_length:
-                masked[opener:end] = " " * (end - opener)
-                cursor = end
-                break
-            closing = end
-        else:
-            cursor = opener + delimiter_length
-    return "".join(masked)
+        end = start + 1
+        while end < len(line) and line[end] == "`":
+            end += 1
+        return start, end - start
+    return None
 
 
-def _mask_html_comments(line: str, in_comment: bool) -> tuple[str, bool]:
-    """Blank HTML comments, including comments spanning multiple lines."""
-    masked = list(line)
+def _closing_backtick_run(
+    line: str, cursor: int, delimiter_length: int
+) -> int | None:
+    while cursor < len(line):
+        run = _next_backtick_run(line, cursor, honor_escapes=False)
+        if run is None:
+            return None
+        start, length = run
+        cursor = start + length
+        if length == delimiter_length:
+            return cursor
+    return None
+
+
+def _mask_markdown_comments_and_code(
+    line: str, in_comment: bool, code_delimiter: int | None
+) -> tuple[str, str, bool, int | None]:
+    """Mask comments and code while preserving their cross-line states."""
+    comments_masked = list(line)
+    links_masked = list(line)
     cursor = 0
     while cursor < len(line):
         if in_comment:
             end = line.find("-->", cursor)
             if end < 0:
-                masked[cursor:] = " " * (len(line) - cursor)
-                return "".join(masked), True
-            masked[cursor : end + 3] = " " * (end + 3 - cursor)
+                comments_masked[cursor:] = " " * (len(line) - cursor)
+                links_masked[cursor:] = " " * (len(line) - cursor)
+                return (
+                    "".join(comments_masked),
+                    "".join(links_masked),
+                    True,
+                    code_delimiter,
+                )
+            comments_masked[cursor : end + 3] = " " * (end + 3 - cursor)
+            links_masked[cursor : end + 3] = " " * (end + 3 - cursor)
             cursor = end + 3
             in_comment = False
             continue
-        start = line.find("<!--", cursor)
-        if start < 0:
+
+        if code_delimiter is not None:
+            closing = _closing_backtick_run(line, cursor, code_delimiter)
+            if closing is None:
+                links_masked[cursor:] = " " * (len(line) - cursor)
+                return (
+                    "".join(comments_masked),
+                    "".join(links_masked),
+                    False,
+                    code_delimiter,
+                )
+            links_masked[cursor:closing] = " " * (closing - cursor)
+            cursor = closing
+            code_delimiter = None
+            continue
+
+        comment_start = line.find("<!--", cursor)
+        backtick_run = _next_backtick_run(line, cursor)
+        if comment_start < 0 and backtick_run is None:
             break
-        end = line.find("-->", start + 4)
-        if end < 0:
-            masked[start:] = " " * (len(line) - start)
-            return "".join(masked), True
-        masked[start : end + 3] = " " * (end + 3 - start)
-        cursor = end + 3
-    return "".join(masked), in_comment
+        if comment_start >= 0 and (
+            backtick_run is None or comment_start < backtick_run[0]
+        ):
+            in_comment = True
+            cursor = comment_start
+            continue
+
+        assert backtick_run is not None
+        opener, code_delimiter = backtick_run
+        closing = _closing_backtick_run(
+            line, opener + code_delimiter, code_delimiter
+        )
+        if closing is None:
+            links_masked[opener:] = " " * (len(line) - opener)
+            return (
+                "".join(comments_masked),
+                "".join(links_masked),
+                False,
+                code_delimiter,
+            )
+        links_masked[opener:closing] = " " * (closing - opener)
+        cursor = closing
+        code_delimiter = None
+    return (
+        "".join(comments_masked),
+        "".join(links_masked),
+        in_comment,
+        code_delimiter,
+    )
 
 
 def _closing_bracket(line: str, opening: int) -> int | None:
@@ -286,11 +448,14 @@ def _inline_destination(line: str, opening: int) -> tuple[str, int] | None:
     return None
 
 
-def _markdown_link_uses(line: str) -> tuple[list[str], list[str], list[str]]:
-    """Return inline destinations, explicit references, and shortcut labels."""
+def _markdown_link_uses(
+    line: str,
+) -> tuple[list[str], list[str], list[str], bool]:
+    """Return link uses and whether an inline destination is incomplete."""
     destinations: list[str] = []
     references: list[str] = []
     shortcuts: list[str] = []
+    malformed_inline = False
     cursor = 0
     while cursor < len(line):
         opening = line.find("[", cursor)
@@ -310,6 +475,9 @@ def _markdown_link_uses(line: str) -> tuple[list[str], list[str], list[str]]:
                 destination, cursor = parsed
                 destinations.append(destination)
                 continue
+            malformed_inline = True
+            cursor = following + 1
+            continue
         elif following < len(line) and line[following] == "[":
             reference_end = _closing_bracket(line, following)
             if reference_end is not None:
@@ -319,7 +487,7 @@ def _markdown_link_uses(line: str) -> tuple[list[str], list[str], list[str]]:
                 continue
         shortcuts.append(_reference_label(label))
         cursor = closing + 1
-    return destinations, references, shortcuts
+    return destinations, references, shortcuts, malformed_inline
 
 
 def _reference_destination(value: str) -> str | None:
@@ -347,6 +515,10 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
     fence_marker: str | None = None
     fence_line: int | None = None
     in_html_comment = False
+    inline_code_delimiter: int | None = None
+    inline_code_line: int | None = None
+    inline_code_blockquote_depth: int | None = None
+    multiline_label_stack: list[int] = []
     setext_candidate: str | None = None
 
     def add_heading(raw_heading: str) -> None:
@@ -371,15 +543,60 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
                     fence_line = None
             continue
 
-        visible, in_html_comment = _mask_html_comments(line, in_html_comment)
-        fence = FENCE_RE.match(visible)
-        if fence:
-            marker = fence.group(1)
-            fence_marker = marker
-            fence_line = line_number
-            setext_candidate = None
-            continue
-        if visible.startswith("\t") or visible.startswith("    "):
+        blockquote_depth, blockquote_body = _blockquote_context(line)
+        same_blockquote_paragraph = (
+            inline_code_delimiter is not None
+            and inline_code_blockquote_depth is not None
+            and blockquote_depth == inline_code_blockquote_depth
+            and bool(blockquote_body.strip())
+            and HEADING_RE.match(blockquote_body) is None
+            and FENCE_RE.match(blockquote_body) is None
+            and SETEXT_HEADING_RE.match(blockquote_body) is None
+            and BLOCK_INTERRUPT_RE.match(blockquote_body) is None
+        )
+        starts_new_block = (
+            not line.strip()
+            or HEADING_RE.match(line) is not None
+            or FENCE_RE.match(line) is not None
+            or SETEXT_HEADING_RE.match(line) is not None
+            or (
+                BLOCK_INTERRUPT_RE.match(line) is not None
+                and not same_blockquote_paragraph
+            )
+        )
+        if inline_code_delimiter is not None and starts_new_block:
+            errors.append(
+                f"{path.relative_to(ROOT)}:{inline_code_line}: "
+                "inline Markdown code span crosses a block boundary"
+            )
+            inline_code_delimiter = None
+            inline_code_line = None
+            inline_code_blockquote_depth = None
+
+        if not in_html_comment and inline_code_delimiter is None:
+            fence = FENCE_RE.match(line)
+            if fence:
+                marker = fence.group(1)
+                fence_marker = marker
+                fence_line = line_number
+                setext_candidate = None
+                continue
+        previous_code_delimiter = inline_code_delimiter
+        (
+            visible,
+            without_code,
+            in_html_comment,
+            inline_code_delimiter,
+        ) = _mask_markdown_comments_and_code(
+            line, in_html_comment, inline_code_delimiter
+        )
+        if previous_code_delimiter is None and inline_code_delimiter is not None:
+            inline_code_line = line_number
+            inline_code_blockquote_depth = blockquote_depth or None
+        elif inline_code_delimiter is None:
+            inline_code_line = None
+            inline_code_blockquote_depth = None
+        if line.startswith("\t") or line.startswith("    "):
             setext_candidate = None
             continue
 
@@ -394,8 +611,19 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
             raw_heading = re.sub(r"\s+#+\s*$", "", heading.group(2))
             add_heading(raw_heading)
             setext_candidate = None
+        if (
+            previous_code_delimiter is None
+            and inline_code_delimiter is not None
+            and heading is not None
+        ):
+            errors.append(
+                f"{path.relative_to(ROOT)}:{inline_code_line}: "
+                "inline Markdown code span crosses a block boundary"
+            )
+            inline_code_delimiter = None
+            inline_code_line = None
+            inline_code_blockquote_depth = None
 
-        without_code = _mask_inline_code(visible)
         anchors.update(HTML_ANCHOR_RE.findall(without_code))
         definition = REFERENCE_DEFINITION_RE.match(without_code)
         if definition:
@@ -414,7 +642,48 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
                 reference_definitions[label] = destination
             setext_candidate = None
             continue
-        inline_links, references, shortcuts = _markdown_link_uses(without_code)
+        if not without_code.strip():
+            multiline_label_stack.clear()
+        else:
+            for index, char in enumerate(without_code):
+                if _is_escaped(without_code, index):
+                    continue
+                if char == "[":
+                    multiline_label_stack.append(line_number)
+                    continue
+                if char != "]" or not multiline_label_stack:
+                    continue
+                label_line = multiline_label_stack.pop()
+                if (
+                    label_line < line_number
+                    and index + 1 < len(without_code)
+                ):
+                    following = index + 1
+                    if without_code[following] == "(":
+                        parsed_destination = _inline_destination(
+                            without_code, following
+                        )
+                        if parsed_destination is None:
+                            errors.append(
+                                f"{path.relative_to(ROOT)}:{label_line}: "
+                                "inline Markdown links must finish on one line"
+                            )
+                        else:
+                            destination, _ = parsed_destination
+                            links.append((label_line, destination))
+                    elif without_code[following] == "[":
+                        errors.append(
+                            f"{path.relative_to(ROOT)}:{label_line}: "
+                            "reference-link labels must finish on one line"
+                        )
+        inline_links, references, shortcuts, malformed_inline = _markdown_link_uses(
+            without_code
+        )
+        if malformed_inline:
+            errors.append(
+                f"{path.relative_to(ROOT)}:{line_number}: "
+                "inline Markdown links must finish on one line"
+            )
         links.extend((line_number, target) for target in inline_links)
         reference_uses.extend((line_number, label) for label in references)
         shortcut_uses.extend((line_number, label) for label in shortcuts)
@@ -424,6 +693,11 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
     if fence_marker is not None:
         errors.append(
             f"{path.relative_to(ROOT)}:{fence_line}: unclosed Markdown fence"
+        )
+    if inline_code_delimiter is not None:
+        errors.append(
+            f"{path.relative_to(ROOT)}:{inline_code_line}: "
+            "unclosed inline Markdown code span"
         )
     for line_number, label in reference_uses:
         target = reference_definitions.get(label)
@@ -440,8 +714,13 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
     return anchors, links, errors
 
 
-def verify_markdown(markdown: dict[Path, str]) -> list[str]:
+def verify_markdown(
+    markdown: dict[Path, str], repository_paths: set[Path] | None = None
+) -> list[str]:
     errors: list[str] = []
+    available_paths = {
+        path.resolve() for path in (repository_paths or set(markdown))
+    }
     parsed = {path: markdown_structure(path, text) for path, text in markdown.items()}
     for _, _, structure_errors in parsed.values():
         errors.extend(structure_errors)
@@ -463,6 +742,17 @@ def verify_markdown(markdown: dict[Path, str]) -> list[str]:
                 )
                 continue
             if destination.is_dir():
+                contains_repository_path = any(
+                    candidate != destination
+                    and candidate.is_relative_to(destination)
+                    for candidate in available_paths
+                )
+                if not contains_repository_path:
+                    errors.append(
+                        f"{source.relative_to(ROOT)}:{line_number}: "
+                        f"directory link has no tracked/nonignored target: {raw_target}"
+                    )
+                    continue
                 if fragment:
                     errors.append(
                         f"{source.relative_to(ROOT)}:{line_number}: "
@@ -472,6 +762,12 @@ def verify_markdown(markdown: dict[Path, str]) -> list[str]:
             if not destination.exists():
                 errors.append(
                     f"{source.relative_to(ROOT)}:{line_number}: missing link target: {raw_target}"
+                )
+                continue
+            if destination not in available_paths:
+                errors.append(
+                    f"{source.relative_to(ROOT)}:{line_number}: "
+                    f"link target is not tracked/nonignored: {raw_target}"
                 )
                 continue
             if fragment and destination.suffix.lower() == ".md":
@@ -524,6 +820,221 @@ def verify_paths(paths: list[Path]) -> list[str]:
             errors.append(f"generated/editor file is tracked: {relative}")
         if "reports" in relative_path.parts and relative != "simulation/reports/.gitkeep":
             errors.append(f"generated report is tracked: {relative}")
+    return errors
+
+
+def _frontmatter_value(value: str) -> str | None:
+    value = value.strip()
+    if not value:
+        return None
+    if value.startswith('"'):
+        try:
+            decoded = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+        return decoded if isinstance(decoded, str) else None
+    if value.startswith("'"):
+        if len(value) < 2 or not value.endswith("'"):
+            return None
+        inner = value[1:-1]
+        cursor = 0
+        while cursor < len(inner):
+            if inner[cursor] != "'":
+                cursor += 1
+                continue
+            if cursor + 1 >= len(inner) or inner[cursor + 1] != "'":
+                return None
+            cursor += 2
+        return inner.replace("''", "'")
+    if " #" in value or ": " in value:
+        return None
+    if value[0] in "[{!&*|>@`" or re.fullmatch(
+        r"(?i:null|~|true|false|yes|no|on|off|[-+]?(?:\d+(?:\.\d*)?|\.\d+))",
+        value,
+    ):
+        return None
+    return value
+
+
+def _skill_frontmatter(path: Path, text: str) -> tuple[dict[str, str], list[str]]:
+    relative = path.relative_to(ROOT)
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
+        return {}, [f"{relative}: skill metadata must start with YAML frontmatter"]
+    try:
+        closing = lines.index("---", 1)
+    except ValueError:
+        return {}, [f"{relative}: skill metadata has no closing frontmatter delimiter"]
+
+    metadata: dict[str, str] = {}
+    errors: list[str] = []
+    for line_number, line in enumerate(lines[1:closing], start=2):
+        key, separator, value = line.partition(":")
+        key = key.strip()
+        if not separator or not key or not value.strip():
+            errors.append(f"{relative}:{line_number}: malformed skill metadata")
+            continue
+        if key in metadata:
+            errors.append(f"{relative}:{line_number}: duplicate skill metadata key: {key}")
+            continue
+        decoded = _frontmatter_value(value)
+        if decoded is None:
+            errors.append(
+                f"{relative}:{line_number}: skill metadata values must be "
+                "one-line strings"
+            )
+            continue
+        metadata[key] = decoded
+    unexpected = sorted(set(metadata) - {"name", "description"})
+    if unexpected:
+        errors.append(
+            f"{relative}: unsupported skill metadata keys: {', '.join(unexpected)}"
+        )
+    missing = sorted({"name", "description"} - set(metadata))
+    if missing:
+        errors.append(f"{relative}: missing skill metadata keys: {', '.join(missing)}")
+    return metadata, errors
+
+
+def _quoted_yaml_string(value: str) -> str | None:
+    value = value.strip()
+    if not value or value[0] not in {"'", '"'}:
+        return None
+    return _frontmatter_value(value)
+
+
+def _verify_skill_agent_metadata(path: Path, skill_name: str) -> list[str]:
+    relative = path.relative_to(ROOT)
+    text = text_content(path)
+    if text is None:
+        return [f"{relative}: skill agent metadata must be UTF-8 text"]
+    lines = text.splitlines()
+    if not lines or lines[0] != "interface:":
+        return [f"{relative}: skill agent metadata must start with interface:"]
+
+    values: dict[str, str] = {}
+    errors: list[str] = []
+    for line_number, line in enumerate(lines[1:], start=2):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.fullmatch(
+            r"  (display_name|short_description|default_prompt):\s*(.+)", line
+        )
+        if match is None:
+            errors.append(
+                f"{relative}:{line_number}: unsupported skill agent metadata"
+            )
+            continue
+        key, raw_value = match.groups()
+        if key in values:
+            errors.append(
+                f"{relative}:{line_number}: duplicate skill agent metadata key: {key}"
+            )
+            continue
+        value = _quoted_yaml_string(raw_value)
+        if value is None:
+            errors.append(
+                f"{relative}:{line_number}: skill agent metadata strings must be "
+                "quoted and valid"
+            )
+            continue
+        if not value:
+            errors.append(
+                f"{relative}:{line_number}: skill agent metadata strings must not be empty"
+            )
+            continue
+        values[key] = value
+
+    required = {"display_name", "short_description", "default_prompt"}
+    missing = sorted(required - set(values))
+    if missing:
+        errors.append(
+            f"{relative}: missing skill agent metadata keys: {', '.join(missing)}"
+        )
+    short_description = values.get("short_description")
+    if short_description is not None and not 25 <= len(short_description) <= 64:
+        errors.append(
+            f"{relative}: short_description must contain 25 to 64 characters"
+        )
+    default_prompt = values.get("default_prompt")
+    skill_token = re.compile(rf"\${re.escape(skill_name)}(?=$|[^a-z0-9-])")
+    if default_prompt is not None and skill_token.search(default_prompt) is None:
+        errors.append(
+            f"{relative}: default_prompt must name the skill as ${skill_name}"
+        )
+    return errors
+
+
+def verify_skills(paths: list[Path]) -> list[str]:
+    """Validate repository-owned Codex skill structure and metadata."""
+    errors: list[str] = []
+    repository_paths = {
+        path.relative_to(ROOT).as_posix()
+        for path in paths
+        if path.is_relative_to(ROOT)
+    }
+    skill_names = sorted(
+        {
+            relative.parts[2]
+            for path in paths
+            if path.is_relative_to(ROOT)
+            for relative in (path.relative_to(ROOT),)
+            if len(relative.parts) >= 3 and relative.parts[:2] == (".agent", "skills")
+        }
+    )
+    for skill_name in skill_names:
+        skill_prefix = f".agent/skills/{skill_name}"
+        skill_relative = f"{skill_prefix}/SKILL.md"
+        metadata_relative = f"{skill_prefix}/agents/openai.yaml"
+        if not SKILL_NAME_RE.fullmatch(skill_name):
+            errors.append(f"{skill_prefix}: invalid skill directory name")
+        elif len(skill_name) > 64:
+            errors.append(f"{skill_prefix}: skill directory name exceeds 64 characters")
+        if skill_relative not in repository_paths:
+            errors.append(f"{skill_prefix}: missing SKILL.md")
+            continue
+
+        skill_path = ROOT / skill_relative
+        skill_text = text_content(skill_path)
+        if skill_text is None:
+            errors.append(f"{skill_relative}: skill instructions must be UTF-8 text")
+            continue
+        metadata, metadata_errors = _skill_frontmatter(skill_path, skill_text)
+        errors.extend(metadata_errors)
+        declared_name = metadata.get("name")
+        if declared_name is not None and declared_name != skill_name:
+            errors.append(
+                f"{skill_relative}: frontmatter name {declared_name!r} "
+                f"does not match directory {skill_name!r}"
+            )
+        description = metadata.get("description")
+        if description is not None:
+            if len(description) > 1024 or "<" in description or ">" in description:
+                errors.append(
+                    f"{skill_relative}: description violates skill metadata limits"
+                )
+            if not re.search(r"\bUse (?:for|when)\b", description):
+                errors.append(
+                    f"{skill_relative}: description must state when the skill should be used"
+                )
+        skill_lines = skill_text.splitlines()
+        try:
+            frontmatter_end = skill_lines.index("---", 1)
+        except ValueError:
+            frontmatter_end = -1
+        if frontmatter_end >= 0 and not any(
+            line.strip() for line in skill_lines[frontmatter_end + 1 :]
+        ):
+            errors.append(f"{skill_relative}: skill instructions must have a body")
+        if SKILL_PLACEHOLDER_RE.search(skill_text):
+            errors.append(f"{skill_relative}: unresolved scaffold placeholder")
+
+        if metadata_relative not in repository_paths:
+            errors.append(f"{skill_prefix}: missing agents/openai.yaml")
+        else:
+            errors.extend(
+                _verify_skill_agent_metadata(ROOT / metadata_relative, skill_name)
+            )
     return errors
 
 
@@ -633,10 +1144,9 @@ def _action_use_value(value: str) -> str:
     if not value:
         return ""
     if value[0] in {"'", '"'}:
-        quote = value[0]
-        end = value.find(quote, 1)
-        return value[1:end] if end >= 0 else value
-    return value.split(maxsplit=1)[0]
+        decoded = _quoted_yaml_string(value)
+        return decoded if decoded is not None else value
+    return value
 
 
 def _double_quoted_mapping_key_has_escape(line: str) -> bool:
@@ -809,19 +1319,51 @@ def _docker_image_error(raw_value: str) -> str | None:
         return "remote Docker action image is empty or uses an unsupported multiline scalar"
     if lexical_value.startswith(("|", ">")):
         return "remote Docker action image uses an unsupported block scalar"
-    if lexical_value.startswith('"'):
-        closing = lexical_value.find('"', 1)
-        quoted_value = lexical_value[1:closing] if closing >= 0 else lexical_value[1:]
-        if "\\" in quoted_value:
+    if lexical_value.startswith(("'", '"')):
+        value = _quoted_yaml_string(lexical_value)
+        if value is None:
+            return "remote Docker action image uses an invalid quoted scalar"
+        if lexical_value.startswith('"') and "\\" in lexical_value[1:-1]:
             return "remote Docker action image uses unsupported YAML escapes"
-
-    value = _action_use_value(raw_value)
+    else:
+        value = _action_use_value(raw_value)
     if value.startswith("docker://") and not DOCKER_DIGEST_RE.fullmatch(value):
         return (
             "remote Docker action image is not pinned to a sha256 digest: "
             f"{value}"
         )
     return None
+
+
+def _content_hygiene_errors(
+    relative: Path, text: str, *, check_whitespace: bool
+) -> list[str]:
+    errors: list[str] = []
+    in_conflict = False
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if check_whitespace and line.endswith((" ", "\t")):
+            errors.append(f"{relative}:{line_number}: trailing whitespace")
+        if CONFLICT_START_RE.fullmatch(line):
+            in_conflict = True
+            errors.append(
+                f"{relative}:{line_number}: unresolved merge conflict marker"
+            )
+        elif in_conflict and CONFLICT_SEPARATOR_RE.fullmatch(line):
+            errors.append(
+                f"{relative}:{line_number}: unresolved merge conflict marker"
+            )
+        elif CONFLICT_END_RE.fullmatch(line):
+            in_conflict = False
+            errors.append(
+                f"{relative}:{line_number}: unresolved merge conflict marker"
+            )
+        for label, pattern in SECRET_PATTERNS.items():
+            if pattern.search(line):
+                errors.append(f"{relative}:{line_number}: possible {label}")
+        for label, pattern in MACHINE_PATH_PATTERNS.items():
+            if pattern.search(line):
+                errors.append(f"{relative}:{line_number}: machine-specific {label}")
+    return errors
 
 
 def verify_text(paths: list[Path]) -> tuple[list[str], dict[Path, str]]:
@@ -834,43 +1376,66 @@ def verify_text(paths: list[Path]) -> tuple[list[str], dict[Path, str]]:
     }
     for path in paths:
         relative = path.relative_to(ROOT)
-        is_policy_path = (
-            relative.parts[:2] == (".github", "workflows")
-            or path.name.lower() in {"action.yml", "action.yaml"}
+        lower_name = path.name.lower()
+        is_dependency_file = (
+            lower_name in DEPENDENCY_FILENAMES
+            or lower_name.startswith("requirements")
+        )
+        is_workflow = relative.parts[:2] == (".github", "workflows")
+        is_action_manifest = lower_name in {"action.yml", "action.yaml"}
+        is_policy_yaml = is_workflow or is_action_manifest
+        try:
+            path_mode = path.lstat().st_mode
+        except OSError:
+            path_mode = 0
+        is_executable = path.suffix.lower() in EXECUTABLE_SUFFIXES or bool(
+            path_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        )
+        is_skill_path = relative.parts[:2] == (".agent", "skills")
+        is_expected_text = (
+            path.suffix.lower() in TEXT_SUFFIXES
+            or lower_name in TEXT_FILENAMES
+            or lower_name.startswith(".env.")
+            or is_dependency_file
+            or is_policy_yaml
+            or is_executable
+            or is_skill_path
         )
         text = text_content(path)
         if text is None:
+            recovered_text = lossy_text_content(path)
+            if recovered_text is not None:
+                errors.extend(
+                    _content_hygiene_errors(
+                        relative, recovered_text, check_whitespace=False
+                    )
+                )
+                if (
+                    is_dependency_file or is_policy_yaml or is_executable
+                ) and JARVIS_DEPENDENCY_RE.search(recovered_text):
+                    errors.append(
+                        f"{relative}: forbidden dependency on "
+                        f"{JARVIS_DEPENDENCY_LABEL}"
+                    )
             if path.suffix.lower() == ".md" and not path.is_symlink():
                 errors.append(
                     f"{relative}: Markdown must be UTF-8 text without NUL bytes"
                 )
-            elif is_policy_path and not path.is_symlink():
+            elif is_policy_yaml and not path.is_symlink():
                 errors.append(
                     f"{relative}: policy YAML must be UTF-8 text without NUL bytes"
+                )
+            elif is_expected_text and not path.is_symlink():
+                errors.append(
+                    f"{relative}: repository text must be UTF-8 without NUL bytes"
                 )
             continue
         if path.suffix.lower() == ".md":
             markdown[path] = text
         if text and not text.endswith("\n"):
             errors.append(f"{relative}: text file has no final newline")
-        for line_number, line in enumerate(text.splitlines(), start=1):
-            if line.endswith((" ", "\t")):
-                errors.append(f"{relative}:{line_number}: trailing whitespace")
-            for label, pattern in SECRET_PATTERNS.items():
-                if pattern.search(line):
-                    errors.append(f"{relative}:{line_number}: possible {label}")
-            for label, pattern in MACHINE_PATH_PATTERNS.items():
-                if pattern.search(line):
-                    errors.append(f"{relative}:{line_number}: machine-specific {label}")
+        errors.extend(_content_hygiene_errors(relative, text, check_whitespace=True))
 
-        is_dependency_file = (
-            path.name.lower() in DEPENDENCY_FILENAMES
-            or path.name.lower().startswith("requirements")
-        )
-        is_workflow = relative.parts[:2] == (".github", "workflows")
-        is_action_manifest = path.name.lower() in {"action.yml", "action.yaml"}
-        is_policy_yaml = is_workflow or is_action_manifest
-        is_executable = path.suffix.lower() in EXECUTABLE_SUFFIXES
         if (is_dependency_file or is_policy_yaml or is_executable) and JARVIS_DEPENDENCY_RE.search(text):
             errors.append(
                 f"{relative}: forbidden dependency on {JARVIS_DEPENDENCY_LABEL}"
@@ -926,11 +1491,19 @@ def main() -> int:
     try:
         paths = tracked_paths()
         errors = verify_paths(paths)
+        errors.extend(
+            f"unexpected tracked submodule: {path}" for path in tracked_gitlinks()
+        )
+        errors.extend(
+            f"tracked path matches repository ignore rules: {path}"
+            for path in tracked_ignored_paths()
+        )
         text_errors, markdown = verify_text(paths)
         errors.extend(text_errors)
-        errors.extend(verify_markdown(markdown))
+        errors.extend(verify_skills(paths))
+        errors.extend(verify_markdown(markdown, set(paths)))
         subprocess.run(["git", "diff", "--check"], cwd=ROOT, check=True)
-    except (OSError, subprocess.CalledProcessError) as exc:
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         print(f"repository verification could not run: {exc}", file=sys.stderr)
         return 2
 
@@ -943,8 +1516,9 @@ def main() -> int:
     print(
         "Repository verification passed: "
         f"{len(paths)} tracked/nonignored paths, {len(markdown)} Markdown files, "
-        "local links/anchors, fences, secrets, machine paths, legacy paths, "
-        "generated artifacts, and dependency boundaries checked."
+        "local links/anchors, fences, skills, conflict markers, secrets, machine "
+        "paths, legacy paths, generated artifacts, submodules, and dependency "
+        "boundaries checked."
     )
     return 0
 
