@@ -25,10 +25,15 @@ metadata outside local development. It defaults to `http://localhost:3000`.
 
 ## Deployment
 
+Public deployment remains blocked by
+[canonical issue #4](https://github.com/matthewong1210/nxtektal-systems/issues/4)
+until `public/og.png` is cleared or replaced. The repository CI workflow is
+validation-only and does not deploy this application.
+
 The canonical repository has no root JavaScript workspace and this migration
-adds no host-specific deployment binding. Configure a host's project/root
-directory as `apps/operational-replay`, install with `npm ci`, build with
-`npm run build`, and serve with `npm run start`. Set
+adds no host-specific deployment binding. After the blocker is resolved,
+configure a host's project/root directory as `apps/operational-replay`, install
+with `npm ci`, build with `npm run build`, and serve with `npm run start`. Set
 `NEXT_PUBLIC_REPLAY_SITE_URL` to the public origin so social metadata resolves
 against the deployed site. The historical Sites/Cloudflare project identity is
 intentionally not reused.

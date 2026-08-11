@@ -19,7 +19,7 @@ they do not change any dependency manifest or lockfile.
 
 | Required-check candidate | Responsibility |
 |---|---|
-| `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, whitespace, likely credentials, machine paths, excluded legacy paths, generated artifacts, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
+| `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
 | `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
@@ -230,6 +230,12 @@ accepted baseline lives in
 [`verify_npm_audit.py`](../.github/scripts/verify_npm_audit.py); remove resolved
 entries in a later dependency-hygiene change.
 
+The dependency remediation remains a separate concern tracked in
+[issue #2](https://github.com/matthewong1210/nxtektal-systems/issues/2). This CI
+foundation does not update ROI dependencies. The raw development audit's
+expected nonzero exit does not fail an unchanged baseline; the committed
+policy verifier fails only new, substituted, expanded, or more severe debt.
+
 ### Operational Replay
 
 Select the exact Node.js 22 runtime used by CI, then consume the committed
@@ -260,6 +266,11 @@ The production audit must remain at zero vulnerabilities. The build and HTTP
 smoke validate only the checked-out read-only application. CI disables Next.js
 telemetry and gives the smoke step a two-minute outer timeout; the job uploads
 no artifact and performs no hosting or deployment.
+
+Public deployment remains blocked by
+[issue #4](https://github.com/matthewong1210/nxtektal-systems/issues/4) until
+`og.png` is cleared or replaced. This validation workflow neither clears that
+asset nor creates a public deployment.
 
 ### Replay and demo
 
