@@ -1,0 +1,31 @@
+{
+  "originalCommit": "810580ae016b0c3c7820a035b795e8cb49331814",
+  "originalTree": "2bc0089846b7644f18b322ca2079dda11ae497ca",
+  "mapping": [
+    { "source": ".gitignore", "target": ".gitignore", "status": "adapted", "reason": "Retained only standard Next.js local outputs." },
+    { "source": ".openai/hosting.json", "target": null, "status": "excluded", "reason": "Existing Sites project binding metadata is outside the canonical app runtime." },
+    { "source": "README.md", "target": "README.md", "status": "adapted", "reason": "Replaced starter instructions with canonical replay contract and verification guidance." },
+    { "source": "app/ReplayStory.tsx", "target": "app/ReplayStory.tsx", "status": "adapted", "reason": "Preserved the recovered experience while tightening parsing, provenance, and advisory/execution separation." },
+    { "source": "app/chatgpt-auth.ts", "target": null, "status": "excluded", "reason": "Unused Sites authentication scaffold." },
+    { "source": "app/globals.css", "target": "app/globals.css", "status": "adapted", "reason": "Replaced the Tailwind import with direct base styling while preserving the recovered layout, smoothing, and palette." },
+    { "source": "app/layout.tsx", "target": "app/layout.tsx", "status": "adapted", "reason": "Removed request-host and Sites coupling while retaining the recovered Geist treatment and metadata." },
+    { "source": "app/page.tsx", "target": "app/page.tsx", "status": "imported", "reason": "Replay entry page retained." },
+    { "source": "build/sites-vite-plugin.ts", "target": null, "status": "excluded", "reason": "Private Sites packaging scaffold is not required by standard Next.js." },
+    { "source": "db/index.ts", "target": null, "status": "excluded", "reason": "Unused database scaffold would add write capability and dependencies." },
+    { "source": "db/schema.ts", "target": null, "status": "excluded", "reason": "Unused database scaffold." },
+    { "source": "drizzle.config.ts", "target": null, "status": "excluded", "reason": "Unused database migration configuration." },
+    { "source": "drizzle/meta/_journal.json", "target": null, "status": "excluded", "reason": "Unused generated migration scaffold." },
+    { "source": "eslint.config.mjs", "target": "eslint.config.mjs", "status": "adapted", "reason": "Retained lint configuration without Sites build paths." },
+    { "source": "examples/d1/app/api/notes/route.ts", "target": null, "status": "excluded", "reason": "Unrelated writable database example." },
+    { "source": "examples/d1/db/schema.ts", "target": null, "status": "excluded", "reason": "Unrelated database example." },
+    { "source": "next.config.ts", "target": "next.config.ts", "status": "imported", "reason": "Standard Next.js configuration retained." },
+    { "source": "package-lock.json", "target": "package-lock.json", "status": "adapted", "reason": "Regenerated after removing Sites-only dependencies, retaining React, patching Next.js for audited advisories, and adding tests." },
+    { "source": "package.json", "target": "package.json", "status": "adapted", "reason": "Renamed and reduced to the standalone read-only Next.js application." },
+    { "source": "postcss.config.mjs", "target": null, "status": "excluded", "reason": "Tailwind/PostCSS was unused after adopting plain recovered CSS." },
+    { "source": "public/og.png", "target": "public/og.png", "status": "imported", "reason": "Recovered social preview retained byte-for-byte." },
+    { "source": "tests/rendered-html.test.mjs", "target": "tests/component.test.tsx", "status": "adapted", "reason": "Replaced vinext worker assertion with component, production build, and HTTP smoke coverage." },
+    { "source": "tsconfig.json", "target": "tsconfig.json", "status": "adapted", "reason": "Retained strict no-emit configuration and included test sources." },
+    { "source": "vite.config.ts", "target": null, "status": "excluded", "reason": "Cloudflare/vinext runtime configuration is not required by standard Next.js." },
+    { "source": "worker/index.ts", "target": null, "status": "excluded", "reason": "Cloudflare worker entry point is not required by standard Next.js." }
+  ]
+}
