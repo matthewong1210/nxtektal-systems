@@ -504,6 +504,17 @@ def _reference_label(value: str) -> str:
     return " ".join(value.split()).casefold()
 
 
+def _fence_opener(line: str) -> re.Match[str] | None:
+    """Return a valid CommonMark fence opener for one physical line."""
+    fence = FENCE_RE.match(line)
+    if fence is None:
+        return None
+    marker, info = fence.groups()
+    if marker.startswith("`") and "`" in info:
+        return None
+    return fence
+
+
 def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int, str]], list[str]]:
     anchors: set[str] = set()
     slug_counts: dict[str, int] = {}
@@ -550,14 +561,14 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
             and blockquote_depth == inline_code_blockquote_depth
             and bool(blockquote_body.strip())
             and HEADING_RE.match(blockquote_body) is None
-            and FENCE_RE.match(blockquote_body) is None
+            and _fence_opener(blockquote_body) is None
             and SETEXT_HEADING_RE.match(blockquote_body) is None
             and BLOCK_INTERRUPT_RE.match(blockquote_body) is None
         )
         starts_new_block = (
             not line.strip()
             or HEADING_RE.match(line) is not None
-            or FENCE_RE.match(line) is not None
+            or _fence_opener(line) is not None
             or SETEXT_HEADING_RE.match(line) is not None
             or (
                 BLOCK_INTERRUPT_RE.match(line) is not None
@@ -574,7 +585,7 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
             inline_code_blockquote_depth = None
 
         if not in_html_comment and inline_code_delimiter is None:
-            fence = FENCE_RE.match(line)
+            fence = _fence_opener(line)
             if fence:
                 marker = fence.group(1)
                 fence_marker = marker
@@ -596,9 +607,10 @@ def markdown_structure(path: Path, text: str) -> tuple[set[str], list[tuple[int,
         elif inline_code_delimiter is None:
             inline_code_line = None
             inline_code_blockquote_depth = None
-        if line.startswith("\t") or line.startswith("    "):
-            setext_candidate = None
-            continue
+
+        # Fail closed on link-shaped syntax in physically indented lines. A
+        # partial list parser cannot reliably distinguish continuations from
+        # indented code; explicit fences, comments, and inline code are masked.
 
         if SETEXT_HEADING_RE.match(visible):
             if setext_candidate is not None:
@@ -727,12 +739,11 @@ def verify_markdown(
 
     for source, (_, links, _) in parsed.items():
         for line_number, raw_target in links:
-            target = unquote(raw_target)
-            split = urlsplit(target)
+            split = urlsplit(raw_target)
             if split.scheme or split.netloc:
                 continue
-            path_text = split.path
-            fragment = split.fragment
+            path_text = unquote(split.path)
+            fragment = unquote(split.fragment)
             destination = source if not path_text else (source.parent / path_text).resolve()
             try:
                 destination.relative_to(ROOT)

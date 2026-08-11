@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import math
 import os
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -14,6 +16,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 
@@ -21,6 +24,144 @@ ROOT = Path(__file__).resolve().parents[2]
 SIMULATION_ROOT = ROOT / "simulation"
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 MAX_RESPONSE_BYTES = 1_048_576
+
+
+class SmokeInterrupted(RuntimeError):
+    """Raised after an interrupt so managed child cleanup can complete."""
+
+
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        response: object,
+        code: int,
+        _message: str,
+        _headers: object,
+        _new_url: str,
+    ) -> None:
+        try:
+            response.close()  # type: ignore[attr-defined]
+        finally:
+            raise RuntimeError(
+                f"HTTP {code} redirect is not allowed for {request.full_url}"
+            )
+
+
+HTTP_OPENER = urllib.request.build_opener(_RejectRedirects())
+
+
+@contextmanager
+def _interrupt_as_exception(
+    *, defer: bool = False
+) -> Iterator[Callable[[], None]]:
+    signal_name: str | None = None
+    delivered = False
+    deferred = defer
+    originals: dict[signal.Signals, object] = {}
+
+    def raise_interruption() -> None:
+        nonlocal delivered
+        if signal_name is None or delivered:
+            return
+        delivered = True
+        raise SmokeInterrupted(f"Streamlit smoke interrupted by {signal_name}")
+
+    def resume_interrupts() -> None:
+        nonlocal deferred
+        deferred = False
+        raise_interruption()
+
+    def handle_interrupt(signum: int, _frame: object) -> None:
+        nonlocal signal_name
+        if signal_name is not None:
+            return
+        signal_name = signal.Signals(signum).name
+        if not deferred:
+            raise_interruption()
+
+    managed_signals = (signal.SIGINT, signal.SIGTERM)
+    try:
+        for candidate in managed_signals:
+            originals[candidate] = signal.getsignal(candidate)
+            signal.signal(candidate, handle_interrupt)
+        yield resume_interrupts
+    finally:
+        for candidate, original in originals.items():
+            signal.signal(candidate, original)
+        raise_interruption()
+
+
+def _finish_process_cleanup(
+    process: subprocess.Popen[str],
+    terminate_timeout_seconds: float,
+    kill_timeout_seconds: float,
+    reject_preexisting_exit: bool,
+) -> None:
+    returncode = process.poll()
+    if returncode is not None:
+        if reject_preexisting_exit:
+            raise RuntimeError(
+                "Streamlit exited with status "
+                f"{returncode} before smoke cleanup began"
+            )
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=terminate_timeout_seconds)
+    except subprocess.TimeoutExpired:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=kill_timeout_seconds)
+
+
+def stop_process(
+    process: subprocess.Popen[str],
+    *,
+    terminate_timeout_seconds: float = 5,
+    kill_timeout_seconds: float = 5,
+    reject_preexisting_exit: bool = False,
+) -> None:
+    interruption: SmokeInterrupted | None = None
+    try:
+        _finish_process_cleanup(
+            process,
+            terminate_timeout_seconds,
+            kill_timeout_seconds,
+            reject_preexisting_exit,
+        )
+    except SmokeInterrupted as exc:
+        interruption = exc
+        _finish_process_cleanup(
+            process,
+            terminate_timeout_seconds,
+            kill_timeout_seconds,
+            False,
+        )
+    if interruption is not None:
+        raise interruption
+
+
+@contextmanager
+def managed_process(
+    command: list[str], **popen_options: object
+) -> Iterator[subprocess.Popen[str]]:
+    """Launch a child whose cleanup survives SIGINT and SIGTERM."""
+
+    process: subprocess.Popen[str] | None = None
+    body_completed = False
+
+    with _interrupt_as_exception(defer=True) as resume_interrupts:
+        try:
+            process = subprocess.Popen(command, **popen_options)  # type: ignore[arg-type]
+            resume_interrupts()
+            yield process
+            body_completed = True
+        finally:
+            if process is not None:
+                stop_process(
+                    process, reject_preexisting_exit=body_completed
+                )
 
 
 def available_port() -> int:
@@ -86,7 +227,7 @@ def fetch(url: str, deadline: float, process: subprocess.Popen[str]) -> bytes:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            with urllib.request.urlopen(
+            with HTTP_OPENER.open(
                 url, timeout=max(0.001, min(2.0, remaining))
             ) as response:
                 if response.status != 200:
@@ -167,38 +308,38 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as log_dir:
         log_path = Path(log_dir) / "streamlit.log"
         with log_path.open("w", encoding="utf-8") as log:
-            process = subprocess.Popen(
+            with managed_process(
                 command,
                 cwd=SIMULATION_ROOT,
                 env=environment,
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 text=True,
-            )
-            try:
-                deadline = time.monotonic() + args.timeout_seconds
-                base_url = f"http://127.0.0.1:{port}"
-                wait_for_startup(base_url, log_path, deadline, process)
-                health = fetch(f"{base_url}/_stcore/health", deadline, process)
-                if health.strip() != b"ok":
-                    raise RuntimeError(f"unexpected Streamlit health body: {health!r}")
-                root = fetch(f"{base_url}/", deadline, process)
-                if not root:
-                    raise RuntimeError("Streamlit root response was empty")
-            except Exception:
-                print(
-                    log_path.read_text(encoding="utf-8", errors="replace"),
-                    file=sys.stderr,
-                )
-                raise
-            finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+            ) as process:
+                try:
+                    deadline = time.monotonic() + args.timeout_seconds
+                    base_url = f"http://127.0.0.1:{port}"
+                    wait_for_startup(base_url, log_path, deadline, process)
+                    health = fetch(f"{base_url}/_stcore/health", deadline, process)
+                    if health.strip() != b"ok":
+                        raise RuntimeError(
+                            f"unexpected Streamlit health body: {health!r}"
+                        )
+                    root = fetch(f"{base_url}/", deadline, process)
+                    if not root:
+                        raise RuntimeError("Streamlit root response was empty")
+                    returncode = process.poll()
+                    if returncode is not None:
+                        raise RuntimeError(
+                            "Streamlit exited with status "
+                            f"{returncode} before smoke completed"
+                        )
+                except Exception:
+                    print(
+                        log_path.read_text(encoding="utf-8", errors="replace"),
+                        file=sys.stderr,
+                    )
+                    raise
 
     print("Streamlit live smoke passed")
     return 0

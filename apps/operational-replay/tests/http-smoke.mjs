@@ -10,6 +10,7 @@ const BODY_TIMEOUT_MS = 5_000;
 const RETRY_DELAY_MS = 200;
 const TERMINATE_TIMEOUT_MS = 5_000;
 const KILL_TIMEOUT_MS = 2_000;
+const ANSI_ESCAPE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
 function timeoutMilliseconds(value) {
   return Math.max(1, Math.ceil(value));
@@ -48,6 +49,8 @@ function spawnReplayServer(port) {
 export function observeChild(child) {
   let exitStatus;
   let closeStatus;
+  let stopRequested = false;
+  let exitedBeforeStop = false;
   let resolveExit;
   let resolveClose;
   const exited = new Promise((resolveStatus) => {
@@ -59,6 +62,9 @@ export function observeChild(child) {
 
   const settleExit = (status) => {
     if (!exitStatus) {
+      if (!stopRequested) {
+        exitedBeforeStop = true;
+      }
       exitStatus = status;
       resolveExit(status);
     }
@@ -91,30 +97,103 @@ export function observeChild(child) {
     get closeStatus() {
       return closeStatus;
     },
+    beginStop() {
+      stopRequested = true;
+    },
+    markMissingBeforeSignal() {
+      exitedBeforeStop = true;
+    },
+    get exitedBeforeStop() {
+      return exitedBeforeStop;
+    },
   };
 }
 
-function exitBeforeReadyError(status) {
+function unexpectedExitError(status, phase) {
+  if (!status) {
+    return new Error(`server exited ${phase}`);
+  }
   if (status.event === "error") {
-    return new Error(`server failed to start: ${status.error.message}`);
+    return new Error(`server failed ${phase}: ${status.error.message}`);
   }
   return new Error(
-    `server exited before becoming ready (code ${status.code ?? "null"}, ` +
+    `server exited ${phase} (code ${status.code ?? "null"}, ` +
       `signal ${status.signal ?? "none"})`,
   );
 }
 
-function raceChildExit(lifecycle, pending) {
+function observeInterruptions() {
+  let signalName;
+  let resolveInterruption;
+  const interrupted = new Promise((resolveSignal) => {
+    resolveInterruption = resolveSignal;
+  });
+  const handlers = new Map();
+
+  for (const candidate of ["SIGINT", "SIGTERM"]) {
+    const handler = () => {
+      if (!signalName) {
+        signalName = candidate;
+        resolveInterruption(candidate);
+      }
+    };
+    handlers.set(candidate, handler);
+    process.on(candidate, handler);
+  }
+
+  return {
+    interrupted,
+    get signalName() {
+      return signalName;
+    },
+    close() {
+      for (const [candidate, handler] of handlers) {
+        process.removeListener(candidate, handler);
+      }
+    },
+  };
+}
+
+function interruptionError(signalName) {
+  return new Error(`HTTP smoke interrupted by ${signalName}`);
+}
+
+function raceRuntime(lifecycle, interruptions, pending) {
   if (lifecycle.exitStatus) {
     return Promise.resolve({ kind: "exit", status: lifecycle.exitStatus });
   }
+  if (interruptions.signalName) {
+    return Promise.resolve({ kind: "interrupt", signal: interruptions.signalName });
+  }
   return Promise.race([
     lifecycle.exited.then((status) => ({ kind: "exit", status })),
+    interruptions.interrupted.then((signal) => ({ kind: "interrupt", signal })),
     pending.then(
       (value) => ({ kind: "value", value }),
       (error) => ({ kind: "error", error }),
     ),
   ]);
+}
+
+function childAnnouncedReady(output, url) {
+  const lines = output.replace(ANSI_ESCAPE, "").replaceAll("\r", "").split("\n");
+  let endpointSeen = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const local = /^-\s+Local:\s+(\S+)$/.exec(trimmed);
+    if (local) {
+      endpointSeen = local[1].replace(/\/$/, "") === url;
+      continue;
+    }
+    if (
+      endpointSeen &&
+      /^[✓✔]?\s*Ready in\s+\d+(?:\.\d+)?(?:ms|s)$/.test(trimmed)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function fetchWithTimeout(url, timeoutMs, fetchImpl = globalThis.fetch) {
@@ -179,15 +258,54 @@ export async function readResponseTextWithTimeout(response, timeoutMs) {
   }
 }
 
+async function waitForLaunchReady({
+  url,
+  lifecycle,
+  interruptions,
+  readOutput,
+  deadline,
+  readyTimeoutMs,
+  retryDelayMs,
+}) {
+  while (Date.now() < deadline) {
+    if (lifecycle.exitStatus) {
+      throw unexpectedExitError(lifecycle.exitStatus, "before becoming ready");
+    }
+    if (interruptions.signalName) {
+      throw interruptionError(interruptions.signalName);
+    }
+    if (childAnnouncedReady(readOutput(), url)) {
+      return;
+    }
+
+    const pause = await raceRuntime(
+      lifecycle,
+      interruptions,
+      delay(Math.min(retryDelayMs, Math.max(0, deadline - Date.now()))),
+    );
+    if (pause.kind === "exit") {
+      throw unexpectedExitError(pause.status, "before becoming ready");
+    }
+    if (pause.kind === "interrupt") {
+      throw interruptionError(pause.signal);
+    }
+  }
+
+  throw new Error(
+    `server did not announce ${url} as ready within ${readyTimeoutMs}ms`,
+  );
+}
+
 async function waitForReady({
   url,
   lifecycle,
+  interruptions,
   fetchImpl,
+  deadline,
   readyTimeoutMs,
   fetchTimeoutMs,
   retryDelayMs,
 }) {
-  const deadline = Date.now() + readyTimeoutMs;
   let lastFetchError;
 
   while (Date.now() < deadline) {
@@ -197,22 +315,29 @@ async function waitForReady({
       Math.min(fetchTimeoutMs, remaining),
       fetchImpl,
     );
-    const result = await raceChildExit(lifecycle, attempt);
+    const result = await raceRuntime(lifecycle, interruptions, attempt);
 
     if (result.kind === "exit") {
-      throw exitBeforeReadyError(result.status);
+      throw unexpectedExitError(result.status, "before becoming ready");
+    }
+    if (result.kind === "interrupt") {
+      throw interruptionError(result.signal);
     }
     if (result.kind === "value") {
       return result.value;
     }
     lastFetchError = result.error;
 
-    const pause = await raceChildExit(
+    const pause = await raceRuntime(
       lifecycle,
+      interruptions,
       delay(Math.min(retryDelayMs, Math.max(0, deadline - Date.now()))),
     );
     if (pause.kind === "exit") {
-      throw exitBeforeReadyError(pause.status);
+      throw unexpectedExitError(pause.status, "before becoming ready");
+    }
+    if (pause.kind === "interrupt") {
+      throw interruptionError(pause.signal);
     }
   }
 
@@ -259,11 +384,21 @@ export async function stopChild(
     signalChild = signalChildTree,
   } = {},
 ) {
+  if (
+    (child.exitCode !== undefined && child.exitCode !== null) ||
+    (child.signalCode !== undefined && child.signalCode !== null)
+  ) {
+    lifecycle.markMissingBeforeSignal();
+  }
+  lifecycle.beginStop();
   if (lifecycle.closeStatus) {
     return lifecycle.closeStatus;
   }
 
-  signalChild(child, "SIGTERM");
+  const terminateSent = signalChild(child, "SIGTERM");
+  if (!terminateSent) {
+    lifecycle.markMissingBeforeSignal();
+  }
   const terminated = await settleWithin(lifecycle.closed, terminateTimeoutMs);
   if (!terminated.timedOut) {
     return terminated.value;
@@ -298,27 +433,64 @@ export async function runHttpSmoke({
   signalChild = signalChildTree,
 } = {}) {
   const port = requestedPort ?? (await selectLoopbackPort());
-  const child = spawnServer(port);
-  const lifecycle = observeChild(child);
+  const interruptions = observeInterruptions();
+  let child;
+  let lifecycle;
   let output = "";
-  child.stdout?.on("data", (chunk) => {
-    output += chunk;
-  });
-  child.stderr?.on("data", (chunk) => {
-    output += chunk;
-  });
+  try {
+    child = spawnServer(port);
+    lifecycle = observeChild(child);
+    child.stdout?.setEncoding?.("utf8");
+    child.stderr?.setEncoding?.("utf8");
+    child.stdout?.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      output += chunk;
+    });
+  } catch (error) {
+    interruptions.close();
+    throw error;
+  }
 
   let failure;
   try {
-    const response = await waitForReady({
-      url: `http://127.0.0.1:${port}/`,
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const readyDeadline = Date.now() + readyTimeoutMs;
+    await waitForLaunchReady({
+      url: baseUrl,
       lifecycle,
+      interruptions,
+      readOutput: () => output,
+      deadline: readyDeadline,
+      readyTimeoutMs,
+      retryDelayMs,
+    });
+    const response = await waitForReady({
+      url: `${baseUrl}/`,
+      lifecycle,
+      interruptions,
       fetchImpl,
+      deadline: readyDeadline,
       readyTimeoutMs,
       fetchTimeoutMs,
       retryDelayMs,
     });
-    const html = await readResponseTextWithTimeout(response, bodyTimeoutMs);
+    const bodyResult = await raceRuntime(
+      lifecycle,
+      interruptions,
+      readResponseTextWithTimeout(response, bodyTimeoutMs),
+    );
+    if (bodyResult.kind === "exit") {
+      throw unexpectedExitError(bodyResult.status, "before smoke completed");
+    }
+    if (bodyResult.kind === "interrupt") {
+      throw interruptionError(bodyResult.signal);
+    }
+    if (bodyResult.kind === "error") {
+      throw bodyResult.error;
+    }
+    const html = bodyResult.value;
 
     assert.equal(response.status, 200);
     assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
@@ -326,6 +498,12 @@ export async function runHttpSmoke({
     assert.match(html, /Operational replay/);
     assert.match(html, /Simulation results/);
     assert.match(html, /Presentation layer only/);
+    if (interruptions.signalName) {
+      throw interruptionError(interruptions.signalName);
+    }
+    if (lifecycle.exitStatus) {
+      throw unexpectedExitError(lifecycle.exitStatus, "before smoke completed");
+    }
   } catch (error) {
     failure = withServerOutput(error, output);
   }
@@ -340,6 +518,21 @@ export async function runHttpSmoke({
     failure = failure
       ? new AggregateError([failure, cleanupError], "HTTP smoke and cleanup failed")
       : cleanupError;
+  } finally {
+    interruptions.close();
+  }
+
+  if (!failure && interruptions.signalName) {
+    failure = interruptionError(interruptions.signalName);
+  }
+  if (!failure && lifecycle.exitedBeforeStop) {
+    failure = withServerOutput(
+      unexpectedExitError(
+        lifecycle.exitStatus ?? lifecycle.closeStatus,
+        "before smoke cleanup began",
+      ),
+      output,
+    );
   }
 
   if (failure) {

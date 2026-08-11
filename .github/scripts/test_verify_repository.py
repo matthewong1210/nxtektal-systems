@@ -313,16 +313,59 @@ class RepositoryVerifierTests(unittest.TestCase):
         self.assertEqual(sum("crosses a block boundary" in error for error in errors), 5)
         self.assertEqual(sum("missing link target" in error for error in errors), 5)
 
-    def test_indented_code_does_not_create_links(self) -> None:
-        source = self.write(
-            "README.md", "Example:\n\n    [ignored](missing.md)\n"
+    def test_indented_link_syntax_fails_closed(self) -> None:
+        spaces = self.write(
+            "spaces.md", "Example:\n\n    [checked](missing-spaces.md)\n"
+        )
+        tab = self.write(
+            "tab.md", "Example:\n\n\t[checked](missing-tab.md)\n"
         )
 
         errors = verifier.verify_markdown(
-            {source: source.read_text(encoding="utf-8")}
+            {
+                spaces: spaces.read_text(encoding="utf-8"),
+                tab: tab.read_text(encoding="utf-8"),
+            }
         )
 
-        self.assertEqual(errors, [])
+        self.assertEqual(sum("missing link target" in error for error in errors), 2)
+        self.assertTrue(any("missing-spaces.md" in error for error in errors))
+        self.assertTrue(any("missing-tab.md" in error for error in errors))
+
+    def test_list_indentation_cannot_hide_links(self) -> None:
+        unordered = self.write(
+            "unordered.md",
+            "- item\n    [broken](missing-unordered.md)\n",
+        )
+        ordered = self.write(
+            "ordered.md",
+            "10. item\n    [broken](missing-ordered.md)\n",
+        )
+        tab_continuation = self.write(
+            "tab-continuation.md",
+            "- item\n\n\t[broken](missing-tab-continuation.md)\n",
+        )
+        nested_tab = self.write(
+            "nested-tab.md",
+            "- outer\n \t- inner\n\n      [broken](missing-nested-tab.md)\n",
+        )
+
+        errors = verifier.verify_markdown(
+            {
+                unordered: unordered.read_text(encoding="utf-8"),
+                ordered: ordered.read_text(encoding="utf-8"),
+                tab_continuation: tab_continuation.read_text(encoding="utf-8"),
+                nested_tab: nested_tab.read_text(encoding="utf-8"),
+            }
+        )
+
+        self.assertEqual(sum("missing link target" in error for error in errors), 4)
+        self.assertTrue(any("missing-unordered.md" in error for error in errors))
+        self.assertTrue(any("missing-ordered.md" in error for error in errors))
+        self.assertTrue(
+            any("missing-tab-continuation.md" in error for error in errors)
+        )
+        self.assertTrue(any("missing-nested-tab.md" in error for error in errors))
 
     def test_inline_code_is_ignored_but_adjacent_link_is_checked(self) -> None:
         source = self.write(
@@ -347,6 +390,57 @@ class RepositoryVerifierTests(unittest.TestCase):
         )
 
         self.assertTrue(any("unclosed Markdown fence" in error for error in errors))
+
+    def test_fenced_code_does_not_create_links(self) -> None:
+        source = self.write(
+            "README.md",
+            "```text\n[ignored](missing-backtick.md)\n```\n\n"
+            "~~~text\n[ignored](missing-tilde.md)\n~~~\n",
+        )
+
+        errors = verifier.verify_markdown(
+            {source: source.read_text(encoding="utf-8")}
+        )
+
+        self.assertEqual(errors, [])
+
+    def test_backtick_in_info_does_not_open_a_fence(self) -> None:
+        source = self.write(
+            "README.md",
+            "```bad```\n[broken](missing.md)\n```\n",
+        )
+
+        errors = verifier.verify_markdown(
+            {source: source.read_text(encoding="utf-8")}
+        )
+
+        self.assertTrue(
+            any("missing link target: missing.md" in error for error in errors)
+        )
+        self.assertTrue(any("unclosed Markdown fence" in error for error in errors))
+
+    def test_encoded_url_delimiters_remain_relative(self) -> None:
+        source = self.write(
+            "README.md",
+            "# Existing\n\n"
+            "[external](https://example.invalid/path#fragment)\n"
+            "[network external](//example.invalid/path#fragment)\n"
+            "[local fragment](#existing)\n"
+            "[encoded scheme](https%3A%2F%2Fexample.invalid)\n"
+            "[encoded network path](%2F%2Fexample.invalid)\n"
+            "[encoded fragment delimiter](README.md%23existing)\n",
+        )
+
+        errors = verifier.verify_markdown(
+            {source: source.read_text(encoding="utf-8")}, {source}
+        )
+
+        self.assertEqual(len(errors), 3)
+        self.assertTrue(
+            any("https%3A%2F%2Fexample.invalid" in error for error in errors)
+        )
+        self.assertTrue(any("%2F%2Fexample.invalid" in error for error in errors))
+        self.assertTrue(any("README.md%23existing" in error for error in errors))
 
     def test_generated_screenshot_egg_info_and_tsbuildinfo_fail(self) -> None:
         paths = [
