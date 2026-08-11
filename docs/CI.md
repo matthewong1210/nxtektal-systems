@@ -10,9 +10,10 @@ the same pull request or ref. It uploads only the npm audit evidence described
 below as a retained GitHub Actions artifact. Every action is pinned to an
 immutable commit SHA.
 
-CI pins Python 3.13.14, uv 0.11.29, and Node.js 24.14.1 with its bundled npm
-11.11.0. These are CI tooling choices within the versions supported by the
-existing projects; they do not change either dependency manifest or lockfile.
+CI pins Python 3.13.14, uv 0.11.29, Node.js 24.14.1 with its bundled npm
+11.11.0 for the ROI engine, and Node.js 22.23.2 for Operational Replay. These
+are CI tooling choices within the versions supported by the existing projects;
+they do not change any dependency manifest or lockfile.
 
 ## Stable checks
 
@@ -21,6 +22,7 @@ existing projects; they do not change either dependency manifest or lockfile.
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, whitespace, likely credentials, machine paths, excluded legacy paths, generated artifacts, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
 | `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
+| `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
 
 Job names are intentionally explicit and stable. Renaming one changes the
@@ -30,11 +32,14 @@ GitHub required-check context and must be coordinated with repository rules.
 
 Run these commands from a clean candidate checkout. Generated distributions,
 audit reports, and replay artifacts go to a temporary directory rather than the
-repository.
+repository. Package-native ignored dependency/build directories remain inside
+their package, and every successful job finishes by proving that tracked and
+nonignored checkout state did not change.
 
-First install uv 0.11.29 and Node.js 24.14.1 with a trusted toolchain manager.
-The local path deliberately fails closed when those versions differ, and uv
-acquires the exact Python patch release used by CI:
+First install uv 0.11.29 and use a trusted toolchain manager that can select the
+two exact Node.js versions below. The local path deliberately fails closed when
+tool versions differ, and uv acquires the exact Python patch release used by
+CI:
 
 ```bash
 case "$(uv --version)" in
@@ -44,8 +49,6 @@ esac
 uv python install 3.13.14
 test "$(uv run --no-project --python 3.13.14 python -c \
   'import platform; print(platform.python_version())')" = "3.13.14"
-test "$(node --version)" = "v24.14.1"
-test "$(npm --version)" = "11.11.0"
 ```
 
 ### Documentation and hygiene
@@ -169,6 +172,8 @@ Do not substitute `uv lock --check`: it currently fails because of the known
 ### ROI
 
 ```bash
+test "$(node --version)" = "v24.14.1"
+test "$(npm --version)" = "11.11.0"
 cd nxtektal-roi-engine
 ci_tmp="$(mktemp -d)"
 npm ci
@@ -224,6 +229,37 @@ or a node severity above its reachable accepted advisory ceiling fails. The
 accepted baseline lives in
 [`verify_npm_audit.py`](../.github/scripts/verify_npm_audit.py); remove resolved
 entries in a later dependency-hygiene change.
+
+### Operational Replay
+
+Select the exact Node.js 22 runtime used by CI, then consume the committed
+application scripts without introducing a root JavaScript workspace or coupling
+to the Python/ROI dependency graphs. The application manifest supports
+Node.js `>=22.13.0`; CI selects 22.23.2, the Node 22 security release current
+when this workflow was configured, because it also satisfies the locked Linux
+optional tooling engine range.
+
+```bash
+test "$(node --version)" = "v22.23.2"
+export NEXT_TELEMETRY_DISABLED=1
+cd apps/operational-replay
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run smoke
+npm audit --omit=dev
+cd ../..
+git diff --check HEAD --
+git diff --exit-code HEAD --
+test -z "$(git ls-files --others --exclude-standard)"
+```
+
+The production audit must remain at zero vulnerabilities. The build and HTTP
+smoke validate only the checked-out read-only application. CI disables Next.js
+telemetry and gives the smoke step a two-minute outer timeout; the job uploads
+no artifact and performs no hosting or deployment.
 
 ### Replay and demo
 
@@ -293,9 +329,10 @@ against `main`.
 
 Steps use normal fail-fast behavior; there is no `continue-on-error`. The ROI
 audit commands capture npm's expected nonzero development-audit status, then a
-separate policy step decides whether it is acceptable. A missing optional USD
-or Streamlit dependency fails through explicit imports, CLI execution, and live
-HTTP smoke instead of being hidden by a skipped test.
+separate policy step decides whether it is acceptable. Operational Replay's
+typecheck, lint, tests, build, HTTP smoke, and production audit fail directly.
+A missing optional USD or Streamlit dependency fails through explicit imports,
+CLI execution, and live HTTP smoke instead of being hidden by a skipped test.
 
 The Python job runs every existing architecture and safety guard. A robust
 generic reachability guard from future LLM/agent code to execution surfaces, or

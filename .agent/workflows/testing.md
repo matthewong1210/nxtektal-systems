@@ -113,7 +113,8 @@ model version is intentionally introduced.
 
 ## Operational Replay web app
 
-From `apps/operational-replay/`:
+Use Node.js `>=22.13.0` as required by the package manifest. From
+`apps/operational-replay/`:
 
 ```bash
 npm ci
