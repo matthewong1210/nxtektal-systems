@@ -165,6 +165,7 @@ orienting a reviewer:
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
 | `nxt_range_viewer` / `nxt_range_demo` | Demo and replay | Read-only presentation over exported artifacts |
+| `apps/operational-replay` | Operational Replay web app | Read-only browser storytelling over selected exported artifacts |
 | `@nxtektal/roi-engine` | ROI engine | Formula-locked economics with evidence-bearing inputs |
 | `AGENTS.md` and `.agent/` | AI engineering operating system | Repository truth, dependency, safety, testing, and review governance |
 
@@ -175,12 +176,13 @@ explicit without pretending the rename has occurred.
 
 ## Repository surfaces
 
-The standalone checkout contains two independent implementation surfaces:
+The standalone checkout contains three independent implementation surfaces:
 
 1. `simulation/`: the Python simulation and Site OS stack.
 2. `nxtektal-roi-engine/`: a standalone deterministic TypeScript package.
+3. `apps/operational-replay/`: a standalone read-only Next.js presentation app.
 
-Root documentation and `.agent/` govern both surfaces without creating a
+Root documentation and `.agent/` govern all surfaces without creating a
 runtime dependency between them.
 
 ## Stable technical references

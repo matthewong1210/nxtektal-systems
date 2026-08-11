@@ -1,6 +1,6 @@
 ---
 name: nxtektal-change
-description: Execute architecture-safe changes in the NXTektal repository. Use for implementation, refactoring, bug fixes, contract or schema changes, package additions, tests, scripts, and architecture documentation across the simulation/Site OS stack or ROI engine.
+description: Execute architecture-safe changes in the NXTektal repository. Use for implementation, refactoring, bug fixes, contract or schema changes, package additions, tests, scripts, and architecture documentation across the simulation/Site OS stack, ROI engine, or Operational Replay web app.
 ---
 
 # Change NXTektal safely
@@ -35,6 +35,8 @@ description: Execute architecture-safe changes in the NXTektal repository. Use f
 - Route historical evidence to `nxt_memory` without feedback.
 - Route viewer replay/export work to `nxt_range_viewer`, using public
   `nxt_range_ops` APIs without runtime ownership or hidden simulator facts.
+- Route browser-only replay storytelling to `apps/operational-replay`, consuming
+  artifact files without importing Python/ROI implementations or owning advice.
 - Route USD twin work to `nxt_range_twin` without simulation-package imports or
   novel facts.
 - Route broad deterministic FacilityState manager advice to
@@ -44,8 +46,8 @@ description: Execute architecture-safe changes in the NXTektal repository. Use f
   `RobotTaskInterface`, preserving timeout/recovery/e-stop contracts. No
   site-level physical collector-dispatch contract exists.
 - Route ROI formulas exclusively through the versioned ROI engine.
-- Keep Python simulation and ROI changes independent unless an existing
-  contract explicitly connects them.
+- Keep Python simulation, ROI, and Operational Replay changes independent unless
+  an existing artifact contract explicitly connects them.
 
 ## Preserve the architecture
 

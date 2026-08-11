@@ -24,8 +24,9 @@ and robot adapters into one package.
 |---|---|---|
 | `simulation/` | Virtual handoff lab, whole-range runtime, Site OS state/advisory/evidence/projection layers | Python project managed with `uv` |
 | `nxtektal-roi-engine/` | Deterministic, formula-locked driving-range ROI calculations | Independent TypeScript package |
+| `apps/operational-replay/` | Browser storytelling over exported simulation replay evidence | Independent read-only Next.js app |
 
-These two implementation surfaces share governance and documentation, not a
+These implementation surfaces share governance and documentation, not a
 runtime dependency.
 
 ## Product-layer vocabulary

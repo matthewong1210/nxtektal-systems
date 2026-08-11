@@ -9,8 +9,9 @@ responsible for a contract or behavior.
 |---|---|---|
 | `simulation/` | Python virtual handoff, operations runtime, and Site OS layers | Pytest, config validation, optional wheel build |
 | `nxtektal-roi-engine/` | Deterministic formula-lock ROI engine | Typecheck, Vitest, package build |
+| `apps/operational-replay/` | Read-only browser storytelling over exported replay artifacts | Typecheck, lint, Vitest, Next.js build, HTTP smoke, production audit |
 
-Root documentation and `.agent/` govern both implementation surfaces without
+Root documentation and `.agent/` govern all implementation surfaces without
 owning production behavior or creating cross-surface runtime coupling.
 
 ## Python packages and tools
@@ -39,6 +40,12 @@ At the merged-main baseline, `simulation/pyproject.toml` ships `nxt_sim`,
 importable without simulation/USD dependencies, while successful processing
 uses the existing telemetry assembler and currently needs the `range-ops`
 compatibility extra. This does not confer simulation ownership.
+
+`apps/operational-replay` is an isolated Node application. It may consume
+existing artifact files through browser APIs, but it imports no Python or ROI
+implementation and owns no replay generation, state, recommendation,
+orchestration, projection, command, or execution semantics. No upstream package
+may depend on it.
 
 ## Feature-placement and duplication gate
 

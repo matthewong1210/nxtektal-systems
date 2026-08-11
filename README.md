@@ -91,13 +91,16 @@ uv run --no-sync python scripts/facility_twin_capture.py \
 Continue with the export and viewer steps in [Demo guide](docs/DEMO.md). The
 existing 60–90 second script is in
 [`simulation/nxt_range_demo/YC_DEMO.md`](simulation/nxt_range_demo/YC_DEMO.md).
+For the recovered browser storytelling experience, use
+[`apps/operational-replay/`](apps/operational-replay/); it reads selected
+simulation artifacts locally and does not replace the canonical exporter.
 
 ## Repository map
 
-This standalone repository retains two independent implementation surfaces:
-the Python simulation/Site OS stack and the TypeScript ROI engine. Repository
-governance and documentation apply across both without creating a runtime
-dependency between them.
+This standalone repository retains three independent implementation surfaces:
+the Python simulation/Site OS stack, the TypeScript ROI engine, and the
+read-only Operational Replay web app. Repository governance and documentation
+apply across them without creating runtime dependencies.
 
 | Path | Purpose | Product status |
 |---|---|---|
@@ -111,6 +114,7 @@ dependency between them.
 | `simulation/nxt_range_twin/` | State/layout validation and USD projection | Implemented projection layer |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
+| `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |
 | `nxtektal-roi-engine/` | Versioned, deterministic ROI calculations | Implemented standalone package |
 | `AGENTS.md`, `.agent/`, `docs/AGENT_OPERATING_MANUAL.md` | AI engineering governance and architecture-safe workflows | Implemented repository operating system |
 

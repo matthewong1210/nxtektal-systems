@@ -16,8 +16,8 @@ workflow, testing expectations, and review standard.
 1. Read root [`AGENTS.md`](../AGENTS.md).
 2. Run `git status --short --branch` and identify whether the checkout is
    `main`, a feature branch, or a stacked branch.
-3. Classify the task as Python `simulation/`, standalone ROI engine, or
-   docs/agent infrastructure.
+3. Classify the task as Python `simulation/`, standalone ROI engine,
+   Operational Replay web app, or docs/agent infrastructure.
 4. Read the matching package source, tests, and stable docs—not only plans or
    PR prose.
 5. Open the relevant files in [`.agent/context/`](../.agent/context/) and
@@ -30,18 +30,19 @@ workflow, testing expectations, and review standard.
 
 ## Repository reality
 
-This standalone repository has two independent implementation surfaces:
+This standalone repository has three independent implementation surfaces:
 
 | Surface | Technology | Role |
 |---|---|---|
 | `simulation/` | Python 3.11+, `uv`, Hatch, pytest | NXTektal virtual handoff, range operations, and Site OS layers |
 | `nxtektal-roi-engine/` | TypeScript, npm, Vitest | Formula-locked deterministic ROI model |
+| `apps/operational-replay/` | TypeScript, Next.js, npm, Vitest | Read-only browser storytelling over exported replay artifacts |
 
 The root README is the NXTektal product and investor overview. Root
 documentation and `.agent/` form the shared governance layer; they do not add a
-third runtime surface. There is no workspace-level dependency graph connecting
-the two implementation surfaces. Do not add one without an explicit product
-requirement and architecture review.
+runtime surface. There is no workspace-level dependency graph connecting the
+implementation surfaces. Do not add one without an explicit product requirement
+and architecture review.
 
 There is no named human ownership file. Package ownership in this manual means
 responsibility for behavior and contracts.
@@ -238,6 +239,9 @@ The normative responsibility/dependency table is
 - `nxt_range_viewer` independently replays `RangeOpsEnv`; `nxt_range_demo`
   presents bundles; `nxt_range_twin` projects FacilityState streams/layout into
   USD. All remain derived/read-only surfaces.
+- `apps/operational-replay` presents selected exported artifacts in a standalone
+  browser story. It imports no Python/ROI runtime and owns no state, advice, or
+  execution behavior.
 - `nxt_commissioning` owns immutable static physical facts and emits disposable
   one-way projections without importing downstream/runtime packages.
 - `nxt_site_runtime` owns state orchestration metadata and behavior only; its

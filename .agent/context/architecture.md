@@ -153,6 +153,7 @@ type:
 | Commissioning independence, immutable/static ownership, and one-way projection | `simulation/tests/commissioning/test_guards.py` |
 | Site Runtime designated seams, no duplicate domain contracts, and no upstream/consumer dependency | `simulation/tests/site_runtime/test_architecture.py` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
+| Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |
 
 The `nxt_range_agent` no-direct-`nxt_sim` rule and some viewer/demo presentation

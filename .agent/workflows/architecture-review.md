@@ -37,6 +37,7 @@ Classify the feature before choosing a directory:
 | Policy-specific trust, trace, evaluation, workflow, ledger | `nxt_pilot_ops` |
 | Historical evidence | `nxt_memory` |
 | Viewer replay/export | `nxt_range_viewer` |
+| Browser replay storytelling | `apps/operational-replay` presentation over artifact files |
 | State/layout-to-USD projection | `nxt_range_twin` |
 | Micro handoff task sequencing/execution | `HandoffController` and `RobotTaskInterface` |
 | Physical site-level task admission/translation | No implemented owner or contract; pause for design/approval |

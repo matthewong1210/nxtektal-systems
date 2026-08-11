@@ -52,6 +52,30 @@ The viewer automatically looks for the generated briefing sidecar at
 `reports/demo/demand_spike-seed101/briefings.jsonl`. All generated reports are
 gitignored.
 
+## Optional browser story
+
+The recovered Operational Replay app is a separate read-only presentation over
+the facility-twin capture files and synchronized briefing sidecar. This is not
+the `nxt_range_viewer` bundle: the viewer exports `episode.json`, `layout.json`,
+and optional `benchmark.json`. The browser app does not replace that viewer,
+run policy logic, or mutate the selected files.
+
+```bash
+cd apps/operational-replay
+npm ci
+npm run dev
+```
+
+Open `http://localhost:3000`, choose **Load artifacts**, and first select the
+capture's `events.jsonl`, `facility_states.jsonl`, and `layout.json`. Choose
+**Load artifacts** again to add the separately stored
+`reports/demo/<episode>/briefings.jsonl` sidecar in page memory. Selecting a new
+`events.jsonl` starts a new bundle; no source file is copied or modified. The
+app reports missing or contract-invalid inputs, keeps advisory outputs
+separate, and never interpolates robot movement. `stream.meta.json` is outside
+the v1 input contract; selected-file scenario and seed checks are not
+cryptographic proof that the separately selected files form one episode.
+
 For the prepared 60–90 second narration and exact event timestamps, use
 [`simulation/nxt_range_demo/YC_DEMO.md`](../simulation/nxt_range_demo/YC_DEMO.md).
 
