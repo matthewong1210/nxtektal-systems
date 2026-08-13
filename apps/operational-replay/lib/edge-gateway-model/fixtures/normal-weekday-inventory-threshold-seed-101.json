@@ -1,0 +1,63 @@
+{
+  "schema": "nxt-edge-gateway-demo/replay-excerpt/v1",
+  "source": {
+    "schema": "nxt-range-viewer/episode/v1",
+    "scenario": "normal_weekday",
+    "policy": "inventory_threshold",
+    "policyVersion": "0.5.0",
+    "seed": 101,
+    "simulatorVersion": "0.5.0",
+    "gitCommit": "f5ae9e1",
+    "controlIntervalSeconds": 60,
+    "episodeSteps": 960,
+    "episodeSha256": "ef426d0b0fbbe03f45461c68362431a0be17474285c3da46530eb8d3e5cd9108",
+    "disclaimer": "All results are produced from placeholder-provenance parameters. They exercise the decision problem and the pipeline only and must NOT be presented as real facility performance."
+  },
+  "frames": [
+    {
+      "label": "accepted collection directive",
+      "step": 1,
+      "tSeconds": 21660,
+      "directive": "assign_collection(R1,Z3)",
+      "safetyShieldAllowed": true,
+      "robotId": "R1",
+      "robotActivity": "traveling",
+      "robotLocation": "transit",
+      "robotDestination": "zone:Z3",
+      "robotBatteryFraction": 0.9975,
+      "robotPayloadBalls": 0,
+      "dispenserBalls": 7197,
+      "ballsProcessed": 0
+    },
+    {
+      "label": "accepted handoff directive",
+      "step": 282,
+      "tSeconds": 38520,
+      "directive": "send_to_handoff(R1)",
+      "safetyShieldAllowed": true,
+      "robotId": "R1",
+      "robotActivity": "unloading",
+      "robotLocation": "station:H1",
+      "robotDestination": null,
+      "robotBatteryFraction": 0.877289,
+      "robotPayloadBalls": 551,
+      "dispenserBalls": 4286,
+      "ballsProcessed": 0
+    },
+    {
+      "label": "recorded terminal replay state",
+      "step": 960,
+      "tSeconds": 79200,
+      "directive": "wait",
+      "safetyShieldAllowed": true,
+      "robotId": "R1",
+      "robotActivity": "idle",
+      "robotLocation": "zone:Z2",
+      "robotDestination": null,
+      "robotBatteryFraction": 0.250795,
+      "robotPayloadBalls": 200,
+      "dispenserBalls": 6097,
+      "ballsProcessed": 16946
+    }
+  ]
+}
