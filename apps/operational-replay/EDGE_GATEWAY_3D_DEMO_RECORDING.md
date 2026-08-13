@@ -1,0 +1,152 @@
+# Edge Gateway 3D demo recording guide
+
+This guide produces a local YC review capture of the presentation-only Edge
+Gateway route. It does not authorize public deployment.
+
+## Production run
+
+From the repository root:
+
+```bash
+cd apps/operational-replay
+npm ci
+npm run build
+npm run start
+```
+
+Use these local URLs:
+
+- manual demo: `http://localhost:3000/edge-gateway-demo`
+- automatic presentation:
+  `http://localhost:3000/edge-gateway-demo?presentation=1`
+
+After the production build completes, the repeatable browser check and its
+uncommitted screenshots can be generated outside the repository with:
+
+```bash
+node tests/edge-gateway-demo/browser-verify.mjs --output-dir "$(mktemp -d)"
+```
+
+The route's page metadata deliberately omits the unresolved `public/og.png`.
+The root asset remains untouched and continues to block public deployment.
+
+## Capture setup
+
+- Set the browser viewport to `1440 x 900` CSS pixels at `100%` browser zoom.
+- Record the production build, not the development server.
+- Use the automatic presentation URL and target a `75`-second capture. A final
+  duration anywhere from `60` to `80` seconds is acceptable.
+- Before recording, restart the presentation and confirm that pause, restart,
+  manual stepping, reduced motion, and the no-audio experience all remain
+  usable.
+- Keep both disclosure labels visible whenever their relevant material is on
+  screen. Do not crop them out.
+- Close notifications and unrelated tabs. Do not expose local paths, account
+  details, customer information, or developer tooling in the capture.
+
+## Truthful 60-80 second narration
+
+The following script is paced for approximately 75 seconds. Read the quoted
+copy; the notes after each segment are not narration.
+
+**0-8 seconds - Installed System**
+
+> This conceptual, not-for-fabrication view shows the proposed NXTektal Edge
+> Gateway installed beside existing range equipment.
+
+**8-20 seconds - Open and exploded enclosure**
+
+> Opening the enclosure reveals repository-authored approximate geometry: an
+> edge computer, router, remote I/O, protected power, network switching, and
+> structured terminals.
+
+**20-40 seconds - Operational Flow**
+
+> In this simulated scenario, observations enter a conceptual Gateway host and
+> are shown alongside the canonical FacilityState boundary and a separate
+> assembly-quality report. Advisory and Decision Trace labels end at a recorded
+> manager response, where the chain stops. The following robot motion is a
+> separate deterministic RangeOps replay excerpt, not a command caused by
+> approval.
+
+**40-52 seconds - Scale the Fleet**
+
+> Fleet onboarding, certificates, capabilities, and Adapter loading are future
+> workflow concepts. The utilization numbers are illustrative, not capacity
+> measurements.
+
+**52-64 seconds - Software Update**
+
+> The signed update and rollback sequence is also a target operating concept,
+> not a production OTA service implemented by this repository.
+
+**64-75 seconds - Safety Architecture and overview**
+
+> Finally, local emergency-stop hardware remains independent of the Agent and
+> normal I/O. This visualization claims neither deployed integration nor safety
+> certification.
+
+Do not substitute narration that describes manager approval, admission, a
+typed mission, a robot Adapter, robot motion, or a stored outcome as one
+implemented causal chain. The repository owns advisory evidence and a separate
+simulator replay; it does not contain a production advice-to-physical-execution
+bridge.
+
+## Silent-demo alternative
+
+Record the same presentation URL with the microphone and system audio disabled.
+The timed scene titles, inspector copy, boundary labels, and disclosures make
+the presentation understandable without narration. Let the sequence complete
+once without pointer movement; use pause or manual stepping only if the viewer
+needs more time on a boundary label. Reduced motion may be enabled before
+restart without changing the story's ordering.
+
+## H.264 export
+
+Export an MP4 using H.264 at the captured `1440 x 900` resolution and `30 fps`.
+Use an `8 Mb/s` target video bitrate, AAC at no more than `128 kb/s` when the
+narrated recording has audio, and no audio track for the silent version. At 75
+seconds, those settings leave useful headroom below 100 MB. Enable web/fast
+start when the recorder offers it.
+
+Verify the final file is under `100 MB` before sharing it. If it is larger,
+re-export at `6 Mb/s`; do not shorten the disclosures or remove the truth
+labels to reduce size. Keep review videos outside the repository and do not
+commit them.
+
+## Screenshot capture
+
+Capture PNG screenshots at `1440 x 900`, `100%` zoom, from the production
+build. Use these review frames:
+
+1. Installed Gateway
+2. Open enclosure
+3. Exploded view
+4. Selected Edge Computer
+5. Operational data flow
+6. Recorded manager response
+7. Advisory stop boundary and separately labelled simulation replay
+8. Fleet expansion
+9. Staged software update
+10. Failed health check and rollback
+11. Independent safety architecture
+12. Mobile non-WebGL fallback
+
+For the mobile fallback, use one of the tested narrow viewports and capture the
+text diagram and parts list rather than forcing WebGL. Confirm that every frame
+retains the relevant conceptual or simulated disclosure. Store screenshots
+outside the repository unless repository policy later requires checked-in
+evidence.
+
+## Product-truth checklist
+
+Every recording and screenshot must preserve these exact disclosures:
+
+- `CONCEPTUAL SYSTEM VISUALIZATION — NOT FOR FABRICATION`
+- `SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA`
+
+The capture must not imply manufacturing readiness, a final electrical design,
+UL or production safety certification, live customer deployment, measured
+customer savings, measured Gateway capacity, autonomous physical execution, or
+an implemented safety installation. Static values and motion are illustrative.
+The Agent cannot control a robot or bypass local safety through this route.
