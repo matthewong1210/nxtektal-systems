@@ -113,7 +113,8 @@ model version is intentionally introduced.
 
 ## Operational Replay web app
 
-From `apps/operational-replay/`:
+Use Node.js `>=22.13.0` as required by the package manifest. From
+`apps/operational-replay/`:
 
 ```bash
 npm ci
@@ -136,10 +137,35 @@ links, and confirm only documentation/agent paths changed. Production suites
 are optional for documentation-only changes unless the documentation asserts a
 command or contract that needs execution evidence.
 
+The repository CI policy helpers and complete repository verifier run from the
+repository root:
+
+```bash
+case "$(uv --version)" in
+  "uv 0.11.29"*) ;;
+  *) exit 1 ;;
+esac
+uv python install 3.13.14
+test "$(uv run --no-project --python 3.13.14 python -c \
+  'import platform; print(platform.python_version())')" = "3.13.14"
+uv run --no-project --python 3.13.14 python -B \
+  -m unittest discover -s .github/scripts -p 'test_*.py' -v
+uv run --no-project --python 3.13.14 python -B \
+  .github/scripts/verify_repository.py
+ci_diff_base="$(git merge-base origin/main HEAD)"
+git diff --check "$ci_diff_base"...HEAD --
+git diff --check HEAD --
+```
+
+The stable GitHub Actions checks, pinned tool versions, exact local equivalents,
+USD workaround, ROI audit policy, and replay verification path are documented
+in [`docs/CI.md`](../../docs/CI.md).
+
 ## Reporting results
 
 - Name the command and the observed pass/fail/skip count.
 - Distinguish focused, full, build, manual, and hygiene checks.
 - State why a check was not run.
 - Never copy historical PR test totals as the result of the current change.
-- Never call a local command "CI" when no repository CI job ran it.
+- Never call a local command a CI result; only an observed GitHub Actions job
+  run is CI evidence.
