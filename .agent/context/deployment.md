@@ -23,6 +23,14 @@ Merged library contracts are not proof of deployed physical integrations. Keep
 protocols, test doubles, and deterministic rehearsal separate from live-service
 claims.
 
+Added after that baseline (verify merge status against the current branch):
+`nxt_agent_runtime`, the deterministic composition/lifecycle library over Site
+Runtime and Shadow Ops — deferred-acknowledgement cycles, a separate evaluation
+checkpoint, an append-only evaluation journal, a pending manager-decision view,
+a local JSONL snapshot publisher, and read-only status. It runs against
+synthetic/fixture sources only; it is not a service scheduler, a production
+publisher, or live delivery.
+
 ## Static truth versus dynamic evidence
 
 For a physical facility, commissioning owns **what exists and how it is
@@ -142,6 +150,7 @@ give Site Runtime ownership of simulation truth.
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
+| Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
 | Broad state-derived manager advice | `nxt_facility.decisions` |
 | Policy trust, trace, evaluation, human workflow, or ledger | `nxt_pilot_ops` |
 | Facility visualization | `nxt_range_twin` projection from declared layout/state contracts |

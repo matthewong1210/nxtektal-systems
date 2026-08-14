@@ -81,6 +81,35 @@ does not pass a previous state, define an alternate assembler, change
 abstract state port, not a live transport or actuator API. See
 [deployment.md](deployment.md) before changing this boundary.
 
+## Agent Runtime composition loop
+
+`nxt_agent_runtime` is the designated deterministic composition/lifecycle
+layer over the two merged runtimes. It owns cycle ordering and evaluation
+lifecycle evidence only:
+
+```mermaid
+flowchart LR
+    Source["ObservationSource\nat-least-once"] --> SitePipeline["SiteRuntimePipeline\npublication"]
+    SitePipeline --> AdmittedEnvelope["FacilitySnapshotEnvelope"]
+    AdmittedEnvelope --> Adapter["nxt_pilot_ops adapter"]
+    Adapter --> Guardian["BallAvailabilityGuardian"]
+    Guardian --> Evaluation["PolicyEvaluation\nNO_ACTION or RECOMMEND"]
+    Evaluation --> Journal["evaluation journal\nappend-only evidence"]
+    Evaluation --> Ledger["Shadow Ops ledger\nissuance + human workflow"]
+    Ledger --> Queue["pending manager-decision view"]
+    Journal --> Status["read-only health/status"]
+    Queue --> HumanMgr["Human manager response\naccept / reject / modify"]
+    HumanMgr --> Ledger
+```
+
+The runtime defers the source acknowledgement until the evaluation lifecycle
+for the published envelope completes, so an at-least-once source redelivers
+any unfinished frame after a crash; deterministic recomputation then
+reproduces byte-identical evidence. Rejected input never reaches the
+adapter, the guardian, the journal, or the queue. The evaluation checkpoint
+is separate from the Site Runtime publication checkpoint. Acceptance in the
+queue is a human workflow record only; no path reaches robot execution.
+
 ## Core principles
 
 ### One-way extension
@@ -102,6 +131,8 @@ coupling in named seams:
 - `nxt_pilot_ops.adapters`
 - `nxt_site_runtime.pipeline` for the existing telemetry assembly call
 - `nxt_site_runtime.composition` for setup-only lazy commissioning projection
+- `nxt_agent_runtime` as the only package-level consumer of the Site Runtime
+  and Shadow Ops public surfaces together (composition/lifecycle only)
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
@@ -152,6 +183,7 @@ type:
 | Shadow Ops adapter-only upstream access and no command surface | `simulation/tests/pilot_ops/test_boundaries.py` |
 | Commissioning independence, immutable/static ownership, and one-way projection | `simulation/tests/commissioning/test_guards.py` |
 | Site Runtime designated seams, no duplicate domain contracts, and no upstream/consumer dependency | `simulation/tests/site_runtime/test_architecture.py` |
+| Agent Runtime approved-surface imports, no execution/network/wall-clock surface, and no reverse dependency | `simulation/tests/agent_runtime/test_architecture.py` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
 | Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |

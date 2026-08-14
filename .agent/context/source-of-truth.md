@@ -16,6 +16,7 @@ fact class and runtime boundary.
 | Observation evidence | `ObservationFrame`, source/timing/provenance fields, and `AssemblyReport` | Ground truth without assembly and quality context |
 | Physical deployment static facts | Validated immutable `nxt_commissioning.CommissionedSite` manifest | `RangeOpsScenario`, `SiteConfig`, observations, viewer/layout files, or USD |
 | Site Runtime orchestration | `nxt_site_runtime` sequence/input validation, publication-quality gate, deterministic envelope/checkpoint/recovery, and idempotent state publication coordination | Observation semantics, a second assembler/state model, advice, projection, physical command admission, or execution |
+| Agent Runtime evaluation lifecycle | `nxt_agent_runtime` deferred-acknowledgement cycle ordering, separate evaluation checkpoint, append-only evaluation journal (including durable `NO_ACTION` evidence), pending manager-decision view, read-only status | State, observation, policy, recommendation, trace, or workflow semantics; a second publication checkpoint; a decision engine; a command surface; facility truth |
 | Facility advice | `nxt_facility.decisions.Recommendation` | Directive or execution acknowledgement |
 | Shadow decision evaluation | `nxt_pilot_ops` snapshot, evaluation, trace, and recommendation | Command, actuator, safety shield, or live state |
 | Human/execution workflow evidence | Shadow Ops immutable workflow records and hash-chained ledger | Proof the physical act occurred beyond the recorded acknowledgement |
@@ -58,6 +59,22 @@ semantics. Its `QualityGate` admits a state envelope based on data quality; it
 is not decision policy, physical command admission, or a robot safety gate.
 `StatePublisher` and `RuntimeSink` are state/visibility ports, never actuator
 ports. See [deployment.md](deployment.md).
+
+### Site Runtime versus Agent Runtime
+
+`nxt_agent_runtime` is the designated composition/lifecycle layer over Site
+Runtime and Shadow Ops. It drives the existing pipeline through its public
+API, defers the observation-source acknowledgement until the evaluation
+lifecycle for the published envelope completes, and records exactly one
+runtime evaluation outcome per admitted envelope in its append-only journal.
+Its evaluation checkpoint is a separate fact class from the Site Runtime
+publication checkpoint and never carries publication, policy, or
+human-workflow semantics. The journal and status reference canonical IDs
+(`envelope_id`, `trace_id`, `recommendation_id`, ledger `event_id`); they are
+evidence and diagnostics, never a second `FacilityState` or policy source of
+truth, and never live-loop input. A rejected Site Runtime input produces no
+evaluation, no `NO_ACTION` record, no checkpoint advance, and no pending
+decision.
 
 ### Truth versus observation
 

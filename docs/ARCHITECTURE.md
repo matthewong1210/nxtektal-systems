@@ -97,6 +97,7 @@ physical observation source or production publisher/sink is implemented.
 | Simulated ball location and count | `BallLedger` | State snapshots and metrics |
 | Physical static site facts | Immutable `nxt_commissioning.CommissionedSite` | One-way config/layout/binding projections |
 | Site-level state orchestration | `nxt_site_runtime` sequencing, quality gate, envelope, checkpoint/recovery, and state-publication coordination | Exact `FacilityState` plus separate `AssemblyReport`; never advice or commands |
+| Continuous evaluation lifecycle | `nxt_agent_runtime` deferred-acknowledgement cycles, evaluation checkpoint, append-only evaluation journal, pending-decision view, and read-only status | References to canonical envelope/trace/recommendation/ledger IDs; never state, policy, or execution truth |
 | Canonical downstream operational snapshot | Frozen `nxt_facility.state.FacilityState` | Advice, memory, twin stream |
 | Observation provenance and assembly quality | `ObservationFrame` and `AssemblyReport` | Must accompany deployment-path state |
 | Shadow policy evaluation and workflow evidence | `nxt_pilot_ops` recommendation, trace, workflow, and ledger contracts | Advisory records; never actuator acknowledgement by themselves |
@@ -162,6 +163,7 @@ orienting a reviewer:
 | `nxt_pilot_ops` | Shadow Ops | Named-policy evaluation, decision trace, human workflow, and tamper-evident ledger; advisory only |
 | `nxt_commissioning` | Facility commissioning | Immutable static site/deployment truth and deterministic one-way projections |
 | `nxt_site_runtime` | Site Runtime | Sequencing, state-publication quality, envelope, checkpoint/recovery, and idempotent publication orchestration |
+| `nxt_agent_runtime` | Agent Runtime | Deterministic, restart-safe composition of Site Runtime output through Shadow Ops evaluation, with an evaluation checkpoint, evidence journal, pending manager-decision view, and health/status; synthetic sources only, advisory only |
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
 | `nxt_range_viewer` / `nxt_range_demo` | Demo and replay | Read-only presentation over exported artifacts |
