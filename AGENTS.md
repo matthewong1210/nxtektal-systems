@@ -125,7 +125,8 @@ Use, in order:
 3. Stable package documentation such as `simulation/docs/facility_state.md`,
    `simulation/docs/range_ops.md`, `simulation/docs/spatial_twin_design.md`, and
    `simulation/docs/shadow_ops_v0.md`, `simulation/docs/commissioning_v0.md`,
-   and `simulation/docs/site_runtime_design.md`.
+   `simulation/docs/site_runtime_design.md`, and
+   `simulation/docs/agent_runtime_v1.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -141,8 +142,8 @@ An untracked document is never repository authority by itself.
 - Let `nxt_range_ops` import only `nxt_sim.interfaces.types` and
   `nxt_sim.config.models` from Phase 0.
 - Keep upstream packages unaware of `nxt_facility`, `nxt_memory`,
-  `nxt_telemetry`, `nxt_range_twin`, `nxt_pilot_ops`, and `nxt_site_runtime` as
-  required by their guard tests.
+  `nxt_telemetry`, `nxt_range_twin`, `nxt_pilot_ops`, `nxt_site_runtime`, and
+  `nxt_agent_runtime` as required by their guard tests.
 - Within downstream Site OS state/evidence/advisory packages, only designated
   seams may touch upstream implementation: `nxt_facility.build`,
   `nxt_memory.harvest`, `nxt_telemetry.bank`/`assemble`, and
@@ -156,8 +157,15 @@ An untracked document is never repository authority by itself.
 - Keep the `nxt_site_runtime` hot path limited to `nxt_telemetry` input/assembly
   contracts and `nxt_facility.state`. Only its setup-only composition seam may
   lazily use commissioning's existing projection. It must not import simulator,
-  policy, Shadow Ops, memory, twin, viewer, or robot packages, and upstream or
-  downstream consumers must not depend on the runtime.
+  policy, Shadow Ops, memory, twin, viewer, or robot packages. The designated
+  `nxt_agent_runtime` composition layer is the only package allowed to import
+  the runtime; no other consumer or upstream package may depend on it.
+- Keep `nxt_agent_runtime` a composition/lifecycle leaf. It may import only the
+  public `nxt_site_runtime` and `nxt_pilot_ops` surfaces (plus
+  `nxt_telemetry.observations` typing). It owns no observation, state, policy,
+  recommendation, trace, workflow, memory, or execution semantics; it must not
+  import simulator, commissioning, memory, twin, viewer, robot, ROS, or network
+  modules, and no existing package may import it.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula

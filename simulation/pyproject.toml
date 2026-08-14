@@ -52,7 +52,10 @@ build-backend = "hatchling.build"
 # nxt_commissioning is the physical facility source-of-truth layer.
 # nxt_site_runtime orchestrates observation assembly, quality gates, recovery,
 # and downstream publication without owning any domain state or decisions.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime"]
+# nxt_agent_runtime is the deterministic composition/lifecycle layer that runs
+# Site Runtime output through Shadow Ops evaluation with restart-safe
+# evaluation checkpoints; it owns no state, policy, or execution semantics.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
