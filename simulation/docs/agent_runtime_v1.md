@@ -85,13 +85,17 @@ Error policy is two-tier and explicit:
 - **Fail-closed** (`evaluation_replay_mismatch`, `evaluation_sequence_gap`,
   `journal_divergence`, `journal_identity_mismatch`,
   `ledger_identity_mismatch`, `ledger_transition_rejected`,
-  `evaluation_failed`, `evidence_verification_failed`, `checkpoint_divergence`,
-  checkpoint contract violations): the runtime enters `FAILED`, refuses
-  further cycles, and preserves the incident in status.  Divergent evidence
-  is never replaced or resequenced.  Recovery verifies both directions: a
-  journal ahead of the evaluation checkpoint *and* a completed evaluation
-  missing from the journal fail closed, and evidence stores holding another
-  `(site_id, deployment_id)` identity are rejected outright.
+  `evaluation_failed`, `evidence_verification_failed`,
+  `checkpoint_divergence`, `evaluation_checkpoint_failed`): the runtime
+  enters `FAILED`, refuses further cycles, and preserves the incident in
+  status.  Divergent evidence is never replaced or resequenced.  Recovery
+  verifies both directions: a journal ahead of the evaluation checkpoint
+  *and* a completed evaluation missing from the journal fail closed, and
+  evidence stores holding another `(site_id, deployment_id)` identity are
+  rejected outright.  These validations are explicit runtime checks, never
+  asserts, so they hold under optimized Python (`python -O`) as well — a
+  malformed cross-package result (for example a RECOMMEND evaluation with
+  no recommendation) fails closed before any evidence is written.
 
 ## Cross-layer checkpoint ordering
 
@@ -201,7 +205,20 @@ Ops facts referenced by ID or embedded verbatim through the existing
 canonical serializer; only `evaluation_id`, the schema version, and the
 record framing are runtime-owned.  Duplicate writes are prevented by
 content-derived IDs plus verify-before-append; identical re-appends no-op
-and divergent re-appends fail closed.  Intentionally absent: copied
+and divergent re-appends fail closed.
+
+Journal and snapshot-stream appends verify incrementally: each store
+instance fully verifies the file once (a fresh instance verifies
+everything on its first write), then verifies only the bytes appended
+since, anchored on the last verified line, so a run of N cycles stays
+linear instead of quadratic (measured: 1,000 journal appends of realistic
+~7 KB records dropped from ~180 s to 0.27 s; 10,000 appends complete in
+~2.6 s).  Shrinkage or tail edits fail closed at append time; an in-place
+edit inside the already-verified region is caught by the full
+verification that `read()`, `recover()`, and every queue projection
+always perform.  Agent Runtime V1 is POSIX-only: the journal, the
+snapshot publisher, and the JSON evaluation checkpoint store all require
+`fcntl` advisory locking and fail loudly at construction elsewhere.  Intentionally absent: copied
 FacilityState fields, denormalized policy fields, wall-clock timestamps,
 and any success/outcome scoring.  These files are append-only historical
 evidence for Operational Memory, Operational Replay, or a future Manager
@@ -252,6 +269,8 @@ a command.  LLMs and generative agents remain outside this loop entirely.
   transport, production publisher/sink, service scheduler, or live-site
   operation exists.  The local JSONL publisher is a demo/evidence sink,
   not a production delivery service.
+- POSIX hosts only: evidence and checkpoint stores require `fcntl`
+  advisory locking and refuse construction elsewhere.
 - `clean_sensed_valid` is a caller-declared constant per runtime instance.
 - Deferral metadata does not survive restart by design.
 - Operational Memory harvesting of the evaluation journal is a future,

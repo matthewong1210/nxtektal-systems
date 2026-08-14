@@ -18,6 +18,7 @@ from nxt_agent_runtime import (
     JournalIntegrityError,
     JsonEvaluationCheckpointStore,
     ManagerDecisionQueue,
+    ManagerDecisionQueueError,
     RuntimeState,
 )
 from nxt_pilot_ops.ledger import JsonlEventLedger
@@ -305,7 +306,10 @@ def test_scoped_queue_never_shows_or_operates_on_foreign_cases(
     )
     assert scoped.entries() == ()
     assert scoped.pending() == ()
-    with pytest.raises(Exception):
+    with pytest.raises(
+        ManagerDecisionQueueError,
+        match=f"unknown recommendation: {foreign_entry.recommendation_id}",
+    ):
         scoped.accept(
             foreign_entry.recommendation_id,
             operator_id="manager-1",
@@ -414,3 +418,230 @@ def test_source_peek_outage_surfaces_as_a_structured_rejection(
     assert status.last_failure_code == "ingestion_failed"
     second = runtime.run_once()
     assert second.kind is CycleKind.EVALUATED
+
+
+# -- fail-closed validation must survive optimized Python ---------------------
+
+
+class _MalformedEvaluation:
+    """A cross-package contract violation: RECOMMEND with no recommendation."""
+
+    from nxt_pilot_ops.contracts import EvaluationVerdict as _Verdict
+
+    verdict = _Verdict.RECOMMEND
+    recommendation = None
+
+
+def _malformed_guardian():
+    from nxt_pilot_ops.guardian import BallAvailabilityGuardian
+
+    class MalformedGuardian(BallAvailabilityGuardian):
+        def evaluate(self, snapshot):
+            return _MalformedEvaluation()
+
+    return MalformedGuardian()
+
+
+def test_malformed_recommend_evaluation_fails_closed(tmp_path, base_inputs):
+    root = tmp_path / "run"
+    source = PilotObservationSource([spike_batch(base_inputs, sequence_number=0, cycle=0)])
+    runtime = make_runtime(
+        root, base_inputs, source, guardian=_malformed_guardian()
+    )
+    with pytest.raises(AgentRuntimeError) as raised:
+        runtime.run_once()
+    assert raised.value.incident_code == "evaluation_failed"
+    assert "no recommendation" in raised.value.detail
+    status = runtime.status()
+    assert status.runtime_state is RuntimeState.FAILED
+    assert status.last_failure_code == "evaluation_failed"
+    # No partial evidence: no journal record, no ledger event, no ack, and
+    # no pending evaluation checkpoint.
+    paths = evidence_paths(root)
+    assert not paths["journal"].exists()
+    assert not paths["ledger"].exists()
+    assert source.acknowledged == []
+    checkpoint = JsonEvaluationCheckpointStore(
+        paths["evaluation_checkpoints"]
+    ).load(SITE_ID, DEPLOYMENT_ID)
+    assert not checkpoint.has_pending_evaluation
+    assert checkpoint.last_sequence is None
+
+
+def test_malformed_recommend_fails_closed_under_optimized_python(tmp_path):
+    """python -O strips asserts; the fail-closed path must not depend on
+    them.  The probe runs the full composed runtime under -O and proves the
+    documented incident still fires with no partial evidence."""
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+
+    probe = textwrap.dedent(
+        """
+        import sys
+        if sys.flags.optimize != 1:
+            raise SystemExit("probe requires python -O")
+        from pathlib import Path
+
+        from nxt_range_ops.core.sim import RangeSimulation
+        from nxt_range_ops.scenarios.generators import make_scenario
+        from nxt_telemetry.bank import (
+            SyntheticSensorBank,
+            site_config_from_scenario,
+        )
+        from tests.agent_runtime import conftest as C
+        from nxt_agent_runtime import AgentRuntimeError, RuntimeState
+        from nxt_pilot_ops.contracts import EvaluationVerdict
+        from nxt_pilot_ops.guardian import BallAvailabilityGuardian
+
+        scenario = make_scenario("normal_weekday")
+        sim = RangeSimulation(scenario, seed=C.PILOT_SEED)
+        base = {
+            "scenario": scenario,
+            "frame": SyntheticSensorBank(sim).sample(),
+            "site_config": site_config_from_scenario(
+                scenario, seed=C.PILOT_SEED
+            ),
+        }
+
+        class Malformed:
+            verdict = EvaluationVerdict.RECOMMEND
+            recommendation = None
+
+        class MalformedGuardian(BallAvailabilityGuardian):
+            def evaluate(self, snapshot):
+                return Malformed()
+
+        root = Path(sys.argv[1])
+        source = C.PilotObservationSource(
+            [C.spike_batch(base, sequence_number=0, cycle=0)]
+        )
+        runtime = C.make_runtime(
+            root, base, source, guardian=MalformedGuardian()
+        )
+        try:
+            runtime.run_once()
+        except AgentRuntimeError as exc:
+            if exc.incident_code != "evaluation_failed":
+                raise SystemExit(f"wrong incident: {exc.incident_code}")
+        else:
+            raise SystemExit("malformed evaluation did not fail closed")
+        status = runtime.status()
+        if status.runtime_state is not RuntimeState.FAILED:
+            raise SystemExit("runtime did not enter FAILED")
+        paths = C.evidence_paths(root)
+        if paths["journal"].exists() or paths["ledger"].exists():
+            raise SystemExit("partial evidence was written")
+        if source.acknowledged:
+            raise SystemExit("malformed evaluation acknowledged the frame")
+        print("OPTIMIZED-FAIL-CLOSED-OK")
+        """
+    )
+    simulation_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "-O", "-B", "-c", probe, str(tmp_path / "opt")],
+        cwd=simulation_root,
+        capture_output=True,
+        text=True,
+        env={
+            **__import__("os").environ,
+            "PYTHONPATH": str(simulation_root),
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert "OPTIMIZED-FAIL-CLOSED-OK" in result.stdout
+
+
+# -- incremental verification keeps failing closed ----------------------------
+
+
+def test_journal_append_fails_closed_on_external_truncation(
+    tmp_path, base_inputs
+):
+    root = tmp_path / "run"
+    source = PilotObservationSource(
+        [calm_batch(base_inputs), spike_batch(base_inputs)]
+    )
+    runtime = make_runtime(root, base_inputs, source)
+    first = runtime.run_once()
+    path = evidence_paths(root)["journal"]
+    journal = EvaluationJournal(path)
+    journal.read()  # adopt the verified state
+    path.write_text("", encoding="utf-8")
+    with pytest.raises(JournalIntegrityError, match="shrank"):
+        journal.append(first.record)
+
+
+def test_journal_append_fails_closed_on_tail_tampering(tmp_path, base_inputs):
+    root = tmp_path / "run"
+    runtime = make_runtime(
+        root, base_inputs, PilotObservationSource([calm_batch(base_inputs)])
+    )
+    record = runtime.run_once().record
+    path = evidence_paths(root)["journal"]
+    journal = EvaluationJournal(path)
+    journal.read()
+    raw = path.read_bytes()
+    path.write_bytes(raw[:-10] + b"x" * 9 + b"\n")
+    with pytest.raises(JournalIntegrityError, match="tail changed"):
+        journal.append(record)
+
+
+def test_fresh_journal_instance_fully_verifies_on_first_append(
+    tmp_path, base_inputs
+):
+    root = tmp_path / "run"
+    runtime = make_runtime(
+        root, base_inputs, PilotObservationSource([calm_batch(base_inputs)])
+    )
+    record = runtime.run_once().record
+    path = evidence_paths(root)["journal"]
+    tampered = path.read_text(encoding="utf-8").replace(
+        '"verdict":"no_action"', '"verdict":"recommend"'
+    )
+    path.write_text(tampered, encoding="utf-8")
+    fresh = EvaluationJournal(path)
+    with pytest.raises(JournalIntegrityError):
+        fresh.append(record)
+
+
+def test_publisher_fails_closed_on_external_truncation(tmp_path, base_inputs):
+    from nxt_agent_runtime import JsonlSnapshotPublisher, SnapshotPublisherError
+
+    root = tmp_path / "run"
+    source = PilotObservationSource([calm_batch(base_inputs)])
+    runtime = make_runtime(root, base_inputs, source)
+    runtime.run_once()
+    path = evidence_paths(root)["snapshots"]
+    publisher = JsonlSnapshotPublisher(path)
+    assert len(publisher.published_envelope_ids()) == 1
+    path.write_text("", encoding="utf-8")
+
+    class StubEnvelope:
+        envelope_id = "fse:" + "e" * 64
+
+        def to_dict(self):
+            return {"envelope_id": self.envelope_id}
+
+    with pytest.raises(SnapshotPublisherError, match="shrank"):
+        publisher.publish(StubEnvelope())
+
+
+# -- POSIX-only platform contract ---------------------------------------------
+
+
+def test_stores_fail_loudly_without_posix_fcntl(tmp_path, monkeypatch):
+    import nxt_agent_runtime.checkpoints as checkpoints_module
+    import nxt_agent_runtime.journal as journal_module
+    import nxt_agent_runtime.publisher as publisher_module
+
+    monkeypatch.setattr(journal_module, "_fcntl", None)
+    monkeypatch.setattr(publisher_module, "_fcntl", None)
+    monkeypatch.setattr(checkpoints_module, "_fcntl", None)
+    with pytest.raises(RuntimeError, match="POSIX fcntl"):
+        journal_module.EvaluationJournal(tmp_path / "j.jsonl")
+    with pytest.raises(RuntimeError, match="POSIX fcntl"):
+        publisher_module.JsonlSnapshotPublisher(tmp_path / "s.jsonl")
+    with pytest.raises(RuntimeError, match="POSIX fcntl"):
+        checkpoints_module.JsonEvaluationCheckpointStore(tmp_path / "cp")

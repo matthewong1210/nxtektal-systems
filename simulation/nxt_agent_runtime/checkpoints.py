@@ -22,6 +22,11 @@ from pathlib import Path
 from threading import RLock
 from typing import Iterator, Protocol, runtime_checkable
 
+try:  # POSIX advisory file locking; module import remains portable.
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - exercised on non-POSIX platforms.
+    _fcntl = None
+
 _IDENTITY_NAMESPACE = "nxt-agent-runtime/evaluation-checkpoint/v1"
 
 
@@ -275,9 +280,20 @@ class InMemoryEvaluationCheckpointStore:
 
 
 class JsonEvaluationCheckpointStore:
-    """Atomic JSON persistence with cross-instance compare-and-save locking."""
+    """Atomic JSON persistence with cross-instance compare-and-save locking.
+
+    Agent Runtime V1 is POSIX-only: like the evaluation journal and the
+    snapshot publisher, this store requires ``fcntl`` advisory locking and
+    fails loudly at construction on hosts without it.
+    """
 
     def __init__(self, root: str | Path) -> None:
+        if _fcntl is None:
+            raise RuntimeError(
+                "JsonEvaluationCheckpointStore requires POSIX fcntl file "
+                "locking; use a supported POSIX host or provide a platform "
+                "checkpoint store"
+            )
         self.root = Path(root)
         self._lock = RLock()
 
@@ -322,28 +338,11 @@ class JsonEvaluationCheckpointStore:
         self.root.mkdir(parents=True, exist_ok=True)
         lock_path = self.root / f".{self._key(site_id, deployment_id)}.lock"
         with lock_path.open("a+b") as lock_file:
-            if os.name == "nt":
-                import msvcrt
-
-                lock_file.seek(0, os.SEEK_END)
-                if lock_file.tell() == 0:
-                    lock_file.write(b"\0")
-                    lock_file.flush()
-                lock_file.seek(0)
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
-                try:
-                    yield
-                finally:
-                    lock_file.seek(0)
-                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                _fcntl.flock(lock_file.fileno(), _fcntl.LOCK_UN)
 
     def load(self, site_id: str, deployment_id: str) -> EvaluationCheckpoint:
         with self._lock:
@@ -373,16 +372,15 @@ class JsonEvaluationCheckpointStore:
                 os.fsync(temporary.fileno())
             os.replace(temporary_name, path)
             # POSIX durability requires syncing the directory entry as well
-            # as the file contents. Windows does not expose directory fsync.
-            if os.name != "nt":
-                directory_fd = os.open(
-                    self.root,
-                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
-                )
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
+            # as the file contents.
+            directory_fd = os.open(
+                self.root,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         except OSError as exc:
             if temporary_name is not None:
                 try:

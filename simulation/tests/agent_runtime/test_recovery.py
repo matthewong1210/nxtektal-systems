@@ -54,7 +54,7 @@ def test_case1_published_but_unevaluated_state_is_evaluated_once_on_restart(
     tmp_path, base_inputs
 ):
     batch = calm_batch(base_inputs)
-    reference_root, reference = _reference_run(tmp_path, base_inputs, [batch])
+    reference_root, _ = _reference_run(tmp_path, base_inputs, [batch])
     root = tmp_path / "site"
     paths = evidence_paths(root)
 

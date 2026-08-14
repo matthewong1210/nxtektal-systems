@@ -28,7 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from nxt_pilot_ops.adapters import FacilityStateAdapterContext, adapt_facility_state
 from nxt_pilot_ops.contracts import EvaluationVerdict
@@ -739,7 +739,14 @@ class AgentRuntime:
             )
 
         if evaluation.verdict is EvaluationVerdict.RECOMMEND:
-            assert evaluation.recommendation is not None
+            # Explicit runtime validation, never an assert: optimized Python
+            # strips asserts, and a malformed cross-package result must take
+            # the documented fail-closed path before any evidence is written.
+            if evaluation.recommendation is None:
+                self._fail_closed(
+                    "evaluation_failed",
+                    "RECOMMEND evaluation carries no recommendation",
+                )
             event: LedgerEvent | None = recommendation_issued_event(
                 evaluation.recommendation, evaluation.trace
             )
@@ -889,7 +896,7 @@ class AgentRuntime:
         self._last_failure_code = code
         self._last_failure_detail = detail
 
-    def _fail_closed(self, incident_code: str, detail: str) -> None:
+    def _fail_closed(self, incident_code: str, detail: str) -> NoReturn:
         self._record_failure(incident_code, detail)
         self._state = RuntimeState.FAILED
         raise AgentRuntimeError(incident_code, detail)

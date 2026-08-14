@@ -156,7 +156,10 @@ def test_illegal_second_response_is_rejected_by_the_ledger(pilot_runtime):
 
 
 def test_unknown_recommendation_is_rejected(pilot_runtime):
-    with pytest.raises(ManagerDecisionQueueError):
+    with pytest.raises(
+        ManagerDecisionQueueError,
+        match="unknown recommendation: rec_000000000000000000000000",
+    ):
         pilot_runtime.queue.accept(
             "rec_000000000000000000000000",
             operator_id="manager-1",
@@ -185,9 +188,31 @@ def test_defer_is_scheduling_metadata_only(pilot_runtime, tmp_path):
     assert pilot_runtime.status().deferred_decision_count == 1
 
 
-def test_deferral_is_cleared_by_a_response_and_by_restart(
-    pilot_runtime, tmp_path
-):
+def test_deferral_does_not_survive_a_queue_restart(pilot_runtime, tmp_path):
+    """Rebuilding the queue while the recommendation is STILL deferred and
+    still pending must clear the deferral: it is non-persistent runtime
+    scheduling metadata, never ledger evidence."""
+    queue = pilot_runtime.queue
+    entry = queue.pending()[0]
+    queue.defer(entry.recommendation_id, deferred_until=DEFER_UNTIL)
+    assert queue.entry_for(entry.recommendation_id).deferred_until == (
+        DEFER_UNTIL
+    )
+
+    paths = evidence_paths(tmp_path)
+    rebuilt = ManagerDecisionQueue(
+        ledger=JsonlEventLedger(paths["ledger"]),
+        journal=EvaluationJournal(paths["journal"]),
+        site_id=SITE_ID,
+        deployment_id=DEPLOYMENT_ID,
+    )
+    restored = rebuilt.entry_for(entry.recommendation_id)
+    assert restored.case_status is CaseStatus.PENDING
+    assert restored.deferred_until is None
+    assert restored.deferral_note is None
+
+
+def test_deferral_is_cleared_by_a_response(pilot_runtime):
     queue = pilot_runtime.queue
     entry = queue.pending()[0]
     queue.defer(entry.recommendation_id, deferred_until=DEFER_UNTIL)
@@ -198,17 +223,6 @@ def test_deferral_is_cleared_by_a_response_and_by_restart(
         reason_code="staffing_confirmed",
     )
     assert queue.entry_for(entry.recommendation_id).deferred_until is None
-
-    paths = evidence_paths(tmp_path)
-    rebuilt = ManagerDecisionQueue(
-        ledger=JsonlEventLedger(paths["ledger"]),
-        journal=EvaluationJournal(paths["journal"]),
-        site_id=SITE_ID,
-        deployment_id=DEPLOYMENT_ID,
-    )
-    assert all(
-        item.deferred_until is None for item in rebuilt.entries()
-    )
 
 
 def test_defer_requires_a_pending_recommendation(pilot_runtime):

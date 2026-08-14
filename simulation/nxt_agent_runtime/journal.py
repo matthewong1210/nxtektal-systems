@@ -11,6 +11,18 @@ different record for an already-journaled sequence fails closed.  Tamper
 evidence for decision/workflow records remains the Shadow Ops ledger's
 responsibility; the journal verifies canonical bytes, contiguity, and
 content-derived identity.
+
+Verification strategy: ``read()`` (used by ``recover()`` and every queue
+projection) always verifies the complete file.  ``append()`` verifies
+every byte it has not already verified in this instance's lifetime — a
+fresh instance therefore verifies the whole file on its first append —
+and re-anchors on the last verified line so shrinkage or tail edits fail
+closed.  An in-place edit strictly inside the already-verified region is
+caught by the next full ``read()``/``recover()``, not by ``append()``;
+this trade keeps a run of N cycles linear instead of quadratic in N.
+
+Agent Runtime V1 is POSIX-only: the journal requires ``fcntl`` advisory
+locking and fails loudly at construction on hosts without it.
 """
 
 from __future__ import annotations
@@ -20,7 +32,7 @@ import os
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, BinaryIO
 
 try:  # POSIX advisory file locking; module import remains portable.
     import fcntl as _fcntl
@@ -38,14 +50,12 @@ class JournalIntegrityError(ValueError):
 
 
 def _sync_directory(directory: Path) -> None:
-    """Make the journal's directory entry durable on POSIX hosts.
+    """Make the journal's directory entry durable.
 
     The first append creates the file, so file-content fsync alone does
-    not guarantee the entry survives a power loss.  Windows does not
-    expose directory fsync.
+    not guarantee the entry survives a power loss.  Agent Runtime V1 is
+    POSIX-only, so directory fsync is always available.
     """
-    if os.name == "nt":  # pragma: no cover - exercised on Windows hosts.
-        return
     directory_fd = os.open(
         directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     )
@@ -104,48 +114,57 @@ def _record_from_payload(payload: dict[str, Any], line_number: int) -> Evaluatio
         ) from exc
 
 
-def _read_records(handle: TextIO) -> list[EvaluationRecord]:
-    records: list[EvaluationRecord] = []
-    previous: EvaluationRecord | None = None
-    for line_number, line in enumerate(handle, start=1):
-        if not line.endswith("\n"):
+def _verify_line(
+    raw_line: bytes,
+    line_number: int,
+    previous: EvaluationRecord | None,
+) -> EvaluationRecord:
+    if not raw_line.endswith(b"\n"):
+        raise JournalIntegrityError(
+            f"journal record at line {line_number} is not newline-terminated"
+        )
+    try:
+        line = raw_line.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise JournalIntegrityError(
+            f"invalid encoding at line {line_number}: {exc}"
+        ) from exc
+    try:
+        raw = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise JournalIntegrityError(
+            f"invalid JSON at line {line_number}: {exc.msg}"
+        ) from exc
+    if type(raw) is not dict:
+        raise JournalIntegrityError(
+            f"line {line_number} must contain a JSON object"
+        )
+    record = _record_from_payload(raw, line_number)
+    if canonical_json(record) + "\n" != line:
+        raise JournalIntegrityError(
+            f"non-canonical journal serialization at line {line_number}"
+        )
+    if record.schema_version != EVALUATION_SCHEMA_VERSION:
+        raise JournalIntegrityError(
+            f"unsupported journal schema at line {line_number}"
+        )
+    if previous is not None:
+        if (record.site_id, record.deployment_id) != (
+            previous.site_id,
+            previous.deployment_id,
+        ):
             raise JournalIntegrityError(
-                f"journal record at line {line_number} is not newline-terminated"
+                f"journal identity changed at line {line_number}"
             )
-        try:
-            raw = json.loads(line)
-        except json.JSONDecodeError as exc:
+        if record.sequence_number != previous.sequence_number + 1:
             raise JournalIntegrityError(
-                f"invalid JSON at line {line_number}: {exc.msg}"
-            ) from exc
-        if type(raw) is not dict:
-            raise JournalIntegrityError(
-                f"line {line_number} must contain a JSON object"
+                f"journal sequence is not contiguous at line {line_number}"
             )
-        record = _record_from_payload(raw, line_number)
-        if canonical_json(record) + "\n" != line:
-            raise JournalIntegrityError(
-                f"non-canonical journal serialization at line {line_number}"
-            )
-        if record.schema_version != EVALUATION_SCHEMA_VERSION:
-            raise JournalIntegrityError(
-                f"unsupported journal schema at line {line_number}"
-            )
-        if previous is not None:
-            if (record.site_id, record.deployment_id) != (
-                previous.site_id,
-                previous.deployment_id,
-            ):
-                raise JournalIntegrityError(
-                    f"journal identity changed at line {line_number}"
-                )
-            if record.sequence_number != previous.sequence_number + 1:
-                raise JournalIntegrityError(
-                    f"journal sequence is not contiguous at line {line_number}"
-                )
-        records.append(record)
-        previous = record
-    return records
+    return record
+
+
+def _split_lines(data: bytes) -> list[bytes]:
+    return data.splitlines(keepends=True)
 
 
 class EvaluationJournal:
@@ -160,17 +179,93 @@ class EvaluationJournal:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._thread_lock = threading.RLock()
+        # Incremental verification state for this instance: every byte up
+        # to _verified_offset has been fully verified by this instance.
+        self._verified_offset = 0
+        self._verified_line_count = 0
+        self._tail_line = b""
+        self._last_record: EvaluationRecord | None = None
+        self._sequences: dict[int, str] = {}
+
+    # -- cache management ---------------------------------------------------
+
+    def _reset_cache(self) -> None:
+        self._verified_offset = 0
+        self._verified_line_count = 0
+        self._tail_line = b""
+        self._last_record = None
+        self._sequences = {}
+
+    def _adopt(self, records: list[EvaluationRecord], raw_lines: list[bytes]) -> None:
+        self._verified_offset = sum(len(line) for line in raw_lines)
+        self._verified_line_count = len(raw_lines)
+        self._tail_line = raw_lines[-1] if raw_lines else b""
+        self._last_record = records[-1] if records else None
+        self._sequences = {
+            record.sequence_number: record.evaluation_id for record in records
+        }
+
+    def _verify_suffix(self, handle: BinaryIO, size: int) -> None:
+        """Verify every byte beyond the instance's verified offset.
+
+        Raises and leaves the cache untouched on any violation; a fresh
+        instance (offset zero) verifies the complete file here.
+        """
+        if size < self._verified_offset:
+            raise JournalIntegrityError(
+                "journal shrank below its verified offset; append-only "
+                "evidence was truncated or replaced"
+            )
+        if self._tail_line:
+            handle.seek(self._verified_offset - len(self._tail_line))
+            if handle.read(len(self._tail_line)) != self._tail_line:
+                raise JournalIntegrityError(
+                    "the verified journal tail changed on disk"
+                )
+        if size == self._verified_offset:
+            return
+        handle.seek(self._verified_offset)
+        suffix = handle.read(size - self._verified_offset)
+        raw_lines = _split_lines(suffix)
+        records: list[EvaluationRecord] = []
+        previous = self._last_record
+        for index, raw_line in enumerate(raw_lines):
+            record = _verify_line(
+                raw_line, self._verified_line_count + index + 1, previous
+            )
+            records.append(record)
+            previous = record
+        # Commit the cache only after the whole suffix verified.
+        self._verified_offset = size
+        self._verified_line_count += len(raw_lines)
+        self._tail_line = raw_lines[-1] if raw_lines else self._tail_line
+        self._last_record = previous
+        for record in records:
+            self._sequences[record.sequence_number] = record.evaluation_id
+
+    # -- public API ---------------------------------------------------------
 
     def read(self) -> tuple[EvaluationRecord, ...]:
+        """Fully verify and return every record.  Never incremental."""
         with self._thread_lock:
             if not self.path.exists():
+                self._reset_cache()
                 return ()
-            with self.path.open("r", encoding="utf-8", newline="") as handle:
+            with self.path.open("rb") as handle:
                 _fcntl.flock(handle.fileno(), _fcntl.LOCK_SH)
                 try:
-                    return tuple(_read_records(handle))
+                    data = handle.read()
                 finally:
                     _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
+            raw_lines = _split_lines(data)
+            records: list[EvaluationRecord] = []
+            previous: EvaluationRecord | None = None
+            for index, raw_line in enumerate(raw_lines):
+                record = _verify_line(raw_line, index + 1, previous)
+                records.append(record)
+                previous = record
+            self._adopt(records, raw_lines)
+            return tuple(records)
 
     def record_for_sequence(self, sequence_number: int) -> EvaluationRecord | None:
         for record in self.read():
@@ -183,26 +278,33 @@ class EvaluationJournal:
         return records[-1] if records else None
 
     def append(self, record: EvaluationRecord) -> EvaluationRecord:
-        """Append one record; identical replays no-op, divergence fails closed."""
+        """Append one record; identical replays no-op, divergence fails closed.
+
+        Bytes this instance has not yet verified are verified before the
+        write, so append cost is linear in a run instead of quadratic.
+        """
         if not isinstance(record, EvaluationRecord):
             raise TypeError("record must be an EvaluationRecord")
         with self._thread_lock:
-            with self.path.open("a+", encoding="utf-8", newline="\n") as handle:
+            with self.path.open("a+b") as handle:
                 _fcntl.flock(handle.fileno(), _fcntl.LOCK_EX)
                 try:
-                    handle.seek(0)
-                    existing = _read_records(handle)
-                    for stored in existing:
-                        if stored.sequence_number == record.sequence_number:
-                            if stored.evaluation_id == record.evaluation_id:
-                                return stored
-                            raise JournalIntegrityError(
-                                "sequence "
-                                f"{record.sequence_number} is already journaled "
-                                "with different content"
-                            )
-                    if existing:
-                        last = existing[-1]
+                    handle.seek(0, os.SEEK_END)
+                    size = handle.tell()
+                    self._verify_suffix(handle, size)
+                    stored_id = self._sequences.get(record.sequence_number)
+                    if stored_id is not None:
+                        if stored_id == record.evaluation_id:
+                            # evaluation_id is a content digest, so an equal
+                            # ID is the identical verified record.
+                            return record
+                        raise JournalIntegrityError(
+                            "sequence "
+                            f"{record.sequence_number} is already journaled "
+                            "with different content"
+                        )
+                    if self._last_record is not None:
+                        last = self._last_record
                         if (record.site_id, record.deployment_id) != (
                             last.site_id,
                             last.deployment_id,
@@ -215,11 +317,19 @@ class EvaluationJournal:
                                 f"sequence {record.sequence_number} is invalid; "
                                 f"expected {last.sequence_number + 1}"
                             )
+                    raw_line = (canonical_json(record) + "\n").encode("utf-8")
                     handle.seek(0, os.SEEK_END)
-                    handle.write(canonical_json(record) + "\n")
+                    handle.write(raw_line)
                     handle.flush()
                     os.fsync(handle.fileno())
                     _sync_directory(self.path.parent)
+                    self._verified_offset = size + len(raw_line)
+                    self._verified_line_count += 1
+                    self._tail_line = raw_line
+                    self._last_record = record
+                    self._sequences[record.sequence_number] = (
+                        record.evaluation_id
+                    )
                     return record
                 finally:
                     _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)

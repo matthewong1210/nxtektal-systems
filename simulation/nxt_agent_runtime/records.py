@@ -218,5 +218,10 @@ class EvaluationRecord:
     def to_payload(self) -> dict[str, Any]:
         """JSON-ready canonical payload for the evaluation journal."""
         payload = to_primitive(self)
-        assert type(payload) is dict
+        if type(payload) is not dict:
+            # Explicit validation, never an assert: this must hold under
+            # optimized Python as well.
+            raise TypeError(
+                "EvaluationRecord serialization must produce a mapping payload"
+            )
         return payload
