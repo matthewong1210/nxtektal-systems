@@ -150,6 +150,7 @@ jobs:
             tests/commissioning/test_guards.py \
             tests/site_runtime/test_architecture.py \
             tests/site_runtime/test_rejection.py \
+            tests/agent_runtime/test_architecture.py \
             tests/test_state_machine.py \
             tests/test_retry_recovery.py \
             tests/test_unload_retry.py \
@@ -169,8 +170,8 @@ jobs:
           uv run --no-sync python -m compileall -q -f \
             nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
             nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
-            nxt_pilot_ops nxt_commissioning nxt_site_runtime scripts \
-            ../.github/scripts
+            nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
+            scripts ../.github/scripts
       - name: Build and inspect wheel and source distribution
         working-directory: simulation
         shell: bash
@@ -209,7 +210,7 @@ jobs:
           shipped = (
               "nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory",
               "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
-              "nxt_commissioning", "nxt_site_runtime",
+              "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
           )
           repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 
