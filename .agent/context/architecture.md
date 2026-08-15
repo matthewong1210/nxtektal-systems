@@ -112,9 +112,11 @@ queue is a human workflow record only; no path reaches robot execution.
 
 ## Edge observation intake
 
-`nxt_edge_observation` is a pure conversion leaf in front of the observation
-boundary. It turns already-read raw device payloads into existing canonical
-`Observation` objects and reports what it could not convert:
+`nxt_edge_observation` is a conversion leaf in front of the observation
+boundary: transport-neutral conversion adapters plus the in-process,
+source-side at-least-once delivery cursor over raw batches. It turns
+already-read raw device payloads into existing canonical `Observation`
+objects and reports what it could not convert:
 
 ```mermaid
 flowchart LR
@@ -159,8 +161,9 @@ coupling in named seams:
 - `nxt_site_runtime.composition` for setup-only lazy commissioning projection
 - `nxt_agent_runtime` as the only package-level consumer of the Site Runtime
   and Shadow Ops public surfaces together (composition/lifecycle only)
-- `nxt_edge_observation` as a pure raw-to-canonical conversion leaf over
-  `nxt_telemetry.observations` and the commissioning projection data
+- `nxt_edge_observation` as a raw-to-canonical conversion leaf (adapters plus
+  the source-side delivery cursor) over `nxt_telemetry.observations` and the
+  commissioning projection data
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public

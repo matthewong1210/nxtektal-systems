@@ -62,15 +62,15 @@ Evaluated alternatives and why they were rejected:
   a tested, reusable contract with its own failure taxonomy needs a package and
   a mechanical dependency guard. Accepted for the *source composition*.
 
-The chosen shape is the hybrid: **pure conversion in a package, source
-composition in a composition root.**
+The chosen shape is the hybrid: **conversion and the source-side delivery
+cursor in a package, source composition in a composition root.**
 
 ```text
 nxt_commissioning.project_telemetry_adapter_config(site)   (one-way projection)
         +  adapter-local device profiles
                  |
                  v
-        nxt_edge_observation            (pure conversion; stdlib + Observation)
+        nxt_edge_observation            (conversion + cursor; stdlib + Observation)
                  |
                  v
    scripts/pilot_course_a_edge_fixture  (composition root: ObservationSource)
@@ -161,7 +161,7 @@ widen `FacilityState`.
 |---|---|
 | `washer_running`, `washer_fault` | `WasherState` carries throughput, batch size, and WIP only; there is no washer run-state or fault channel or field |
 | `basket_present` | no canonical basket concept exists |
-| `lift_upper_limit`, `lift_lower_limit` | no canonical lift-position concept exists (still checked for impossible combinations) |
+| `lift_upper_limit`, `lift_lower_limit` | no canonical lift-position concept exists (checked for impossible combinations only when both members' polarity is declared via a `DigitalInputProfile` — polarity is never guessed) |
 | `cabinet_door_closed` | no canonical door channel exists |
 | load-cell `diagnostic_code` | no canonical device-diagnostic channel exists |
 | robot `fault_code` | `robot.<rid>.health` is the only health destination and it is a closed enum |

@@ -662,6 +662,12 @@ def adapter_kit(site: CommissionedSite) -> EdgeObservationAdapterKit:
             # The handoff dock proximity switch is wired normally closed.
             (SENSOR_STATION_DOCKED, True),
             (SENSOR_ZONE_OPEN, False),
+            # Raw-only lift-limit points: unbound (no canonical channel),
+            # but their polarity must still be declared, because the
+            # mutually-exclusive pair check refuses to guess -- a pair with
+            # an undeclared member is not evaluated.
+            ("di-lift-upper", False),
+            ("di-lift-lower", False),
         )
     )
     robots = tuple(

@@ -32,10 +32,12 @@ synthetic/fixture sources only; it is not a service scheduler, a production
 publisher, or live delivery.
 
 Also added after that baseline (verify merge status against the current
-branch): `nxt_edge_observation`, the Edge Observation Adapter Kit V0 — a pure
+branch): `nxt_edge_observation`, the Edge Observation Adapter Kit V0 — a
 conversion leaf that turns already-read load-cell, digital-I/O, and
 robot-status samples into canonical `Observation` objects using commissioned
-bindings, plus separate adapter diagnostics. It is transport-neutral and
+bindings, plus separate adapter diagnostics and the in-process source-side
+at-least-once delivery cursor (peek / acknowledge / reject with sequence
+reuse; sequence validation stays with Site Runtime). It is transport-neutral and
 fixture-backed: it opens no connection, drives no device, writes no register,
 and has no robot, actuator, or emergency-stop surface. It is not a physical
 telemetry adapter and does not change the "Not implemented" row above.

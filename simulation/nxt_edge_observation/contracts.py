@@ -100,6 +100,10 @@ def _require_non_negative(value: object, field_name: str) -> float:
 # Adapter-local device profiles (NOT commissioned facts)
 # ---------------------------------------------------------------------------
 
+# Declared-unit vocabularies read by the profile validators below.
+MASS_UNIT_TO_KG: dict[str, float] = {"kg": 1.0, "g": 0.001}
+BATTERY_UNITS: frozenset[str] = frozenset({"fraction", "percent"})
+
 
 @dataclass(frozen=True, slots=True)
 class DeviceProfile:
@@ -190,7 +194,10 @@ class DigitalDeviceProfile:
     ``mutually_exclusive_inputs`` names pairs the commissioned equipment
     makes physically impossible together (a lift cannot be at both
     limits).  Observing both asserted is evidence of a broken device, not
-    a state to publish.
+    a state to publish.  "Asserted" is a *logical* state: pair evaluation
+    requires a ``DigitalInputProfile`` declaring each member's polarity,
+    and a pair with an undeclared member is not evaluated -- polarity is
+    never guessed from a raw bit.
     """
 
     device_id: str
@@ -263,10 +270,6 @@ class RobotStatusProfile(DeviceProfile):
                 _require_identifier(item, f"{name} entry")
             if len(set(values)) != len(values):
                 raise EdgeAdapterError(f"{name} must not repeat a value")
-
-
-MASS_UNIT_TO_KG: dict[str, float] = {"kg": 1.0, "g": 0.001}
-BATTERY_UNITS: frozenset[str] = frozenset({"fraction", "percent"})
 
 
 # ---------------------------------------------------------------------------

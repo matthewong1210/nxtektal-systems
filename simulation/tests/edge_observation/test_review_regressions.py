@@ -358,3 +358,138 @@ def test_every_rejection_code_is_reachable_in_the_package():
         if f"RejectionCode.{code.name}" not in source
     ]
     assert unreachable == [], unreachable
+
+
+# -- pair evaluation never guesses an undeclared polarity ----------------
+
+
+def _kit_with_mixed_pair(site):
+    """A declared pair whose second member has no polarity profile."""
+    original = adapter_kit(site)
+    device = dataclasses.replace(
+        original.digital_device_profiles[0],
+        raw_only_inputs=original.digital_device_profiles[0].raw_only_inputs
+        + ("aux_gate",),
+        mutually_exclusive_inputs=(("equipment_ready", "aux_gate"),),
+    )
+    inputs = tuple(
+        dataclasses.replace(profile, active_low=True)
+        if profile.sensor_id == SENSOR_STATION_OPEN
+        else profile
+        for profile in original.digital_input_profiles
+    )
+    return EdgeObservationAdapterKit(
+        bindings=original.bindings,
+        coordinate_frame=COORDINATE_FRAME,
+        load_cell_profiles=original.load_cell_profiles,
+        digital_device_profiles=(device,),
+        digital_input_profiles=inputs,
+        robot_profiles=original.robot_profiles,
+    )
+
+
+def test_an_undeclared_pair_member_never_demotes_the_profiled_one(site):
+    """Reviewer scenario: mixed pair, active-low profiled member asserted.
+
+    Before the fix the unprofiled member's raw bit was guessed active-high,
+    the pair fired IMPOSSIBLE_STATE, and the commissioned, correctly
+    profiled point was demoted to MISSING on that guess.
+    """
+    kit = _kit_with_mixed_pair(site)
+    result, by_channel = convert_one(
+        kit,
+        digital_io=(
+            DigitalIOSnapshot(
+                device_id=DIGITAL_DEVICE_ID,
+                timing=timing(),
+                device_status="ok",
+                inputs=(
+                    DigitalInputSample(
+                        sensor_id=SENSOR_STATION_OPEN,
+                        input_name="equipment_ready",
+                        raw_state=False,  # active-low: logically asserted
+                    ),
+                    DigitalInputSample(
+                        sensor_id="di-aux",
+                        input_name="aux_gate",
+                        raw_state=True,  # polarity undeclared: unknown
+                    ),
+                ),
+            ),
+        ),
+    )
+    from scripts.pilot_course_a_edge_fixture import STATION_ID
+
+    observation = by_channel[f"station.{STATION_ID}.is_open"]
+    assert observation.status is ObservationStatus.OK
+    assert observation.value is True
+    assert RejectionCode.IMPOSSIBLE_STATE.value not in rejection_codes(
+        result.report
+    )
+
+
+def test_a_fully_declared_pair_is_still_evaluated(site):
+    """The fixture's lift pair now declares polarity; detection still works."""
+    kit = adapter_kit(site)
+    result, _ = convert_one(
+        kit,
+        digital_io=(
+            DigitalIOSnapshot(
+                device_id=DIGITAL_DEVICE_ID,
+                timing=timing(),
+                device_status="ok",
+                inputs=(
+                    DigitalInputSample(
+                        sensor_id="di-lift-upper",
+                        input_name="lift_upper_limit",
+                        raw_state=True,
+                    ),
+                    DigitalInputSample(
+                        sensor_id="di-lift-lower",
+                        input_name="lift_lower_limit",
+                        raw_state=True,
+                    ),
+                ),
+            ),
+        ),
+    )
+    assert RejectionCode.IMPOSSIBLE_STATE.value in rejection_codes(result.report)
+
+
+# -- a rejected sample is never re-reported as device silence ------------
+
+
+def test_a_structural_rejection_is_not_reattributed_as_silence():
+    """Reviewer scenario: fabricated unit -> UNSUPPORTED_UNIT, no claim.
+
+    The channel must still surface as an explicit MISSING observation, but
+    with exactly the original rejection -- a second NO_SAMPLE entry would
+    claim the device was silent when it demonstrably reported.
+    """
+    kit = _kit_with_uncalibrated_dispenser(commissioned_site_payload())
+    # An uncalibrated-binding kit rejects a sample that asserts calibration.
+    result, by_channel = convert_one(
+        kit,
+        load_cells=(load_cell_sample(calibration_id="CAL-EXPIRED-2019"),),
+    )
+    observation = by_channel["inventory.dispenser.count"]
+    assert observation.status is ObservationStatus.MISSING
+    codes_for_channel = {
+        item.code
+        for item in result.report.rejected
+        if item.channel == "inventory.dispenser.count"
+    }
+    assert RejectionCode.CALIBRATION_MISMATCH in codes_for_channel
+    assert RejectionCode.NO_SAMPLE not in codes_for_channel
+
+
+def test_a_genuinely_silent_channel_still_reports_no_sample(kit):
+    result, by_channel = convert_one(kit, load_cells=(load_cell_sample(),))
+    # Nothing digital or robot was delivered: those channels are silent.
+    silent_codes = {
+        item.channel: item.code
+        for item in result.report.rejected
+        if item.code is RejectionCode.NO_SAMPLE
+    }
+    assert "robot.R1.health" in silent_codes
+    assert "inventory.dispenser.count" not in silent_codes

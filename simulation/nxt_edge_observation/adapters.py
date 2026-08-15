@@ -86,6 +86,7 @@ class _Collector:
         self.rejected: list[RejectedField] = []
         self.unmapped: list[UnmappedField] = []
         self._claimed: dict[str, str] = {}  # channel -> sensor_id
+        self._rejected_channels: set[str] = set()
 
     # -- diagnostics ----------------------------------------------------
 
@@ -107,6 +108,8 @@ class _Collector:
                 detail=detail,
             )
         )
+        if channel is not None:
+            self._rejected_channels.add(channel)
 
     def unmap(self, *, sensor_id: str, raw_field: str, reason: str) -> None:
         self.unmapped.append(
@@ -221,6 +224,10 @@ class _Collector:
     @property
     def claimed_channels(self) -> frozenset[str]:
         return frozenset(self._claimed)
+
+    @property
+    def rejected_channels(self) -> frozenset[str]:
+        return frozenset(self._rejected_channels)
 
     def report(self) -> EdgeAdapterReport:
         return EdgeAdapterReport(
@@ -564,11 +571,19 @@ class DigitalIOAdapter:
             A normally-closed point reads ``False`` when it is physically
             asserted, so comparing raw bits here would invert exactly the
             wiring ``DigitalInputProfile.active_low`` exists to describe.
+
+            An input with no declared polarity returns ``None`` -- unknown.
+            Guessing active-high would let a raw bit demote the *other*,
+            correctly profiled member of a declared pair, or mask a real
+            impossible state; a pair with an unknown member is simply not
+            evaluable.
             """
             if sample.raw_state is None:
                 return None
             profile = profiles.get(sample.sensor_id)
-            if profile is not None and profile.active_low:
+            if profile is None:
+                return None
+            if profile.active_low:
                 return not sample.raw_state
             return sample.raw_state
 
@@ -1147,16 +1162,34 @@ class EdgeObservationAdapterKit:
         ``MISSING`` observation carries no measurement claim.
         """
         claimed = collector.claimed_channels
+        already_rejected = collector.rejected_channels
         for binding in self._bindings.bindings:
             if binding.channel in claimed:
+                continue
+            if binding.channel in already_rejected:
+                # A sample for this channel arrived and was rejected with a
+                # named cause.  The channel still needs its explicit MISSING
+                # observation, but adding a NO_SAMPLE entry would claim a
+                # silence that did not happen -- the original rejection is
+                # the diagnosis.
+                collector.emit(
+                    binding=binding,
+                    raw_field="(rejected sample)",
+                    value=None,
+                    status=ObservationStatus.MISSING,
+                    sample_timestamp_s=batch.frame_t_s,
+                    available_timestamp_s=batch.frame_t_s,
+                )
                 continue
             collector.emit_missing(
                 binding=binding,
                 raw_field="(no sample)",
                 code=RejectionCode.NO_SAMPLE,
                 detail=(
-                    f"no raw sample was delivered for commissioned sensor "
-                    f"{binding.sensor_id!r}; the device is silent for this cycle"
+                    f"no usable raw sample reached commissioned sensor "
+                    f"{binding.sensor_id!r} this cycle: the device is silent, "
+                    "or its whole delivery was rejected at device level (see "
+                    "any device-scoped rejection)"
                 ),
                 sample_timestamp_s=batch.frame_t_s,
                 available_timestamp_s=batch.frame_t_s,

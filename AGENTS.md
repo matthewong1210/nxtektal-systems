@@ -169,7 +169,8 @@ An untracked document is never repository authority by itself.
   recommendation, trace, workflow, memory, or execution semantics; it must not
   import simulator, commissioning, memory, twin, viewer, robot, ROS, or network
   modules, and no existing package may import it.
-- Keep `nxt_edge_observation` a pure conversion leaf. It may import only
+- Keep `nxt_edge_observation` a conversion leaf (adapters plus the
+  source-side at-least-once delivery cursor). It may import only
   `nxt_telemetry.observations`, and consumes commissioning's existing
   telemetry-adapter-config projection as plain data rather than importing
   `nxt_commissioning`. It owns raw device payload normalization, binding and
