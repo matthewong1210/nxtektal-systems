@@ -17,6 +17,7 @@ from nxt_edge_observation import adapters as adapters_module
 from nxt_telemetry.observations import ObservationStatus
 
 from scripts.pilot_course_a_edge_fixture import (
+    DIGITAL_DEVICE_ID,
     SENSOR_STATION_DOCKED,
     SENSOR_STATION_OPEN,
     SENSOR_ZONE_OPEN,
@@ -217,17 +218,25 @@ def test_a_snapshot_cannot_repeat_one_input_name():
 
 
 def test_a_mismatched_device_identity_is_rejected(kit):
-    result, by_channel = convert_one(
+    """`by_channel` is never empty now, so assert the converted value itself.
+
+    Silent-device reconciliation puts every commissioned channel in the
+    frame, so a bare truthiness check on `by_channel` would pass even when
+    the device was rejected outright.
+    """
+    _, matched = convert_one(
         kit,
         digital_io=(
             _snapshot(
                 _input(SENSOR_STATION_OPEN, "equipment_ready", True),
-                device_id="io-handoff-01",
+                device_id=DIGITAL_DEVICE_ID,
             ),
         ),
     )
-    assert by_channel  # sanity: the matching device converts
-    unknown = convert_one(
+    assert matched[STATION_OPEN_CHANNEL].value is True
+    assert matched[STATION_OPEN_CHANNEL].status is ObservationStatus.OK
+
+    result, unknown = convert_one(
         kit,
         digital_io=(
             _snapshot(
@@ -236,7 +245,10 @@ def test_a_mismatched_device_identity_is_rejected(kit):
             ),
         ),
     )
-    assert RejectionCode.UNKNOWN_SOURCE.value in rejection_codes(unknown[0].report)
+    assert RejectionCode.UNKNOWN_SOURCE.value in rejection_codes(result.report)
+    # The undeclared device produces no value; the channel is an explicit gap.
+    assert unknown[STATION_OPEN_CHANNEL].status is ObservationStatus.MISSING
+    assert unknown[STATION_OPEN_CHANNEL].value is None
 
 
 @pytest.mark.parametrize("state", ["1", 1, "true", "", 0])

@@ -39,6 +39,7 @@ from .contracts import (
     AcceptedField,
     DigitalDeviceProfile,
     DigitalInputProfile,
+    DigitalInputSample,
     DigitalIOSnapshot,
     EdgeAdapterError,
     EdgeAdapterReport,

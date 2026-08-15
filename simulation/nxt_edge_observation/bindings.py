@@ -12,9 +12,21 @@ identity.
 Nothing here re-validates the commissioning vocabulary: a
 ``CommissionedSite`` cannot be constructed unless every binding's
 channel, canonical unit, sensor type, and associated asset already
-passed ``validate_commissioned_site``.  This module only checks that the
-projection it was handed is structurally the thing it claims to be, and
-fails closed otherwise.
+passed ``validate_commissioned_site``.  Re-checking those relationships
+would be a second registry, which the architecture forbids.
+
+The trust boundary that follows is deliberate and worth stating plainly.
+This module validates that the projection is *structurally* what it
+claims to be -- schema, identities, source address, units, source type,
+calibration block, provenance blocks, and no duplicate sensor or channel
+-- and fails closed otherwise.  It does **not** re-derive whether a
+channel and a unit belong together.  A caller that fabricates a mapping
+rather than passing a real projection can therefore build a binding whose
+channel/unit pairing commissioning would have rejected; each adapter's
+own unit guard refuses to convert it, so the outcome is an explicit
+``MISSING`` observation with an ``unsupported_unit`` rejection rather
+than a fabricated value.  ``associated_asset_id`` and ``sensor_type`` are
+retained for diagnostics and never drive conversion.
 """
 
 from __future__ import annotations
@@ -59,10 +71,18 @@ def _text(payload: Mapping[str, object], key: str, path: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class AdapterBinding:
-    """One commissioned sensor-to-channel mapping, ready for conversion."""
+    """One commissioned sensor-to-channel mapping, ready for conversion.
+
+    ``source`` is the commissioned transport address (for example
+    ``plc.range-01``).  V0 opens nothing, so nothing reads it during
+    conversion; it is retained because it is the field a real reader will
+    key on, and retaining it keeps the binding self-describing rather than
+    silently dropping a commissioned fact.
+    """
 
     sensor_id: str
     sensor_type: str
+    source: str
     channel: str
     associated_asset_id: str
     canonical_unit: str
@@ -118,9 +138,26 @@ class AdapterBindingSet:
                     f"{path}.observation_source_type {source_type!r} is not one of "
                     f"{sorted(_SOURCE_TYPES)}"
                 )
+            # Provenance never reaches an Observation -- the canonical
+            # contract has no provenance field, and the manifest remains its
+            # only home -- but a projection that carries a blank or malformed
+            # provenance block is not the artefact this layer claims to
+            # consume, so it is checked rather than silently accepted.
+            provenance = raw.get("provenance")
+            if not isinstance(provenance, Mapping) or not provenance:
+                raise EdgeAdapterError(
+                    f"{path}.provenance must be a non-empty mapping"
+                )
             calibration = raw.get("calibration")
             if not isinstance(calibration, Mapping):
                 raise EdgeAdapterError(f"{path}.calibration must be a mapping")
+            calibration_provenance = calibration.get("provenance")
+            if not isinstance(calibration_provenance, Mapping) or not (
+                calibration_provenance
+            ):
+                raise EdgeAdapterError(
+                    f"{path}.calibration.provenance must be a non-empty mapping"
+                )
             status = calibration.get("status")
             if status not in {"calibrated", "not_required"}:
                 raise EdgeAdapterError(
@@ -143,6 +180,7 @@ class AdapterBindingSet:
                 AdapterBinding(
                     sensor_id=_text(raw, "sensor_id", path),
                     sensor_type=_text(raw, "sensor_type", path),
+                    source=_text(raw, "source", path),
                     channel=_text(raw, "channel", path),
                     associated_asset_id=_text(raw, "associated_asset_id", path),
                     canonical_unit=_text(raw, "units", path),

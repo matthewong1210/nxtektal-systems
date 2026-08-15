@@ -145,3 +145,95 @@ def test_an_unknown_calibration_status_fails_closed(projection):
     payload["bindings"][0]["calibration"]["status"] = "probably_fine"
     with pytest.raises(EdgeAdapterError):
         AdapterBindingSet.from_projection(payload)
+
+
+# ---------------------------------------------------------------------------
+# Projection evidence integrity: required fields must be validated, not merely
+# present. Provenance never reaches an Observation, but a projection carrying a
+# blank or malformed provenance block is not the artefact this layer consumes.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value", [None, "oops", {}, [], 12345, ""],
+)
+def test_a_malformed_binding_provenance_is_refused(projection, value):
+    payload = copy.deepcopy(projection)
+    payload["bindings"][0]["provenance"] = value
+    with pytest.raises(EdgeAdapterError) as excinfo:
+        AdapterBindingSet.from_projection(payload)
+    assert "provenance" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("value", [None, "oops", {}, 12345])
+def test_a_malformed_calibration_provenance_is_refused(projection, value):
+    payload = copy.deepcopy(projection)
+    payload["bindings"][0]["calibration"]["provenance"] = value
+    with pytest.raises(EdgeAdapterError) as excinfo:
+        AdapterBindingSet.from_projection(payload)
+    assert "provenance" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("value", [None, "", "   ", 12345, " plc.range-01 "])
+def test_a_malformed_source_address_is_refused(projection, value):
+    payload = copy.deepcopy(projection)
+    payload["bindings"][0]["source"] = value
+    with pytest.raises(EdgeAdapterError) as excinfo:
+        AdapterBindingSet.from_projection(payload)
+    assert "source" in str(excinfo.value)
+
+
+def test_the_commissioned_source_address_is_retained(projection):
+    bindings = AdapterBindingSet.from_projection(projection)
+    binding = bindings.by_sensor_id(SENSOR_DISPENSER_COUNT)
+    declared = {
+        item["sensor_id"]: item["source"] for item in projection["bindings"]
+    }
+    assert binding.source == declared[SENSOR_DISPENSER_COUNT]
+    assert binding.source.strip() == binding.source
+    for item in bindings.bindings:
+        assert item.source, item.sensor_id
+
+
+def test_provenance_is_validated_but_never_carried_into_a_binding(projection):
+    """The manifest stays provenance's only home; Observation has no field."""
+    bindings = AdapterBindingSet.from_projection(projection)
+    for binding in bindings.bindings:
+        assert not hasattr(binding, "provenance")
+
+
+def test_a_fabricated_unit_is_still_caught_at_conversion(projection, kit):
+    """The documented trust boundary, proven rather than assumed.
+
+    `from_projection` does not re-implement the commissioning vocabulary --
+    that would be a second registry. A fabricated unit therefore builds a
+    binding, but each adapter's own unit guard refuses to convert it.
+    """
+    from nxt_edge_observation import EdgeObservationAdapterKit
+    from scripts.pilot_course_a_edge_fixture import COORDINATE_FRAME
+
+    from .conftest import batch, load_cell_sample
+
+    payload = copy.deepcopy(projection)
+    for item in payload["bindings"]:
+        if item["sensor_id"] == SENSOR_DISPENSER_COUNT:
+            item["units"] = "1"
+    fabricated = EdgeObservationAdapterKit(
+        bindings=AdapterBindingSet.from_projection(payload),
+        coordinate_frame=COORDINATE_FRAME,
+        load_cell_profiles=tuple(kit._load_cells.values()),
+        digital_device_profiles=tuple(kit._digital_devices.values()),
+        digital_input_profiles=tuple(kit._digital_inputs.values()),
+        robot_profiles=tuple(kit._robots.values()),
+    )
+    result = fabricated.convert(batch(load_cells=(load_cell_sample(),)))
+    observation = {
+        item.channel: item for item in result.observations
+    }["inventory.dispenser.count"]
+    assert observation.status.value == "missing"
+    assert observation.value is None
+    assert "unsupported_unit" in {
+        item.code.value
+        for item in result.report.rejected
+        if item.sensor_id == SENSOR_DISPENSER_COUNT
+    }

@@ -102,6 +102,10 @@ the Python simulation/Site OS stack, the TypeScript ROI engine, and the
 read-only Operational Replay web app. Repository governance and documentation
 apply across them without creating runtime dependencies.
 
+The table below inventories every implementation surface in the repository,
+including work that is still on an unmerged branch. Merge status is stated per
+row; the "What is working now" section above describes `main` only.
+
 | Path | Purpose | Product status |
 |---|---|---|
 | `simulation/nxt_range_ops/` | Whole-site operating-day simulation and guarded directive path | Implemented simulation environment |
