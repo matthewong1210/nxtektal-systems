@@ -42,6 +42,7 @@ const VIEWPORTS = [
   { width: 1280, height: 800 },
   { width: 1024, height: 768 },
   { width: 768, height: 1024 },
+  { width: 680, height: 800 },
   { width: 390, height: 844 },
   { width: 375, height: 667 },
 ];
@@ -67,6 +68,20 @@ const PRIMARY_CONTROLS = [
   "Show network",
   "Show telemetry",
   "Show safety",
+];
+
+const TIMELINE_CONTROLS = [
+  "Installed Gateway overview",
+  "Open the conceptual enclosure",
+  "Identify conceptual Gateway components",
+  "Illustrative simulated operating flow",
+  "Record manager workflow evidence; issue no command",
+  "Show separate RangeOps replay; do not infer causality",
+  "Conceptual fleet onboarding with unchanged Gateway identity",
+  "Conceptual signed update and health-check success",
+  "Conceptual failed health check and automatic rollback",
+  "Independent local safety path",
+  "An updatable on-site operating layer for autonomous golf facilities",
 ];
 
 function usage() {
@@ -574,6 +589,16 @@ function assertLabels(values, expectedValues, context) {
   assert.deepEqual(missing, [], `${context} missing accessible controls: ${missing.join(", ")}`);
 }
 
+async function assertTimelineAccessibility(page, context) {
+  await page.send("Accessibility.enable");
+  const tree = await page.send("Accessibility.getFullAXTree");
+  const buttonNames = tree.nodes
+    .filter((node) => node.role?.value === "button" && !node.ignored)
+    .map((node) => node.name?.value ?? "")
+    .filter(Boolean);
+  assertLabels(buttonNames, TIMELINE_CONTROLS, context);
+}
+
 async function collectDomAudit(page) {
   return page.evaluate(`(() => {
     const visible = (element) => {
@@ -931,6 +956,21 @@ async function verifyResponsiveRoute(endpoint, baseUrl, outputDirectory, report)
       const audit = await collectDomAudit(page);
       assert.deepEqual(audit.viewport, viewport, `${context} viewport override drifted`);
       assertDemoAudit(audit, context);
+      if ([680, 390, 375].includes(viewport.width)) {
+        await page.evaluate(`document.querySelector('section[aria-label="Presentation timeline"]')?.scrollIntoView({ block: "end" })`);
+        await assertTimelineAccessibility(page, `${context} accessibility tree`);
+        await assertBoundingRectVisible(
+          page,
+          'button[aria-label="Installed Gateway overview"]',
+          `${context} first presentation timeline control`,
+        );
+        await assertBoundingRectVisible(
+          page,
+          'button[aria-label="An updatable on-site operating layer for autonomous golf facilities"]',
+          `${context} final presentation timeline control`,
+        );
+        await page.evaluate("scrollTo(0, 0)");
+      }
       assertNetworkBoundary(page, baseUrl, context);
       assertNoBrowserErrors(page, context);
       await capture(page, outputDirectory, `responsive-${viewport.width}x${viewport.height}.png`);
@@ -997,6 +1037,27 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
     assert.match(interfaceText, /Not a surveyed fact/i, "Existing Washer inspector omitted commissioning status");
     assert.match(interfaceText, /Control\s+Unavailable/i, "Existing Washer inspector omitted control status");
     await clickControl(page, ["Close installation interface inspector"], "close Existing Washer inspector");
+    const installationStatuses = await page.evaluate(`Array.from(document.querySelectorAll('[class*=statusList] li')).map((row) => ({
+      label: row.querySelector('span')?.textContent?.trim() || '',
+      status: row.getAttribute('data-status') || '',
+      dotColor: getComputedStyle(row.querySelector('i')).backgroundColor,
+    }))`);
+    const installationStatusByLabel = Object.fromEntries(
+      installationStatuses.map((status) => [status.label, status]),
+    );
+    assert.equal(installationStatusByLabel["Agent Runtime V1"]?.status, "implemented");
+    assert.equal(installationStatusByLabel["Power + normal I/O"]?.status, "conceptual");
+    assert.equal(installationStatusByLabel["Cloud sync"]?.status, "unimplemented");
+    assert.notEqual(
+      installationStatusByLabel["Power + normal I/O"]?.dotColor,
+      installationStatusByLabel["Agent Runtime V1"]?.dotColor,
+      "conceptual installation row used the implemented green status signal",
+    );
+    assert.notEqual(
+      installationStatusByLabel["Cloud sync"]?.dotColor,
+      installationStatusByLabel["Agent Runtime V1"]?.dotColor,
+      "unimplemented cloud sync row used the implemented green status signal",
+    );
     await capture(page, outputDirectory, "01-installed-gateway.png");
     await exercisePointerInputs(page);
     for (const camera of ["Perspective", "Orthographic", "Front", "Side", "Top", "Isometric", "Reset Camera"]) {
@@ -1030,11 +1091,32 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
     await capture(page, outputDirectory, "05-operational-data-flow.png");
     const scenarioText = (await collectDomAudit(page)).bodyText;
     assert.match(scenarioText, /SIMULATED PILOT SCENARIO\s*[—-]\s*NOT LIVE CUSTOMER DATA/i);
+    assert.match(scenarioText, /ILLUSTRATIVE STORYBOARD.*NOT AGENT RUNTIME FIXTURE OUTPUT/is);
+    assert.match(
+      scenarioText,
+      /IMPLEMENTED\s*[·-]\s*SYNTHETIC \/ FIXTURE INPUTS.*Site Runtime validates input.*telemetry-owned assembly.*quality-gates the exact state\/report envelope.*Agent Runtime invokes Shadow Ops evaluation.*separate lifecycle evidence.*manager workflow record/is,
+    );
+    assert.match(
+      scenarioText,
+      /Checkpoint\/recovery and read-only runtime status exist.*Physical telemetry adapters.*physical command admission.*robot execution.*safety installation remain unimplemented/is,
+    );
+    assert.equal(
+      await page.evaluate(`Boolean(document.querySelector('[data-evidence-card="rangeops-replay"]'))`),
+      false,
+      "separate RangeOps replay evidence appeared before the manager workflow step",
+    );
     await clickControl(page, ["Record manager response"], "manager response recording");
     await capture(page, outputDirectory, "06-manager-response-no-command.png");
+    const managerResponseText = (await collectDomAudit(page)).bodyText;
+    assert.match(managerResponseText, /ACCEPT recorded.*no command/is);
+    assert.equal(
+      await page.evaluate(`Boolean(document.querySelector('[data-evidence-card="rangeops-replay"]'))`),
+      false,
+      "recording manager acceptance also revealed the separate replay evidence",
+    );
     await clickControl(page, ["Next step"], "separate replay step");
     await capture(page, outputDirectory, "07-advisory-stop-and-separate-replay.png");
-    assert.match((await collectDomAudit(page)).bodyText, /SEPARATE RANGEOPS REPLAY.*SafetyShield.*not caused by the manager response/is);
+    assert.match((await collectDomAudit(page)).bodyText, /SEPARATE RANGEOPS REPLAY.*SafetyShield.*not caused by any manager response/is);
     await clickControl(page, ["Scale the Fleet"], "fleet scene");
     await clickControlIfPresent(page, ["Close component inspector"], "show fleet controls");
     await clickControl(page, ["Add Picker"], "add Picker");
@@ -1042,12 +1124,12 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
       page,
       '[data-evidence-card="fleet"]',
       "1440x900 fleet evidence card",
-      /SAME GATEWAY.*1 DEVICES.*Concept Picker 01.*certificate enrollment.*capability assignment.*Adapter loading.*commissioning/is,
+      /SAME GATEWAY.*1 DEVICES.*Concept Picker 01.*certificate enrollment.*capability assignment.*Adapter loading.*physical device onboarding/is,
     );
     await capture(page, outputDirectory, "08-fleet-expansion.png");
     const fleetText = (await collectDomAudit(page)).bodyText;
     assert.match(fleetText, /Same Gateway\s*[—-]\s*new device registration and Adapter/i);
-    assert.match(fleetText, /certificate enrollment.*capability assignment.*Adapter loading.*commissioning/is);
+    assert.match(fleetText, /certificate enrollment.*capability assignment.*Adapter loading.*physical device onboarding/is);
     assert.match(fleetText, /collect.*navigate.*report_payload.*report_battery/is);
     await clickControl(page, ["Software Update"], "software update scene");
     await clickControl(page, ["Run update"], "software update start");
@@ -1055,7 +1137,7 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
       page,
       '[data-evidence-card="update"]',
       "1440x900 successful-update evidence card",
-      /CONCEPTUAL OTA SEQUENCE.*HEALTHY.*0\.3\.2.*Agent updates normally change software/is,
+      /CONCEPTUAL OTA SEQUENCE.*HEALTHY.*0\.3\.2.*production update delivery is not implemented/is,
     );
     await capture(page, outputDirectory, "09-ota-update.png");
     await clickControl(page, ["Simulate Failed Health Check"], "failed health check");
@@ -1072,6 +1154,8 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
     const safetyText = (await collectDomAudit(page)).bodyText;
     assert.match(safetyText, /The Agent cannot bypass local safety/i);
     assert.match(safetyText, /Emergency Stop/i);
+    assert.match(safetyText, /manager workflow record.*STOP.*Future physical admission.*NOT IMPLEMENTED/is);
+    assert.match(safetyText, /No installed or certified integration/i);
     assertNoBrowserErrors(page, "interactive story");
     report.performance = await collectPerformance(page);
   } finally {
@@ -1106,6 +1190,52 @@ async function verifyPresentation(endpoint, baseUrl, report) {
     const stepped = await presentationState(page);
     assert.notDeepEqual(stepped, paused, "manual presentation step did not change state");
 
+    await clickControl(
+      page,
+      ["Record manager workflow evidence; issue no command"],
+      "manager workflow presentation cue",
+    );
+    const managerCueText = (await collectDomAudit(page)).bodyText;
+    assert.match(managerCueText, /ACCEPT recorded.*no command/is);
+    assert.equal(
+      await page.evaluate(`Boolean(document.querySelector('[data-evidence-card="rangeops-replay"]'))`),
+      false,
+      "manager presentation cue also revealed the separate RangeOps replay",
+    );
+    await clickControl(
+      page,
+      ["Show separate RangeOps replay; do not infer causality"],
+      "separate RangeOps presentation cue",
+    );
+    assert.equal(
+      await page.evaluate(`Boolean(document.querySelector('[data-evidence-card="rangeops-replay"]'))`),
+      true,
+      "separate RangeOps presentation cue did not reveal replay evidence",
+    );
+    assert.match(
+      (await collectDomAudit(page)).bodyText,
+      /SEPARATE RANGEOPS REPLAY.*not caused by any manager response/is,
+    );
+
+    await clickControl(page, ["Restart presentation"], "reset presentation before direct replay jump");
+    await clickControl(
+      page,
+      ["Show separate RangeOps replay; do not infer causality"],
+      "direct separate RangeOps presentation jump",
+    );
+    const directJump = await page.evaluate(`(() => {
+      const managerStep = document.querySelector('[data-flow-step="06"]');
+      return {
+        managerState: managerStep?.getAttribute('data-flow-state') || '',
+        replayVisible: Boolean(document.querySelector('[data-evidence-card="rangeops-replay"]')),
+        bodyText: document.body.innerText,
+      };
+    })()`);
+    assert.equal(directJump.managerState, "pending", "direct replay jump painted an unrecorded manager response complete");
+    assert.equal(directJump.replayVisible, true, "direct replay jump omitted independent evidence");
+    assert.match(directJump.bodyText, /Record response\s*[·-]\s*ACCEPT/i);
+    assert.match(directJump.bodyText, /not caused by any manager response/i);
+
     await clickControl(page, ["Play presentation"], "resume presentation before tab freeze");
 
     let lifecycleSupported = true;
@@ -1122,7 +1252,16 @@ async function verifyPresentation(endpoint, baseUrl, report) {
     }
     assertNetworkBoundary(page, baseUrl, "presentation mode");
     assertNoBrowserErrors(page, "presentation mode");
-    report.presentation = { automaticAdvance: true, pause: true, restart: true, manualStep: true, lifecycleSupported };
+    report.presentation = {
+      automaticAdvance: true,
+      pause: true,
+      restart: true,
+      manualStep: true,
+      managerCueNoReplay: true,
+      separateReplayCue: true,
+      directReplayJumpNoncausal: true,
+      lifecycleSupported,
+    };
   } finally {
     await page.close();
   }
@@ -1181,6 +1320,10 @@ async function verifyWebglFallback(browserPath, baseUrl, outputDirectory, report
       }
       assert.match(audit.bodyText, /Edge Gateway system architecture/i);
       assert.match(audit.bodyText, /FacilityState.*AssemblyReport/is);
+      assert.match(audit.bodyText, /Agent Runtime lifecycle evidence.*checkpoint \/ recovery.*read-only diagnostics/is);
+      assert.match(audit.bodyText, /does not run or connect to the Python runtime/is);
+      assert.match(audit.bodyText, /Physical telemetry adapters.*device enrollment.*production OTA.*physical command admission.*robot execution.*safety installation remain unimplemented/is);
+      assert.match(audit.bodyText, /Manager acceptance does not cause the separate RangeOps replay/is);
       assert.match(audit.bodyText, /Manager.*no command issued/is);
       assertNetworkBoundary(page, baseUrl, "WebGL fallback");
       assertNoBrowserErrors(page, "WebGL fallback");

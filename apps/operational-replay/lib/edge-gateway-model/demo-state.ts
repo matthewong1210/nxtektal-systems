@@ -86,8 +86,8 @@ const ONBOARDING_STEPS = [
     implementationStatus: "conceptual-target-not-implemented",
   },
   {
-    id: "commissioning",
-    label: "Commissioning",
+    id: "physical-device-onboarding",
+    label: "Physical device onboarding",
     implementationStatus: "conceptual-target-not-implemented",
   },
 ] as const;

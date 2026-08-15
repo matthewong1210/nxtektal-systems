@@ -35,7 +35,8 @@ The route is a browser-local, read-only presentation. Its geometry, requested
 demand-spike storyboard, fleet utilization, update sequence, and safety diagram
 are repository-authored illustrative content; they are not live customer data,
 manufacturing CAD, measured capacity, certification evidence, or an interface
-to the Python runtime. The clearly separate replay panel consumes a compact,
+to the Python runtime. In particular, the route does not import, run, or connect
+to `nxt_agent_runtime`. The clearly separate replay panel consumes a compact,
 checked-in excerpt generated from the deterministic `RangeOpsEnv` viewer export
 for `normal_weekday`, `inventory_threshold`, seed `101`, at repository commit
 `f5ae9e1`. The route cannot mutate that simulation or control a robot, and it
@@ -45,11 +46,14 @@ The architecture decision for the requested operational story is **RESHAPE
 THEN PROCEED**. The demo may explain this canonical advisory boundary:
 
 ```text
-simulated observations
-  -> conceptual on-site Gateway host
-  -> FacilityState plus a separate AssemblyReport
-  -> owner-labelled deterministic advice / Decision Trace
-  -> recorded human workflow response
+deterministic synthetic / fixture observations
+  -> Site Runtime ordered input validation, then telemetry-owned assembly
+  -> exact FacilityState plus a separate AssemblyReport
+  -> Site Runtime publication quality gate and exact admitted envelope
+  -> Agent Runtime V1 invokes existing Shadow Ops evaluation / DecisionTrace
+  -> Agent Runtime evaluation-lifecycle evidence, checkpoint / recovery,
+     and read-only diagnostic status
+  -> recorded Shadow Ops manager-workflow response
   -> stop; no command is issued
 ```
 
@@ -63,11 +67,18 @@ RangeOps policy -> closed Directive -> SafetyShield -> RangeSimulation
 ### Truth boundary and conceptual limits
 
 The diagram names architectural boundaries; it does not mean that the browser
-constructs or executes their canonical runtime objects. `nxt_telemetry` owns
-observation assembly, with frozen `FacilityState` and a separate
-`AssemblyReport` as outputs. `nxt_facility` manager advice and `nxt_pilot_ops`
-policy trace/workflow evidence remain distinct advisory owners. The demo does
-not merge, rank, reconcile, or execute them.
+constructs or executes their canonical runtime objects. Agent Runtime V1 is
+implemented for deterministic synthetic or fixture-backed observations. Site
+Runtime owns input validation and quality-gated publication of the exact frozen
+`FacilityState` plus its separate `AssemblyReport`; Agent Runtime composes that
+public pipeline with the existing Shadow Ops adapter and Guardian, records one
+evaluation outcome per admitted envelope, and provides separate evaluation
+checkpoint/recovery, a pending manager-decision view, and read-only runtime
+status. Shadow Ops still owns policy, recommendation, trace, and human-workflow
+semantics. Broad `nxt_facility` manager advice remains a separate advisory
+surface; Agent Runtime neither owns nor reconciles it with Guardian output. The
+demo does not merge, rank, reconcile, execute, import, or run any of those
+Python contracts.
 
 The two paths are not a causal implemented chain. In particular, a recorded
 manager accept response is not physical command admission; the repository has
@@ -97,10 +108,11 @@ node scripts/build-edge-gateway-replay-excerpt.mjs \
 The exporter disclaimer remains in the checked-in projection: its parameters
 have placeholder provenance and are not real facility performance.
 
-Fleet device registration, certificate enrollment, hot Adapter loading,
-production OTA activation/rollback, live gateway/vendor connectivity, and the
-depicted independent physical safety chain are conceptual target workflows,
-not implemented production integrations. Static site facts remain owned by a
+Physical telemetry adapters/transports, device and certificate enrollment, hot
+Adapter loading, production OTA activation/rollback, live gateway/vendor
+connectivity, production publishers or service scheduling, physical command
+admission, robot execution, and the depicted independent physical safety
+installation remain unimplemented. Static site facts remain owned by a
 validated `CommissionedSite`, not by the scene, telemetry, or `FacilityState`.
 
 The route always distinguishes the two required disclosures:

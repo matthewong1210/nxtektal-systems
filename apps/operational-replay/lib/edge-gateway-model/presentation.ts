@@ -38,10 +38,18 @@ export const PRESENTATION_SEGMENTS = [
   {
     id: "manager-evidence",
     startSecond: 31,
-    endSecond: 40,
+    endSecond: 35,
     scene: "operational-flow",
     title: "Record manager workflow evidence; issue no command",
     cue: "record-manager-workflow-evidence",
+  },
+  {
+    id: "separate-rangeops-replay",
+    startSecond: 35,
+    endSecond: 40,
+    scene: "operational-flow",
+    title: "Show separate RangeOps replay; do not infer causality",
+    cue: "separate-rangeops-replay",
   },
   {
     id: "fleet-onboarding",

@@ -511,7 +511,12 @@
 
 .statusList li > span { color: var(--ink-faint); }
 .statusList li strong { color: var(--ink-soft); font-weight: 500; }
-.statusList li i { width: 4px; height: 4px; margin-right: 5px; display: inline-block; border-radius: 50%; background: var(--green); }
+.statusList li i { width: 4px; height: 4px; margin-right: 5px; display: inline-block; border-radius: 50%; background: #66736c; }
+.statusList li[data-status="conceptual"] i { background: var(--amber); }
+.statusList li[data-status="implemented"] i { background: var(--green); }
+.statusList li[data-status="limited"] i,
+.statusList li[data-status="diagnostic"] i { background: #78b8d6; }
+.statusList li[data-status="unimplemented"] i { background: #66736c; }
 
 .flowCard {
   top: 106px;
@@ -927,7 +932,7 @@
   position: relative;
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(10, minmax(44px, 1fr));
+  grid-template-columns: repeat(11, minmax(44px, 1fr));
 }
 
 .timeline::before {
@@ -1122,6 +1127,8 @@
   .partBrowser { max-height: 310px; }
   .partGrid { grid-template-columns: repeat(3, 1fr); }
   .presentationBar { grid-template-columns: auto minmax(0, 1fr); }
+  .timeline { grid-template-columns: repeat(11, minmax(18px, 1fr)); }
+  .timeline button { padding: 0; }
   .timecode { display: none; }
   .footer { grid-template-columns: 1fr; text-align: center; }
   .footer span:last-child { display: none; }
@@ -1161,8 +1168,7 @@
   .partGrid { grid-template-columns: 1fr 1fr; }
   .presentationBar { position: sticky; z-index: 10; bottom: 0; gap: 6px; }
   .presentationControls button:nth-child(2) { min-width: 48px; }
-  .timeline { grid-template-columns: repeat(10, minmax(18px, 1fr)); }
-  .timeline button { padding: 0; }
+  .timeline { grid-template-columns: repeat(11, minmax(12px, 1fr)); }
   .footer strong { font-size: 6px; }
   .fallback { inset: 92px 10px 10px; padding: 14px; }
   .fallbackDiagram { min-height: auto; padding: 9px; display: grid; gap: 7px; }

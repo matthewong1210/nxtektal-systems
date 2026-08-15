@@ -62,12 +62,13 @@ copy; the notes after each segment are not narration.
 
 **20-40 seconds - Operational Flow**
 
-> In this simulated scenario, observations enter a conceptual Gateway host and
-> are shown alongside the canonical FacilityState boundary and a separate
-> assembly-quality report. Advisory and Decision Trace labels end at a recorded
-> manager response, where the chain stops. The following robot motion is a
-> separate deterministic RangeOps replay excerpt, not a command caused by
-> approval.
+> For deterministic synthetic or fixture inputs, merged Agent Runtime V1
+> composes Site Runtime's ordered validation, telemetry-owned assembly, and
+> quality-gated state publication, then invokes the existing Shadow Ops
+> evaluation. Agent Runtime's separate evaluation-lifecycle evidence supports
+> checkpoint and recovery plus read-only diagnostic status. The later Shadow Ops
+> manager workflow records acceptance as evidence only. The robot motion shown
+> next is a separate deterministic RangeOps replay, not a command caused by it.
 
 **40-52 seconds - Scale the Fleet**
 
@@ -150,3 +151,7 @@ UL or production safety certification, live customer deployment, measured
 customer savings, measured Gateway capacity, autonomous physical execution, or
 an implemented safety installation. Static values and motion are illustrative.
 The Agent cannot control a robot or bypass local safety through this route.
+Agent Runtime V1 is implemented only for deterministic synthetic/fixture inputs
+in this repository; the browser does not run it. Physical telemetry adapters,
+device enrollment, production OTA, physical command admission, robot execution,
+and physical safety installation remain unimplemented.

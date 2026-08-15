@@ -37,7 +37,19 @@ part of that commit and were not imported.
 This app owns presentation and deterministic parsing only. Its inputs are
 read-only projection artifacts. `RangeSimulation`, `BallLedger`,
 `FacilityState`, telemetry assembly, Site Runtime, facility advice, Shadow Ops,
-the twin, and execution interfaces retain their existing owners and contracts.
+Agent Runtime, the twin, and execution interfaces retain their existing owners
+and contracts.
+
+Agent Runtime V1 is merged and implemented for deterministic synthetic or
+fixture-backed observations. It composes Site Runtime's quality-gated
+publication and invokes Shadow Ops evaluation; its separate
+evaluation-lifecycle evidence supports checkpoint/recovery and its status
+surface is read-only diagnostics. Shadow Ops retains the later manager
+workflow. This browser app neither imports nor runs it. Physical telemetry
+adapters, production OTA, device enrollment, physical command admission, robot
+execution, and an installed physical safety integration remain unimplemented.
+The user-authored dispatch storyboard is not presented as Agent Runtime fixture
+output.
 
 The app preserves observed state, risk output, recommendation, simulated task
 evidence, and recorded simulation outcome as separate stages. It does not infer

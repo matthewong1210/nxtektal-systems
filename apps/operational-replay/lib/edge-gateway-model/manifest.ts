@@ -230,7 +230,7 @@ export const GATEWAY_PARTS = [
     installedPosition: positionMm(-120, 80, -35),
     explodedPosition: positionMm(-690, 110, 80),
     description:
-      "Conceptually represents a planned fanless x86 host for telemetry ingestion, state assembly, deterministic evaluation, local storage, adapters, and secure synchronization.",
+      "Conceptual planned fanless x86 host. Repository software implements Site Runtime state publication and Agent Runtime evaluation lifecycles for deterministic synthetic/fixture inputs; no physical adapters, live delivery, production OTA, or command path is connected.",
     status: "conceptual-pilot-component",
     notForFabrication: true,
     optional: false,

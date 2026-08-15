@@ -71,6 +71,33 @@ describe("package and safety boundaries", () => {
     }
   });
 
+  test("states merged Agent Runtime truth without browser coupling or execution claims", () => {
+    const demo = readFileSync(
+      join(ROOT, "components", "edge-gateway-3d", "EdgeGatewayDemo.tsx"),
+      "utf8",
+    );
+    const fallback = readFileSync(
+      join(ROOT, "components", "edge-gateway-3d", "WebGLFallback.tsx"),
+      "utf8",
+    );
+    const readme = readFileSync(join(ROOT, "README.md"), "utf8");
+
+    expect(demo).toMatch(/Merged Agent Runtime V1/);
+    expect(demo).toMatch(/IMPLEMENTED · SYNTHETIC \/ FIXTURE INPUTS/);
+    expect(demo).toMatch(/Site Runtime validation.*telemetry assembly/);
+    expect(demo).toMatch(/Site Runtime quality-gates the exact envelope/);
+    expect(demo).toMatch(/Shadow Ops evaluation/);
+    expect(demo).toMatch(/Checkpoint\/recovery and read-only runtime status exist/);
+    expect(fallback).toMatch(/does\s+not run or connect to the Python runtime/);
+    expect(readme).toMatch(
+      /Agent Runtime V1 is\s+implemented for deterministic synthetic or fixture-backed observations/,
+    );
+    expect(readme).toMatch(
+      /Physical telemetry adapters\/transports[\s\S]*device and certificate enrollment[\s\S]*production OTA[\s\S]*physical command\s+admission[\s\S]*robot execution[\s\S]*physical safety\s+installation remain unimplemented/i,
+    );
+    expect(demo).toMatch(/not caused by any manager response/);
+  });
+
   test("isolates the 3D runtime behind the dedicated route client loader", () => {
     const home = readFileSync(join(ROOT, "app", "page.tsx"), "utf8");
     const loader = readFileSync(
@@ -126,6 +153,9 @@ describe("package and safety boundaries", () => {
   test("proves the runtime-import guard catches each forbidden direction", () => {
     expect(
       isForbiddenRuntimeImport("../../../simulation/nxt_facility/state"),
+    ).toBe(true);
+    expect(
+      isForbiddenRuntimeImport("../../../simulation/nxt_agent_runtime"),
     ).toBe(true);
     expect(isForbiddenRuntimeImport("@nxtektal/roi-engine")).toBe(true);
     expect(isForbiddenRuntimeImport("next")).toBe(false);

@@ -290,6 +290,10 @@ describe("deterministic demo state", () => {
         "user-specified-illustrative-storyboard",
       );
       expect(device.onboarding).toHaveLength(5);
+      expect(device.onboarding.at(-1)).toMatchObject({
+        id: "physical-device-onboarding",
+        label: "Physical device onboarding",
+      });
       expect(
         device.onboarding.every(
           (step) =>
@@ -415,6 +419,11 @@ describe("75-second deterministic presentation", () => {
         (segment) => segment.cue === "record-manager-workflow-evidence",
       )?.title,
     ).toMatch(/no command/i);
+    expect(
+      PRESENTATION_SEGMENTS.find(
+        (segment) => segment.cue === "separate-rangeops-replay",
+      )?.title,
+    ).toMatch(/do not infer causality/i);
   });
 
   test("selects boundary segments deterministically", () => {
@@ -422,6 +431,8 @@ describe("75-second deterministic presentation", () => {
     expect(presentationSegmentAt(7.999).id).toBe("installed-overview");
     expect(presentationSegmentAt(8).id).toBe("open-enclosure");
     expect(presentationSegmentAt(31).id).toBe("manager-evidence");
+    expect(presentationSegmentAt(34.999).id).toBe("manager-evidence");
+    expect(presentationSegmentAt(35).id).toBe("separate-rangeops-replay");
     expect(presentationSegmentAt(75).id).toBe("final-overview");
     expect(presentationSegmentAt(Number.NaN).id).toBe("installed-overview");
   });

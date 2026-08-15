@@ -63,14 +63,14 @@ const SCENE_DESCRIPTION: Record<SceneId, { eyebrow: string; title: string; body:
     body: "The enclosure, protected power, compute, networking, normal remote I/O, terminations, and optional hardware remain individually selectable.",
   },
   "operational-flow": {
-    eyebrow: "User-specified illustrative storyboard · not exported evidence",
-    title: "Evidence reaches a human—not an actuator",
-    body: "The repository-backed path ends with recorded workflow evidence. A separate simulated replay can show later state without claiming the response caused it.",
+    eyebrow: "Merged Agent Runtime V1 · deterministic synthetic / fixture inputs",
+    title: "Quality-gated evidence reaches a human—not an actuator",
+    body: "For deterministic synthetic or fixture inputs, Agent Runtime V1 composes Site Runtime's quality-gated publication and invokes the existing Shadow Ops evaluation. Agent Runtime separately records evaluation-lifecycle evidence for checkpoint/recovery and exposes read-only diagnostic status; Shadow Ops owns the later manager workflow. This browser does not run that Python runtime, and the RangeOps replay remains separate.",
   },
   "scale-the-fleet": {
     eyebrow: "Conceptual onboarding workflow · not implemented",
     title: "Keep the Gateway. Register the device.",
-    body: "New robot and sensor concepts join through registration, certificates, capabilities, Adapter loading, and commissioning. Camera inference remains on a separate optional node.",
+    body: "New robot and sensor concepts join through registration, certificates, capabilities, Adapter loading, and physical-device onboarding. Camera inference remains on a separate optional node.",
   },
   "software-update": {
     eyebrow: "Conceptual update architecture · simulated sequence",
@@ -100,22 +100,21 @@ const CAMERA_PRESETS: ReadonlyArray<{ id: CameraPreset; label: string }> = [
 ];
 
 const INSTALLATION_STATUS = [
-  ["Power", "Healthy"],
-  ["Primary network", "Connected"],
-  ["Cellular backup", "Ready"],
-  ["Normal I/O", "Connected"],
-  ["Edge runtime", "Healthy"],
-  ["Facility State", "Current"],
-  ["Cloud sync", "Illustrated"],
+  ["Power + normal I/O", "Conceptual", "conceptual"],
+  ["Network + cellular", "Conceptual", "conceptual"],
+  ["Agent Runtime V1", "Implemented", "implemented"],
+  ["Input scope", "Synthetic / fixture", "limited"],
+  ["Runtime health", "Read-only diagnostics", "diagnostic"],
+  ["Cloud sync", "Not implemented", "unimplemented"],
 ] as const;
 
 const FLOW_STEPS = [
-  ["01", "Simulated observations", "Synthetic sensor and robot evidence"],
-  ["02", "Conceptual Edge host", "Browser-local system representation"],
-  ["03", "FacilityState + AssemblyReport", "State and quality evidence remain separate"],
-  ["04", "Deterministic evaluation", "Facility advice and Shadow trace stay owner-identified"],
-  ["05", "Recommendation + DecisionTrace", "Illustrative storyboard—not canonical output"],
-  ["06", "Manager response: ACCEPT", "Workflow evidence recorded; no command issued"],
+  ["01", "Synthetic / fixture observations", "Implemented input scope; no physical adapter"],
+  ["02", "Site Runtime validation → telemetry assembly", "Site Runtime orchestrates; nxt_telemetry owns assembly"],
+  ["03", "Exact state/report → publication gate", "Site Runtime quality-gates the exact envelope"],
+  ["04", "Shadow Ops evaluation + trace", "Invoked by Agent Runtime; storyboard is illustrative"],
+  ["05", "Agent Runtime lifecycle evidence", "Checkpoint / recovery and read-only diagnostics"],
+  ["06", "Manager workflow response", "ACCEPT only when recorded; no command issued"],
   ["07", "Physical task admission", "NOT IMPLEMENTED · inactive boundary"],
   ["08", "Separate RangeOps replay", "Seed 101 evidence; not causal proof"],
 ] as const;
@@ -276,6 +275,9 @@ export function EdgeGatewayDemo({
           break;
       case "record-manager-workflow-evidence":
         dispatch({ type: "manager/record-response", response: "accept" });
+        setFlowStep(6);
+          break;
+      case "separate-rangeops-replay":
         setFlowStep(7);
           break;
       case "conceptual-fleet-onboarding":
@@ -750,6 +752,8 @@ export function EdgeGatewayDemo({
             <button
               key={segment.id}
               type="button"
+              aria-label={segment.title}
+              aria-current={index === presentationIndex && presentationActive ? "step" : undefined}
               className={index === presentationIndex && presentationActive ? styles.activeTimeline : undefined}
               onClick={() => {
                 setPresentationActive(true);
@@ -829,8 +833,8 @@ function SceneOverlay({
       <div className={`${styles.sceneCard} ${styles.installedCard}`}>
         <div className={styles.cardTitle}><span>INSTALLATION STATUS</span><strong>PILOT COURSE A · SIMULATED</strong></div>
         <ul className={styles.statusList}>
-          {INSTALLATION_STATUS.map(([label, value]) => (
-            <li key={label}><span>{label}</span><strong><i />{value}</strong></li>
+          {INSTALLATION_STATUS.map(([label, value, status]) => (
+            <li key={label} data-status={status}><span>{label}</span><strong><i aria-hidden="true" />{value}</strong></li>
           ))}
         </ul>
       </div>
@@ -840,7 +844,7 @@ function SceneOverlay({
     return (
       <div className={`${styles.sceneCard} ${styles.flowCard}`}>
         <div className={styles.cardTitle}>
-          <span>PILOT COURSE A · ILLUSTRATIVE VALUES</span>
+          <span>ILLUSTRATIVE STORYBOARD · NOT AGENT RUNTIME FIXTURE OUTPUT</span>
           <strong>17:20 · EVENING DEMAND STORYBOARD</strong>
         </div>
         <div className={styles.flowReadout}>
@@ -850,32 +854,39 @@ function SceneOverlay({
           <div><span>Quality</span><strong>Illustrative</strong></div>
         </div>
         <ol className={styles.flowList}>
-          {FLOW_STEPS.map(([index, title, detail], stepIndex) => (
-            <li
-              key={index}
-              className={
-                stepIndex === 6
-                  ? styles.inactiveFlow
-                  : stepIndex < flowStep
-                    ? styles.completeFlow
-                    : stepIndex === flowStep
-                      ? styles.currentFlow
-                      : undefined
-              }
-            >
-              <span>{index}</span><div><strong>{title}</strong><small>{detail}</small></div>
-            </li>
-          ))}
+          {FLOW_STEPS.map(([index, title, detail], stepIndex) => {
+            const flowState = stepIndex === 6
+              ? "inactive"
+              : stepIndex === 5
+                ? managerRecorded ? "complete" : "pending"
+                : stepIndex < flowStep
+                  ? "complete"
+                  : stepIndex === flowStep
+                    ? "current"
+                    : "pending";
+            const className = flowState === "inactive"
+              ? styles.inactiveFlow
+              : flowState === "complete"
+                ? styles.completeFlow
+                : flowState === "current"
+                  ? styles.currentFlow
+                  : undefined;
+            return (
+              <li key={index} className={className} data-flow-step={index} data-flow-state={flowState}>
+                <span>{index}</span><div><strong>{title}</strong><small>{detail}</small></div>
+              </li>
+            );
+          })}
         </ol>
         {flowStep >= 7 ? (
-          <div className={styles.replayEvidence}>
+          <div className={styles.replayEvidence} data-evidence-card="rangeops-replay">
             <div><span>SEPARATE RANGEOPS REPLAY</span><strong>SEED {replayExcerpt.source.seed} · {replayExcerpt.source.policy}</strong></div>
             <dl>
               <div><dt>Recorded directive</dt><dd>{REPLAY_HANDOFF_FRAME.directive}</dd></div>
               <div><dt>SafetyShield</dt><dd>{REPLAY_HANDOFF_FRAME.safetyShieldAllowed ? "allowed" : "rejected"}</dd></div>
               <div><dt>Recorded state</dt><dd>{REPLAY_HANDOFF_FRAME.robotId} · {REPLAY_HANDOFF_FRAME.robotActivity} · {REPLAY_HANDOFF_FRAME.robotLocation}</dd></div>
             </dl>
-            <small>Deterministic simulator evidence from commit {replayExcerpt.source.gitCommit}; not caused by the manager response above.</small>
+            <small>Independent deterministic simulator evidence from commit {replayExcerpt.source.gitCommit}; not a command and not caused by any manager response.</small>
           </div>
         ) : null}
         <div className={styles.cardActions}>
@@ -902,10 +913,10 @@ function SceneOverlay({
               ))}
             </ol>
             <p>{latestFleetDevice.capabilities.join(" · ")}</p>
-            <small>Illustrated target sequence only · not connected to a live facility</small>
+            <small>Device/certificate enrollment, Adapter loading, and physical-device onboarding are not implemented.</small>
           </div>
         ) : (
-          <p className={styles.onboardingEmpty}>Add a conceptual device to inspect registration, certificate, capability, Adapter, and commissioning steps.</p>
+          <p className={styles.onboardingEmpty}>Add a conceptual device to inspect registration, certificate, capability, Adapter, and physical-device onboarding.</p>
         )}
         <div className={styles.meters}>
           {[
@@ -928,7 +939,7 @@ function SceneOverlay({
           {UPDATE_SEQUENCE.map((step, index) => <li key={step} className={index < updateStep ? styles.completeUpdate : undefined}><i>{index < updateStep ? "✓" : index + 1}</i><span>{step}</span></li>)}
         </ol>
         <p className={updateFailed ? styles.rollback : styles.updateTruth}>
-          {updateFailed ? `Failed health check → retained version ${activeUpdateVersion} restored → rollback report recorded` : "Agent updates normally change software, not Gateway hardware."}
+          {updateFailed ? `Failed health check → retained version ${activeUpdateVersion} restored → rollback report recorded` : "OTA storyboard only · production update delivery is not implemented."}
         </p>
       </div>
     );
@@ -938,8 +949,8 @@ function SceneOverlay({
       <div className={styles.sceneCard} data-evidence-card="safety">
         <div className={styles.cardTitle}><span>INDEPENDENT SAFETY PATH</span><strong>{safetyActive ? "PATH EMPHASIZED" : "CONCEPT VIEW"}</strong></div>
         <div className={styles.safetyPaths}>
-          <div><span>OPERATING DATA</span><p>Agent → manager response → inactive future admission gap → local controller</p></div>
-          <div><span>PHYSICAL SAFETY</span><p>Emergency Stop → safety relay / robot safety controller → motor and mechanism power</p></div>
+          <div><span>OPERATING DATA</span><p>Agent → manager workflow record → STOP. Future physical admission / local controller: NOT IMPLEMENTED.</p></div>
+          <div><span>PHYSICAL SAFETY CONCEPT</span><p>Emergency Stop → safety relay / robot safety controller → motor and mechanism power. No installed or certified integration.</p></div>
         </div>
         <strong className={styles.safetyStatement}>The Agent cannot bypass local safety.</strong>
       </div>
@@ -995,7 +1006,7 @@ function ComponentInspector({
         <div className={styles.configBlock}>
           <span>CONCEPTUAL PILOT CONFIGURATION</span>
           <ul><li>x86 fanless computer</li><li>32 GB RAM · 1 TB NVMe</li><li>TPM 2.0 · Ubuntu</li><li>No GPU required for initial Pilot</li></ul>
-          <small>Physical adapters, live service operation, cloud synchronization, and robot-command admission are not implemented.</small>
+          <small>Physical adapters, live service operation, cloud synchronization, and physical robot-command admission are not implemented.</small>
         </div>
       ) : null}
       {part.id === "remote-io-module" ? <p className={styles.warningCallout}>Not part of the emergency-stop safety chain.</p> : null}
@@ -1072,10 +1083,10 @@ function SceneInspector({
 
       {scene === "operational-flow" ? (
         <div className={styles.boundaryCard}>
-          <span>IMPLEMENTED SOFTWARE BOUNDARY</span>
-          <p>State + separate quality evidence → owner-identified advice and trace → immutable manager workflow record.</p>
+          <span>IMPLEMENTED · SYNTHETIC / FIXTURE INPUTS</span>
+          <p>Site Runtime validates input and invokes telemetry-owned assembly, then quality-gates the exact state/report envelope. Agent Runtime invokes Shadow Ops evaluation and records separate lifecycle evidence for checkpoint/recovery and read-only diagnostics → manager workflow record.</p>
           <strong>STOP · NO COMMAND ISSUED</strong>
-          <small>Physical command admission and typed site-task translation: NOT IMPLEMENTED.</small>
+          <small>Checkpoint/recovery and read-only runtime status exist. Physical telemetry adapters, physical command admission, robot execution, and safety installation remain unimplemented.</small>
         </div>
       ) : null}
 
@@ -1087,7 +1098,7 @@ function SceneInspector({
           <button type="button" aria-label="Add Handoff" onClick={() => addFleetDevice("handoff")}>＋ Add Handoff</button>
           <button type="button" aria-label="Add Sensor" onClick={() => addFleetDevice("sensor")}>＋ Add Sensor</button>
           <button type="button" aria-label="Add Vision Node" onClick={requestVision}>＋ Add Vision Node / camera workload</button>
-          <small>Registration, certificates, Adapter loading, runtime onboarding, and utilization values are conceptual—not implemented benchmarks.</small>
+          <small>Device/certificate enrollment, Adapter loading, runtime onboarding, and utilization values are conceptual—not implemented benchmarks.</small>
         </div>
       ) : null}
 
@@ -1096,7 +1107,7 @@ function SceneInspector({
           <span>UPDATE REHEARSAL</span>
           <button type="button" aria-label="Run update" onClick={runUpdate}>Run update · target 0.3.2</button>
           <button type="button" aria-label="Simulate Failed Health Check" onClick={failUpdate}>Simulate Failed Health Check</button>
-          <dl className={styles.versionList}><div><dt>Edge Runtime</dt><dd>0.3.1 → 0.3.2</dd></div><div><dt>Policy</dt><dd>0.1.5</dd></div><div><dt>Site Configuration</dt><dd>1.4</dd></div><div><dt>Carrier Adapter</dt><dd>0.2.0</dd></div></dl>
+          <dl className={styles.versionList}><div><dt>Illustrative edge software</dt><dd>0.3.1 → 0.3.2</dd></div><div><dt>Policy</dt><dd>0.1.5</dd></div><div><dt>Site Configuration</dt><dd>1.4</dd></div><div><dt>Carrier Adapter</dt><dd>0.2.0</dd></div></dl>
         </div>
       ) : null}
 

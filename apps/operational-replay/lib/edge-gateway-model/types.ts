@@ -130,7 +130,7 @@ export type ConceptualOnboardingStep = Readonly<{
     | "certificate-enrollment"
     | "capability-assignment"
     | "adapter-loading"
-    | "commissioning";
+    | "physical-device-onboarding";
   label: string;
   implementationStatus: "conceptual-target-not-implemented";
 }>;
@@ -251,6 +251,7 @@ export type PresentationSegment = Readonly<{
     | "explode-components"
     | "illustrative-operational-flow"
     | "record-manager-workflow-evidence"
+    | "separate-rangeops-replay"
     | "conceptual-fleet-onboarding"
     | "conceptual-update-success"
     | "conceptual-update-rollback"
