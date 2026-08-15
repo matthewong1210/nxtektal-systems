@@ -2,16 +2,22 @@
 
 This package converts *already-read* equipment and vendor-shaped samples
 into the existing canonical ``nxt_telemetry.observations.Observation``
-boundary.  It owns exactly one fact class: the conversion from a raw
-device payload into a trustworthy canonical channel value, plus the
-diagnostics explaining what could not be converted.
+boundary.  It owns two fact classes and no others: the conversion from a raw
+device payload into a trustworthy canonical channel value plus the
+diagnostics explaining what could not be converted, and the
+at-least-once delivery cursor over raw batches -- peek, acknowledge,
+reject-with-sequence-reuse, and explicit exhaustion -- which is the
+source side of the contract the Site Runtime's ``ObservationSource`` port
+documents.  Assigning a delivery position is the source's job; validating
+it, gating on quality, and checkpointing it are the Site Runtime's.
 
 It owns none of:
 
 * observation semantics or state assembly (``nxt_telemetry``);
 * physical static facts, channels, units, or calibration identity
   (``nxt_commissioning``);
-* sequencing, quality admission, or publication (the Site Runtime);
+* publication sequencing validation, quality admission, checkpointing, or
+  publication (the Site Runtime);
 * evaluation lifecycle (the Agent Runtime);
 * policy, trace, or workflow (``nxt_pilot_ops``);
 * any facility state, advice, or execution surface.

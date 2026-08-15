@@ -58,6 +58,15 @@ def test_demo_reports_admission_rejection_and_evaluation(tmp_path):
     assert result.returncode == 0, result.stderr
     payload = _evidence_json(tmp_path / "out")
 
+    # Each row names the cycle it actually consumed, not a positional guess.
+    assert [cycle["cycle_index"] for cycle in payload["cycles"]] == [
+        0,
+        1,
+        2,
+        3,
+        4,
+        None,
+    ]
     kinds = [cycle["kind"] for cycle in payload["cycles"]]
     assert kinds == [
         "evaluated",
@@ -135,15 +144,31 @@ def test_demo_refuses_to_append_over_an_existing_run(tmp_path):
 
 
 def test_demo_writes_only_inside_the_requested_output_directory(tmp_path):
-    before = {
-        path
-        for path in SIMULATION_ROOT.rglob("*")
-        if path.is_file() and ".venv" not in path.parts and "reports" not in path.parts
-    }
+    """The demo must not write into the checkout.
+
+    The snapshot is scoped to the directories the demo could plausibly
+    touch rather than the whole of ``simulation/``: this repository is
+    routinely worked on by concurrent sessions, and a repo-wide snapshot
+    would fail on an unrelated edit instead of on a real defect.
+    """
+    watched = (
+        SIMULATION_ROOT / "scripts",
+        SIMULATION_ROOT / "nxt_edge_observation",
+        SIMULATION_ROOT / "reports",
+    )
+
+    def snapshot():
+        found = set()
+        for root in watched:
+            if not root.exists():
+                continue
+            found |= {
+                path.relative_to(SIMULATION_ROOT)
+                for path in root.rglob("*")
+                if path.is_file() and "__pycache__" not in path.parts
+            }
+        return found
+
+    before = snapshot()
     assert _run_demo(tmp_path / "out").returncode == 0
-    after = {
-        path
-        for path in SIMULATION_ROOT.rglob("*")
-        if path.is_file() and ".venv" not in path.parts and "reports" not in path.parts
-    }
-    assert after == before
+    assert snapshot() == before

@@ -174,7 +174,10 @@ An untracked document is never repository authority by itself.
   telemetry-adapter-config projection as plain data rather than importing
   `nxt_commissioning`. It owns raw device payload normalization, binding and
   calibration application, device-data validation, canonical Observation
-  production, and adapter diagnostics only. It must not import the simulator,
+  production, adapter diagnostics, and the at-least-once raw-batch delivery
+  cursor (the source side of the `ObservationSource` port; sequence
+  validation, quality admission, and checkpointing stay with Site Runtime).
+  It must not import the simulator,
   Site Runtime, Agent Runtime, Shadow Ops, memory, twin, viewer, robot, ROS,
   actuator, transport/field-bus, network, subprocess, threading, wall-clock, or
   randomness modules, and no existing package may import it. Composing its

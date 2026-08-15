@@ -99,8 +99,16 @@ class FixtureRawSampleFeed:
         """Return the current batch without consuming it.
 
         Repeated calls return an equal value until the batch is
-        acknowledged or rejected, so a consumer that crashes mid-cycle
-        sees the identical input on restart.
+        acknowledged or rejected, so a consumer that fails part-way
+        through a cycle re-observes the identical input.
+
+        This guarantee is **in-process only**: the cursor lives in memory.
+        Surviving a restart is the caller's responsibility -- construct
+        the feed with ``first_sequence_number`` set to the next expected
+        publication position, and with the already-delivered batches
+        removed.  A real transport needs the same resume hook, because
+        Site Runtime retains an ``invalid_sequence`` frame rather than
+        discarding it.
         """
         if not self._pending:
             raise FeedExhausted("the fixture raw-sample feed is exhausted")

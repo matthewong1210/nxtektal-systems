@@ -217,6 +217,10 @@ class _Collector:
             ]
             return
 
+    @property
+    def claimed_channels(self) -> frozenset[str]:
+        return frozenset(self._claimed)
+
     def report(self) -> EdgeAdapterReport:
         return EdgeAdapterReport(
             schema=ADAPTER_REPORT_SCHEMA,
@@ -418,6 +422,17 @@ class LoadCellAdapter:
                     f"match commissioned calibration {binding.calibration_id!r}",
                 )
                 return
+        elif sample.calibration_id is not None:
+            # The device claims a calibration the commissioned binding says
+            # it does not have.  Silently discarding that claim would hide a
+            # real disagreement between the device and the manifest.
+            emit_missing(
+                RejectionCode.CALIBRATION_MISMATCH,
+                f"the sample declares calibration {sample.calibration_id!r} "
+                "but the commissioned binding declares calibration is not "
+                "required",
+            )
+            return
 
         verdict = _check_timing(
             sample_timestamp_s=timing.sample_timestamp_s,
@@ -464,6 +479,17 @@ class LoadCellAdapter:
             )
             return
         balls = net_raw / profile.mass_per_ball_raw
+        if not math.isfinite(balls):
+            # A finite but enormous raw reading (a common driver fault
+            # sentinel) can still divide to infinity.  Guarding only the
+            # raw value would let int(round(inf)) raise OverflowError out
+            # of convert() and destroy every other sample in the batch.
+            emit_missing(
+                RejectionCode.NON_FINITE_VALUE,
+                f"derived ball count is not finite for net mass {net_raw} "
+                f"{profile.raw_unit}",
+            )
+            return
         if kind is ChannelKind.COUNT:
             value: object = int(round(balls))
         else:
@@ -528,13 +554,28 @@ class DigitalIOAdapter:
             return
 
         by_name = {item.input_name: item for item in snapshot.inputs}
+
+        def logical_state(sample: DigitalInputSample) -> bool | None:
+            """Apply declared polarity before any semantic comparison.
+
+            A normally-closed point reads ``False`` when it is physically
+            asserted, so comparing raw bits here would invert exactly the
+            wiring ``DigitalInputProfile.active_low`` exists to describe.
+            """
+            if sample.raw_state is None:
+                return None
+            profile = profiles.get(sample.sensor_id)
+            if profile is not None and profile.active_low:
+                return not sample.raw_state
+            return sample.raw_state
+
         impossible: set[str] = set()
         for first, second in device_profile.mutually_exclusive_inputs:
             left = by_name.get(first)
             right = by_name.get(second)
             if left is None or right is None:
                 continue
-            if left.raw_state is True and right.raw_state is True:
+            if logical_state(left) is True and logical_state(right) is True:
                 impossible.update({first, second})
                 for name in (first, second):
                     collector.reject(
@@ -625,6 +666,30 @@ class DigitalIOAdapter:
                     "input can only produce a boolean or a 0/1 occupancy count",
                 )
                 continue
+            # A single bit is never a quantity of balls.  Without this the
+            # adapter would publish an occupancy bit as a full-confidence
+            # ball count on a ball-denominated channel, inventing a
+            # physical fact that no device measured.
+            expected_unit = "1" if kind is ChannelKind.BOOLEAN else "count"
+            if binding.canonical_unit != expected_unit:
+                emit_missing(
+                    RejectionCode.UNSUPPORTED_UNIT,
+                    f"channel {binding.channel!r} has canonical unit "
+                    f"{binding.canonical_unit!r}; a digital input can only "
+                    f"serve a {expected_unit!r}-denominated channel",
+                )
+                continue
+            # A discrete point carries no calibration reference, so it can
+            # never satisfy a binding whose commissioned sensor requires
+            # calibrated evidence.
+            if binding.calibration_required:
+                emit_missing(
+                    RejectionCode.CALIBRATION_MISSING,
+                    f"channel {binding.channel!r} requires calibrated evidence "
+                    f"({binding.calibration_id!r}); a digital input carries no "
+                    "calibration reference",
+                )
+                continue
 
             verdict = _check_timing(
                 sample_timestamp_s=timing.sample_timestamp_s,
@@ -709,18 +774,6 @@ class RobotStatusAdapter:
                 detail=(
                     "unknown robot identity: no commissioned robot profile "
                     f"named {sample.robot_id!r}"
-                ),
-            )
-            return
-        if profile.robot_id != sample.robot_id:
-            collector.reject(
-                sensor_id=sample.robot_id,
-                channel=None,
-                raw_field="robot_id",
-                code=RejectionCode.IDENTITY_MISMATCH,
-                detail=(
-                    f"profile robot {profile.robot_id!r} does not match sample "
-                    f"robot {sample.robot_id!r}"
                 ),
             )
             return
@@ -1034,12 +1087,45 @@ class EdgeObservationAdapterKit:
                 coordinate_frame=self._coordinate_frame,
                 collector=collector,
             )
+        self._reconcile_silent_devices(collector, batch)
         observations = tuple(
             sorted(collector.observations, key=lambda item: item.channel)
         )
         return ConversionResult(
             observations=observations, report=collector.report()
         )
+
+    def _reconcile_silent_devices(
+        self, collector: _Collector, batch: RawSampleBatch
+    ) -> None:
+        """Publish an explicit gap for every commissioned channel with no sample.
+
+        A device that simply stops reporting must not become an absent key.
+        Left absent, the assembler's own backfill turns a silent robot into
+        ``health=ok`` and a silent dispenser load cell into zero inventory,
+        and the adapter report would look like a clean cycle.  Every
+        commissioned channel this batch did not claim therefore gets a
+        ``MISSING`` Observation and a named ``NO_SAMPLE`` rejection.
+
+        The frame timestamp is used for both observation timestamps: with
+        no reading there is no measurement instant to preserve, and a
+        ``MISSING`` observation carries no measurement claim.
+        """
+        claimed = collector.claimed_channels
+        for binding in self._bindings.bindings:
+            if binding.channel in claimed:
+                continue
+            collector.emit_missing(
+                binding=binding,
+                raw_field="(no sample)",
+                code=RejectionCode.NO_SAMPLE,
+                detail=(
+                    f"no raw sample was delivered for commissioned sensor "
+                    f"{binding.sensor_id!r}; the device is silent for this cycle"
+                ),
+                sample_timestamp_s=batch.frame_t_s,
+                available_timestamp_s=batch.frame_t_s,
+            )
 
 
 def _index(profiles, key: str, label: str) -> dict:

@@ -98,6 +98,10 @@ def run_demo(out_dir: Path) -> str:
     root.mkdir(parents=True, exist_ok=True)
 
     coverage = _coverage(source, site)
+    # _coverage peeks the feed to read the adapter version; discard the
+    # diagnostics that peek recorded so the run's evidence starts empty.
+    source.reports.clear()
+    source.delivery_log.clear()
 
     runtime = AgentRuntime(
         site_id=SITE_ID,
@@ -120,13 +124,26 @@ def run_demo(out_dir: Path) -> str:
     )
 
     labels = {spec.cycle_index: spec.label for spec in PILOT_CYCLES}
+    # Pair each outcome with the delivery it actually consumed. A retained
+    # frame is re-observed, so a positional index would attach the wrong
+    # label and the wrong adapter report to a published snapshot.
+    deliveries = list(source.delivery_log)
     cycles = []
     for index, outcome in enumerate(outcomes):
-        report = source.reports.get(index)
+        if outcome.kind.value == "source_exhausted" or not deliveries:
+            cycle_index = None
+        else:
+            _, cycle_index = deliveries.pop(0)
+        report = None if cycle_index is None else source.reports.get(cycle_index)
         cycles.append(
             {
                 "cycle": index,
-                "label": labels.get(index, "source exhausted"),
+                "cycle_index": cycle_index,
+                "label": (
+                    "source exhausted"
+                    if cycle_index is None
+                    else labels.get(cycle_index, "unlabelled cycle")
+                ),
                 "kind": outcome.kind.value,
                 "sequence_number": outcome.sequence_number,
                 "acknowledged": outcome.acknowledged,

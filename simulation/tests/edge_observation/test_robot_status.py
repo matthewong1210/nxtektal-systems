@@ -22,7 +22,15 @@ from scripts.pilot_course_a_edge_fixture import (
     adapter_kit,
 )
 
-from .conftest import FRAME_T_S, convert_one, rejection_codes, robot_sample, timing
+from .conftest import (
+    FRAME_T_S,
+    convert_one,
+    rejection_codes,
+    rejections_for,
+    robot_sample,
+    timing,
+    valued_channels,
+)
 
 ROBOT = ROBOT_IDS[0]
 BATTERY_CHANNEL = f"robot.{ROBOT}.battery_frac"
@@ -50,19 +58,18 @@ CANONICAL_CHANNELS = {
 
 def test_a_known_robot_maps_every_commissioned_channel(kit):
     result, by_channel = convert_one(kit, robots=(robot_sample(),))
-    assert set(by_channel) == CANONICAL_CHANNELS
-    assert all(
-        item.status is ObservationStatus.OK for item in by_channel.values()
-    )
+    valued = valued_channels(result)
+    assert set(valued) == CANONICAL_CHANNELS
+    assert all(item.status is ObservationStatus.OK for item in valued.values())
     assert by_channel[ACTIVITY_CHANNEL].source_type is SourceType.EXTERNAL_SYSTEM
-    assert not result.report.rejected
+    assert rejections_for(result.report, ROBOT) == []
 
 
 def test_an_unknown_robot_identity_is_rejected(kit):
-    result, by_channel = convert_one(
-        kit, robots=(robot_sample(robot_id="R99"),)
-    )
-    assert by_channel == {}
+    result, _ = convert_one(kit, robots=(robot_sample(robot_id="R99"),))
+    # An uncommissioned robot produces no value, and every commissioned
+    # robot channel is still reported as an explicit gap.
+    assert valued_channels(result) == {}
     assert RejectionCode.IDENTITY_MISMATCH.value in rejection_codes(result.report)
 
 
@@ -203,11 +210,11 @@ def test_estop_is_observed_but_never_actionable(kit):
 
 
 def test_the_adapter_infers_no_capability_eta_yield_or_permission(kit):
-    _, by_channel = convert_one(kit, robots=(robot_sample(),))
+    result, by_channel = convert_one(kit, robots=(robot_sample(),))
     forbidden = ("eta", "yield", "capability", "permission", "washer_available")
     for channel in by_channel:
         assert not any(token in channel for token in forbidden)
-    assert set(by_channel) == CANONICAL_CHANNELS
+    assert set(valued_channels(result)) == CANONICAL_CHANNELS
 
 
 def test_a_robot_sample_rejects_non_boolean_flags():

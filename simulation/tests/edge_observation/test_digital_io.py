@@ -27,6 +27,7 @@ from scripts.pilot_course_a_edge_fixture import (
 from .conftest import (
     FRAME_T_S,
     convert_one,
+    valued_channels,
     digital_snapshot,
     rejection_codes,
     timing,
@@ -142,7 +143,7 @@ def test_stale_snapshot_marks_points_stale(kit):
 
 
 def test_declared_raw_only_inputs_are_reported_not_dropped(kit):
-    result, by_channel = convert_one(
+    result, _ = convert_one(
         kit,
         digital_io=(
             _snapshot(
@@ -152,13 +153,17 @@ def test_declared_raw_only_inputs_are_reported_not_dropped(kit):
             ),
         ),
     )
-    assert by_channel == {}
+    # Raw-only points name no canonical channel, so nothing is valued.
+    assert valued_channels(result) == {}
     assert {item.raw_field for item in result.report.unmapped} == {
         "washer_running",
         "washer_fault",
         "basket_present",
     }
-    assert not result.report.rejected
+    # The only rejections are the silent-device gaps, never a raw-only point.
+    assert {item.code for item in result.report.rejected} == {
+        RejectionCode.NO_SAMPLE
+    }
 
 
 def test_an_undeclared_unknown_bit_is_rejected(kit):

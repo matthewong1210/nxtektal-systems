@@ -24,6 +24,8 @@ from scripts.pilot_course_a_edge_fixture import (
 from .conftest import (
     FRAME_T_S,
     convert_one,
+    rejections_for,
+    valued_channels,
     dispenser_mass_kg,
     load_cell_sample,
     rejection_codes,
@@ -43,7 +45,7 @@ def test_valid_calibration_produces_an_ok_count(kit):
     assert observation.source_type is SourceType.SENSOR
     assert observation.source_id == SENSOR_DISPENSER_COUNT
     assert observation.calibration_id == CALIBRATION_ID_LOAD_CELL
-    assert not result.report.rejected
+    assert rejections_for(result.report, SENSOR_DISPENSER_COUNT) == []
 
 
 def test_sensed_channel_keeps_a_real_quantity(kit):
@@ -146,7 +148,7 @@ def test_stale_reading_is_marked_stale_and_keeps_its_value(kit):
     assert observation.status is ObservationStatus.STALE
     assert observation.value == 6000
     assert observation.confidence == 0.5
-    assert not result.report.rejected
+    assert rejections_for(result.report, SENSOR_DISPENSER_COUNT) == []
 
 
 def test_a_sample_timestamped_in_the_future_fails_closed(kit):
@@ -182,11 +184,13 @@ def test_availability_cannot_precede_sampling_at_all():
         )
 
 
-def test_unknown_sensor_has_no_binding_and_emits_no_observation(kit):
-    result, by_channel = convert_one(
+def test_unknown_sensor_has_no_binding_and_produces_no_value(kit):
+    result, _ = convert_one(
         kit, load_cells=(load_cell_sample(sensor_id="sensor-unknown-99"),)
     )
-    assert by_channel == {}
+    # An uncommissioned sensor cannot name a channel, so nothing is valued;
+    # every commissioned channel is still reported as an explicit gap.
+    assert valued_channels(result) == {}
     assert RejectionCode.NO_BINDING.value in rejection_codes(result.report)
 
 

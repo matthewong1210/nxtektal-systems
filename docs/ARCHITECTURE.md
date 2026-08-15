@@ -203,6 +203,11 @@ runtime dependency between them.
   immutable physical-site static truth and one-way projections.
 - [`simulation/docs/site_runtime_design.md`](../simulation/docs/site_runtime_design.md):
   orchestration-only Site Runtime boundary.
+- [`simulation/docs/agent_runtime_v1.md`](../simulation/docs/agent_runtime_v1.md):
+  deterministic runtime lifecycle and evaluation composition.
+- [`simulation/docs/edge_observation_v0.md`](../simulation/docs/edge_observation_v0.md):
+  raw-device-to-canonical-observation conversion, coverage matrix, and the
+  absent physical boundary.
 - [`simulation/docs/architecture.md`](../simulation/docs/architecture.md): micro
   handoff controller and robot interface.
 - [`docs/AGENT_OPERATING_MANUAL.md`](AGENT_OPERATING_MANUAL.md): merged AI

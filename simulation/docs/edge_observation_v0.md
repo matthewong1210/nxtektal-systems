@@ -29,13 +29,17 @@ robotics, wall-clock, randomness, and execution import root is banned.
 | The closed canonical channel vocabulary, each channel's canonical unit, allowed sensor types, and the asset it binds to | `nxt_commissioning.validation` |
 | Calibration identity and validity | `nxt_commissioning.CalibrationInfo` |
 | Load-cell/polarity/battery-unit conversion coefficients and declared vocabularies | **adapter-local device profiles** (see the contract gap below) |
-| Raw device payload normalisation, binding application, device-data validation, canonical Observation production, conversion diagnostics | `nxt_edge_observation` |
+| Raw device payload normalisation, binding application, device-data validation, canonical Observation production, conversion diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` |
 | The Observation contract and state assembly | `nxt_telemetry` |
-| Sequencing, publication-quality admission, envelope, checkpoints | `nxt_site_runtime` |
+| Sequence *validation*, publication-quality admission, envelope, checkpoints | `nxt_site_runtime` |
 | Evaluation lifecycle, evaluation journal, manager-decision queue | `nxt_agent_runtime` |
 | Policy evaluation, trace, trust, workflow, ledger | `nxt_pilot_ops` |
 
-The adapter kit owns **none** of the rows above it or below it. It defines no
+The adapter kit owns none of the other rows. Assigning a delivery position is
+the source's job, exactly as `nxt_site_runtime.ports.ObservationSource`
+documents ("`reject` discards the bad physical input but reuses its sequence
+number"); validating that position, gating on quality, and checkpointing it
+stay with the Site Runtime. The kit defines no
 `Observation`, `ObservationFrame`, `FacilityState`, `AssemblyReport`,
 `SequencedObservationFrame`, or any other canonical contract; a guard test
 fails if such a class name is ever defined inside the package.
@@ -82,7 +86,10 @@ protocol are therefore assembled at the composition root, which also supplies
 the `UpstreamInputs` and `SourceReference` facts an edge device cannot know.
 The package instead exposes `FixtureRawSampleFeed`, which owns the
 at-least-once cursor (peek / acknowledge / reject / explicit exhaustion) over
-raw batches with exactly the semantics the runtime port documents.
+raw batches with exactly the semantics the runtime port documents. That cursor
+is in-memory: surviving a restart is the caller's job, and
+`pilot_observation_source` takes explicit `consumed_cycles` and
+`first_sequence_number` arguments for it.
 
 The package consumes the commissioning **projection dictionary** rather than
 importing `nxt_commissioning`. That keeps the projection one-way and disposable,
@@ -103,14 +110,6 @@ destination → `FacilityState` field.
 | Station buffer mass | load cell | `load_cell`, unit `balls`, calibrated | `inventory.station.<sid>.buffer_balls` | int count | `_ChannelView.count` | `ball_flow.dirty_buffered`, `stations[].buffer_balls` |
 | Equipment-ready contact | digital I/O | `proximity_switch`, unit `1` | `station.<sid>.is_open` | bool | `bool(view.get(...))` | `stations[].is_open`, `environment.stations_open` |
 | Handoff dock occupancy | digital I/O | `proximity_switch`, unit `count` | `station.<sid>.docked` | int 0/1 | `_ChannelView.count` | `stations[].docked` |
-
-`station.<sid>.docked` is a **count** of docked robots. A single discrete
-input can only express 0 or 1, so the digital mapping is honest **only for a
-single-dock station**. A multi-dock station needs one input per dock plus an
-aggregation rule; V0 does not aggregate, because summing independently
-commissioned points into one canonical channel would be an unreviewed
-composition contract. The Pilot Course A fixture declares one dock.
-
 | Zone gate contact | digital I/O | `proximity_switch`, unit `1` | `zone.<zid>.is_open` | bool | `bool(view.get(...))` | `zones[].is_open`, `environment.zones_open` |
 | Robot activity | robot status | `external_system`, unit `1` | `robot.<rid>.activity` | declared label | `RobotActivity(...)` | `robots[].activity`, `fleet.*` |
 | Robot health | robot status | `external_system`, unit `1` | `robot.<rid>.health` | declared label | `RobotHealth(...)` | `robots[].health` |
@@ -122,6 +121,21 @@ composition contract. The Pilot Course A fixture declares one dock.
 | Robot e-stop observation | robot status | `external_system`, unit `1` | `robot.<rid>.estop_latched` | bool | `bool(...)` | `robots[].estop_latched` |
 | Robot awaiting-human flag | robot status | `external_system`, unit `1` | `robot.<rid>.awaiting_human` | bool | `bool(...)` | `robots[].awaiting_human`, `fleet.awaiting_human` |
 | Robot heartbeat age | robot status | (timing, not a channel) | every `robot.<rid>.*` | drives `OK`/`STALE` | staleness math | quality gate rejection |
+
+`station.<sid>.docked` is a **count** of docked robots. A single discrete
+input can only express 0 or 1, so the digital mapping is honest **only for a
+single-dock station**. A multi-dock station needs one input per dock plus an
+aggregation rule; V0 does not aggregate, because summing independently
+commissioned points into one canonical channel would be an unreviewed
+composition contract. The Pilot Course A fixture declares one dock.
+
+The digital family is confined by unit, not only by value kind: a point may
+serve a `1`-denominated boolean channel or a `count`-denominated occupancy
+channel, and nothing else. A ball-denominated channel is refused with
+`unsupported_unit`, and a binding whose commissioned sensor requires
+calibrated evidence is refused with `calibration_missing`, because a discrete
+input carries no calibration reference. Without those guards one bit would
+publish as a full-confidence ball count.
 
 ### Canonical channels with no V0 adapter family
 
@@ -207,26 +221,59 @@ commissioning contract change and requires its own architecture review.
 
 ### Fail-closed conditions
 
-`missing commissioned binding`, `unknown source/device ID`, `identity mismatch`,
-`calibration missing`, `calibration mismatch`, `unsupported unit`,
-`non-finite value` (NaN, infinity, or a bool used as a number), `invalid boolean
-encoding` (any non-`bool` digital state is refused at the contract),
-`value out of range` (negative net mass, above declared capacity, battery
-outside its declared unit range, negative payload), `unknown value` (a label
-outside the declared vocabulary, or an unknown device status),
-`sample timestamp in the future`, `available timestamp after frame time`,
-`available before sample` (refused at the contract), `stale sample`,
-`device fault`, `device-reported missing`, `impossible equipment state`,
-`coordinate frame mismatch`, `raw payload schema mismatch`, `duplicate canonical
-channel`, `conflicting observations for one channel` (both rejected and the
-channel demoted to `MISSING`), and `unsupported channel`.
+Each of these produces an explicit `MISSING` Observation on the affected
+commissioned channel plus a named `RejectionCode`:
 
-A malformed raw sample therefore cannot become an optimistic default, cannot
-produce a misleading `AVAILABLE`/healthy state, cannot advance a Site Runtime
-checkpoint, cannot generate a recommendation, cannot create a misleading
-`NO_ACTION` evaluation, and cannot acknowledge a frame that has not completed
-the canonical lifecycle — the existing Site Runtime `FailureCode` taxonomy and
-the Agent Runtime deferred acknowledgement make that decision, not the adapter.
+`no_binding`, `no_sample` (a commissioned device delivered nothing this
+cycle), `unknown_source`, `identity_mismatch` (unknown device or robot),
+`calibration_missing` (no profile, no sample reference where one is required,
+or a discrete input on a binding that requires calibrated evidence),
+`calibration_mismatch` (profile, sample, and manifest disagree — including a
+device asserting a calibration the manifest says it does not have),
+`unsupported_unit` (raw unit differs from the declared calibration unit, or a
+family cannot serve that channel's canonical unit), `non_finite_value` (NaN,
+infinity, a bool used as a number, or a derived count that overflows),
+`value_out_of_range` (negative net mass, above declared capacity, battery
+outside its declared unit range, negative payload), `unknown_value` (a label
+outside the declared vocabulary, or an unrecognised device status),
+`future_sample`, `inconsistent_timestamps` (not yet available at frame time),
+`device_fault`, `device_reported_missing`, `impossible_state`,
+`duplicate_channel` and conflicting observations for one channel (all
+claimants rejected and the channel demoted to `MISSING`), and
+`unsupported_channel`.
+
+Refused earlier, at the contract rather than as a rejection code: a non-`bool`
+digital state, an availability timestamp preceding its sample, a negative or
+non-finite timestamp, and a malformed raw batch. These raise
+`EdgeAdapterError` from the raw-sample constructors, so a malformed payload
+cannot be built at all.
+
+Two conditions are deliberately **not** adapter rejections:
+
+- **Staleness.** A reading older than its declared horizon keeps its value and
+  becomes `STALE` with capped confidence, exactly as the honesty rule above
+  states. Admission is then refused by the Site Runtime quality gate
+  (`STALE_OBSERVATION`), not by the adapter.
+- **`coordinate_frame_mismatch`.** It is recorded as a rejection and the metric
+  pose stays unmapped, but it does **not** demote the robot's other channels:
+  activity, health, battery, payload, and the named location are
+  frame-independent, and invalidating them because a frame identifier
+  disagreed would be an invented consequence. The mismatch is reported so an
+  operator can fix the commissioning or the vendor configuration.
+
+A malformed or absent reading therefore cannot become an optimistic default on
+its own channel, cannot advance a Site Runtime checkpoint, cannot generate a
+recommendation, cannot create a misleading `NO_ACTION` evaluation, and cannot
+acknowledge a frame that has not completed the canonical lifecycle — the
+existing Site Runtime `FailureCode` taxonomy and the Agent Runtime deferred
+acknowledgement make the admission decision, not the adapter.
+
+**Silent devices are reconciled.** After every batch the kit compares the
+channels it produced against the full commissioned binding set and publishes a
+`MISSING` Observation plus a `no_sample` rejection for each channel no device
+reported. Without this a dropped-out load cell or robot would leave an absent
+key, and the assembler's own backfill would turn that into zero inventory or a
+healthy-looking idle robot.
 
 ### Physical safety
 
@@ -265,6 +312,17 @@ like a production transport.
 - A sequence that does not match the delivered one raises `FeedProtocolError`.
 - Exhaustion is explicit: `peek()` raises `FeedExhausted`, which the composition
   root translates into the runtime's `SourceExhausted`.
+
+Redelivery is an **in-process** guarantee. Site Runtime deliberately retains an
+`invalid_sequence` frame rather than discarding it, so a source that restarts
+at sequence 0 after publishing sequence 1 can never make progress again. A
+restarting caller must therefore resume the cursor: drop the batches the
+previous run already delivered and start at the checkpoint's
+`last_successful_sequence + 1`. `pilot_observation_source` exposes those as two
+separate, explicit arguments because a rejected frame consumes a batch without
+advancing the sequence — deriving one from the other would be wrong exactly
+when recovery matters. `tests/edge_observation/test_integration.py` covers both
+the deadlock a naive restart causes and the resumed restart that completes.
 
 ## Deterministic identity
 
@@ -319,17 +377,32 @@ byte-identical evidence files.
 
 ## Next seam for a real transport
 
-A production reader replaces exactly one object: the composition root's
-`FixtureRawSampleFeed`. A real Modbus, MQTT, OPC-UA, or robot-vendor reader must
+The conversion kit is transport-free and does not change. The seam is **two
+objects, not one**, and it is worth being precise about the second because the
+fixture hides it:
 
-1. decode its own wire protocol and emit the same `LoadCellSample` /
-   `DigitalIOSnapshot` / `RobotStatusSample` shapes;
-2. implement the same `peek` / `acknowledge` / `reject` / explicit-exhaustion
-   contract, including sequence reuse on rejection;
-3. keep site time, not wall-clock time, in `RawSampleTiming`;
-4. live outside `nxt_edge_observation`, which must stay transport-free.
+1. **The reader replaces `FixtureRawSampleFeed`.** A real Modbus, MQTT,
+   OPC-UA, or robot-vendor reader must decode its own wire protocol and emit
+   the same `LoadCellSample` / `DigitalIOSnapshot` / `RobotStatusSample`
+   shapes; implement the same `peek` / `acknowledge` / `reject` /
+   explicit-exhaustion contract, including sequence reuse on rejection; offer a
+   resume hook, because an in-memory cursor that restarts at sequence 0 is
+   rejected forever with a retained `invalid_sequence`; keep site time, not
+   wall-clock time, in `RawSampleTiming`; and live outside
+   `nxt_edge_observation`, which must stay transport-free.
 
-Nothing downstream of the adapter kit changes. Such a transport is a new
+2. **The composition root replaces more than the reader.**
+   `EdgeObservationSource` in `scripts/pilot_course_a_edge_fixture.py` also
+   supplies three things no edge device can: the `UpstreamInputs` and
+   `SourceReference` POS/forecast facts, and the five canonical channels no V0
+   adapter family covers. Today it derives all three from the fixture's
+   `CycleSpec` table, so swapping only the feed leaves a source that cannot
+   describe a live cycle. A pilot deployment needs a real upstream-inputs
+   provider and either real scanning/facility-system adapters or an explicit,
+   declared absence for those channels.
+
+Downstream of the composition root — Site Runtime, Agent Runtime, Shadow Ops —
+nothing changes. Such a transport is a new
 high-risk boundary — live hardware, vendor integration, and site deployment
 remain unimplemented in this repository — and requires its own architecture
 review before it is built. Physical command admission and robot execution

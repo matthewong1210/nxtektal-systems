@@ -15,6 +15,8 @@ import dataclasses
 
 import pytest
 
+from nxt_telemetry.observations import ObservationStatus
+
 from nxt_edge_observation import (
     DigitalInputSample,
     DigitalIOSnapshot,
@@ -138,13 +140,33 @@ def batch(**changes) -> RawSampleBatch:
 
 
 def convert_one(kit, **changes):
-    """Convert a single-family batch and return ``(result, by_channel)``."""
+    """Convert a single-family batch and return ``(result, by_channel)``.
+
+    ``by_channel`` holds every commissioned channel, because the kit
+    reconciles silent devices into explicit ``MISSING`` observations.  A
+    test that cares only about channels the batch actually produced a
+    value for should use :func:`valued_channels`.
+    """
     result = kit.convert(batch(**changes))
     return result, {item.channel: item for item in result.observations}
 
 
+def valued_channels(result) -> dict:
+    """Channels this batch produced a real value for (never ``MISSING``)."""
+    return {
+        item.channel: item
+        for item in result.observations
+        if item.status is not ObservationStatus.MISSING
+    }
+
+
 def rejection_codes(report) -> set[str]:
     return {item.code.value for item in report.rejected}
+
+
+def rejections_for(report, sensor_id: str) -> list:
+    """Rejections raised against one sensor, ignoring silent-device gaps."""
+    return [item for item in report.rejected if item.sensor_id == sensor_id]
 
 
 def replace_input(
@@ -166,7 +188,9 @@ __all__ = [
     "dispenser_mass_kg",
     "load_cell_sample",
     "rejection_codes",
+    "rejections_for",
     "replace_input",
     "robot_sample",
     "timing",
+    "valued_channels",
 ]

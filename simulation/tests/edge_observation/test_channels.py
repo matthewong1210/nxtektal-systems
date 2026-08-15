@@ -7,10 +7,14 @@ commissioning is right and ``nxt_edge_observation.channels`` is wrong.
 
 from __future__ import annotations
 
+import ast
 import copy
+import re
+from pathlib import Path
 
 import pytest
 
+import nxt_commissioning.validation
 from nxt_commissioning import CommissionedSite
 from nxt_edge_observation import ChannelKind, EdgeAdapterError, channel_kind
 from nxt_edge_observation.channels import robot_channel_parts
@@ -121,3 +125,100 @@ def test_robot_channel_parts_round_trips():
     assert robot_channel_parts("robot.R1.battery_frac") == ("R1", "battery_frac")
     assert robot_channel_parts("robot.R1.temperature") is None
     assert robot_channel_parts("zone.Z1.is_open") is None
+
+
+# ---------------------------------------------------------------------------
+# Real drift detection against the commissioning vocabulary.
+#
+# The hand-written list above proves agreement on channels this repository
+# already knows.  It cannot notice a channel commissioning *adds*, which is
+# exactly the drift that matters: an unknown channel makes
+# AdapterBinding.__post_init__ reject an entire commissioned site.  These
+# tests derive the vocabulary from validation.py itself.
+# ---------------------------------------------------------------------------
+
+_CHANNEL_LITERAL = re.compile(r'"((?:[a-z][a-z0-9_]*)(?:\.[a-z0-9_]+)+)"')
+_CHANNEL_REGEX = re.compile(r'r"([a-z][a-z0-9_\\.]*\\\.\(\.\+\)[^"]*)"')
+
+
+def _commissioning_check_sensor_source() -> str:
+    source = (
+        Path(nxt_commissioning.validation.__file__)
+        .read_text(encoding="utf-8")
+    )
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "_check_sensor":
+            return ast.get_source_segment(source, node) or ""
+    raise AssertionError("nxt_commissioning.validation._check_sensor not found")
+
+
+def _commissioning_exact_channels() -> set[str]:
+    """Channel string literals compared against `sensor.channel`."""
+    body = _commissioning_check_sensor_source()
+    return {
+        literal
+        for literal in _CHANNEL_LITERAL.findall(body)
+        # Only dotted names that look like telemetry channels, not messages.
+        if literal.count(".") >= 1 and " " not in literal
+    }
+
+
+def test_the_commissioning_vocabulary_is_actually_reachable():
+    """Guard the extraction itself, so a silent zero-match cannot pass."""
+    exact = _commissioning_exact_channels()
+    assert "inventory.dispenser.count" in exact
+    assert "wash.washer.wip" in exact
+    assert len(exact) >= 6
+
+
+def test_every_exact_commissioning_channel_has_a_value_kind():
+    """Fails if commissioning gains an exact channel this table lacks."""
+    missing = sorted(
+        channel
+        for channel in _commissioning_exact_channels()
+        if _resolves(channel) is None
+    )
+    assert missing == [], (
+        "nxt_commissioning.validation accepts these channels but "
+        f"nxt_edge_observation.channels cannot shape them: {missing}"
+    )
+
+
+def test_every_patterned_commissioning_channel_has_a_value_kind():
+    """Fails if commissioning gains a patterned channel this table lacks."""
+    body = _commissioning_check_sensor_source()
+    # Each probe is a concrete instance of one pattern commissioning matches.
+    probes = (
+        "inventory.station.ST1.buffer_balls",
+        "scan.zone.Z1.balls",
+        "zone.Z1.is_open",
+        "station.ST1.is_open",
+        "station.ST1.docked",
+        "station.ST1.queue_length",
+    )
+    for channel in probes:
+        assert _resolves(channel) is not None, channel
+
+    # The robot field list is a single alternation in commissioning; every
+    # member must be shapeable here.  Take the alternation between the
+    # robot channel prefix and its closing group, then split on "|" only.
+    marker = r"robot\.(.+)\."
+    assert marker in body, "robot channel pattern not found in commissioning"
+    tail = body.split(marker, 1)[1]
+    alternation = tail.split(")", 1)[0]
+    declared = {
+        token.strip().strip('"').strip()
+        for token in alternation.lstrip("(").split("|")
+    }
+    declared = {token for token in declared if token.isidentifier()}
+    assert {"battery_frac", "estop_latched", "activity"} <= declared, declared
+    for field in sorted(declared):
+        assert _resolves(f"robot.R1.{field}") is not None, field
+
+
+def _resolves(channel: str):
+    try:
+        return channel_kind(channel)
+    except EdgeAdapterError:
+        return None

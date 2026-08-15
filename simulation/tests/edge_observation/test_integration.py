@@ -204,9 +204,8 @@ def test_the_guardian_still_fails_closed_instead_of_dispatching(
     assert "dispatch_collector" not in actions
 
 
-def test_restart_replays_identically_and_stays_idempotent(
-    tmp_path, config, site
-):
+def test_two_independent_runs_produce_identical_evidence(tmp_path, config, site):
+    """Determinism across processes -- not a restart (see the tests below)."""
     def evidence(root):
         return {
             path.name: path.read_bytes()
@@ -225,6 +224,7 @@ def test_restart_replays_identically_and_stays_idempotent(
 def test_a_restarted_runtime_reconciles_without_reevaluating(
     tmp_path, config, site
 ):
+    """Recovery only; the cycle loop is exercised by the restart tests below."""
     first = make_runtime(tmp_path, config, pilot_observation_source(site))
     first.run(max_cycles=8, failure_policy=FailurePolicy.CONTINUE)
     before = [record.evaluation_id for record in first._journal.read()]
@@ -281,3 +281,106 @@ def test_the_unsupported_channels_are_declared_and_not_adapter_output(
     commissioned = {binding.channel for binding in site.sensor_bindings}
     for channel in FACILITY_SYSTEM_CHANNELS:
         assert channel not in commissioned
+
+
+# -- real restart of the cycle loop --------------------------------------
+
+
+def test_a_restart_that_replays_from_zero_cannot_make_progress(
+    tmp_path, config, site
+):
+    """The failure mode the resume hook exists to prevent.
+
+    ``invalid_sequence`` is deliberately not discardable, so a source that
+    restarts at sequence 0 after publishing sequence 1 retains its frame
+    and the runtime can never advance again.
+    """
+    first = make_runtime(tmp_path, config, pilot_observation_source(site))
+    first.run(max_cycles=2, failure_policy=FailurePolicy.CONTINUE)
+    assert first.status().last_published_sequence == 1
+
+    naive = make_runtime(tmp_path, config, pilot_observation_source(site))
+    outcomes = naive.run(max_cycles=5, failure_policy=FailurePolicy.CONTINUE)
+    # The runtime stops after two consecutive identical rejections because a
+    # retained frame can make no progress without external remediation.
+    assert {item.kind for item in outcomes} == {CycleKind.REJECTED}
+    assert {item.failure.code.value for item in outcomes} == {"invalid_sequence"}
+    assert all(item.failure.retryable is False for item in outcomes)
+    assert naive.status().last_published_sequence == 1
+
+
+def test_a_resumed_source_restarts_the_cycle_loop_and_completes(
+    tmp_path, config, site
+):
+    """A restart that resumes at the checkpoint finishes the storyline once."""
+    first = make_runtime(tmp_path, config, pilot_observation_source(site))
+    first_outcomes = first.run(max_cycles=2, failure_policy=FailurePolicy.CONTINUE)
+    assert [item.kind for item in first_outcomes] == [
+        CycleKind.EVALUATED,
+        CycleKind.EVALUATED,
+    ]
+    checkpoint_sequence = first.status().last_published_sequence
+    assert checkpoint_sequence == 1
+
+    resumed_source = pilot_observation_source(
+        site,
+        consumed_cycles=2,
+        first_sequence_number=checkpoint_sequence + 1,
+    )
+    resumed = make_runtime(tmp_path, config, resumed_source)
+    resumed_outcomes = resumed.run(
+        max_cycles=8, failure_policy=FailurePolicy.CONTINUE
+    )
+    assert [item.kind for item in resumed_outcomes] == [
+        CycleKind.REJECTED,
+        CycleKind.REJECTED,
+        CycleKind.EVALUATED,
+        CycleKind.SOURCE_EXHAUSTED,
+    ]
+
+    # Exactly three evaluations across both processes, each envelope once.
+    journal = resumed._journal.read()
+    assert [record.sequence_number for record in journal] == [0, 1, 2]
+    assert len({record.evaluation_id for record in journal}) == 3
+
+
+def test_a_resumed_run_matches_an_uninterrupted_run_byte_for_byte(
+    tmp_path, config, site
+):
+    straight_root = tmp_path / "straight"
+    split_root = tmp_path / "split"
+    straight_root.mkdir()
+    split_root.mkdir()
+
+    make_runtime(straight_root, config, pilot_observation_source(site)).run(
+        max_cycles=8, failure_policy=FailurePolicy.CONTINUE
+    )
+
+    make_runtime(split_root, config, pilot_observation_source(site)).run(
+        max_cycles=2, failure_policy=FailurePolicy.CONTINUE
+    )
+    make_runtime(
+        split_root,
+        config,
+        pilot_observation_source(site, consumed_cycles=2, first_sequence_number=2),
+    ).run(max_cycles=8, failure_policy=FailurePolicy.CONTINUE)
+
+    def evidence(root):
+        return {
+            str(path.relative_to(root)): path.read_bytes()
+            for path in sorted(root.rglob("*"))
+            if path.is_file() and not path.name.startswith(".")
+        }
+
+    assert evidence(straight_root) == evidence(split_root)
+
+
+def test_the_resume_hook_validates_its_inputs(site):
+    for kwargs in (
+        {"consumed_cycles": -1},
+        {"first_sequence_number": -1},
+        {"consumed_cycles": True},
+        {"consumed_cycles": len(PILOT_CYCLES) + 1},
+    ):
+        with pytest.raises((ValueError, TypeError)):
+            pilot_observation_source(site, **kwargs)

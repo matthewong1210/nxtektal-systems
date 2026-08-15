@@ -1043,6 +1043,11 @@ class EdgeObservationSource:
     kit: EdgeObservationAdapterKit
     specs: tuple[CycleSpec, ...]
     reports: dict[int, EdgeAdapterReport] = field(default_factory=dict)
+    # Ordered record of what each delivery actually carried.  The demo
+    # pairs outcomes with this rather than with a positional index,
+    # because a retained frame is re-observed and one cycle index can
+    # therefore span several runtime outcomes.
+    delivery_log: list[tuple[int, int]] = field(default_factory=list)
 
     def _spec_for(self, cycle_index: int) -> CycleSpec:
         for spec in self.specs:
@@ -1059,6 +1064,11 @@ class EdgeObservationSource:
         spec = self._spec_for(batch.cycle_index)
         result = self.kit.convert(batch)
         self.reports[batch.cycle_index] = result.report
+        delivery = (sequenced.sequence_number, batch.cycle_index)
+        # observe() is a peek and the runtime calls it twice per cycle, so
+        # only a genuinely new delivery is logged.
+        if not self.delivery_log or self.delivery_log[-1] != delivery:
+            self.delivery_log.append(delivery)
         frame = ObservationFrame(
             t_s=batch.frame_t_s,
             observations=result.observations + facility_system_observations(spec),
@@ -1081,10 +1091,50 @@ def pilot_observation_source(
     site: CommissionedSite,
     *,
     specs: tuple[CycleSpec, ...] = PILOT_CYCLES,
+    consumed_cycles: int = 0,
+    first_sequence_number: int = 0,
 ) -> EdgeObservationSource:
-    """Compose the whole synthetic edge path for Pilot Course A."""
+    """Compose the whole synthetic edge path for Pilot Course A.
+
+    The two resume parameters exist because this feed is in-memory and a
+    restarted runtime must not replay from the beginning: Site Runtime
+    treats ``invalid_sequence`` as a retained, non-discardable incident
+    (``nxt_site_runtime.pipeline._DISCARDABLE_INPUT_FAILURES``), so a
+    source that restarts at sequence 0 after publishing sequence 1 can
+    never make progress again.
+
+    They are deliberately explicit rather than derived from the
+    checkpoint's ``last_successful_sequence``, because a rejected frame
+    consumes a cycle without advancing the sequence -- the two counts are
+    genuinely independent and guessing one from the other would be wrong
+    exactly when recovery matters:
+
+    * ``consumed_cycles`` -- how many declared cycles the previous run
+      already delivered, whether they were acknowledged or rejected;
+    * ``first_sequence_number`` -- the next publication position, i.e. the
+      checkpoint's ``last_successful_sequence + 1`` (or ``0`` when nothing
+      was published).
+
+    A real transport must offer an equivalent resume hook. An
+    at-least-once reader that cannot resume is not restart-safe, however
+    correct its peek/acknowledge/reject semantics are within one process.
+    """
+    for name, value in (
+        ("consumed_cycles", consumed_cycles),
+        ("first_sequence_number", first_sequence_number),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a non-negative integer")
+    if consumed_cycles > len(specs):
+        raise ValueError(
+            f"cannot resume after {consumed_cycles} cycles: the fixture "
+            f"declares only {len(specs)}"
+        )
     return EdgeObservationSource(
-        feed=FixtureRawSampleFeed(tuple(raw_batch(spec) for spec in specs)),
+        feed=FixtureRawSampleFeed(
+            tuple(raw_batch(spec) for spec in specs[consumed_cycles:]),
+            first_sequence_number=first_sequence_number,
+        ),
         kit=adapter_kit(site),
         specs=specs,
     )

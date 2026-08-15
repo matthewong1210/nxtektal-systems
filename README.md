@@ -112,7 +112,8 @@ apply across them without creating runtime dependencies.
 | `simulation/nxt_pilot_ops/` | Shadow policy evaluation, trace, human workflow, and tamper-evident ledger | Implemented advisory layer; no execution authority |
 | `simulation/nxt_memory/` | Append-only operational evidence for offline analysis | Implemented; no live-loop feedback |
 | `simulation/nxt_range_twin/` | State/layout validation and USD projection | Implemented projection layer |
-| `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented conversion layer; fixture-backed only, no transport, device connection, or command path |
+| `simulation/nxt_agent_runtime/` | Deterministic composition of Site Runtime output through Shadow Ops evaluation, with evaluation checkpoints, journal, and pending manager decisions | Implemented composition layer; synthetic sources only, advisory only |
+| `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented on an unmerged branch; fixture-backed only, no transport, device connection, or command path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |

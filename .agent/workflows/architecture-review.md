@@ -33,6 +33,7 @@ Classify the feature before choosing a directory:
 | Canonical downstream snapshot | `nxt_facility.state` |
 | Broad deterministic manager advice over FacilityState | `nxt_facility.decisions` |
 | Observation contract/assembly/quality | `nxt_telemetry` |
+| Raw device payload conversion into a canonical observation | `nxt_edge_observation` (conversion plus the source-side delivery cursor; no transport, sequence validation, state, or command) |
 | Physical static onboarding facts | `nxt_commissioning` |
 | Policy-specific trust, trace, evaluation, workflow, ledger | `nxt_pilot_ops` |
 | Historical evidence | `nxt_memory` |
@@ -42,6 +43,7 @@ Classify the feature before choosing a directory:
 | Micro handoff task sequencing/execution | `HandoffController` and `RobotTaskInterface` |
 | Physical site-level task admission/translation | No implemented owner or contract; pause for design/approval |
 | Cross-package physical-site state orchestration | `nxt_site_runtime`: ordering/input validation, existing telemetry assembly invocation, publication-quality gate, exact state/report envelope, checkpoint/recovery, idempotent state publication |
+| Continuous evaluation lifecycle over Site Runtime and Shadow Ops | `nxt_agent_runtime` composition/lifecycle only |
 | ROI semantics | Versioned `@nxtektal/roi-engine` |
 
 If no row fits, stop and write the missing responsibility explicitly. Do not
