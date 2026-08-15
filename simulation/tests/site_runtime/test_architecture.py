@@ -96,8 +96,12 @@ def test_upstream_and_consumers_do_not_depend_on_runtime():
         "nxt_memory",
         "nxt_range_twin",
         "nxt_range_viewer",
+        # The edge adapter kit is pure conversion: composing its output into
+        # a SequencedObservationFrame belongs to a composition root, not to
+        # the package.  Only nxt_agent_runtime may import the runtime.
+        "nxt_edge_observation",
     )
-    for package_name in ("nxt_commissioning", "nxt_pilot_ops"):
+    for package_name in ("nxt_commissioning", "nxt_pilot_ops", "nxt_edge_observation"):
         assert (SIMULATION_ROOT / package_name).is_dir(), (
             f"required existing package is missing: {package_name}"
         )

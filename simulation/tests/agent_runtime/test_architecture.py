@@ -98,6 +98,7 @@ OTHER_PACKAGES = (
     "nxt_pilot_ops",
     "nxt_commissioning",
     "nxt_site_runtime",
+    "nxt_edge_observation",
 )
 
 
