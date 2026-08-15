@@ -86,7 +86,9 @@ architectural responsibility, not an inferred person or team.
     the rule that no motion follows e-stop. This interface covers the micro
     handoff cycle; it is not a site-level collector-dispatch API or physical
    command gateway. The Isaac Sim simulation adapter and ROS 2 physical adapter
-   are currently stubs; do not claim deployed robot execution.
+   are currently stubs; do not claim deployed robot execution. The Edge
+    Observation Adapter Kit V0 converts already-read synthetic samples only; it
+    has no live transport, physical device, register write, or command surface.
 11. The AI operating layer—the trusted state, advisory, trace, and evaluation
    system—is the strategic moat. Preserve its boundaries instead of collapsing
    it into the simulator, twin, or robot adapter.
@@ -125,8 +127,9 @@ Use, in order:
 3. Stable package documentation such as `simulation/docs/facility_state.md`,
    `simulation/docs/range_ops.md`, `simulation/docs/spatial_twin_design.md`, and
    `simulation/docs/shadow_ops_v0.md`, `simulation/docs/commissioning_v0.md`,
-   `simulation/docs/site_runtime_design.md`, and
-   `simulation/docs/agent_runtime_v1.md`.
+   `simulation/docs/site_runtime_design.md`,
+   `simulation/docs/agent_runtime_v1.md`, and
+   `simulation/docs/edge_observation_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -166,6 +169,17 @@ An untracked document is never repository authority by itself.
   recommendation, trace, workflow, memory, or execution semantics; it must not
   import simulator, commissioning, memory, twin, viewer, robot, ROS, or network
   modules, and no existing package may import it.
+- Keep `nxt_edge_observation` a pure conversion leaf. It may import only
+  `nxt_telemetry.observations`, and consumes commissioning's existing
+  telemetry-adapter-config projection as plain data rather than importing
+  `nxt_commissioning`. It owns raw device payload normalization, binding and
+  calibration application, device-data validation, canonical Observation
+  production, and adapter diagnostics only. It must not import the simulator,
+  Site Runtime, Agent Runtime, Shadow Ops, memory, twin, viewer, robot, ROS,
+  actuator, transport/field-bus, network, subprocess, threading, wall-clock, or
+  randomness modules, and no existing package may import it. Composing its
+  output into `ObservationSource`/`SequencedObservationFrame` belongs to a
+  composition root, because only `nxt_agent_runtime` may import the runtime.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula

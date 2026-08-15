@@ -44,6 +44,7 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 | `nxt_pilot_ops` | Shadow policy evaluation, trace, human workflow, and tamper-evident advisory records |
 | `nxt_commissioning` | Immutable physical-site static truth and deterministic one-way projections |
 | `nxt_site_runtime` | Input sequencing, publication-quality state envelopes, checkpoint/recovery, and idempotent state-publication coordination |
+| `nxt_edge_observation` | Raw device sample conversion into canonical observations, with explicit adapter diagnostics; fixture-backed, no transport or command surface |
 | `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
 
 The robot handoff packages and Site OS packages remain separate layers. The

@@ -14,7 +14,8 @@ The baseline for this operating layer is `main` at
 | Shadow Ops | Merged by PR #19 (`e84c5016a19d1d4aec0b4b183164c08bba5b164e`) | FacilityState adaptation, named-policy evaluation, trace, human workflow, and ledger; no live runner or command bridge |
 | Commissioning | Merged by PR #20 (`89e93f6a8ea0cd469d6da907321eafe30318fa49`) | Immutable `CommissionedSite`, strict validation/storage, one-way static projections, and setup-only Site Runtime binding |
 | Site Runtime | Merged by PR #22 (`b055c9472737feb923c6ac48fad44a5b7e43333c`) | Orchestration library, envelope schema, input/quality gates, source/publisher ports, checkpoints, recovery, and idempotent publication coordination |
-| Physical telemetry adapters and transport | Not implemented | No hardware, POS, weather, fleet, MQTT, Kafka, OPC-UA, or vendor source/transport implementation |
+| Edge observation adapter kit (raw sample conversion) | Merged on the `nxt_edge_observation` branch under review | Transport-neutral conversion of already-read load-cell, digital-I/O, and robot-status samples into canonical `Observation` objects, plus adapter diagnostics; fixture-backed samples only |
+| Physical telemetry adapters and transport | Not implemented | No hardware, POS, weather, fleet, Modbus, serial, MQTT, Kafka, OPC-UA, ROS 2, or vendor source/transport implementation; the edge adapter kit converts already-read synthetic samples and opens no connection |
 | Physical state publisher or consumer delivery | Not implemented | `StatePublisher` and `RuntimeSink` are protocols/test seams; there is no live decision, memory, twin, or external-system delivery service |
 | Physical robot execution | Not implemented | Mock adapter works; Isaac Sim and ROS 2 adapters raise unavailable errors; no site-level physical command admission exists |
 | Live twin delivery and real-site deployment | Not implemented | No live Omniverse/Nucleus delivery, production site service, or real-site performance evidence |
@@ -148,6 +149,7 @@ give Site Runtime ownership of simulation truth.
 |---|---|
 | Surveyed/static physical site fact or calibration | `nxt_commissioning` |
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
+| Raw device payload conversion into a canonical observation, and its diagnostics | `nxt_edge_observation` (pure conversion; no transport, sequencing, state, or command) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
