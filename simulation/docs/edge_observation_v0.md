@@ -309,6 +309,11 @@ like a production transport.
   `FeedProtocolError`.
 - `reject(n, reason)` discards the batch and **reuses** its sequence number, so
   published snapshot ordering stays contiguous.
+- Each delivery accepts **exactly one decision**: after an `acknowledge` or
+  `reject`, a fresh `peek()` is required before the next decision, and a
+  duplicated decision raises `FeedProtocolError`. Sequence reuse means the
+  next batch inherits a rejected position, so without this gate a duplicate
+  `reject(n)` would silently consume that unrelated batch.
 - A sequence that does not match the delivered one raises `FeedProtocolError`.
 - Exhaustion is explicit: `peek()` raises `FeedExhausted`, which the composition
   root translates into the runtime's `SourceExhausted`.
@@ -385,7 +390,9 @@ fixture hides it:
    OPC-UA, or robot-vendor reader must decode its own wire protocol and emit
    the same `LoadCellSample` / `DigitalIOSnapshot` / `RobotStatusSample`
    shapes; implement the same `peek` / `acknowledge` / `reject` /
-   explicit-exhaustion contract, including sequence reuse on rejection; offer a
+   explicit-exhaustion contract, including sequence reuse on rejection and the
+   one-decision-per-peek rule that keeps a duplicated decision from consuming
+   the batch that inherited a rejected position; offer a
    resume hook, because an in-memory cursor that restarts at sequence 0 is
    rejected forever with a retained `invalid_sequence`; keep site time, not
    wall-clock time, in `RawSampleTiming`; and live outside
