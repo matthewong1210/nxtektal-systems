@@ -492,7 +492,9 @@ class LoadCellAdapter:
             )
             return
         if kind is ChannelKind.COUNT:
-            value: object = int(round(balls))
+            # round() with no ndigits already returns an int (banker's
+            # rounding, matching the assembler's own count coercion).
+            value: object = round(balls)
         else:
             # Round the sensed quantity so an identical raw sample always
             # serialises to identical canonical bytes.
@@ -635,13 +637,18 @@ class DigitalIOAdapter:
                 continue
             seen_sensors[sample.sensor_id] = sample.input_name
 
-            emit_missing = lambda code, detail: collector.emit_missing(  # noqa: E731
-                binding=binding,
-                raw_field=sample.input_name,
-                code=code,
-                detail=detail,
-                sample_timestamp_s=timing.sample_timestamp_s,
-                available_timestamp_s=timing.available_timestamp_s,
+            # Default-argument binding matches RobotStatusAdapter and keeps
+            # the helper safe even if a call were ever deferred past the
+            # loop iteration that created it.
+            emit_missing = lambda code, detail, b=binding, n=sample.input_name: (  # noqa: E731
+                collector.emit_missing(
+                    binding=b,
+                    raw_field=n,
+                    code=code,
+                    detail=detail,
+                    sample_timestamp_s=timing.sample_timestamp_s,
+                    available_timestamp_s=timing.available_timestamp_s,
+                )
             )
 
             profile = profiles.get(sample.sensor_id)
@@ -1047,6 +1054,33 @@ class EdgeObservationAdapterKit:
     @property
     def bindings(self) -> AdapterBindingSet:
         return self._bindings
+
+    # Read-only views of the profiles the kit was composed with, in
+    # deterministic identity order.  A caller that needs a variant kit
+    # (tests, a reconfigured deployment) rebuilds from these instead of
+    # reaching into the private indexes.
+
+    @property
+    def load_cell_profiles(self) -> tuple[LoadCellProfile, ...]:
+        return tuple(
+            self._load_cells[key] for key in sorted(self._load_cells)
+        )
+
+    @property
+    def digital_device_profiles(self) -> tuple[DigitalDeviceProfile, ...]:
+        return tuple(
+            self._digital_devices[key] for key in sorted(self._digital_devices)
+        )
+
+    @property
+    def digital_input_profiles(self) -> tuple[DigitalInputProfile, ...]:
+        return tuple(
+            self._digital_inputs[key] for key in sorted(self._digital_inputs)
+        )
+
+    @property
+    def robot_profiles(self) -> tuple[RobotStatusProfile, ...]:
+        return tuple(self._robots[key] for key in sorted(self._robots))
 
     def convert(self, batch: RawSampleBatch) -> ConversionResult:
         """Convert one raw batch into canonical observations plus diagnostics."""

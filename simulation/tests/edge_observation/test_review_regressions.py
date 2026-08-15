@@ -129,16 +129,16 @@ def _kit_with_exclusive_boolean_pair(site, *, active_low: bool):
         for sensor_id in (SENSOR_STATION_OPEN, SENSOR_ZONE_OPEN)
     )
     device = dataclasses.replace(
-        next(iter(original._digital_devices.values())),
+        original.digital_device_profiles[0],
         mutually_exclusive_inputs=(("gate_a", "gate_b"),),
     )
     return EdgeObservationAdapterKit(
         bindings=original.bindings,
         coordinate_frame=COORDINATE_FRAME,
-        load_cell_profiles=tuple(original._load_cells.values()),
+        load_cell_profiles=original.load_cell_profiles,
         digital_device_profiles=(device,),
         digital_input_profiles=inputs,
-        robot_profiles=tuple(original._robots.values()),
+        robot_profiles=original.robot_profiles,
     )
 
 
@@ -256,11 +256,11 @@ def _kit_with_uncalibrated_dispenser(site_payload):
             )
             if profile.sensor_id == "sensor-lc-dispenser-count"
             else profile
-            for profile in original._load_cells.values()
+            for profile in original.load_cell_profiles
         ),
-        digital_device_profiles=tuple(original._digital_devices.values()),
-        digital_input_profiles=tuple(original._digital_inputs.values()),
-        robot_profiles=tuple(original._robots.values()),
+        digital_device_profiles=original.digital_device_profiles,
+        digital_input_profiles=original.digital_input_profiles,
+        robot_profiles=original.robot_profiles,
     )
 
 
@@ -335,7 +335,7 @@ def test_a_complete_batch_reports_no_silent_device(kit, nominal_batch):
 
 
 def test_a_robot_with_no_profile_still_reports_every_channel_as_missing(kit):
-    result, by_channel = convert_one(kit, robots=(robot_sample(robot_id="R99"),))
+    _, by_channel = convert_one(kit, robots=(robot_sample(robot_id="R99"),))
     for field in ("health", "activity", "battery_frac"):
         for robot_id in ROBOT_IDS:
             channel = f"robot.{robot_id}.{field}"

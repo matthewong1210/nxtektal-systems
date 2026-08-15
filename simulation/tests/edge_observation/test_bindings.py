@@ -221,10 +221,10 @@ def test_a_fabricated_unit_is_still_caught_at_conversion(projection, kit):
     fabricated = EdgeObservationAdapterKit(
         bindings=AdapterBindingSet.from_projection(payload),
         coordinate_frame=COORDINATE_FRAME,
-        load_cell_profiles=tuple(kit._load_cells.values()),
-        digital_device_profiles=tuple(kit._digital_devices.values()),
-        digital_input_profiles=tuple(kit._digital_inputs.values()),
-        robot_profiles=tuple(kit._robots.values()),
+        load_cell_profiles=kit.load_cell_profiles,
+        digital_device_profiles=kit.digital_device_profiles,
+        digital_input_profiles=kit.digital_input_profiles,
+        robot_profiles=kit.robot_profiles,
     )
     result = fabricated.convert(batch(load_cells=(load_cell_sample(),)))
     observation = {

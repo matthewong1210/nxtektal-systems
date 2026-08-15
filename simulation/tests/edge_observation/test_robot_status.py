@@ -94,14 +94,14 @@ def _kit_with_battery_unit(site, unit: str):
     original = adapter_kit(site)
     robots = tuple(
         dataclasses.replace(profile, battery_unit=unit)
-        for profile in original._robots.values()
+        for profile in original.robot_profiles
     )
     return type(original)(
         bindings=original.bindings,
         coordinate_frame=COORDINATE_FRAME,
-        load_cell_profiles=tuple(original._load_cells.values()),
-        digital_device_profiles=tuple(original._digital_devices.values()),
-        digital_input_profiles=tuple(original._digital_inputs.values()),
+        load_cell_profiles=original.load_cell_profiles,
+        digital_device_profiles=original.digital_device_profiles,
+        digital_input_profiles=original.digital_input_profiles,
         robot_profiles=robots,
     )
 

@@ -37,7 +37,9 @@ def test_peek_redelivers_the_identical_batch_until_acknowledged(batches):
 
 def test_acknowledge_advances_exactly_once(batches):
     feed = FixtureRawSampleFeed(batches)
+    feed.peek()
     feed.acknowledge(0)
+    feed.peek()
     feed.acknowledge(1)
     assert feed.acknowledged == (0, 1)
     assert feed.remaining == 1
@@ -45,14 +47,27 @@ def test_acknowledge_advances_exactly_once(batches):
 
 def test_a_duplicate_acknowledgement_fails_visibly(batches):
     feed = FixtureRawSampleFeed(batches)
+    feed.peek()
     feed.acknowledge(0)
     with pytest.raises(FeedProtocolError):
         feed.acknowledge(0)
     assert feed.acknowledged == (0,)
+    assert feed.remaining == 2
+
+
+def test_a_decision_without_any_peek_fails_visibly(batches):
+    """A decision is only legal against a delivery the caller has seen."""
+    feed = FixtureRawSampleFeed(batches)
+    with pytest.raises(FeedProtocolError):
+        feed.acknowledge(0)
+    with pytest.raises(FeedProtocolError):
+        feed.reject(0, "never peeked")
+    assert feed.remaining == 3
 
 
 def test_a_mismatched_sequence_fails_visibly(batches):
     feed = FixtureRawSampleFeed(batches)
+    feed.peek()
     with pytest.raises(FeedProtocolError):
         feed.acknowledge(1)
     with pytest.raises(FeedProtocolError):
@@ -63,16 +78,21 @@ def test_a_mismatched_sequence_fails_visibly(batches):
 
 def test_reject_discards_the_batch_and_reuses_its_sequence(batches):
     feed = FixtureRawSampleFeed(batches)
+    feed.peek()
     feed.acknowledge(0)
     assert feed.peek().sequence_number == 1
     feed.reject(1, "insufficient_data_quality")
     assert feed.rejected == ((1, "insufficient_data_quality"),)
     # Publication ordering stays contiguous: the next batch takes position 1.
     assert feed.peek().sequence_number == 1
+    # And after a fresh peek, deciding the reused position works normally.
+    feed.acknowledge(1)
+    assert feed.acknowledged == (0, 1)
 
 
 def test_reject_requires_a_reason(batches):
     feed = FixtureRawSampleFeed(batches)
+    feed.peek()
     with pytest.raises(FeedProtocolError):
         feed.reject(0, "   ")
 
@@ -80,12 +100,69 @@ def test_reject_requires_a_reason(batches):
 def test_exhaustion_is_explicit(batches):
     feed = FixtureRawSampleFeed(batches)
     for sequence in range(3):
+        feed.peek()
         feed.acknowledge(sequence)
     assert feed.exhausted
     with pytest.raises(FeedExhausted):
         feed.peek()
     with pytest.raises(FeedProtocolError):
         feed.acknowledge(3)
+
+
+# -- per-delivery decision state: exactly one decision per peek -----------
+
+
+def test_a_duplicate_reject_cannot_consume_the_next_batch(batches):
+    """Regression for the review-confirmed data-loss defect.
+
+    Sequence reuse means the next batch inherits the rejected position, so
+    before the peek gate a second reject(0) matched -- and silently
+    destroyed -- the unrelated batch at cycle 1.
+    """
+    feed = FixtureRawSampleFeed(batches)
+    feed.peek()
+    feed.reject(0, "bad frame")
+    assert feed.remaining == 2
+    with pytest.raises(FeedProtocolError):
+        feed.reject(0, "duplicate reject")
+    # The next batch is intact: same count, same identity, same position.
+    assert feed.remaining == 2
+    survivor = feed.peek()
+    assert survivor.sequence_number == 0
+    assert survivor.batch.cycle_index == 1
+    assert feed.rejected == ((0, "bad frame"),)
+
+
+def test_acknowledge_after_reject_without_a_new_peek_fails(batches):
+    feed = FixtureRawSampleFeed(batches)
+    feed.peek()
+    feed.reject(0, "bad frame")
+    with pytest.raises(FeedProtocolError):
+        feed.acknowledge(0)
+    assert feed.remaining == 2
+    assert feed.acknowledged == ()
+
+
+def test_reject_after_acknowledge_without_a_new_peek_fails(batches):
+    feed = FixtureRawSampleFeed(batches)
+    feed.peek()
+    feed.acknowledge(0)
+    with pytest.raises(FeedProtocolError):
+        feed.reject(1, "stale decision")
+    assert feed.remaining == 2
+    assert feed.rejected == ()
+
+
+def test_repeated_peeks_still_permit_exactly_one_decision(batches):
+    """Peek is idempotent; the gate counts decisions, not peeks."""
+    feed = FixtureRawSampleFeed(batches)
+    assert feed.peek() == feed.peek() == feed.peek()
+    feed.acknowledge(0)
+    with pytest.raises(FeedProtocolError):
+        feed.acknowledge(1)
+    feed.peek()
+    feed.acknowledge(1)
+    assert feed.acknowledged == (0, 1)
 
 
 def test_an_empty_feed_is_immediately_exhausted():

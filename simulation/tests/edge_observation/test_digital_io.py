@@ -291,32 +291,96 @@ def test_an_estop_observation_is_evidence_only_and_influences_nothing(kit):
     )
 
 
+_FORBIDDEN_SURFACE_FRAGMENTS = (
+    "write",
+    "send",
+    "command",
+    "actuate",
+    "set_output",
+    "coil",
+    "gpio",
+    "publish",
+    "dispatch",
+)
+
+
+def _surface_names(tree: ast.Module) -> set[str]:
+    """Every name a module introduces that could hide a write/output surface.
+
+    Collected: imported module names and their aliases, class names,
+    function and async-function names (at any nesting level), and
+    module-level plain/annotated assignment targets.  Function-local
+    variables are deliberately excluded -- a local can never be a module
+    surface, and scanning them would only manufacture false positives.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.name)
+                if alias.asname:
+                    names.add(alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                names.add(node.module)
+            for alias in node.names:
+                names.add(alias.name)
+                if alias.asname:
+                    names.add(alias.asname)
+        elif isinstance(
+            node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            names.add(node.name)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name in ast.walk(target):
+                    if isinstance(name, ast.Name):
+                        names.add(name.id)
+        elif isinstance(node, ast.AnnAssign) and isinstance(
+            node.target, ast.Name
+        ):
+            names.add(node.target.id)
+    return names
+
+
+def _forbidden_surface_offenders(tree: ast.Module) -> list[str]:
+    return sorted(
+        name
+        for name in _surface_names(tree)
+        for fragment in _FORBIDDEN_SURFACE_FRAGMENTS
+        if fragment in name.lower()
+    )
+
+
 def test_the_adapter_module_defines_no_write_or_output_surface():
     source = Path(adapters_module.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    names = {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    forbidden_fragments = (
-        "write",
-        "send",
-        "command",
-        "actuate",
-        "set_output",
-        "coil",
-        "gpio",
-        "publish",
-        "dispatch",
-    )
-    offenders = [
-        name
-        for name in names
-        for fragment in forbidden_fragments
-        if fragment in name.lower()
-    ]
+    offenders = _forbidden_surface_offenders(ast.parse(source))
     assert offenders == [], offenders
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        "import write_register",
+        "import pymodbus.client as mb_writer",
+        "from vendor import set_output as so",
+        "from vendor import harmless as write_coil",
+        "class CoilWriter:\n    pass",
+        "async def send_command():\n    pass",
+        "SEND_QUEUE = []",
+        "dispatch_table: dict = {}",
+        "a, gpio_pin = 1, 2",
+    ],
+)
+def test_the_surface_guard_catches_each_forbidden_shape(probe):
+    """Negative control: every collected shape can actually trip the guard."""
+    assert _forbidden_surface_offenders(ast.parse(probe)) != []
+
+
+def test_the_surface_guard_ignores_clean_shapes():
+    clean = "import math\nclass Converter:\n    def convert(self):\n        pass\nLIMIT = 3\n"
+    assert _forbidden_surface_offenders(ast.parse(clean)) == []
 
 
 def test_timing_contract_rejects_impossible_windows():

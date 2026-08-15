@@ -810,7 +810,8 @@ def raw_batch(spec: CycleSpec) -> RawSampleBatch:
                 input_name="equipment_ready",
                 raw_state=True,
             ),
-            # Wired normally closed: an occupied dock reads False.
+            # Wired normally closed (active_low): raw True means no robot
+            # is docked, so station.<sid>.docked publishes 0.
             DigitalInputSample(
                 sensor_id=SENSOR_STATION_DOCKED,
                 input_name="handoff_docked",

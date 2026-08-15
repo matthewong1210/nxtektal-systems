@@ -185,6 +185,26 @@ def test_every_exact_commissioning_channel_has_a_value_kind():
     )
 
 
+def _robot_field_tokens(body: str) -> list[str]:
+    """Parse the robot-channel field alternation out of commissioning source.
+
+    The alternation spans a Python adjacent-string-literal seam
+    (``...location|"`` newline ``r"destination...``); the seam is joined
+    before splitting so no token arrives mangled.  Every token must come
+    back as a bare identifier -- the caller asserts that, so a
+    commissioning pattern-format change fails the test instead of
+    silently shrinking its scope.
+    """
+    marker = r"robot\.(.+)\."
+    assert marker in body, "robot channel pattern not found in commissioning"
+    tail = body.split(marker, 1)[1]
+    alternation = tail.split(")", 1)[0].lstrip("(")
+    # Join adjacent string-literal seams: closing quote, whitespace,
+    # optional r-prefix, opening quote.
+    joined = re.sub(r'"\s*r?"', "", alternation)
+    return [token.strip() for token in joined.split("|")]
+
+
 def test_every_patterned_commissioning_channel_has_a_value_kind():
     """Fails if commissioning gains a patterned channel this table lacks."""
     body = _commissioning_check_sensor_source()
@@ -200,21 +220,27 @@ def test_every_patterned_commissioning_channel_has_a_value_kind():
     for channel in probes:
         assert _resolves(channel) is not None, channel
 
-    # The robot field list is a single alternation in commissioning; every
-    # member must be shapeable here.  Take the alternation between the
-    # robot channel prefix and its closing group, then split on "|" only.
-    marker = r"robot\.(.+)\."
-    assert marker in body, "robot channel pattern not found in commissioning"
-    tail = body.split(marker, 1)[1]
-    alternation = tail.split(")", 1)[0]
-    declared = {
-        token.strip().strip('"').strip()
-        for token in alternation.lstrip("(").split("|")
-    }
-    declared = {token for token in declared if token.isidentifier()}
+    tokens = _robot_field_tokens(body)
+    # Fail closed on the parse itself: a malformed token means the
+    # commissioning pattern changed shape, never that a field vanished.
+    malformed = [token for token in tokens if not token.isidentifier()]
+    assert malformed == [], (
+        "the commissioning robot-field alternation no longer parses into "
+        f"bare field names; malformed tokens: {malformed!r}"
+    )
+    declared = set(tokens)
+    assert len(tokens) == len(declared), "alternation repeats a field"
     assert {"battery_frac", "estop_latched", "activity"} <= declared, declared
     for field in sorted(declared):
         assert _resolves(f"robot.R1.{field}") is not None, field
+
+
+def test_the_alternation_parser_fails_on_a_malformed_pattern():
+    """Negative control: unexpected surrounding text must surface, not vanish."""
+    synthetic = 'x = re.fullmatch(r"robot\\.(.+)\\.(activity|hea lth|\\w+)", c)'
+    tokens = _robot_field_tokens(synthetic)
+    malformed = [token for token in tokens if not token.isidentifier()]
+    assert malformed != [], tokens
 
 
 def _resolves(channel: str):

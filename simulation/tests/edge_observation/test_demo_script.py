@@ -19,6 +19,8 @@ def _run_demo(out_dir: Path) -> subprocess.CompletedProcess:
         cwd=SIMULATION_ROOT,
         capture_output=True,
         text=True,
+        # A blocked demo must fail the test, not stall CI to the job limit.
+        timeout=120,
     )
 
 

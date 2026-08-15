@@ -204,14 +204,41 @@ def test_the_guardian_still_fails_closed_instead_of_dispatching(
     assert "dispatch_collector" not in actions
 
 
+def _evidence_map(root):
+    """Every evidence file keyed by its path relative to ``root``.
+
+    Keyed by relative path, never by bare name: the runtime writes
+    checkpoint files under both ``cp/site`` and ``cp/evaluation``, and a
+    name-keyed map would let two same-named files overwrite each other and
+    hide a divergence in one of them.
+    """
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and not path.name.startswith(".")
+    }
+
+
+def test_the_evidence_map_distinguishes_same_named_files(tmp_path):
+    """Regression: same-named files in different subdirectories never collide."""
+    (tmp_path / "cp" / "site").mkdir(parents=True)
+    (tmp_path / "cp" / "evaluation").mkdir(parents=True)
+    (tmp_path / "cp" / "site" / "checkpoint.json").write_bytes(b"site-bytes")
+    (tmp_path / "cp" / "evaluation" / "checkpoint.json").write_bytes(
+        b"evaluation-bytes"
+    )
+    mapping = _evidence_map(tmp_path)
+    assert len(mapping) == 2
+    assert mapping["cp/site/checkpoint.json"] == b"site-bytes"
+    assert mapping["cp/evaluation/checkpoint.json"] == b"evaluation-bytes"
+    # A divergence in exactly one of them is visible, not masked.
+    (tmp_path / "cp" / "evaluation" / "checkpoint.json").write_bytes(b"changed")
+    assert _evidence_map(tmp_path) != mapping
+
+
 def test_two_independent_runs_produce_identical_evidence(tmp_path, config, site):
     """Determinism across processes -- not a restart (see the tests below)."""
-    def evidence(root):
-        return {
-            path.name: path.read_bytes()
-            for path in sorted(root.rglob("*"))
-            if path.is_file()
-        }
+    evidence = _evidence_map
 
     first_root, second_root = tmp_path / "first", tmp_path / "second"
     for root in (first_root, second_root):
@@ -365,14 +392,7 @@ def test_a_resumed_run_matches_an_uninterrupted_run_byte_for_byte(
         pilot_observation_source(site, consumed_cycles=2, first_sequence_number=2),
     ).run(max_cycles=8, failure_policy=FailurePolicy.CONTINUE)
 
-    def evidence(root):
-        return {
-            str(path.relative_to(root)): path.read_bytes()
-            for path in sorted(root.rglob("*"))
-            if path.is_file() and not path.name.startswith(".")
-        }
-
-    assert evidence(straight_root) == evidence(split_root)
+    assert _evidence_map(straight_root) == _evidence_map(split_root)
 
 
 def test_the_resume_hook_validates_its_inputs(site):
