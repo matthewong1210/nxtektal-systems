@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useReducer,
@@ -21,6 +22,7 @@ import {
 import {
   PRESENTATION_DURATION_SECONDS,
   PRESENTATION_SEGMENTS,
+  segmentIndexAt,
 } from "../../lib/edge-gateway-model/presentation";
 import { resolvePartModel } from "../../lib/edge-gateway-model/model-registry";
 import replayExcerpt from "../../lib/edge-gateway-model/fixtures/normal-weekday-inventory-threshold-seed-101.json";
@@ -142,11 +144,10 @@ function supportsWebGL(): boolean {
   }
 }
 
-function presentationIndexAt(seconds: number): number {
-  const found = PRESENTATION_SEGMENTS.findIndex(
-    (segment) => seconds >= segment.startSecond && seconds < segment.endSecond,
-  );
-  return found === -1 ? PRESENTATION_SEGMENTS.length - 1 : found;
+function formatPresentationTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
 }
 
 function countFleet(
@@ -244,7 +245,7 @@ export function EdgeGatewayDemo({
     reducedMotion,
   ]);
 
-  const presentationIndex = presentationIndexAt(presentationSeconds);
+  const presentationIndex = segmentIndexAt(presentationSeconds);
   const presentationSegment = PRESENTATION_SEGMENTS[presentationIndex];
 
   useEffect(() => {
@@ -747,7 +748,14 @@ export function EdgeGatewayDemo({
           <button type="button" aria-label="Next step" onClick={() => jumpPresentation(1)}>›</button>
           <button type="button" aria-label="Restart presentation" onClick={restartPresentation}>Restart</button>
         </div>
-        <div className={styles.timeline}>
+        <div
+          className={styles.timeline}
+          style={
+            {
+              "--timeline-segment-count": PRESENTATION_SEGMENTS.length,
+            } as CSSProperties
+          }
+        >
           {PRESENTATION_SEGMENTS.map((segment, index) => (
             <button
               key={segment.id}
@@ -772,8 +780,8 @@ export function EdgeGatewayDemo({
           />
         </div>
         <div className={styles.timecode}>
-          <strong>{String(Math.floor(presentationSeconds / 60)).padStart(2, "0")}:{String(Math.floor(presentationSeconds % 60)).padStart(2, "0")}</strong>
-          <span>/ 01:15</span>
+          <strong>{formatPresentationTime(presentationSeconds)}</strong>
+          <span>/ {formatPresentationTime(PRESENTATION_DURATION_SECONDS)}</span>
         </div>
       </section>
 

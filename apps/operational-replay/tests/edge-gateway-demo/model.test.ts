@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, test } from "vitest";
 
 import replayExcerpt from "../../lib/edge-gateway-model/fixtures/normal-weekday-inventory-threshold-seed-101.json";
@@ -53,9 +55,18 @@ import {
   presentationSegmentAt,
   restartPresentation,
   resumePresentation,
+  segmentIndexAt,
   stepPresentation,
 } from "../../lib/edge-gateway-model/presentation";
 import { SCENE_IDS, type GatewayDemoAction } from "../../lib/edge-gateway-model/types";
+
+const DEMO_STYLES = readFileSync(
+  new URL(
+    "../../components/edge-gateway-3d/EdgeGatewayDemo.module.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 describe("conceptual Gateway model manifest", () => {
   test("keeps stable component IDs and approximate dimensions in one manifest", () => {
@@ -437,6 +448,13 @@ describe("75-second deterministic presentation", () => {
     expect(presentationSegmentAt(Number.NaN).id).toBe("installed-overview");
   });
 
+  test("bounds presentation indices for negative and non-finite seconds", () => {
+    expect(segmentIndexAt(-1)).toBe(0);
+    expect(segmentIndexAt(Number.NaN)).toBe(0);
+    expect(segmentIndexAt(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(segmentIndexAt(Number.NEGATIVE_INFINITY)).toBe(0);
+  });
+
   test("supports pause, resume, restart, advance, and manual stepping", () => {
     let presentation = createPresentationState();
     presentation = advancePresentation(presentation, 15);
@@ -470,6 +488,25 @@ describe("75-second deterministic presentation", () => {
       playing: false,
       complete: false,
     });
+  });
+});
+
+describe("small-screen product-truth disclosures", () => {
+  test("keeps every installation status row available in a bounded scroller", () => {
+    const mobileSceneCardStyles = DEMO_STYLES.match(
+      /@media \(max-width: 520px\)[\s\S]*?\.sceneCard \{([\s\S]*?)\}/,
+    )?.[1];
+    const mobileStatusStyles = DEMO_STYLES.match(
+      /@media \(max-width: 520px\)[\s\S]*?\.statusList \{([\s\S]*?)\}/,
+    )?.[1];
+
+    expect(mobileSceneCardStyles).toMatch(/left:\s*14px/);
+    expect(mobileSceneCardStyles).toMatch(/width:\s*min\(420px,\s*calc\(100vw\s*-\s*28px\)\)/);
+    expect(mobileStatusStyles).toMatch(/max-height:\s*120px/);
+    expect(mobileStatusStyles).toMatch(/grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(mobileStatusStyles).toMatch(/overflow-x:\s*hidden/);
+    expect(mobileStatusStyles).toMatch(/overflow-y:\s*auto/);
+    expect(DEMO_STYLES).not.toMatch(/\.statusList li:nth-child/);
   });
 });
 

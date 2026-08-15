@@ -32,13 +32,6 @@ export const ILLUSTRATIVE_OPERATIONAL_SCENARIO = {
 const SCENE_ID_SET = new Set<string>(SCENE_IDS);
 const CAMERA_PRESET_SET = new Set<string>(CAMERA_PRESETS);
 const GATEWAY_LAYER_SET = new Set<string>(GATEWAY_LAYERS);
-const FLEET_DEVICE_KIND_SET = new Set<string>([
-  "picker",
-  "carrier",
-  "handoff",
-  "sensor",
-  "vision-node",
-]);
 
 const CONCEPTUAL_EXECUTION_BOUNDARIES = [
   {
@@ -122,6 +115,10 @@ const FLEET_DEVICE_DETAILS: Readonly<
     capabilities: ["local_camera_inference", "report_inspection_result"],
   },
 };
+
+const FLEET_DEVICE_KIND_SET = new Set<string>(
+  Object.keys(FLEET_DEVICE_DETAILS),
+);
 
 function managerWorkflowInitial(): GatewayDemoState["managerWorkflow"] {
   return {

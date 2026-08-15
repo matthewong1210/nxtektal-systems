@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { Box3, BoxGeometry, CylinderGeometry, Group, Mesh, Vector3 } from "three";
 import {
@@ -103,6 +104,20 @@ function errorMessage(error: unknown): string {
 }
 
 describe("registered model loading boundary", () => {
+  test("wraps registered model suspension inside the fail-loud error boundary", () => {
+    const source = readFileSync(
+      new URL(
+        "../../components/edge-gateway-3d/GatewayCanvas.tsx",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+
+    expect(source).toMatch(
+      /<ModelErrorBoundary[\s\S]*?>\s*<Suspense[\s\S]*?fallback=\{[\s\S]*?<RegisteredModelLoadingMarker[\s\S]*?\}[\s\S]*?>\s*<RegisteredGatewayPart[\s\S]*?\/>\s*<\/Suspense>\s*<\/ModelErrorBoundary>/,
+    );
+  });
+
   test("parses an in-memory points asset and accepts its meter-space bounds", async () => {
     const gltf = await parseGltf(validPointsGltf());
     const points = gltf.scene.getObjectByName(PART_ID);

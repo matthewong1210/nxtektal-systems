@@ -109,7 +109,7 @@ function boundedElapsed(seconds: number): number {
   return Math.min(PRESENTATION_DURATION_SECONDS, Math.max(0, seconds));
 }
 
-function segmentIndexAt(seconds: number): number {
+export function segmentIndexAt(seconds: number): number {
   const elapsed = boundedElapsed(seconds);
   const index = PRESENTATION_SEGMENTS.findIndex(
     (segment) => elapsed >= segment.startSecond && elapsed < segment.endSecond,

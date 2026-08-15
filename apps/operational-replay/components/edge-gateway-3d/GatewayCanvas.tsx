@@ -9,6 +9,7 @@ import {
 } from "@react-three/fiber";
 import {
   Component,
+  Suspense,
   type ReactNode,
   useEffect,
   useMemo,
@@ -327,6 +328,32 @@ function ModelErrorMarker({
   );
 }
 
+function RegisteredModelLoadingMarker({
+  part,
+  position,
+}: {
+  part: GatewayPart;
+  position: readonly [number, number, number];
+}) {
+  const dimensions = part.approximateDimensionsMm.map(
+    (value) => value / 1_000,
+  ) as [number, number, number];
+  return (
+    <group name={`Loading registered model ${part.id}`} position={position}>
+      <CadBox
+        dimensions={dimensions}
+        color={COLORS.amber}
+        opacity={0.12}
+        emissive={COLORS.amber}
+      />
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[Math.max(...dimensions) * 0.2, 0.008, 8, 20]} />
+        <meshBasicMaterial color={COLORS.amber} wireframe />
+      </mesh>
+    </group>
+  );
+}
+
 class ModelErrorBoundary extends Component<
   {
     children: ReactNode;
@@ -416,9 +443,10 @@ function CameraRig({ targetY }: { targetY: number }) {
       invalidate();
       event.preventDefault();
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [camera, invalidate]);
+    const canvas = gl.domElement;
+    canvas.addEventListener("keydown", onKeyDown);
+    return () => canvas.removeEventListener("keydown", onKeyDown);
+  }, [camera, gl, invalidate]);
 
   useFrame(() => controlsRef.current?.update());
   return null;
@@ -570,14 +598,20 @@ function GatewayPartVisual({
       position={position}
       onError={onModelError}
     >
-      <RegisteredGatewayPart
-        model={model}
-        part={part}
-        position={position}
-        selected={selected}
-        dimmed={dimmed}
-        onSelect={onSelect}
-      />
+      <Suspense
+        fallback={
+          <RegisteredModelLoadingMarker part={part} position={position} />
+        }
+      >
+        <RegisteredGatewayPart
+          model={model}
+          part={part}
+          position={position}
+          selected={selected}
+          dimmed={dimmed}
+          onSelect={onSelect}
+        />
+      </Suspense>
     </ModelErrorBoundary>
   );
 }
@@ -1156,7 +1190,13 @@ export function GatewayCanvas(props: GatewayCanvasProps) {
       gl={{ antialias: !props.lowQuality, alpha: false, powerPreference: "high-performance" }}
       shadows={!props.lowQuality}
       onPointerMissed={() => props.onSelectPart("")}
-      aria-label="Interactive conceptual Edge Gateway CAD viewport"
+      onCreated={({ gl }) => {
+        gl.domElement.tabIndex = 0;
+        gl.domElement.setAttribute(
+          "aria-label",
+          "Interactive conceptual Edge Gateway CAD viewport",
+        );
+      }}
     >
       <color attach="background" args={["#0a0f0d"]} />
       <fog attach="fog" args={["#0a0f0d", 8, 18]} />

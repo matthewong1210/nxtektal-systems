@@ -913,7 +913,9 @@ async function collectPerformance(page) {
 
 async function exercisePointerInputs(page) {
   const canvas = await page.evaluate(`(() => {
-    const element = document.querySelector('canvas');
+    const element = document.querySelector(
+      'canvas[tabindex="0"][aria-label="Interactive conceptual Edge Gateway CAD viewport"]',
+    );
     if (!element) return null;
     const rect = element.getBoundingClientRect();
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
@@ -940,8 +942,79 @@ async function exercisePointerInputs(page) {
   await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
   await page.send("Emulation.setTouchEmulationEnabled", { enabled: false });
 
+  const pageScrollBefore = await page.evaluate(`(() => {
+    const canvas = document.querySelector(
+      'canvas[tabindex="0"][aria-label="Interactive conceptual Edge Gateway CAD viewport"]',
+    );
+    canvas?.blur();
+    document.body.dataset.keyboardTestMinHeight = document.body.style.minHeight;
+    document.body.dataset.keyboardTestTabIndex = document.body.getAttribute('tabindex') || '';
+    document.body.style.minHeight = Math.max(document.body.scrollHeight, innerHeight * 2) + 'px';
+    document.body.tabIndex = -1;
+    document.body.focus();
+    scrollTo(0, 0);
+    return {
+      scrollY,
+      canvasFocused: document.activeElement === canvas,
+      bodyFocused: document.activeElement === document.body,
+    };
+  })()`);
+  assert.equal(pageScrollBefore.canvasFocused, false, "canvas remained focused before page-scroll verification");
+  assert.equal(pageScrollBefore.bodyFocused, true, "page body could not receive focus outside the canvas");
+  await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+  await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowDown", code: "ArrowDown", windowsVirtualKeyCode: 40 });
+  await delay(250);
+  const pageScrollAfter = await page.evaluate("scrollY");
+  assert.ok(
+    pageScrollAfter > pageScrollBefore.scrollY,
+    "ArrowDown did not preserve default page scrolling while the canvas was unfocused",
+  );
+
+  const focusedCanvas = await page.evaluate(`(() => {
+    document.body.style.minHeight = document.body.dataset.keyboardTestMinHeight || '';
+    const previousTabIndex = document.body.dataset.keyboardTestTabIndex;
+    if (previousTabIndex) document.body.setAttribute('tabindex', previousTabIndex);
+    else document.body.removeAttribute('tabindex');
+    delete document.body.dataset.keyboardTestMinHeight;
+    delete document.body.dataset.keyboardTestTabIndex;
+    scrollTo(0, 0);
+    const canvas = document.querySelector(
+      'canvas[tabindex="0"][aria-label="Interactive conceptual Edge Gateway CAD viewport"]',
+    );
+    canvas?.focus();
+    const focusStyle = canvas ? getComputedStyle(canvas) : null;
+    return {
+      focused: document.activeElement === canvas,
+      scrollY,
+      label: canvas?.getAttribute('aria-label') || '',
+      outlineStyle: focusStyle?.outlineStyle || '',
+      outlineWidth: focusStyle?.outlineWidth || '',
+      outlineOffset: focusStyle?.outlineOffset || '',
+    };
+  })()`);
+  assert.equal(focusedCanvas.focused, true, "named 3D canvas could not receive keyboard focus");
+  assert.equal(
+    focusedCanvas.label,
+    "Interactive conceptual Edge Gateway CAD viewport",
+    "focusable 3D canvas lost its accessible name",
+  );
+  assert.notEqual(focusedCanvas.outlineStyle, "none", "focused 3D canvas has no visible focus style");
+  assert.ok(Number.parseFloat(focusedCanvas.outlineWidth) >= 2, "focused 3D canvas focus ring is too thin");
+  assert.ok(
+    Number.parseFloat(focusedCanvas.outlineOffset) < 0,
+    "focused 3D canvas focus ring is not inset from its clipped wrapper",
+  );
+  const keyboardBefore = createHash("sha256").update(await page.screenshotBytes()).digest("hex");
   await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
   await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "ArrowRight", code: "ArrowRight", windowsVirtualKeyCode: 39 });
+  await delay(250);
+  const keyboardAfter = createHash("sha256").update(await page.screenshotBytes()).digest("hex");
+  assert.notEqual(keyboardAfter, keyboardBefore, "focused canvas ArrowRight produced no visible orbit change");
+  assert.equal(
+    await page.evaluate("scrollY"),
+    focusedCanvas.scrollY,
+    "focused canvas ArrowRight unexpectedly scrolled the page",
+  );
   assertNoBrowserErrors(page, "pointer, touch, and keyboard input");
 }
 
@@ -956,6 +1029,26 @@ async function verifyResponsiveRoute(endpoint, baseUrl, outputDirectory, report)
       const audit = await collectDomAudit(page);
       assert.deepEqual(audit.viewport, viewport, `${context} viewport override drifted`);
       assertDemoAudit(audit, context);
+      if (viewport.width <= 520) {
+        const cloudStatusFound = await page.evaluate(`(() => {
+          const row = Array.from(document.querySelectorAll('[class*=statusList] li')).find(
+            (candidate) => candidate.querySelector('span')?.textContent?.trim() === 'Cloud sync',
+          );
+          row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+          return Boolean(row);
+        })()`);
+        assert.equal(cloudStatusFound, true, `${context} omitted the Cloud sync status disclosure`);
+        await assertBoundingRectVisible(
+          page,
+          { selector: '[class*=statusList]', requiredTexts: ['Cloud sync', 'Not implemented'] },
+          `${context} scroll-revealed Cloud sync status disclosure`,
+        );
+        await assertBoundingRectVisible(
+          page,
+          { selector: '[class*=statusList]', requiredTexts: ['Not implemented'] },
+          `${context} visible Cloud sync implementation status`,
+        );
+      }
       if ([680, 390, 375].includes(viewport.width)) {
         await page.evaluate(`document.querySelector('section[aria-label="Presentation timeline"]')?.scrollIntoView({ block: "end" })`);
         await assertTimelineAccessibility(page, `${context} accessibility tree`);
@@ -1238,7 +1331,6 @@ async function verifyPresentation(endpoint, baseUrl, report) {
 
     await clickControl(page, ["Play presentation"], "resume presentation before tab freeze");
 
-    let lifecycleSupported = true;
     try {
       await page.send("Page.setWebLifecycleState", { state: "frozen" });
       const frozen = await presentationState(page);
@@ -1247,7 +1339,6 @@ async function verifyPresentation(endpoint, baseUrl, report) {
       assert.deepEqual(stillFrozen, frozen, "presentation advanced while tab was frozen");
       await page.send("Page.setWebLifecycleState", { state: "active" });
     } catch (error) {
-      lifecycleSupported = false;
       throw new Error(`tab hide/resume verification unavailable: ${error.message}`);
     }
     assertNetworkBoundary(page, baseUrl, "presentation mode");
@@ -1260,7 +1351,7 @@ async function verifyPresentation(endpoint, baseUrl, report) {
       managerCueNoReplay: true,
       separateReplayCue: true,
       directReplayJumpNoncausal: true,
-      lifecycleSupported,
+      lifecycleSupported: true,
     };
   } finally {
     await page.close();
