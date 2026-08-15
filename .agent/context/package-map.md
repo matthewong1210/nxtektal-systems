@@ -29,13 +29,15 @@ owning production behavior or creating cross-surface runtime coupling.
 | `nxt_range_twin` | State/layout file validation and USD layers | No production `nxt_*` imports; file contracts; `pxr` in USD modules | Projection only; no simulator imports, physics claims, or upstream feedback |
 | `nxt_pilot_ops` | Named-policy evaluation, decision traces/trust evidence, immutable human workflow, hash-chained ledger | Only `adapters/` may import `nxt_facility.state`; core uses self/stdlib | No commands, ROS, actuator, motion, charging, or e-stop surface; not a second broad manager-rules package |
 | `nxt_commissioning` | Immutable physical site/deployment identity, surveyed spatial facts, declared assets/capabilities/safety limits, sensor binding/calibration, provenance, canonical manifest storage, one-way static projections | Self/stdlib only | No live observations/state/tasks/demand; no runtime/downstream imports; projections are disposable and never write back to the manifest |
-| `nxt_site_runtime` | Input ordering/validation, publication-quality gate, deterministic FacilityState/AssemblyReport envelope, checkpoints/recovery, idempotent state publication coordination | Hot path: `nxt_facility.state` and `nxt_telemetry` observation/assembly contracts; setup-only `composition.py` lazily uses commissioning's existing projection | Orchestration only; no duplicate state/assembler/policy/projection/execution; no simulator, Shadow Ops, memory, twin, viewer, robot, ROS, or actuator imports; consumers/upstream do not import runtime |
+| `nxt_site_runtime` | Input ordering/validation, publication-quality gate, deterministic FacilityState/AssemblyReport envelope, checkpoints/recovery, idempotent state publication coordination | Hot path: `nxt_facility.state` and `nxt_telemetry` observation/assembly contracts; setup-only `composition.py` lazily uses commissioning's existing projection | Orchestration only; no duplicate state/assembler/policy/projection/execution; no simulator, Shadow Ops, memory, twin, viewer, robot, ROS, or actuator imports; only the designated `nxt_agent_runtime` composition layer may import the runtime — no other consumer or upstream package may |
+| `nxt_agent_runtime` | Deterministic runtime lifecycle, deferred source acknowledgement, separate evaluation checkpoint, append-only evaluation journal (durable `NO_ACTION` evidence), pending manager-decision view with non-persistent deferral metadata, local snapshot publisher, read-only health/status | Public `nxt_site_runtime` pipeline/envelope/checkpoint/port surfaces, public `nxt_pilot_ops` adapters/guardian/contracts/workflow/ledger/serialization, `nxt_telemetry.observations` typing | Composition/lifecycle only; owns no observation, state, policy, recommendation, trace, workflow, memory, or execution semantics; no simulator, commissioning, memory, twin, viewer, robot, ROS, actuator, network, wall-clock, or UUID surface; no upstream or existing package may import it |
 | `simulation/scripts/` | Composition roots for demos, capture, validation, and evaluation | May compose public package APIs | Do not use scripts to justify reverse imports in core packages |
 
-At the merged-main baseline, `simulation/pyproject.toml` ships `nxt_sim`,
+`simulation/pyproject.toml` ships `nxt_sim`,
 `nxt_range_ops`, `nxt_facility`, `nxt_memory`, `nxt_telemetry`,
-`nxt_range_twin`, `nxt_pilot_ops`, `nxt_commissioning`, and
-`nxt_site_runtime` in the wheel. `nxt_range_agent`, `nxt_range_viewer`, and
+`nxt_range_twin`, `nxt_pilot_ops`, `nxt_commissioning`,
+`nxt_site_runtime`, and `nxt_agent_runtime` in the wheel.
+`nxt_range_agent`, `nxt_range_viewer`, and
 `nxt_range_demo` are repository-local tools. Site Runtime's contract surface is
 importable without simulation/USD dependencies, while successful processing
 uses the existing telemetry assembler and currently needs the `range-ops`
@@ -79,7 +81,8 @@ branches, and both decision surfaces before adding a package or engine.
 | Memory contracts | `facility_memory_design.md` plus current code | Entire `tests/memory` and no-feedback guards |
 | Observation contract/assembly | `facility_telemetry_design.md` plus current code | Entire `tests/telemetry`, facility parity, full suite |
 | Commissioning manifest/projection | `commissioning_v0.md`, commissioning contracts/guards, [deployment.md](deployment.md) | Entire `tests/commissioning`, Site Runtime composition, telemetry/twin integration review, architecture suite, full suite |
-| Site Runtime orchestration/envelope/checkpoint/publication contract | `site_runtime_design.md`, runtime contracts/guards, [deployment.md](deployment.md) | Entire `tests/site_runtime`, commissioning composition, telemetry assembly/quality, architecture/safety suite, full suite |
+| Site Runtime orchestration/envelope/checkpoint/publication contract | `site_runtime_design.md`, runtime contracts/guards, [deployment.md](deployment.md) | Entire `tests/site_runtime`, commissioning composition, telemetry assembly/quality, agent-runtime composition, architecture/safety suite, full suite |
+| Agent Runtime lifecycle/evaluation checkpoint/journal/queue contract | `agent_runtime_v1.md`, runtime contracts/guards, [deployment.md](deployment.md) | Entire `tests/agent_runtime`, Site Runtime and Shadow Ops suites, architecture/safety suite, full suite |
 | Facility-state stream or twin mapping | `spatial_twin_design.md`, stream/mapping source | Entire `tests/twin`, viewer/capture parity, full suite with `twin` extra |
 | Shadow snapshot/trace/workflow | `shadow_ops_v0.md`, adapter and contracts | Entire `tests/pilot_ops`, boundary guards, full suite |
 | ROI formula/API | ROI README, API contract, `AMBIGUITIES.md`, formula-lock spec | Typecheck, all Vitest tests, build |

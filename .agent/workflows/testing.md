@@ -25,8 +25,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 ```
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
-`twin`, `pilot_ops`, `commissioning`, and `site_runtime`. Root Phase 0 tests
-live directly under `tests/` and should be selected by file.
+`twin`, `pilot_ops`, `commissioning`, `site_runtime`, and `agent_runtime`.
+Root Phase 0 tests live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
 
@@ -46,19 +46,21 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/commissioning/test_guards.py \
   tests/site_runtime/test_architecture.py \
   tests/site_runtime/test_rejection.py \
+  tests/agent_runtime/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
   tests/test_emergency_stop.py
 ```
 
-For changes to merged Commissioning or Site Runtime, run the entire relevant
-package suites in addition to the architecture/safety subset:
+For changes to merged Commissioning, Site Runtime, or Agent Runtime, run the
+entire relevant package suites in addition to the architecture/safety subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/commissioning \
-  tests/site_runtime
+  tests/site_runtime \
+  tests/agent_runtime
 ```
 
 Run the full suite before handing off a Python production/contract change:
@@ -92,6 +94,7 @@ safe. Do not build into the repository.
 | Robot interface/controller/adapter | Timeouts, invalid sequencing, bounded retry/recovery, safe retract, latched e-stop, no post-e-stop motion, adapter/controller separation |
 | Commissioning contract/projection | Strict schema/provenance/immutability, canonical conflict-safe storage, one-way detached projections, forbidden-import guards, downstream integration review |
 | Site Runtime orchestration | Input/freshness and quality rejection; exact FacilityState/AssemblyReport retention; deterministic envelope ID; strict sequence/replay; checkpoint recovery and idempotent publication; setup-only commissioning seam; no duplicate domain contracts, policy, or execution imports |
+| Agent Runtime composition | Rejected input never reaches policy; one evaluation outcome per admitted envelope; deterministic evaluation/trace/recommendation IDs; restart/replay idempotency and divergence fail-closed; workflow legality and recommendation immutability; byte-identical evidence; boundary guards including no execution/network/wall-clock surface |
 | AI/LLM integration | Proof outputs remain advisory; static/import tests prevent direct directive, robot-interface, adapter, ROS, actuator, or e-stop access |
 | Physical/config value | Provenance and placeholder census/validation |
 | Bug fix | A regression test that fails for the reproduced defect |

@@ -106,6 +106,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/commissioning/test_guards.py \
   tests/site_runtime/test_architecture.py \
   tests/site_runtime/test_rejection.py \
+  tests/agent_runtime/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -122,8 +123,8 @@ PYTHONPYCACHEPREFIX="$ci_tmp/python-bytecode" \
 uv run --no-sync python -m compileall -q -f \
   nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
-  nxt_pilot_ops nxt_commissioning nxt_site_runtime scripts \
-  ../.github/scripts
+  nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
+  scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
 mkdir -p "$python_dist_dir"
@@ -149,7 +150,7 @@ from importlib.util import find_spec
 shipped = (
     "nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory",
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
-    "nxt_commissioning", "nxt_site_runtime",
+    "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:
