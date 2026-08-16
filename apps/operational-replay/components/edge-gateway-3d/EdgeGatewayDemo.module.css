@@ -304,6 +304,7 @@
   font-family: var(--font-geist-mono), monospace;
   font-size: 7px;
   letter-spacing: 0.08em;
+  white-space: nowrap;
   pointer-events: none;
 }
 
@@ -1156,7 +1157,7 @@
   .sceneHeading { width: calc(100% - 32px); }
   .sceneHeading h1 { max-width: 78%; font-size: 24px; }
   .sceneHeading p { max-width: 75%; font-size: 7px; }
-  .viewMeta { top: 18px; }
+  .viewMeta { top: 84px; right: auto; left: 16px; }
   .sceneLabels { display: none; }
   .interfaceLabels,
   .flowMapLabels { display: none; }
@@ -1186,7 +1187,15 @@
   .presentationControls button:nth-child(2) { min-width: 48px; }
   .timeline { grid-template-columns: repeat(var(--timeline-segment-count), minmax(12px, 1fr)); }
   .footer strong { font-size: 6px; }
-  .fallback { inset: 92px 10px 10px; padding: 14px; }
+  .fallback {
+    inset: 92px auto 10px 10px;
+    width: calc(100vw - 20px);
+    padding: 14px;
+    gap: 14px;
+  }
+  .fallbackCopy,
+  .fallbackDiagram,
+  .partsDetails { min-width: 0; }
   .fallbackDiagram { min-height: auto; padding: 9px; display: grid; gap: 7px; }
   .fallbackGateway,
   .fallbackSource,

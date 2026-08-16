@@ -215,6 +215,10 @@ export type GatewayDemoState = Readonly<{
     canonicalRecommendation: false;
     robotMotionEvidence: false;
     robotControlAvailable: false;
+    transportNeutralObservationConversionImplemented: true;
+    fixtureBackedSiteAgentRuntimeIntegrationImplemented: true;
+    liveDeviceTransportImplemented: false;
+    edgeGatewayProductionDeploymentImplemented: false;
   }>;
 }>;
 

@@ -8,10 +8,10 @@ export function WebGLFallback({ parts }: { parts: readonly GatewayPart[] }) {
       <div className={styles.fallbackDiagram} aria-hidden="true">
         <div className={styles.fallbackGateway}>
           <span>EDGE GATEWAY</span>
-          <i>runtime lifecycle</i>
+          <i>adapter Observations + fixture composition</i>
         </div>
         <div className={styles.fallbackRail} />
-        <div className={styles.fallbackSource}>SYNTHETIC / FIXTURE INPUTS</div>
+        <div className={styles.fallbackSource}>ALREADY-READ FIXTURE SAMPLES</div>
         <div className={styles.fallbackAdvice}>SHADOW OPS EVALUATION</div>
         <div className={styles.fallbackStop}>STOP · NO COMMAND ISSUED</div>
       </div>
@@ -20,15 +20,25 @@ export function WebGLFallback({ parts }: { parts: readonly GatewayPart[] }) {
         <p className={styles.eyebrow}>WebGL unavailable · accessible system view</p>
         <h2>Edge Gateway system architecture</h2>
         <p>
-          Agent Runtime V1 is implemented for deterministic synthetic or
-          fixture inputs. This browser only illustrates the quality-gated state,
-          evaluation, recovery, status, and manager-workflow contracts; it does
-          not run or connect to the Python runtime. Physical telemetry adapters,
-          device enrollment, production OTA, physical command admission, robot
-          execution, and safety installation remain unimplemented.
+          Observation adapters are implemented and fixture-backed. They convert
+          deterministic, already-read load-cell and digital-I/O samples and
+          already-received robot status using commissioned bindings and validated
+          profiles. The adapter diagnostic report stays separate local evidence.
+          Fixture composition adds required simulation-only facility channels and
+          upstream/source references before the complete frame reaches the
+          quality-gated Site and Agent Runtime path. This browser does not run or
+          connect to the Python runtime. Live physical transports and device
+          connectivity remain unimplemented, as do Edge Gateway production deployment,
+          device/certificate enrollment, production OTA, physical command
+          admission, robot or actuator execution, and installed or certified safety
+          integration.
         </p>
         <ol className={styles.fallbackFlow}>
-          <li>Synthetic / fixture observations — no physical adapter</li>
+          <li>At-least-once fixture feed — already-read samples</li>
+          <li>Observation adapters — implemented, fixture-backed</li>
+          <li>Canonical adapter Observations</li>
+          <li>EdgeAdapterReport diagnostics — separate local conversion evidence</li>
+          <li>Fixture composition — five simulation-only facility channels + upstream / source-reference inputs</li>
           <li>Site Runtime validation invokes telemetry-owned assembly</li>
           <li>Exact FacilityState + separate AssemblyReport</li>
           <li>Site Runtime publication quality gate — exact admitted envelope</li>

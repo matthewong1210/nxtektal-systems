@@ -230,7 +230,7 @@ export const GATEWAY_PARTS = [
     installedPosition: positionMm(-120, 80, -35),
     explodedPosition: positionMm(-690, 110, 80),
     description:
-      "Conceptual planned fanless x86 host. Repository software implements Site Runtime state publication and Agent Runtime evaluation lifecycles for deterministic synthetic/fixture inputs; no physical adapters, live delivery, production OTA, or command path is connected.",
+      "Conceptual planned fanless x86 host. Repository software implements transport-neutral observation conversion plus Site Runtime and Agent Runtime integration for deterministic, fixture-backed, already-read samples. No live device transport, Edge Gateway production deployment, production OTA, or command path is connected.",
     status: "conceptual-pilot-component",
     notForFabrication: true,
     optional: false,
@@ -292,7 +292,7 @@ export const GATEWAY_PARTS = [
     installedPosition: positionMm(155, 35, -35),
     explodedPosition: positionMm(690, 20, 80),
     description:
-      "Conceptual normal-operating-signal interface. It is explicitly not part of the emergency-stop safety chain.",
+      "Conceptual normal-operating-signal interface. Repository software implements fixture-backed conversion of already-read digital-I/O samples; no live I/O transport or device connectivity exists. This module is explicitly not part of the emergency-stop safety chain.",
     status: "conceptual-pilot-component",
     notForFabrication: true,
     optional: false,
@@ -516,7 +516,7 @@ export const GATEWAY_PARTS = [
     installedPosition: positionMm(-570, -210, 0),
     explodedPosition: positionMm(-900, -390, 90),
     description:
-      "Optional conceptual hopper load cells, summing junction, and Modbus weighing transmitter that would produce illustrative, non-canonical estimates of balls remaining, consumption rate, minutes to safety stock, and sensor confidence.",
+      "Optional conceptual hopper load cells, summing junction, and Modbus weighing transmitter. Repository software converts deterministic, fixture-backed, already-read load-cell samples into canonical Observations; the depicted live Modbus reader and device connectivity remain unimplemented, while its non-canonical estimates and readouts remain illustrative and unmeasured.",
     status: "optional-future-hardware",
     notForFabrication: true,
     optional: true,

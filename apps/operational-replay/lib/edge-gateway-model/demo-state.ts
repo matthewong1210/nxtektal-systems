@@ -75,7 +75,7 @@ const ONBOARDING_STEPS = [
   },
   {
     id: "adapter-loading",
-    label: "Adapter loading",
+    label: "Live transport adapter loading",
     implementationStatus: "conceptual-target-not-implemented",
   },
   {
@@ -212,6 +212,10 @@ export function createInitialGatewayDemoState(): GatewayDemoState {
       canonicalRecommendation: false,
       robotMotionEvidence: false,
       robotControlAvailable: false,
+      transportNeutralObservationConversionImplemented: true,
+      fixtureBackedSiteAgentRuntimeIntegrationImplemented: true,
+      liveDeviceTransportImplemented: false,
+      edgeGatewayProductionDeploymentImplemented: false,
     },
   };
 }

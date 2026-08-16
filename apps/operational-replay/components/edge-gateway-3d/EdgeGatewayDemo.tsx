@@ -65,14 +65,14 @@ const SCENE_DESCRIPTION: Record<SceneId, { eyebrow: string; title: string; body:
     body: "The enclosure, protected power, compute, networking, normal remote I/O, terminations, and optional hardware remain individually selectable.",
   },
   "operational-flow": {
-    eyebrow: "Merged Agent Runtime V1 · deterministic synthetic / fixture inputs",
+    eyebrow: "Merged Edge Observation Adapter Kit V0 + Agent Runtime V1 · fixture-backed",
     title: "Quality-gated evidence reaches a human—not an actuator",
-    body: "For deterministic synthetic or fixture inputs, Agent Runtime V1 composes Site Runtime's quality-gated publication and invokes the existing Shadow Ops evaluation. Agent Runtime separately records evaluation-lifecycle evidence for checkpoint/recovery and exposes read-only diagnostic status; Shadow Ops owns the later manager workflow. This browser does not run that Python runtime, and the RangeOps replay remains separate.",
+    body: "Transport-neutral adapters convert already-read fixture samples into canonical Observations while their diagnostic report stays separate. Fixture composition adds required simulation-only facility channels and upstream/source references before the complete frame reaches Site and Agent Runtime. This browser does not run that Python path, no live device transport is connected, and the RangeOps replay remains separate.",
   },
   "scale-the-fleet": {
-    eyebrow: "Conceptual onboarding workflow · not implemented",
+    eyebrow: "Conceptual live-device onboarding · not implemented",
     title: "Keep the Gateway. Register the device.",
-    body: "New robot and sensor concepts join through registration, certificates, capabilities, Adapter loading, and physical-device onboarding. Camera inference remains on a separate optional node.",
+    body: "New robot and sensor concepts would join through registration, certificates, capabilities, live transport-adapter loading, and physical-device onboarding. Camera inference remains on a separate optional node.",
   },
   "software-update": {
     eyebrow: "Conceptual update architecture · simulated sequence",
@@ -104,15 +104,17 @@ const CAMERA_PRESETS: ReadonlyArray<{ id: CameraPreset; label: string }> = [
 const INSTALLATION_STATUS = [
   ["Power + normal I/O", "Conceptual", "conceptual"],
   ["Network + cellular", "Conceptual", "conceptual"],
-  ["Agent Runtime V1", "Implemented", "implemented"],
-  ["Input scope", "Synthetic / fixture", "limited"],
+  ["Observation adapters", "Implemented, fixture-backed", "implemented"],
+  ["Live device transport", "Not implemented", "unimplemented"],
+  ["Agent Runtime V1", "Implemented, fixture-backed", "implemented"],
   ["Runtime health", "Read-only diagnostics", "diagnostic"],
+  ["Edge Gateway deployment", "Not implemented", "unimplemented"],
   ["Cloud sync", "Not implemented", "unimplemented"],
 ] as const;
 
 const FLOW_STEPS = [
-  ["01", "Synthetic / fixture observations", "Implemented input scope; no physical adapter"],
-  ["02", "Site Runtime validation → telemetry assembly", "Site Runtime orchestrates; nxt_telemetry owns assembly"],
+  ["01", "Observation adapters — implemented, fixture-backed", "Canonical adapter Observations; EdgeAdapterReport stays separate local evidence; no live transport"],
+  ["02", "Fixture composition → Site Runtime validation", "Adds five simulation-only facility channels + upstream/source references; nxt_telemetry owns assembly"],
   ["03", "Exact state/report → publication gate", "Site Runtime quality-gates the exact envelope"],
   ["04", "Shadow Ops evaluation + trace", "Invoked by Agent Runtime; storyboard is illustrative"],
   ["05", "Agent Runtime lifecycle evidence", "Checkpoint / recovery and read-only diagnostics"],
@@ -456,11 +458,15 @@ export function EdgeGatewayDemo({
               <span>{sceneCopy.body}</span>
             </div>
 
-            <div className={styles.viewMeta}>
-              <span>UNITS · METERS</span>
-              <span>{state.cameraProjection.toUpperCase()}</span>
-              <span>{lowQuality ? "MOBILE QUALITY" : "DESKTOP QUALITY"}</span>
-            </div>
+            {webGL !== false ? (
+              <div className={styles.viewMeta}>
+                <span data-render-capability="webgl">
+                  {lowQuality ? "MOBILE WEBGL · REDUCED QUALITY" : "DESKTOP WEBGL · FULL QUALITY"}
+                </span>
+                <span>UNITS · METERS</span>
+                <span>{state.cameraProjection.toUpperCase()}</span>
+              </div>
+            ) : null}
 
             {Object.keys(modelErrors).length > 0 ? (
               <div className={styles.modelError} role="alert">
@@ -552,8 +558,8 @@ export function EdgeGatewayDemo({
             {state.showLabels && state.scene === "operational-flow" ? (
               <div className={styles.flowMapLabels} aria-label="Operational flow 3D site labels">
                 <div><span>Dispenser sensor</span><span>Washer</span><span>Picker R1</span><span>Picker R2</span><span>Carrier C1</span><span>Universal Handoff H1</span></div>
-                <div><strong>Edge Gateway</strong><strong>NXTektal Cloud</strong><strong>Manager tablet</strong></div>
-                <small>Robots retain local navigation · obstacle avoidance · motor and mechanism control · local safety stop</small>
+                <div><strong>Observation adapters · fixture-backed</strong><strong>Edge Gateway</strong><strong>NXTektal Cloud</strong><strong>Manager tablet</strong></div>
+                <small>EdgeAdapterReport stays separate local evidence · fixture composition adds five simulation-only facility channels + upstream/source references · live device transport not implemented · robots retain local navigation, obstacle avoidance, motor and mechanism control, and local safety stop</small>
               </div>
             ) : null}
 
@@ -910,7 +916,7 @@ function SceneOverlay({
     return (
       <div className={styles.sceneCard} data-evidence-card="fleet">
         <div className={styles.cardTitle}><span>CONCEPTUAL ONBOARDING</span><strong>SAME GATEWAY · {fleetCount} DEVICES</strong></div>
-        <p className={styles.callout}>Same Gateway — new device registration and Adapter</p>
+        <p className={styles.callout}>Same Gateway — new device registration and live transport adapter</p>
         {visionNode ? <p className={styles.visionCallout}>Dedicated Vision Node Recommended</p> : null}
         {latestFleetDevice ? (
           <div className={styles.onboardingEvidence}>
@@ -921,10 +927,10 @@ function SceneOverlay({
               ))}
             </ol>
             <p>{latestFleetDevice.capabilities.join(" · ")}</p>
-            <small>Device/certificate enrollment, Adapter loading, and physical-device onboarding are not implemented.</small>
+            <small>Device/certificate enrollment, live transport adapter loading, and physical-device onboarding are not implemented.</small>
           </div>
         ) : (
-          <p className={styles.onboardingEmpty}>Add a conceptual device to inspect registration, certificate, capability, Adapter, and physical-device onboarding.</p>
+          <p className={styles.onboardingEmpty}>Add a conceptual device to inspect registration, certificate, capability, live transport adapter, and physical-device onboarding.</p>
         )}
         <div className={styles.meters}>
           {[
@@ -1014,7 +1020,7 @@ function ComponentInspector({
         <div className={styles.configBlock}>
           <span>CONCEPTUAL PILOT CONFIGURATION</span>
           <ul><li>x86 fanless computer</li><li>32 GB RAM · 1 TB NVMe</li><li>TPM 2.0 · Ubuntu</li><li>No GPU required for initial Pilot</li></ul>
-          <small>Physical adapters, live service operation, cloud synchronization, and physical robot-command admission are not implemented.</small>
+          <small>Fixture-backed observation conversion is implemented. Live device transport, Edge Gateway deployment, cloud synchronization, and physical robot-command admission are not implemented.</small>
         </div>
       ) : null}
       {part.id === "remote-io-module" ? <p className={styles.warningCallout}>Not part of the emergency-stop safety chain.</p> : null}
@@ -1091,10 +1097,10 @@ function SceneInspector({
 
       {scene === "operational-flow" ? (
         <div className={styles.boundaryCard}>
-          <span>IMPLEMENTED · SYNTHETIC / FIXTURE INPUTS</span>
-          <p>Site Runtime validates input and invokes telemetry-owned assembly, then quality-gates the exact state/report envelope. Agent Runtime invokes Shadow Ops evaluation and records separate lifecycle evidence for checkpoint/recovery and read-only diagnostics → manager workflow record.</p>
+          <span>OBSERVATION ADAPTERS · IMPLEMENTED, FIXTURE-BACKED</span>
+          <p>Transport-neutral conversion turns deterministic, already-read load-cell, digital-I/O, and received robot-status samples into canonical Observations; its EdgeAdapterReport stays separate local conversion evidence. Fixture composition adds five required simulation-only facility-system Observations and upstream/source references before the complete frame reaches the exact state/report quality gate owned by Site Runtime. Agent Runtime then invokes Shadow Ops evaluation and records separate lifecycle evidence for checkpoint/recovery and read-only diagnostics → manager workflow record.</p>
           <strong>STOP · NO COMMAND ISSUED</strong>
-          <small>Checkpoint/recovery and read-only runtime status exist. Physical telemetry adapters, physical command admission, robot execution, and safety installation remain unimplemented.</small>
+          <small>Live device transport, real facility connectivity, Edge Gateway deployment, physical command admission, robot or actuator execution, and installed or certified safety integration remain unimplemented.</small>
         </div>
       ) : null}
 
@@ -1106,7 +1112,7 @@ function SceneInspector({
           <button type="button" aria-label="Add Handoff" onClick={() => addFleetDevice("handoff")}>＋ Add Handoff</button>
           <button type="button" aria-label="Add Sensor" onClick={() => addFleetDevice("sensor")}>＋ Add Sensor</button>
           <button type="button" aria-label="Add Vision Node" onClick={requestVision}>＋ Add Vision Node / camera workload</button>
-          <small>Device/certificate enrollment, Adapter loading, runtime onboarding, and utilization values are conceptual—not implemented benchmarks.</small>
+          <small>Device/certificate enrollment, live transport adapter loading, runtime onboarding, and utilization values are conceptual—not implemented benchmarks.</small>
         </div>
       ) : null}
 

@@ -124,6 +124,18 @@ describe("conceptual Gateway model manifest", () => {
     );
   });
 
+  test("separates implemented fixture conversion from conceptual live hardware", () => {
+    expect(GATEWAY_PART_BY_ID.get("fanless-edge-computer")?.description).toMatch(
+      /transport-neutral observation conversion[\s\S]*fixture-backed[\s\S]*already-read[\s\S]*no live device transport/i,
+    );
+    expect(GATEWAY_PART_BY_ID.get("remote-io-module")?.description).toMatch(
+      /already-read digital-I\/O samples[\s\S]*no live I\/O transport or device connectivity/i,
+    );
+    expect(GATEWAY_PART_BY_ID.get("load-cell-interface")?.description).toMatch(
+      /already-read load-cell samples into canonical Observations[\s\S]*live Modbus reader[\s\S]*remain unimplemented/i,
+    );
+  });
+
   test("keeps conceptual connections resolvable without inventing external facts", () => {
     const internalIds = new Set<string>(GATEWAY_PARTS.map((part) => part.id));
     for (const part of GATEWAY_PARTS) {
@@ -189,6 +201,10 @@ describe("deterministic demo state", () => {
       canonicalRecommendation: false,
       robotMotionEvidence: false,
       robotControlAvailable: false,
+      transportNeutralObservationConversionImplemented: true,
+      fixtureBackedSiteAgentRuntimeIntegrationImplemented: true,
+      liveDeviceTransportImplemented: false,
+      edgeGatewayProductionDeploymentImplemented: false,
     });
     expect(ILLUSTRATIVE_OPERATIONAL_SCENARIO.source).toBe(
       "user-specified-illustrative-storyboard",
@@ -305,6 +321,10 @@ describe("deterministic demo state", () => {
         id: "physical-device-onboarding",
         label: "Physical device onboarding",
       });
+      expect(device.onboarding).toContainEqual(expect.objectContaining({
+        id: "adapter-loading",
+        label: "Live transport adapter loading",
+      }));
       expect(
         device.onboarding.every(
           (step) =>

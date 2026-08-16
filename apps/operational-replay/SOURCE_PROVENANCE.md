@@ -40,16 +40,27 @@ read-only projection artifacts. `RangeSimulation`, `BallLedger`,
 Agent Runtime, the twin, and execution interfaces retain their existing owners
 and contracts.
 
-Agent Runtime V1 is merged and implemented for deterministic synthetic or
-fixture-backed observations. It composes Site Runtime's quality-gated
-publication and invokes Shadow Ops evaluation; its separate
-evaluation-lifecycle evidence supports checkpoint/recovery and its status
-surface is read-only diagnostics. Shadow Ops retains the later manager
-workflow. This browser app neither imports nor runs it. Physical telemetry
-adapters, production OTA, device enrollment, physical command admission, robot
-execution, and an installed physical safety integration remain unimplemented.
-The user-authored dispatch storyboard is not presented as Agent Runtime fixture
-output.
+The Edge Observation Adapter Kit V0 is merged. Transport-neutral observation
+conversion is implemented for deterministic, fixture-backed, already-read
+samples. It covers already-read load-cell and digital-I/O samples plus
+already-received robot status. It consumes commissioned binding projections,
+validates calibration identity and adapter profiles, emits canonical
+`Observation` values plus a separate local `EdgeAdapterReport`, and provides
+bounded in-process at-least-once fixture-feed semantics. A composition root adds
+five required simulation-only facility-system Observations and fixture
+upstream/source references before integrating the complete frame with Site
+Runtime and Agent Runtime; the report does not enter that frame, and this browser
+app neither imports nor runs those Python packages.
+
+Agent Runtime V1 composes Site Runtime's quality-gated publication and invokes
+Shadow Ops evaluation; its separate evaluation-lifecycle evidence supports
+checkpoint/recovery and its status surface is read-only diagnostics. Shadow Ops
+retains the later manager workflow. Live physical transports and device
+connectivity remain unimplemented. Edge Gateway production deployment,
+device/certificate enrollment, production OTA, physical command admission,
+robot or actuator execution, and an installed or certified physical safety
+integration also remain unimplemented. The user-authored dispatch storyboard is
+not presented as adapter, Site Runtime, or Agent Runtime fixture output.
 
 The app preserves observed state, risk output, recommendation, simulated task
 evidence, and recorded simulation outcome as separate stages. It does not infer

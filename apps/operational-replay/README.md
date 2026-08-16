@@ -46,7 +46,14 @@ The architecture decision for the requested operational story is **RESHAPE
 THEN PROCEED**. The demo may explain this canonical advisory boundary:
 
 ```text
-deterministic synthetic / fixture observations
+deterministic fixture raw-sample feed (in-process at-least-once cursor)
+  + commissioned binding projection + validated adapter-local profiles
+  -> Edge Observation Adapter Kit V0 transport-neutral conversion
+     |-> separate EdgeAdapterReport diagnostics (local conversion evidence)
+     \-> canonical adapter Observations
+         + five required simulation-only facility-system Observations
+         + fixture UpstreamInputs and SourceReference records
+  -> composition root creates the complete sequenced ObservationFrame
   -> Site Runtime ordered input validation, then telemetry-owned assembly
   -> exact FacilityState plus a separate AssemblyReport
   -> Site Runtime publication quality gate and exact admitted envelope
@@ -80,6 +87,34 @@ surface; Agent Runtime neither owns nor reconciles it with Guardian output. The
 demo does not merge, rank, reconcile, execute, import, or run any of those
 Python contracts.
 
+Current implementation status is split deliberately by layer:
+
+- **Observation adapters — Implemented, fixture-backed.** Transport-neutral
+  conversion accepts deterministic, already-read load-cell and digital-I/O
+  samples plus already-received robot status. It consumes commissioned binding
+  projections, validates calibration identity and adapter profiles, and emits
+  canonical `Observation` values with explicit missing, stale, fault, rejected,
+  and unmapped diagnostics. The bounded fixture feed provides in-process
+  at-least-once delivery semantics.
+- **Runtime integration — Implemented for the deterministic fixture path.** A
+  composition root combines the adapter Observations with five required
+  simulation-only facility-system Observations and fixture upstream/source
+  references, then carries the complete frame through Site Runtime and Agent
+  Runtime without making the adapter package depend on either runtime. The
+  `EdgeAdapterReport` remains separate local conversion evidence. This is not a
+  continuously running production site service.
+- **Live device transport and Gateway deployment — Not implemented.** Live
+  Modbus, serial, MQTT, OPC-UA, and vendor-SDK readers; real facility device
+  connectivity; Edge Gateway production deployment; device/certificate
+  enrollment; hot transport-adapter loading; and production OTA are absent.
+- **Control and safety — Not implemented.** There is no physical command
+  admission, robot or actuator execution, or installed or certified safety
+  integration.
+
+Transport-neutral observation conversion is implemented for deterministic,
+fixture-backed, already-read samples. Live physical transports and device
+connectivity remain unimplemented.
+
 The two paths are not a causal implemented chain. In particular, a recorded
 manager accept response is not physical command admission; the repository has
 no implemented site-level typed-mission bridge from advice to robots. The
@@ -108,12 +143,13 @@ node scripts/build-edge-gateway-replay-excerpt.mjs \
 The exporter disclaimer remains in the checked-in projection: its parameters
 have placeholder provenance and are not real facility performance.
 
-Physical telemetry adapters/transports, device and certificate enrollment, hot
-Adapter loading, production OTA activation/rollback, live gateway/vendor
-connectivity, production publishers or service scheduling, physical command
-admission, robot execution, and the depicted independent physical safety
-installation remain unimplemented. Static site facts remain owned by a
-validated `CommissionedSite`, not by the scene, telemetry, or `FacilityState`.
+Live physical transports and device connectivity, device and certificate
+enrollment, hot transport-adapter loading, production OTA activation/rollback,
+Edge Gateway production deployment, production publishers or service
+scheduling, physical command admission, robot or actuator execution, and the
+depicted independent physical safety installation remain unimplemented. Static
+site facts remain owned by a validated `CommissionedSite`, not by the scene,
+telemetry, or `FacilityState`.
 
 The route always distinguishes the two required disclosures:
 
@@ -238,9 +274,10 @@ node tests/edge-gateway-demo/browser-verify.mjs --output-dir "$(mktemp -d)"
 ```
 
 The browser verifier runs the production build in installed Chrome, covers all
-six required viewports plus the forced non-WebGL fallback, and writes its 12
-review screenshots only to the supplied empty directory outside the repository.
-To verify an already running build, add `--base-url <origin>`.
+seven required viewports plus the forced non-WebGL fallback, and writes 19
+review screenshots (12 story frames and seven responsive captures) only to the
+supplied empty directory outside the repository. To verify an already running
+build, add `--base-url <origin>`.
 
 See [SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md) for the recovered source
 identity and deterministic import map.

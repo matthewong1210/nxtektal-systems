@@ -62,19 +62,19 @@ copy; the notes after each segment are not narration.
 
 **20-40 seconds - Operational Flow**
 
-> For deterministic synthetic or fixture inputs, merged Agent Runtime V1
-> composes Site Runtime's ordered validation, telemetry-owned assembly, and
-> quality-gated state publication, then invokes the existing Shadow Ops
-> evaluation. Agent Runtime's separate evaluation-lifecycle evidence supports
-> checkpoint and recovery plus read-only diagnostic status. The later Shadow Ops
-> manager workflow records acceptance as evidence only. The robot motion shown
-> next is a separate deterministic RangeOps replay, not a command caused by it.
+> The implemented Edge Observation Kit converts deterministic, already-read
+> load-cell, digital-I/O, and received robot-status fixture samples into
+> canonical Observations. Its diagnostic report stays separate local evidence.
+> Fixture composition adds required simulation-only channels and upstream
+> references before Site and Agent Runtime. Live device transport is
+> unimplemented, and manager acceptance does not cause the separate RangeOps
+> replay.
 
 **40-52 seconds - Scale the Fleet**
 
-> Fleet onboarding, certificates, capabilities, and Adapter loading are future
-> workflow concepts. The utilization numbers are illustrative, not capacity
-> measurements.
+> Fleet onboarding, certificates, capabilities, and live transport-adapter
+> loading are future workflow concepts. The utilization numbers are
+> illustrative, not capacity measurements.
 
 **52-64 seconds - Software Update**
 
@@ -131,10 +131,11 @@ build. Use these review frames:
 9. Staged software update
 10. Failed health check and rollback
 11. Independent safety architecture
-12. Mobile non-WebGL fallback
+12. Forced WebGL-unavailable fallback at a mobile viewport
 
-For the mobile fallback, use one of the tested narrow viewports and capture the
-text diagram and parts list rather than forcing WebGL. Confirm that every frame
+Narrow devices use reduced-quality WebGL when it is available. For the fallback
+frame, use one of the tested narrow viewports and explicitly disable WebGL, then
+capture the accessible text diagram and parts list. Confirm that every frame
 retains the relevant conceptual or simulated disclosure. Store screenshots
 outside the repository unless repository policy later requires checked-in
 evidence.
@@ -151,7 +152,17 @@ UL or production safety certification, live customer deployment, measured
 customer savings, measured Gateway capacity, autonomous physical execution, or
 an implemented safety installation. Static values and motion are illustrative.
 The Agent cannot control a robot or bypass local safety through this route.
-Agent Runtime V1 is implemented only for deterministic synthetic/fixture inputs
-in this repository; the browser does not run it. Physical telemetry adapters,
-device enrollment, production OTA, physical command admission, robot execution,
-and physical safety installation remain unimplemented.
+Observation adapters are implemented and fixture-backed: deterministic,
+already-read load-cell and digital-I/O samples and already-received robot status
+are converted into canonical Observations using commissioned bindings and
+validated profiles, with explicit missing, stale, and fault diagnostics. The
+bounded fixture feed has in-process at-least-once semantics, and a composition
+root keeps the diagnostic report separate while adding five required
+simulation-only facility-system Observations and fixture upstream/source
+references before the complete frame reaches Site Runtime and Agent Runtime;
+the browser does not run that path. Transport-neutral observation conversion is
+implemented for deterministic, fixture-backed, already-read samples. Live
+physical transports and device connectivity remain unimplemented, as do Edge
+Gateway production deployment, device/certificate enrollment, production OTA,
+physical command admission, robot or actuator execution, and installed or
+certified safety integration.

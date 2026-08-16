@@ -1029,24 +1029,38 @@ async function verifyResponsiveRoute(endpoint, baseUrl, outputDirectory, report)
       const audit = await collectDomAudit(page);
       assert.deepEqual(audit.viewport, viewport, `${context} viewport override drifted`);
       assertDemoAudit(audit, context);
-      if (viewport.width <= 520) {
-        const cloudStatusFound = await page.evaluate(`(() => {
-          const row = Array.from(document.querySelectorAll('[class*=statusList] li')).find(
-            (candidate) => candidate.querySelector('span')?.textContent?.trim() === 'Cloud sync',
-          );
-          row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-          return Boolean(row);
-        })()`);
-        assert.equal(cloudStatusFound, true, `${context} omitted the Cloud sync status disclosure`);
+      if (viewport.width <= 700) {
         await assertBoundingRectVisible(
           page,
-          { selector: '[class*=statusList]', requiredTexts: ['Cloud sync', 'Not implemented'] },
-          `${context} scroll-revealed Cloud sync status disclosure`,
+          '[data-render-capability="webgl"]',
+          `${context} mobile WebGL capability disclosure`,
+          /MOBILE WEBGL.*REDUCED QUALITY/is,
         );
-        await assertBoundingRectVisible(
-          page,
-          { selector: '[class*=statusList]', requiredTexts: ['Not implemented'] },
-          `${context} visible Cloud sync implementation status`,
+      }
+      if (viewport.width <= 520) {
+        for (const [label, value] of [
+          ["Observation adapters", "Implemented, fixture-backed"],
+          ["Live device transport", "Not implemented"],
+          ["Edge Gateway deployment", "Not implemented"],
+          ["Cloud sync", "Not implemented"],
+        ]) {
+          const statusFound = await page.evaluate(`(() => {
+            const label = ${JSON.stringify(label)};
+            const row = Array.from(document.querySelectorAll('[class*=statusList] li')).find(
+              (candidate) => candidate.querySelector('span')?.textContent?.trim() === label,
+            );
+            row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            return Boolean(row);
+          })()`);
+          assert.equal(statusFound, true, `${context} omitted the ${label} status disclosure`);
+          await assertBoundingRectVisible(
+            page,
+            { selector: '[class*=statusList]', requiredTexts: [label, value] },
+            `${context} scroll-revealed ${label} status disclosure`,
+          );
+        }
+        await page.evaluate(
+          `document.querySelector('[class*=statusList]')?.scrollTo({ top: 0 })`,
         );
       }
       if ([680, 390, 375].includes(viewport.width)) {
@@ -1132,6 +1146,7 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
     await clickControl(page, ["Close installation interface inspector"], "close Existing Washer inspector");
     const installationStatuses = await page.evaluate(`Array.from(document.querySelectorAll('[class*=statusList] li')).map((row) => ({
       label: row.querySelector('span')?.textContent?.trim() || '',
+      value: row.querySelector('strong')?.textContent?.trim() || '',
       status: row.getAttribute('data-status') || '',
       dotColor: getComputedStyle(row.querySelector('i')).backgroundColor,
     }))`);
@@ -1139,6 +1154,12 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
       installationStatuses.map((status) => [status.label, status]),
     );
     assert.equal(installationStatusByLabel["Agent Runtime V1"]?.status, "implemented");
+    assert.match(installationStatusByLabel["Agent Runtime V1"]?.value || "", /Implemented, fixture-backed/i);
+    assert.equal(installationStatusByLabel["Observation adapters"]?.status, "implemented");
+    assert.match(installationStatusByLabel["Observation adapters"]?.value || "", /Implemented, fixture-backed/i);
+    assert.equal(installationStatusByLabel["Live device transport"]?.status, "unimplemented");
+    assert.match(installationStatusByLabel["Live device transport"]?.value || "", /Not implemented/i);
+    assert.equal(installationStatusByLabel["Edge Gateway deployment"]?.status, "unimplemented");
     assert.equal(installationStatusByLabel["Power + normal I/O"]?.status, "conceptual");
     assert.equal(installationStatusByLabel["Cloud sync"]?.status, "unimplemented");
     assert.notEqual(
@@ -1150,6 +1171,11 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
       installationStatusByLabel["Cloud sync"]?.dotColor,
       installationStatusByLabel["Agent Runtime V1"]?.dotColor,
       "unimplemented cloud sync row used the implemented green status signal",
+    );
+    assert.notEqual(
+      installationStatusByLabel["Live device transport"]?.dotColor,
+      installationStatusByLabel["Observation adapters"]?.dotColor,
+      "unimplemented live transport row used the implemented adapter status signal",
     );
     await capture(page, outputDirectory, "01-installed-gateway.png");
     await exercisePointerInputs(page);
@@ -1179,7 +1205,7 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
       page,
       '[aria-label="Operational flow 3D site labels"]',
       "1440x900 operational-flow site labels",
-      /Dispenser sensor.*Washer.*Picker R1.*Picker R2.*Carrier C1.*Universal Handoff H1.*NXTektal Cloud.*Manager tablet/is,
+      /Dispenser sensor.*Washer.*Picker R1.*Picker R2.*Carrier C1.*Universal Handoff H1.*Observation adapters.*fixture-backed.*NXTektal Cloud.*Manager tablet.*Live device transport.*not implemented/is,
     );
     await capture(page, outputDirectory, "05-operational-data-flow.png");
     const scenarioText = (await collectDomAudit(page)).bodyText;
@@ -1187,11 +1213,23 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
     assert.match(scenarioText, /ILLUSTRATIVE STORYBOARD.*NOT AGENT RUNTIME FIXTURE OUTPUT/is);
     assert.match(
       scenarioText,
-      /IMPLEMENTED\s*[·-]\s*SYNTHETIC \/ FIXTURE INPUTS.*Site Runtime validates input.*telemetry-owned assembly.*quality-gates the exact state\/report envelope.*Agent Runtime invokes Shadow Ops evaluation.*separate lifecycle evidence.*manager workflow record/is,
+      /OBSERVATION ADAPTERS\s*[·-]\s*IMPLEMENTED, FIXTURE-BACKED.*already-read load-cell.*digital-I\/O.*robot-status samples.*canonical Observations/is,
     );
     assert.match(
       scenarioText,
-      /Checkpoint\/recovery and read-only runtime status exist.*Physical telemetry adapters.*physical command admission.*robot execution.*safety installation remain unimplemented/is,
+      /EdgeAdapterReport stays separate local conversion evidence/is,
+    );
+    assert.match(
+      scenarioText,
+      /Fixture composition adds five required simulation-only facility-system Observations and upstream\/source references/is,
+    );
+    assert.match(
+      scenarioText,
+      /exact state\/report quality gate owned by Site Runtime.*Agent Runtime then invokes Shadow Ops evaluation.*separate lifecycle evidence.*manager workflow record/is,
+    );
+    assert.match(
+      scenarioText,
+      /Live device transport.*real facility connectivity.*Edge Gateway deployment.*physical command admission.*robot or actuator execution.*safety integration remain unimplemented/is,
     );
     assert.equal(
       await page.evaluate(`Boolean(document.querySelector('[data-evidence-card="rangeops-replay"]'))`),
@@ -1217,12 +1255,12 @@ async function verifyInteractiveStory(endpoint, baseUrl, outputDirectory, report
       page,
       '[data-evidence-card="fleet"]',
       "1440x900 fleet evidence card",
-      /SAME GATEWAY.*1 DEVICES.*Concept Picker 01.*certificate enrollment.*capability assignment.*Adapter loading.*physical device onboarding/is,
+      /SAME GATEWAY.*1 DEVICES.*Concept Picker 01.*certificate enrollment.*capability assignment.*Live transport adapter loading.*physical device onboarding/is,
     );
     await capture(page, outputDirectory, "08-fleet-expansion.png");
     const fleetText = (await collectDomAudit(page)).bodyText;
-    assert.match(fleetText, /Same Gateway\s*[—-]\s*new device registration and Adapter/i);
-    assert.match(fleetText, /certificate enrollment.*capability assignment.*Adapter loading.*physical device onboarding/is);
+    assert.match(fleetText, /Same Gateway\s*[—-]\s*new device registration and live transport adapter/i);
+    assert.match(fleetText, /certificate enrollment.*capability assignment.*Live transport adapter loading.*physical device onboarding/is);
     assert.match(fleetText, /collect.*navigate.*report_payload.*report_battery/is);
     await clickControl(page, ["Software Update"], "software update scene");
     await clickControl(page, ["Run update"], "software update start");
@@ -1406,6 +1444,32 @@ async function verifyWebglFallback(browserPath, baseUrl, outputDirectory, report
       assertDemoAudit(audit, "WebGL fallback", { requireCanvas: false });
       assert.equal(audit.hasFallback, true, "WebGL fallback system diagram is not visible");
       assert.equal(audit.partsListVisible, true, "WebGL fallback parts list is not visible or labeled");
+      const fallbackLayout = await page.evaluate(`(() => {
+        const fallback = document.querySelector('[data-testid="webgl-fallback"]');
+        if (!(fallback instanceof HTMLElement)) return null;
+        const rect = fallback.getBoundingClientRect();
+        return {
+          left: rect.left,
+          right: rect.right,
+          viewportWidth: innerWidth,
+          clientWidth: fallback.clientWidth,
+          scrollWidth: fallback.scrollWidth,
+        };
+      })()`);
+      assert.ok(fallbackLayout, "WebGL fallback layout could not be measured");
+      assert.ok(
+        fallbackLayout.left >= 0 && fallbackLayout.right <= fallbackLayout.viewportWidth,
+        `WebGL fallback extends outside the mobile viewport: ${JSON.stringify(fallbackLayout)}`,
+      );
+      assert.ok(
+        fallbackLayout.scrollWidth <= fallbackLayout.clientWidth,
+        `WebGL fallback has clipped horizontal content: ${JSON.stringify(fallbackLayout)}`,
+      );
+      assert.equal(
+        await page.evaluate(`Boolean(document.querySelector('[data-render-capability="webgl"]'))`),
+        false,
+        "WebGL-unavailable fallback still claims an active WebGL render profile",
+      );
       for (const component of ["Edge Computer", "LTE Router", "Remote I/O", "UPS", "Ethernet Switch"]) {
         assert.match(audit.bodyText, new RegExp(component.replace("/", "\\/"), "i"));
       }
@@ -1413,13 +1477,21 @@ async function verifyWebglFallback(browserPath, baseUrl, outputDirectory, report
       assert.match(audit.bodyText, /FacilityState.*AssemblyReport/is);
       assert.match(audit.bodyText, /Agent Runtime lifecycle evidence.*checkpoint \/ recovery.*read-only diagnostics/is);
       assert.match(audit.bodyText, /does not run or connect to the Python runtime/is);
-      assert.match(audit.bodyText, /Physical telemetry adapters.*device enrollment.*production OTA.*physical command admission.*robot execution.*safety installation remain unimplemented/is);
+      assert.match(audit.bodyText, /Observation adapters.*implemented and fixture-backed.*already-read load-cell.*digital-I\/O.*robot status/is);
+      assert.match(audit.bodyText, /EdgeAdapterReport diagnostics.*separate local conversion evidence/is);
+      assert.match(audit.bodyText, /Fixture composition.*five simulation-only facility channels.*upstream.*source-reference inputs/is);
+      assert.match(audit.bodyText, /Live physical transports and device connectivity.*Edge Gateway production deployment.*device\/certificate enrollment.*production OTA.*physical command admission.*robot or actuator execution.*safety integration/is);
       assert.match(audit.bodyText, /Manager acceptance does not cause the separate RangeOps replay/is);
       assert.match(audit.bodyText, /Manager.*no command issued/is);
       assertNetworkBoundary(page, baseUrl, "WebGL fallback");
       assertNoBrowserErrors(page, "WebGL fallback");
-      await capture(page, outputDirectory, "12-mobile-fallback.png");
-      report.webglFallback = { webglAvailable, visible: audit.hasFallback, partsList: audit.partsListVisible };
+      await capture(page, outputDirectory, "12-forced-webgl-unavailable-fallback.png");
+      report.webglFallback = {
+        webglAvailable,
+        visible: audit.hasFallback,
+        partsList: audit.partsListVisible,
+        activeWebglProfileClaim: false,
+      };
     } finally {
       await page.close();
     }
