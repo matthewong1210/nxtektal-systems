@@ -20,7 +20,7 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
@@ -91,6 +91,7 @@ manually installed USD package:
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_runtime
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/pilot_ops
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/commissioning
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_observation
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \
@@ -107,6 +108,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_runtime/test_architecture.py \
   tests/site_runtime/test_rejection.py \
   tests/agent_runtime/test_architecture.py \
+  tests/edge_observation/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -124,6 +126,7 @@ uv run --no-sync python -m compileall -q -f \
   nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
+  nxt_edge_observation \
   scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
@@ -151,6 +154,7 @@ shipped = (
     "nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory",
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
+    "nxt_edge_observation",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:

@@ -55,7 +55,10 @@ build-backend = "hatchling.build"
 # nxt_agent_runtime is the deterministic composition/lifecycle layer that runs
 # Site Runtime output through Shadow Ops evaluation with restart-safe
 # evaluation checkpoints; it owns no state, policy, or execution semantics.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime"]
+# nxt_edge_observation converts already-read raw device samples into the
+# existing canonical Observation contract. It is transport-neutral and
+# fixture-backed: no live transport, physical device, or command surface.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

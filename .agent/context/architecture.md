@@ -110,6 +110,34 @@ adapter, the guardian, the journal, or the queue. The evaluation checkpoint
 is separate from the Site Runtime publication checkpoint. Acceptance in the
 queue is a human workflow record only; no path reaches robot execution.
 
+## Edge observation intake
+
+`nxt_edge_observation` is a conversion leaf in front of the observation
+boundary: transport-neutral conversion adapters plus the in-process,
+source-side at-least-once delivery cursor over raw batches. It turns
+already-read raw device payloads into existing canonical `Observation`
+objects and reports what it could not convert:
+
+```mermaid
+flowchart LR
+    Raw["already-read raw samples\nload cell / digital I/O / robot status"] --> Kit["nxt_edge_observation\nbinding + calibration + validation"]
+    Binding["commissioned telemetry-adapter-config\n(one-way projection)"] --> Kit
+    Kit --> Obs["canonical Observation objects"]
+    Kit --> Diag["EdgeAdapterReport\nadapter diagnostics only"]
+    Obs --> Root["composition root\nObservationSource + upstream inputs"]
+    Root --> SiteRuntime["SiteRuntimePipeline"]
+```
+
+The package imports only `nxt_telemetry.observations` and consumes the
+commissioning projection as plain data. It must not import the Site Runtime:
+building `SequencedObservationFrame` and satisfying the `ObservationSource`
+protocol belong to a composition root, because only `nxt_agent_runtime` may
+depend on the runtime. `EdgeAdapterReport` is conversion evidence, never a
+second telemetry envelope and never a `FacilityState` input. V0 is
+fixture-backed and adds no transport, device connection, register write, or
+command surface. See
+[`simulation/docs/edge_observation_v0.md`](../../simulation/docs/edge_observation_v0.md).
+
 ## Core principles
 
 ### One-way extension
@@ -133,6 +161,9 @@ coupling in named seams:
 - `nxt_site_runtime.composition` for setup-only lazy commissioning projection
 - `nxt_agent_runtime` as the only package-level consumer of the Site Runtime
   and Shadow Ops public surfaces together (composition/lifecycle only)
+- `nxt_edge_observation` as a raw-to-canonical conversion leaf (adapters plus
+  the source-side delivery cursor) over `nxt_telemetry.observations` and the
+  commissioning projection data
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
