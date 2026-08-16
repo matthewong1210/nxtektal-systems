@@ -88,6 +88,8 @@ runtime dependency.
 - `simulation/docs/shadow_ops_v0.md`
 - `simulation/docs/commissioning_v0.md`
 - `simulation/docs/site_runtime_design.md`
+- `simulation/docs/agent_runtime_v1.md`
+- `simulation/docs/edge_observation_v0.md`
 - `nxtektal-roi-engine/README.md`
 - `nxtektal-roi-engine/docs/api-contract.md`
 

@@ -17,6 +17,7 @@ fact class and runtime boundary.
 | Physical deployment static facts | Validated immutable `nxt_commissioning.CommissionedSite` manifest | `RangeOpsScenario`, `SiteConfig`, observations, viewer/layout files, or USD |
 | Site Runtime orchestration | `nxt_site_runtime` sequence/input validation, publication-quality gate, deterministic envelope/checkpoint/recovery, and idempotent state publication coordination | Observation semantics, a second assembler/state model, advice, projection, physical command admission, or execution |
 | Agent Runtime evaluation lifecycle | `nxt_agent_runtime` deferred-acknowledgement cycle ordering, separate evaluation checkpoint, append-only evaluation journal (including durable `NO_ACTION` evidence), pending manager-decision view, read-only status | State, observation, policy, recommendation, trace, or workflow semantics; a second publication checkpoint; a decision engine; a command surface; facility truth |
+| Raw-device-to-canonical-observation conversion and its diagnostics | `nxt_edge_observation` adapters, adapter-local device profiles, and `EdgeAdapterReport` | Observation semantics, a second telemetry envelope, facility truth, a channel registry, a commissioned fact, or any transport/command surface |
 | Facility advice | `nxt_facility.decisions.Recommendation` | Directive or execution acknowledgement |
 | Shadow decision evaluation | `nxt_pilot_ops` snapshot, evaluation, trace, and recommendation | Command, actuator, safety shield, or live state |
 | Human/execution workflow evidence | Shadow Ops immutable workflow records and hash-chained ledger | Proof the physical act occurred beyond the recorded acknowledgement |
@@ -141,7 +142,10 @@ simulator policies use the closed directive vocabulary through `RangeOpsEnv` and
 Concrete physical observation sources/transports, live hardware/vendor
 integrations, production state publishers/consumer sinks, site-level physical
 command admission, autonomous actuator execution, live Omniverse/Nucleus
-delivery, and production real-site deployment are not implemented. Protocols
+delivery, and production real-site deployment are not implemented. The Edge
+Observation Adapter Kit V0 converts already-read synthetic samples through the
+existing Observation contract; it is fixture-backed and adds no transport,
+device connection, register write, or command path. Protocols
 and test doubles do not satisfy those boundaries, and LLMs must not participate
 in execution, command admission, actuator control, e-stop handling, or safety
 loops.

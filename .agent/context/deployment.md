@@ -14,7 +14,7 @@ The baseline for this operating layer is `main` at
 | Shadow Ops | Merged by PR #19 (`e84c5016a19d1d4aec0b4b183164c08bba5b164e`) | FacilityState adaptation, named-policy evaluation, trace, human workflow, and ledger; no live runner or command bridge |
 | Commissioning | Merged by PR #20 (`89e93f6a8ea0cd469d6da907321eafe30318fa49`) | Immutable `CommissionedSite`, strict validation/storage, one-way static projections, and setup-only Site Runtime binding |
 | Site Runtime | Merged by PR #22 (`b055c9472737feb923c6ac48fad44a5b7e43333c`) | Orchestration library, envelope schema, input/quality gates, source/publisher ports, checkpoints, recovery, and idempotent publication coordination |
-| Physical telemetry adapters and transport | Not implemented | No hardware, POS, weather, fleet, MQTT, Kafka, OPC-UA, or vendor source/transport implementation |
+| Physical telemetry adapters and transport | Not implemented | No hardware, POS, weather, fleet, Modbus, serial, MQTT, Kafka, OPC-UA, ROS 2, or vendor source/transport implementation; the edge adapter kit converts already-read synthetic samples and opens no connection |
 | Physical state publisher or consumer delivery | Not implemented | `StatePublisher` and `RuntimeSink` are protocols/test seams; there is no live decision, memory, twin, or external-system delivery service |
 | Physical robot execution | Not implemented | Mock adapter works; Isaac Sim and ROS 2 adapters raise unavailable errors; no site-level physical command admission exists |
 | Live twin delivery and real-site deployment | Not implemented | No live Omniverse/Nucleus delivery, production site service, or real-site performance evidence |
@@ -30,6 +30,17 @@ checkpoint, an append-only evaluation journal, a pending manager-decision view,
 a local JSONL snapshot publisher, and read-only status. It runs against
 synthetic/fixture sources only; it is not a service scheduler, a production
 publisher, or live delivery.
+
+Also added after that baseline (verify merge status against the current
+branch): `nxt_edge_observation`, the Edge Observation Adapter Kit V0 — a
+conversion leaf that turns already-read load-cell, digital-I/O, and
+robot-status samples into canonical `Observation` objects using commissioned
+bindings, plus separate adapter diagnostics and the in-process source-side
+at-least-once delivery cursor (peek / acknowledge / reject with sequence
+reuse; sequence validation stays with Site Runtime). It is transport-neutral and
+fixture-backed: it opens no connection, drives no device, writes no register,
+and has no robot, actuator, or emergency-stop surface. It is not a physical
+telemetry adapter and does not change the "Not implemented" row above.
 
 ## Static truth versus dynamic evidence
 
@@ -148,6 +159,7 @@ give Site Runtime ownership of simulation truth.
 |---|---|
 | Surveyed/static physical site fact or calibration | `nxt_commissioning` |
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
+| Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
