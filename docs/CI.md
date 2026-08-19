@@ -272,10 +272,11 @@ smoke validate only the checked-out read-only application. CI disables Next.js
 telemetry and gives the smoke step a two-minute outer timeout; the job uploads
 no artifact and performs no hosting or deployment.
 
-Public deployment remains blocked by
-[issue #4](https://github.com/matthewong1210/nxtektal-systems/issues/4) until
-`og.png` is cleared or replaced. This validation workflow neither clears that
-asset nor creates a public deployment.
+The repository-authored `og.png` replacement and its byte/provenance regression
+address the asset blocker tracked in
+[issue #4](https://github.com/matthewong1210/nxtektal-systems/issues/4). This
+workflow validates the application; it neither grants rights to unrelated
+assets nor creates a public deployment.
 
 ### Replay and demo
 

@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { createServer } from "node:net";
 import { spawn } from "node:child_process";
@@ -36,6 +36,9 @@ const READY_TIMEOUT_MS = 45_000;
 const PAGE_TIMEOUT_MS = 30_000;
 const SERVER_STOP_TIMEOUT_MS = 5_000;
 const BROWSER_STOP_TIMEOUT_MS = 5_000;
+const SOCIAL_PREVIEW_PATH = "/og.png";
+const SOCIAL_PREVIEW_SHA256 =
+  "9d715678dd5910471591e7c45bd2ca7c9d88178355d0829e655b641e10d844eb";
 
 const VIEWPORTS = [
   { width: 1440, height: 900 },
@@ -243,15 +246,45 @@ async function waitForHttp(url, observed, timeoutMs = READY_TIMEOUT_MS) {
   throw new Error(`timed out waiting for ${url}: ${lastError?.message ?? "no response"}`);
 }
 
-async function startProductionServer() {
+async function readBuiltSocialPreviewUrl() {
   await access(join(APP_ROOT, ".next", "BUILD_ID"), fsConstants.R_OK).catch(() => {
     throw new Error("production build missing; run `npm run build` before browser verification");
   });
-  const port = await selectLoopbackPort();
+  const htmlPath = join(APP_ROOT, ".next", "server", "app", "index.html");
+  const html = await readFile(htmlPath, "utf8").catch((error) => {
+    throw new Error(`could not read built root metadata at ${htmlPath}: ${error.message}`);
+  });
+  const metaTags = html.match(/<meta\b[^>]*>/gi) ?? [];
+  for (const tag of metaTags) {
+    const attributes = Object.fromEntries(
+      [...tag.matchAll(/\b([a-z][\w:-]*)=(?:"([^"]*)"|'([^']*)')/gi)]
+        .map((match) => [match[1].toLowerCase(), match[2] ?? match[3]]),
+    );
+    if (attributes.property === "og:image" && attributes.content) {
+      const previewUrl = new URL(attributes.content);
+      assert.equal(previewUrl.pathname, SOCIAL_PREVIEW_PATH, "built og:image uses an unexpected path");
+      assert.equal(previewUrl.search, "", "built og:image must not include a query");
+      assert.equal(previewUrl.hash, "", "built og:image must not include a fragment");
+      return previewUrl;
+    }
+  }
+  throw new Error(`built root metadata at ${htmlPath} does not contain og:image`);
+}
+
+async function startProductionServer(previewUrl) {
+  assert.equal(previewUrl.protocol, "http:", "self-hosted verification requires an HTTP metadata origin");
+  assert.ok(
+    ["127.0.0.1", "localhost"].includes(previewUrl.hostname),
+    `self-hosted verification requires loopback metadata, received ${previewUrl.origin}`,
+  );
+  assert.equal(previewUrl.username, "", "metadata origin must not include credentials");
+  assert.equal(previewUrl.password, "", "metadata origin must not include credentials");
+  const port = Number(previewUrl.port || "80");
+  assert.ok(Number.isInteger(port) && port > 0 && port <= 65_535, "metadata origin has an invalid port");
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const child = spawn(
     npmCommand,
-    ["run", "start", "--", "--hostname", "127.0.0.1", "--port", String(port)],
+    ["run", "start", "--", "--hostname", previewUrl.hostname, "--port", String(port)],
     {
       cwd: APP_ROOT,
       detached: process.platform !== "win32",
@@ -260,7 +293,7 @@ async function startProductionServer() {
     },
   );
   const observed = observeProcess(child, "production server");
-  const baseUrl = `http://127.0.0.1:${port}`;
+  const baseUrl = previewUrl.origin;
   try {
     await waitForHttp(`${baseUrl}/`, observed);
   } catch (error) {
@@ -703,6 +736,83 @@ function assertNetworkBoundary(page, baseUrl, context) {
   const documents = page.responses.filter((response) => response.type === "Document");
   assert.ok(documents.length >= 1, `${context} had no document response`);
   assert.ok(documents.every((response) => response.status >= 200 && response.status < 400), `${context} document failed`);
+}
+
+async function verifySocialPreviewMetadata(endpoint, baseUrl, report) {
+  const routes = ["/", DEMO_PATH];
+  const routeMetadata = {};
+  for (const route of routes) {
+    const page = await DevToolsPage.create(endpoint);
+    try {
+      await page.setViewport({ width: 1200, height: 630 });
+      await page.navigate(`${baseUrl}${route}`);
+      const metadata = await page.evaluate(`(() => {
+        const contents = (selector) => Array.from(document.querySelectorAll(selector))
+          .map((element) => element.getAttribute('content'))
+          .filter(Boolean);
+        return {
+          ogImages: contents('meta[property="og:image"]'),
+          twitterImages: contents('meta[name="twitter:image"]'),
+          ogType: contents('meta[property="og:image:type"]'),
+          ogWidth: contents('meta[property="og:image:width"]'),
+          ogHeight: contents('meta[property="og:image:height"]'),
+          ogAlt: contents('meta[property="og:image:alt"]'),
+          twitterCard: contents('meta[name="twitter:card"]'),
+        };
+      })()`);
+      assert.equal(metadata.ogImages.length, 1, `${route} must emit one og:image`);
+      assert.equal(metadata.twitterImages.length, 1, `${route} must emit one twitter:image`);
+      assert.equal(new URL(metadata.ogImages[0]).pathname, SOCIAL_PREVIEW_PATH);
+      assert.equal(new URL(metadata.twitterImages[0]).pathname, SOCIAL_PREVIEW_PATH);
+      assert.deepEqual(metadata.ogImages, metadata.twitterImages);
+      assert.deepEqual(metadata.ogType, ["image/png"]);
+      assert.deepEqual(metadata.ogWidth, ["1200"]);
+      assert.deepEqual(metadata.ogHeight, ["630"]);
+      assert.deepEqual(metadata.ogAlt, [
+        "NXTektal Operational Replay — read-only operating-layer evidence",
+      ]);
+      assert.deepEqual(metadata.twitterCard, ["summary_large_image"]);
+      assert.equal(new URL(metadata.ogImages[0]).origin, new URL(baseUrl).origin);
+      assertNetworkBoundary(page, baseUrl, `${route} metadata inspection`);
+      assertNoBrowserErrors(page, `${route} metadata inspection`);
+      routeMetadata[route] = metadata;
+    } finally {
+      await page.close();
+    }
+  }
+
+  const advertisedUrls = Object.values(routeMetadata)
+    .flatMap((metadata) => [...metadata.ogImages, ...metadata.twitterImages]);
+  const uniqueAdvertisedUrls = [...new Set(advertisedUrls)];
+  assert.equal(uniqueAdvertisedUrls.length, 1, "routes must advertise the same cleared preview URL");
+  const externalPreviewUrls = uniqueAdvertisedUrls.filter(
+    (url) => new URL(url).origin !== new URL(baseUrl).origin,
+  );
+  assert.deepEqual(externalPreviewUrls, [], "metadata advertises an external preview asset");
+  const advertisedUrl = uniqueAdvertisedUrls[0];
+
+  const response = await fetch(advertisedUrl, {
+    redirect: "error",
+    signal: AbortSignal.timeout(5_000),
+  });
+  assert.equal(response.status, 200, "social preview did not return HTTP 200");
+  assert.match(response.headers.get("content-type") ?? "", /^image\/png\b/i);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(bytes.readUInt32BE(16), 1200);
+  assert.equal(bytes.readUInt32BE(20), 630);
+  assert.equal(createHash("sha256").update(bytes).digest("hex"), SOCIAL_PREVIEW_SHA256);
+  report.socialPreview = {
+    routes: routeMetadata,
+    responseUrl: advertisedUrl,
+    mimeType: response.headers.get("content-type"),
+    sizeBytes: bytes.length,
+    width: 1200,
+    height: 630,
+    sha256: SOCIAL_PREVIEW_SHA256,
+    sameOriginRequired: true,
+    externalAssetRequests: externalPreviewUrls.length,
+  };
 }
 
 function assertDemoAudit(audit, context, { requireCanvas = true } = {}) {
@@ -1542,13 +1652,15 @@ async function main() {
       baseUrl = supplied.href.replace(/\/$/, "");
       await waitForHttp(`${baseUrl}/`);
     } else {
-      server = await startProductionServer();
+      const previewUrl = await readBuiltSocialPreviewUrl();
+      server = await startProductionServer(previewUrl);
       baseUrl = server.baseUrl;
       report.startedProductionServer = true;
     }
     report.baseUrl = baseUrl;
 
     browser = await startBrowser(browserPath);
+    await verifySocialPreviewMetadata(browser.endpoint, baseUrl, report);
     await verifyBaselineCodeSplit(browser.endpoint, baseUrl, report);
     await verifyResponsiveRoute(browser.endpoint, baseUrl, outputDirectory, report);
     await verifyInteractiveStory(browser.endpoint, baseUrl, outputDirectory, report);
