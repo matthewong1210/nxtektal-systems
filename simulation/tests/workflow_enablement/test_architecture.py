@@ -1,4 +1,4 @@
-"""Mechanical dependency, transport, and safety guards for the adapter kit."""
+"""Mechanical dependency, transport, and safety guards for workflow enablement."""
 
 from __future__ import annotations
 
@@ -10,11 +10,12 @@ import textwrap
 from pathlib import Path
 
 SIMULATION_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = SIMULATION_ROOT / "nxt_edge_observation"
+PACKAGE_ROOT = SIMULATION_ROOT / "nxt_workflow_enablement"
 
-# The kit converts raw payloads into the canonical Observation contract and
-# nothing else, so exactly one first-party module is reachable.
-ALLOWED_FIRST_PARTY_MODULES = {"nxt_telemetry.observations"}
+# The enablement layer consumes validated commissioned truth and nothing
+# else first-party: adapter and runtime facts arrive as declared plain
+# data from composition roots.
+ALLOWED_FIRST_PARTY_ROOTS = {"nxt_commissioning"}
 
 BANNED_IMPORT_ROOTS = {
     # every other first-party package, upstream and downstream
@@ -26,10 +27,11 @@ BANNED_IMPORT_ROOTS = {
     "nxt_range_demo",
     "nxt_facility",
     "nxt_memory",
-    "nxt_commissioning",
+    "nxt_telemetry",
     "nxt_pilot_ops",
     "nxt_site_runtime",
     "nxt_agent_runtime",
+    "nxt_edge_observation",
     # simulation / USD / robotics stacks
     "simpy",
     "gymnasium",
@@ -65,20 +67,21 @@ BANNED_IMPORT_ROOTS = {
     "httpx",
     "aiohttp",
     "websockets",
-    # process and concurrency surfaces
+    # process, concurrency, and filesystem surfaces: evaluation is pure
     "subprocess",
     "multiprocessing",
     "threading",
     "asyncio",
     "selectors",
     "signal",
+    "os",
+    "pathlib",
+    "io",
     # nondeterminism
     "time",
-    "datetime",
     "uuid",
     "random",
     "secrets",
-    "os",
 }
 
 EXECUTION_TOKENS = (
@@ -108,8 +111,6 @@ FOREIGN_SURFACE_TOKENS = (
     "nxtektal-roi",
 )
 
-# Word-boundary patterns: a bare substring such as "llm" also matches
-# ordinary identifiers like ``fullmatch``.
 LLM_PATTERNS = (
     r"\bopenai\b",
     r"\banthropic\b",
@@ -120,7 +121,7 @@ LLM_PATTERNS = (
     r"\bgenerative\b",
 )
 
-# Canonical contracts this package must consume, never redefine.
+# Canonical contracts this package must reference, never redefine.
 FORBIDDEN_CLASS_DEFINITIONS = {
     "Observation",
     "ObservationFrame",
@@ -137,6 +138,16 @@ FORBIDDEN_CLASS_DEFINITIONS = {
     "PolicyEvaluation",
     "Recommendation",
     "DecisionTrace",
+    "CommissionedSite",
+    "SensorBinding",
+    "CalibrationInfo",
+    "AdapterBindingSet",
+    "EdgeAdapterReport",
+    "EvaluationRecord",
+    "EvaluationCheckpoint",
+    "RuntimeCheckpoint",
+    "AgentRuntime",
+    "RangeSimulation",
 }
 
 OTHER_PACKAGES = (
@@ -153,7 +164,15 @@ OTHER_PACKAGES = (
     "nxt_commissioning",
     "nxt_site_runtime",
     "nxt_agent_runtime",
-    "nxt_workflow_enablement",
+    "nxt_edge_observation",
+)
+
+# The exact runtime-bearing package names this package's *source* may
+# never mention, even in prose: their reverse guards scan raw text.
+RUNTIME_PACKAGE_LITERALS = (
+    "nxt_site_runtime",
+    "nxt_agent_runtime",
+    "nxt_edge_observation",
 )
 
 
@@ -163,17 +182,17 @@ def _package_files() -> list[Path]:
         for path in PACKAGE_ROOT.rglob("*.py")
         if "__pycache__" not in path.parts
     ]
-    assert files, "nxt_edge_observation sources not found"
+    assert files, "nxt_workflow_enablement sources not found"
     return files
 
 
 def _code_text(path: Path) -> str:
-    """Return executable source with docstrings and comments removed.
+    """Return executable source with docstrings removed.
 
-    Documentation is allowed -- and required -- to *name* the transports,
-    robot interfaces, and safety systems this package deliberately does
-    not touch.  The token guards below must therefore inspect real code,
-    not prose that declares an absence.
+    Documentation is allowed -- and required -- to name the transports
+    and safety systems this package deliberately does not touch; the
+    token guards below must inspect real code, not prose declaring an
+    absence.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
@@ -194,13 +213,13 @@ def _code_text(path: Path) -> str:
 
 
 def test_code_text_strips_prose_but_keeps_code():
-    """Negative control for the docstring/comment stripper itself."""
-    probe = PACKAGE_ROOT / "feed.py"
+    """Negative control for the docstring stripper itself."""
+    probe = PACKAGE_ROOT / "launch.py"
     raw = probe.read_text(encoding="utf-8")
     code = _code_text(probe)
-    assert "at-least-once" in raw
-    assert "at-least-once" not in code
-    assert "class FixtureRawSampleFeed" in code
+    assert "composition-root work" in raw
+    assert "composition-root work" not in code
+    assert "class RangeOpsLaunchPlan" in code
 
 
 def _imports_of(path: Path) -> set[str]:
@@ -217,7 +236,7 @@ def _imports_of(path: Path) -> set[str]:
     return modules
 
 
-def test_adapters_import_only_the_canonical_observation_contract():
+def test_the_package_imports_only_commissioned_truth_first_party():
     for path in _package_files():
         for module in _imports_of(path):
             root = module.split(".")[0]
@@ -225,12 +244,23 @@ def test_adapters_import_only_the_canonical_observation_contract():
                 f"{path.name} imports banned module {module}"
             )
             if root.startswith("nxt_"):
-                assert module in ALLOWED_FIRST_PARTY_MODULES, (
-                    f"{path.name} imports unapproved first-party module {module}"
+                assert root in ALLOWED_FIRST_PARTY_ROOTS, (
+                    f"{path.name} imports unapproved first-party module "
+                    f"{module}"
                 )
 
 
-def test_adapters_have_no_execution_foreign_or_llm_surface():
+def test_the_package_never_mentions_a_runtime_package_by_name():
+    for path in _package_files():
+        text = path.read_text(encoding="utf-8")
+        for literal in RUNTIME_PACKAGE_LITERALS:
+            assert literal not in text, (
+                f"{path.name} mentions {literal!r}; the enablement layer "
+                "consumes runtime facts as declared data only"
+            )
+
+
+def test_the_package_has_no_execution_foreign_or_llm_surface():
     for path in _package_files():
         code = _code_text(path)
         for token in EXECUTION_TOKENS + FOREIGN_SURFACE_TOKENS:
@@ -238,11 +268,11 @@ def test_adapters_have_no_execution_foreign_or_llm_surface():
         lowered = code.lower()
         for pattern in LLM_PATTERNS:
             assert re.search(pattern, lowered) is None, (
-                f"{path.name} mentions {pattern!r}"
+                f"{path.name} matches {pattern!r}"
             )
 
 
-def test_adapters_redefine_no_canonical_contract():
+def test_the_package_redefines_no_canonical_contract():
     defined: set[str] = set()
     for path in _package_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -253,7 +283,7 @@ def test_adapters_redefine_no_canonical_contract():
     assert collisions == set(), collisions
 
 
-def test_no_wall_clock_uuid_or_randomness_in_the_adapter_package():
+def test_no_wall_clock_uuid_or_randomness_in_the_package():
     banned_calls = {
         "now",
         "utcnow",
@@ -282,7 +312,7 @@ def test_no_wall_clock_uuid_or_randomness_in_the_adapter_package():
             )
 
 
-def test_no_existing_package_depends_on_the_adapter_kit():
+def test_no_existing_package_depends_on_workflow_enablement():
     offenders = []
     for package in OTHER_PACKAGES:
         package_root = SIMULATION_ROOT / package
@@ -291,14 +321,13 @@ def test_no_existing_package_depends_on_the_adapter_kit():
         for path in package_root.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue
-            if "nxt_edge_observation" in path.read_text(encoding="utf-8"):
+            if "nxt_workflow_enablement" in path.read_text(encoding="utf-8"):
                 offenders.append(str(path.relative_to(SIMULATION_ROOT)))
     assert offenders == []
 
 
 def test_required_existing_packages_are_present():
-    for package in ("nxt_telemetry", "nxt_commissioning", "nxt_site_runtime"):
-        assert (SIMULATION_ROOT / package).is_dir(), package
+    assert (SIMULATION_ROOT / "nxt_commissioning").is_dir()
 
 
 def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess:
@@ -317,16 +346,16 @@ def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess
 
         sys.meta_path.insert(0, Blocker())
 
-        import nxt_edge_observation
+        import nxt_workflow_enablement
 
         surface = (
-            nxt_edge_observation.EdgeObservationAdapterKit,
-            nxt_edge_observation.LoadCellAdapter,
-            nxt_edge_observation.DigitalIOAdapter,
-            nxt_edge_observation.RobotStatusAdapter,
-            nxt_edge_observation.AdapterBindingSet,
-            nxt_edge_observation.FixtureRawSampleFeed,
-            nxt_edge_observation.EdgeAdapterReport,
+            nxt_workflow_enablement.WorkflowRegistry,
+            nxt_workflow_enablement.pilot_workflow_registry,
+            nxt_workflow_enablement.evaluate_pilot_site,
+            nxt_workflow_enablement.EnablementReport,
+            nxt_workflow_enablement.plan_range_ops_launch,
+            nxt_workflow_enablement.RangeOpsLaunchPlan,
+            nxt_workflow_enablement.verify_report_payload,
         )
         print("imported", len(surface))
         """
@@ -339,7 +368,7 @@ def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess
     )
 
 
-def test_the_kit_imports_without_any_runtime_simulation_or_transport_stack():
+def test_the_package_imports_without_any_runtime_simulation_or_transport_stack():
     result = _import_probe(
         (
             "simpy",
@@ -364,10 +393,11 @@ def test_the_kit_imports_without_any_runtime_simulation_or_transport_stack():
             "nxt_range_agent",
             "nxt_facility",
             "nxt_memory",
-            "nxt_commissioning",
+            "nxt_telemetry",
             "nxt_pilot_ops",
             "nxt_site_runtime",
             "nxt_agent_runtime",
+            "nxt_edge_observation",
         )
     )
     assert result.returncode == 0, result.stderr
@@ -375,17 +405,55 @@ def test_the_kit_imports_without_any_runtime_simulation_or_transport_stack():
 
 
 def test_import_blocker_negative_control():
-    result = _import_probe(("nxt_telemetry",))
+    result = _import_probe(("nxt_commissioning",))
     assert result.returncode != 0
     assert "blocked import" in result.stderr
 
 
-def test_the_kit_is_registered_as_a_distribution_package():
+def test_the_package_is_registered_as_a_distribution_package():
     pyproject = (SIMULATION_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"nxt_edge_observation"' in pyproject
+    assert '"nxt_workflow_enablement"' in pyproject
 
 
 def test_the_package_documents_its_absent_physical_boundary():
     text = (PACKAGE_ROOT / "__init__.py").read_text(encoding="utf-8")
     for claim in ("Modbus", "MQTT", "ROS 2", "emergency stop", "fixture-backed"):
         assert claim in text, claim
+
+
+def test_physical_execution_reachability_is_gated_false():
+    """A context claiming reachability must fail the shared gate."""
+    sys.path.insert(0, str(SIMULATION_ROOT))
+    try:
+        from nxt_workflow_enablement import (
+            EnablementContext,
+            OutputLocationPlan,
+            SharedSiteExpectation,
+            SharedSiteVerdict,
+            TransportMode,
+            evaluate_shared_site,
+        )
+        from scripts.pilot_course_a_enablement_fixture import (
+            DEPLOYMENT_ID,
+            SITE_ID,
+            enablement_manifest_payload,
+        )
+    finally:
+        sys.path.remove(str(SIMULATION_ROOT))
+    context = EnablementContext(
+        scenario_name="probe",
+        scenario_t_s=0.0,
+        transport_mode=TransportMode.FIXTURE_ONLY.value,
+        physical_execution_reachable=True,
+        output_locations=OutputLocationPlan(
+            relative_paths=("probe.jsonl",), root_is_empty=True
+        ),
+    )
+    _, result = evaluate_shared_site(
+        enablement_manifest_payload(),
+        expectation=SharedSiteExpectation(
+            site_id=SITE_ID, deployment_id=DEPLOYMENT_ID
+        ),
+        context=context,
+    )
+    assert result.verdict is SharedSiteVerdict.INVALID

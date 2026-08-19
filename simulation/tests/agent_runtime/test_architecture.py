@@ -99,6 +99,7 @@ OTHER_PACKAGES = (
     "nxt_commissioning",
     "nxt_site_runtime",
     "nxt_edge_observation",
+    "nxt_workflow_enablement",
 )
 
 
