@@ -101,6 +101,7 @@ physical observation source or production publisher/sink is implemented.
 | Canonical downstream operational snapshot | Frozen `nxt_facility.state.FacilityState` | Advice, memory, twin stream |
 | Observation provenance and assembly quality | `ObservationFrame` and `AssemblyReport` | Must accompany deployment-path state |
 | Raw-device-to-canonical conversion and its diagnostics | `nxt_edge_observation` adapters and `EdgeAdapterReport` | Adapter evidence only; never facility truth, a second telemetry envelope, or a channel registry |
+| Multi-workflow commissioning readiness | `nxt_workflow_enablement` registry, requirement matrices, verdicts, and content-addressed enablement report | Readiness evidence only; never commissioning truth, state, policy output, or proof a registered capability exists |
 | Shadow policy evaluation and workflow evidence | `nxt_pilot_ops` recommendation, trace, workflow, and ledger contracts | Advisory records; never actuator acknowledgement by themselves |
 | Viewer replay/output | Independent deterministic `RangeOpsEnv` replay through public APIs | Viewer artifacts; never FacilityState input or upstream truth |
 | Dynamic twin projection | Declared layout plus FacilityState stream | USD artifacts; never upstream truth |
@@ -166,6 +167,7 @@ orienting a reviewer:
 | `nxt_site_runtime` | Site Runtime | Sequencing, state-publication quality, envelope, checkpoint/recovery, and idempotent publication orchestration |
 | `nxt_agent_runtime` | Agent Runtime | Deterministic, restart-safe composition of Site Runtime output through Shadow Ops evaluation, with an evaluation checkpoint, evidence journal, pending manager-decision view, and health/status; synthetic sources only, advisory only |
 | `nxt_edge_observation` | Edge Observation Adapter Kit V0 | Converts already-read load-cell, digital-I/O, and robot-status samples into canonical `Observation` objects using commissioned bindings, with explicit conversion diagnostics; fixture-backed, no transport, device, or command surface |
+| `nxt_workflow_enablement` | Pilot Site Workflow Enablement V0 | Registers the three pilot workflow identities, evaluates the shared commissioned site and each workflow's requirements independently, and emits a deterministic enablement report plus fixture-only launch-plan data; readiness gating only, no runtime construction |
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
 | `nxt_range_viewer` / `nxt_range_demo` | Demo and replay | Read-only presentation over exported artifacts |
@@ -208,6 +210,9 @@ runtime dependency between them.
 - [`simulation/docs/edge_observation_v0.md`](../simulation/docs/edge_observation_v0.md):
   raw-device-to-canonical-observation conversion, coverage matrix, and the
   absent physical boundary.
+- [`simulation/docs/workflow_enablement_v0.md`](../simulation/docs/workflow_enablement_v0.md):
+  shared-site gates, independent per-workflow readiness, the deterministic
+  enablement report, and the fixture-only launch boundary.
 - [`simulation/docs/architecture.md`](../simulation/docs/architecture.md): micro
   handoff controller and robot interface.
 - [`docs/AGENT_OPERATING_MANUAL.md`](AGENT_OPERATING_MANUAL.md): merged AI
