@@ -22,7 +22,7 @@
     { "source": "package-lock.json", "target": "package-lock.json", "status": "adapted", "reason": "Regenerated after removing Sites-only dependencies, retaining React, patching Next.js for audited advisories, and adding tests." },
     { "source": "package.json", "target": "package.json", "status": "adapted", "reason": "Renamed and reduced to the standalone read-only Next.js application." },
     { "source": "postcss.config.mjs", "target": null, "status": "excluded", "reason": "Tailwind/PostCSS was unused after adopting plain recovered CSS." },
-    { "source": "public/og.png", "target": "public/og.png", "status": "imported", "reason": "Recovered social preview retained byte-for-byte." },
+    { "source": "public/og.png", "target": "public/og.png", "status": "replaced", "reason": "Recovered bytes retired; the same path now contains original repository-authored artwork generated from assets/social-preview/operational-replay.svg and is not derived from the recovered image." },
     { "source": "tests/rendered-html.test.mjs", "target": "tests/component.test.tsx", "status": "adapted", "reason": "Replaced vinext worker assertion with component, production build, and HTTP smoke coverage." },
     { "source": "tsconfig.json", "target": "tsconfig.json", "status": "adapted", "reason": "Retained strict no-emit configuration and included test sources." },
     { "source": "vite.config.ts", "target": null, "status": "excluded", "reason": "Cloudflare/vinext runtime configuration is not required by standard Next.js." },

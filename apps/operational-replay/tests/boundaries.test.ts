@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -197,13 +196,17 @@ describe("package and safety boundaries", () => {
     expect(demo).toMatch(/PE bond/);
   });
 
-  test("keeps the demo independent of the unresolved recovered og image", () => {
+  test("routes delegate social images to the cleared shared metadata", () => {
+    const layout = readFileSync(join(ROOT, "app", "layout.tsx"), "utf8");
     const page = readFileSync(
       join(ROOT, "app", "edge-gateway-demo", "page.tsx"),
       "utf8",
     );
+    expect(layout).toMatch(/ROOT_METADATA/);
+    expect(page).toMatch(/EDGE_GATEWAY_METADATA/);
+    expect(layout).not.toMatch(/og\.png/);
     expect(page).not.toMatch(/og\.png/);
-    expect(page).toMatch(/images:\s*\[\]/);
+    expect(page).not.toMatch(/images:\s*\[\]/);
   });
 
   test("proves the runtime-import guard catches each forbidden direction", () => {
@@ -266,13 +269,6 @@ describe("package and safety boundaries", () => {
         expect(() => readFileSync(join(ROOT, target))).not.toThrow();
       }
     }
-  });
-
-  test("retains the recovered preview asset byte-for-byte", () => {
-    const bytes = readFileSync(join(ROOT, "public", "og.png"));
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
-      "340b52286f97ae5fd8ea80bd60333dfdc2548f43a4201f0de03602c83f3c2606",
-    );
   });
 
   test("contains no machine-specific paths or archived starter duplicates", () => {
