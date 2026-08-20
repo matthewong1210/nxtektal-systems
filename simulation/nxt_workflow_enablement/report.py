@@ -200,9 +200,37 @@ def canonical_report_json(report: EnablementReport) -> str:
 
 
 def verify_report_payload(payload: Mapping[str, Any]) -> None:
-    """Fail closed when a serialized report's content-derived id is wrong."""
+    """Fail closed on schema, workflow-set, or content-digest violations.
+
+    This is *content* verification only: ``report_id`` is deterministic
+    content addressing, so a mismatch proves the payload no longer
+    matches its own digest.  It is not a signature and proves nothing
+    about who produced the report or whether its issuance was trusted;
+    a consumer that needs provenance must obtain the report from a
+    trusted composition root.
+    """
     if not isinstance(payload, Mapping):
         raise WorkflowEnablementError("payload must be a mapping")
+    if payload.get("schema") != ENABLEMENT_REPORT_SCHEMA:
+        raise WorkflowEnablementError(
+            f"unsupported enablement report schema "
+            f"{payload.get('schema')!r}; expected "
+            f"{ENABLEMENT_REPORT_SCHEMA!r}"
+        )
+    workflows = payload.get("workflows")
+    registered = payload.get("registered_workflow_ids")
+    if not isinstance(workflows, Mapping) or not isinstance(
+        registered, (list, tuple)
+    ):
+        raise WorkflowEnablementError(
+            "the report payload must carry a workflows mapping and a "
+            "registered workflow id list"
+        )
+    if sorted(workflows) != sorted(registered):
+        raise WorkflowEnablementError(
+            "the report's workflow sections do not match its registered "
+            "workflow ids"
+        )
     declared = payload.get("report_id")
     if type(declared) is not str or not declared:
         raise WorkflowEnablementError(
@@ -212,5 +240,6 @@ def verify_report_payload(payload: Mapping[str, Any]) -> None:
     if declared != expected:
         raise WorkflowEnablementError(
             f"report_id {declared!r} does not match the payload digest "
-            f"{expected!r}; the report was altered after issuance"
+            f"{expected!r}; the payload no longer matches its own "
+            "content digest"
         )

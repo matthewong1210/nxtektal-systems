@@ -11,7 +11,9 @@ commissioned site does not support.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from .identity import WorkflowEnablementError, _require_non_blank
@@ -41,36 +43,65 @@ class SharedSiteExpectation:
         _require_non_blank("deployment_id", self.deployment_id)
 
 
+def validate_relative_evidence_paths(paths: object) -> tuple[str, ...]:
+    """Validate a deterministic, collision-safe relative evidence layout."""
+    if not isinstance(paths, tuple) or not paths:
+        raise WorkflowEnablementError(
+            "evidence paths must be a non-empty tuple"
+        )
+    seen: set[str] = set()
+    for path in paths:
+        _require_non_blank("evidence path", path)
+        if path.startswith(("/", "\\")) or "\\" in path:
+            raise WorkflowEnablementError(
+                f"evidence path {path!r} must be a relative POSIX path"
+            )
+        segments = path.split("/")
+        if any(segment in ("", ".", "..") for segment in segments):
+            raise WorkflowEnablementError(
+                f"evidence path {path!r} must not contain empty, '.', "
+                "or '..' segments"
+            )
+        if path in seen:
+            raise WorkflowEnablementError(
+                f"evidence path {path!r} is duplicated"
+            )
+        seen.add(path)
+    return paths
+
+
+def simulation_midnight_issue(value: str) -> str | None:
+    """Return a failure detail, or None when the epoch is valid."""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        return f"simulation midnight is not ISO-8601: {exc}"
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return "simulation midnight must be timezone-aware"
+    if (parsed.hour, parsed.minute, parsed.second, parsed.microsecond) != (
+        0,
+        0,
+        0,
+        0,
+    ):
+        return "simulation midnight must be an exact calendar midnight"
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class OutputLocationPlan:
-    """Deterministic, collision-safe evidence locations (relative only)."""
+    """Deterministic, collision-safe evidence locations (relative only).
+
+    ``root_is_empty`` is declared evidence: the package never touches a
+    filesystem, so the composition root is responsible for proving the
+    declaration against the real evidence root before making it.
+    """
 
     relative_paths: tuple[str, ...]
     root_is_empty: bool
 
     def __post_init__(self) -> None:
-        if not isinstance(self.relative_paths, tuple) or not self.relative_paths:
-            raise WorkflowEnablementError(
-                "relative_paths must be a non-empty tuple"
-            )
-        seen: set[str] = set()
-        for path in self.relative_paths:
-            _require_non_blank("relative_paths entry", path)
-            if path.startswith(("/", "\\")) or "\\" in path:
-                raise WorkflowEnablementError(
-                    f"evidence path {path!r} must be a relative POSIX path"
-                )
-            segments = path.split("/")
-            if any(segment in ("", ".", "..") for segment in segments):
-                raise WorkflowEnablementError(
-                    f"evidence path {path!r} must not contain empty, '.', "
-                    "or '..' segments"
-                )
-            if path in seen:
-                raise WorkflowEnablementError(
-                    f"evidence path {path!r} is duplicated"
-                )
-            seen.add(path)
+        validate_relative_evidence_paths(self.relative_paths)
         if type(self.root_is_empty) is not bool:
             raise WorkflowEnablementError("root_is_empty must be a boolean")
 
@@ -90,10 +121,13 @@ class EnablementContext:
         if (
             isinstance(self.scenario_t_s, bool)
             or not isinstance(self.scenario_t_s, (int, float))
-            or not self.scenario_t_s >= 0
+            or not math.isfinite(self.scenario_t_s)
+            or self.scenario_t_s < 0
         ):
+            # Fail at contract construction: a non-finite value must never
+            # reach report hashing or canonical JSON serialization.
             raise WorkflowEnablementError(
-                "scenario_t_s must be a non-negative number"
+                "scenario_t_s must be a finite non-negative number"
             )
         _require_non_blank("transport_mode", self.transport_mode)
         if type(self.physical_execution_reachable) is not bool:
@@ -129,10 +163,10 @@ class AdapterCompositionEvidence:
                 "a composed adapter kit must not carry an error"
             )
         if not self.composed:
-            if self.error is None or not str(self.error).strip():
+            if type(self.error) is not str or not self.error.strip():
                 raise WorkflowEnablementError(
                     "a failed adapter composition must carry the owner's "
-                    "error detail"
+                    "error detail as a string"
                 )
             if self.adapter_channels:
                 raise WorkflowEnablementError(

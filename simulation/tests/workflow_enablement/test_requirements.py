@@ -15,6 +15,7 @@ from nxt_workflow_enablement import (
     RANGE_OPS_REQUIREMENTS_VERSION,
     RANGE_OPS_WORKFLOW_ID,
     RequirementStatus,
+    WorkflowEnablementError,
     grounds_prerequisites,
     pilot_workflow_registry,
     player_caddy_prerequisites,
@@ -108,11 +109,13 @@ class TestRangeOpsChannelRequirements:
         assert list(first) == sorted(first)
 
     def test_empty_topology_ids_are_rejected(self):
-        from nxt_workflow_enablement import WorkflowEnablementError
-
         with pytest.raises(WorkflowEnablementError):
             required_range_ops_channels(
                 zone_ids=(), station_ids=("ST1",), robot_ids=("R1",)
+            )
+        with pytest.raises(WorkflowEnablementError):
+            required_range_ops_channels(
+                zone_ids=("Z1",), station_ids=(), robot_ids=("R1",)
             )
         with pytest.raises(WorkflowEnablementError):
             required_range_ops_channels(
@@ -199,6 +202,11 @@ class TestPlayerCaddyPrerequisiteScaffold:
         assert all(
             item.status is not RequirementStatus.SATISFIED
             for item in prerequisites
+        )
+
+    def test_every_prerequisite_carries_a_non_blank_detail(self):
+        assert all(
+            item.detail.strip() for item in player_caddy_prerequisites()
         )
 
     def test_caddy_session_contract_is_deferred_not_missing(self):

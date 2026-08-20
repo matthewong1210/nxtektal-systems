@@ -19,7 +19,6 @@ from __future__ import annotations
 import copy
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 from typing import Any, Mapping
 
@@ -36,6 +35,7 @@ from .evidence import (
     RuntimeMode,
     SharedSiteExpectation,
     TransportMode,
+    simulation_midnight_issue,
 )
 from .identity import (
     GROUNDS_WORKFLOW_ID,
@@ -58,7 +58,10 @@ from .requirements import (
 
 SHARED_SITE_INVALID = "shared_site_invalid"
 
-_NOT_EVALUATED = "not evaluated: the shared manifest is invalid"
+_MANIFEST_NOT_EVALUATED = "not evaluated: the shared manifest is invalid"
+_SHARED_SITE_NOT_EVALUATED = (
+    "not evaluated: the shared site failed its gates"
+)
 
 
 class SharedSiteVerdict(StrEnum):
@@ -169,7 +172,11 @@ def evaluate_shared_site(
             "manifest_digest_stable",
         ):
             gates.append(
-                GateResult(gate_id=gate_id, passed=False, detail=_NOT_EVALUATED)
+                GateResult(
+                    gate_id=gate_id,
+                    passed=False,
+                    detail=_MANIFEST_NOT_EVALUATED,
+                )
             )
     else:
         site_matches = site.site_id == expectation.site_id
@@ -290,24 +297,6 @@ def _shared_site_blocked(
     )
 
 
-def _parse_simulation_midnight(value: str) -> str | None:
-    """Return a failure detail, or None when the epoch is valid."""
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError as exc:
-        return f"simulation midnight is not ISO-8601: {exc}"
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        return "simulation midnight must be timezone-aware"
-    if (parsed.hour, parsed.minute, parsed.second, parsed.microsecond) != (
-        0,
-        0,
-        0,
-        0,
-    ):
-        return "simulation midnight must be an exact calendar midnight"
-    return None
-
-
 def evaluate_range_ops(
     *,
     site: CommissionedSite | None,
@@ -341,7 +330,7 @@ def evaluate_range_ops(
                 RequirementResult(
                     requirement_id="shared_site_valid",
                     status=RequirementStatus.MISSING,
-                    detail=_NOT_EVALUATED,
+                    detail=_SHARED_SITE_NOT_EVALUATED,
                 ),
             ),
         )
@@ -410,42 +399,74 @@ def evaluate_range_ops(
         ),
     )
 
-    # 2. Adapter conversion profiles composed by the canonical owner.
+    # 2. Adapter conversion profiles composed by the canonical owner,
+    # and every claimed adapter channel backed by a commissioned binding.
+    # Evidence is declared plain data, so an adapter-channel claim the
+    # validated site does not bind is a fabrication and fails closed
+    # instead of filling coverage.
+    bound_channels = frozenset(
+        binding.channel for binding in site.sensor_bindings
+    )
+    unbacked_claims = tuple(
+        sorted(
+            channel
+            for channel in evidence.adapter.adapter_channels
+            if channel not in bound_channels
+        )
+    )
+    adapter_issues: list[str] = []
+    if not evidence.adapter.composed:
+        adapter_issues.append(
+            f"adapter composition failed closed: {evidence.adapter.error}"
+        )
+    if unbacked_claims:
+        adapter_issues.append(
+            "adapter evidence claims channels the commissioned site does "
+            "not bind: " + ", ".join(unbacked_claims)
+        )
     add(
         "adapter_conversion_profiles",
-        evidence.adapter.composed,
+        not adapter_issues,
         (
             "the edge adapter kit composed over the commissioned "
-            "telemetry-adapter projection"
-            if evidence.adapter.composed
-            else f"adapter composition failed closed: {evidence.adapter.error}"
+            "telemetry-adapter projection and every claimed channel is a "
+            "commissioned binding"
+            if not adapter_issues
+            else "; ".join(adapter_issues)
         ),
     )
 
-    # 3. Adapter profile calibration identities match commissioned truth.
+    # 3. Adapter profile calibration identities match commissioned truth,
+    # and every commissioned CALIBRATED binding has a declared profile
+    # identity -- an empty or partial declaration cannot pass vacuously.
     calibrated_by_sensor = {
         binding.sensor_id: binding.calibration.calibration_id
         for binding in site.sensor_bindings
         if binding.calibration.status is CalibrationStatus.CALIBRATED
     }
-    calibration_issues = tuple(
-        sorted(
-            f"profile for {sensor_id!r} declares calibration "
-            f"{profile_calibration!r}, the commissioned binding requires "
-            f"{calibrated_by_sensor[sensor_id]!r}"
-            for sensor_id, profile_calibration in (
-                evidence.adapter.profile_calibration_ids
-            )
-            if sensor_id in calibrated_by_sensor
-            and profile_calibration != calibrated_by_sensor[sensor_id]
+    declared_by_sensor = dict(evidence.adapter.profile_calibration_ids)
+    calibration_issues = [
+        f"profile for {sensor_id!r} declares calibration "
+        f"{declared_by_sensor[sensor_id]!r}, the commissioned binding "
+        f"requires {commissioned_calibration!r}"
+        for sensor_id, commissioned_calibration in sorted(
+            calibrated_by_sensor.items()
         )
+        if sensor_id in declared_by_sensor
+        and declared_by_sensor[sensor_id] != commissioned_calibration
+    ]
+    calibration_issues.extend(
+        f"no adapter profile calibration identity is declared for the "
+        f"commissioned calibrated sensor {sensor_id!r}"
+        for sensor_id in sorted(calibrated_by_sensor)
+        if sensor_id not in declared_by_sensor
     )
     add(
         "calibration_profile_match",
         not calibration_issues,
         (
-            "every adapter profile bound to a calibrated sensor declares "
-            "the commissioned calibration identity"
+            "every commissioned calibrated sensor has an adapter profile "
+            "declaring the commissioned calibration identity"
             if not calibration_issues
             else "; ".join(calibration_issues)
         ),
@@ -486,16 +507,24 @@ def evaluate_range_ops(
             ),
         )
 
-    # 5. No channel is claimed beyond what the site supports.
+    # 5. No channel is claimed beyond what the site supports, and a
+    # declared fixture input can never impersonate a commissioned
+    # binding's adapter output.
     overlap = tuple(sorted(adapter_channels & declared_channels))
     beyond_requirements = tuple(
         sorted(declared_channels - frozenset(required))
     )
+    impersonated = tuple(sorted(declared_channels & bound_channels))
     claim_issues: list[str] = []
     if overlap:
         claim_issues.append(
             "declared fixture channels duplicate adapter coverage: "
             + ", ".join(overlap)
+        )
+    if impersonated:
+        claim_issues.append(
+            "declared fixture channels impersonate commissioned adapter "
+            "bindings: " + ", ".join(impersonated)
         )
     if beyond_requirements:
         claim_issues.append(
@@ -520,7 +549,7 @@ def evaluate_range_ops(
             f"runtime mode {evidence.runtime.runtime_mode!r} is not "
             f"{RuntimeMode.SHADOW.value!r}; v0 permits Shadow Mode only"
         )
-    midnight_issue = _parse_simulation_midnight(
+    midnight_issue = simulation_midnight_issue(
         evidence.runtime.simulation_midnight_iso
     )
     if midnight_issue is not None:

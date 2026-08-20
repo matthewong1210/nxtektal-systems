@@ -109,10 +109,10 @@ another's.
 | Requirement | Evaluated against |
 |---|---|
 | `commissioned_range_equipment` | ≥1 dispenser, exactly one washer and charging station (the legacy `SiteConfig` projection precondition), ≥1 collection station, robot, and zone |
-| `adapter_conversion_profiles` | the real edge adapter kit composed over `project_telemetry_adapter_config` (declared outcome; a composition error fails closed with the owner's message) |
-| `calibration_profile_match` | every adapter profile bound to a calibrated sensor declares the commissioned calibration identity |
+| `adapter_conversion_profiles` | the real edge adapter kit composed over `project_telemetry_adapter_config` (declared outcome; a composition error fails closed with the owner's message), and every claimed adapter channel is backed by a commissioned binding — a fabricated channel claim cannot fill coverage |
+| `calibration_profile_match` | every commissioned calibrated sensor has a declared adapter-profile calibration identity that matches the commissioned one — an empty or partial declaration fails, never passes vacuously |
 | `complete_channel_coverage` | the requirement channel templates × the site's zone/station/robot IDs are fully covered by adapter channels plus declared non-adapter fixture inputs |
-| `no_unsupported_channel_claims` | declared fixture channels neither duplicate adapter coverage nor claim channels outside the requirement set |
+| `no_unsupported_channel_claims` | declared fixture channels neither duplicate adapter coverage, nor impersonate a commissioned binding, nor claim channels outside the requirement set |
 | `runtime_configuration` | declared runtime mode is `SHADOW`, the simulation epoch is a timezone-aware calendar midnight, and the run is bounded |
 
 The channel templates deliberately re-declare which canonical channels the
@@ -126,11 +126,20 @@ Drift in either direction fails the suite.
 When every requirement is satisfied the verdict is
 `READY_FOR_FIXTURE_SHADOW_MODE` and `plan_range_ops_launch` issues a
 `RangeOpsLaunchPlan` — pure data (identity, transport, mode, bound, evidence
-paths). When any requirement fails, the verdict is `NOT_READY`, the planner
-raises, and no Site Runtime, Agent Runtime, `FacilityState`,
-`PolicyEvaluation`, `NO_ACTION`, `Recommendation`, `DecisionTrace`, or
-pending manager decision can come into existence for the workflow — proven
-on disk by the demo, which keys runtime evidence directories by workflow ID.
+paths). When any requirement fails, the verdict is `NOT_READY` and the
+planner raises, so the honest composition path produces no Site Runtime,
+Agent Runtime, `FacilityState`, `PolicyEvaluation`, `NO_ACTION`,
+`Recommendation`, `DecisionTrace`, or pending manager decision for the
+workflow — proven on disk by the demo, which keys runtime evidence
+directories by workflow ID.
+
+The plan is plain public data, **not an unforgeable capability**: the
+factory in the composition root revalidates every structural claim it can
+(plan type, workflow identity, site/deployment identity, FIXTURE_ONLY
+transport, SHADOW posture) but cannot prove a plan's provenance. The
+composition root is the trusted boundary and must obtain plans from
+`plan_range_ops_launch`; a caller that hand-builds a plan is bypassing
+readiness evaluation and owns that violation.
 
 ## Why Range Operations is not blocked by future Course workflows
 
@@ -186,15 +195,21 @@ commissioning's canonical JSON (sorted keys, compact separators,
 `allow_nan=False`) plus a trailing newline. It carries the disclaimer, the
 site/deployment identity, the manifest digest, the declared scenario name and
 scenario time (never a wall clock), the transport mode,
-`physical_execution_reachable` (always `false`), every shared gate result,
+`physical_execution_reachable` (the declared value — any claim of
+reachability fails the shared gate, so no READY verdict can accompany a
+`true` here), every shared gate result,
 the registered workflow IDs, and one section per workflow with its verdict,
 requirement matrix split into satisfied/missing/unsupported_in_v0/deferred,
 failures, and runtime-assembly eligibility. The summary lists ready and
 not-ready workflow IDs without erasing the individual results. `report_id`
 is `wer_` plus a SHA-256 digest over the canonical payload without the ID
-field; `verify_report_payload` recomputes it and fails closed on any altered
-byte. Identical inputs produce byte-identical reports across processes and
-`PYTHONHASHSEED` values.
+field — deterministic **content addressing, not an authenticity proof**.
+`verify_report_payload` fails closed on a foreign or missing schema, on a
+workflow-section set that does not match the registered IDs, and on any
+altered byte, but it proves only payload/ID consistency; it says nothing
+about who produced the report, and a consumer that needs provenance must
+obtain the report from a trusted composition root. Identical inputs produce
+byte-identical reports across processes and `PYTHONHASHSEED` values.
 
 The report is commissioning and workflow-readiness **evidence**. It is not
 `FacilityState`, telemetry truth, a Course World Model, player session
@@ -262,10 +277,21 @@ produces byte-identical stdout and artifacts across repeat runs and across
   policy contracts plus named owners for the landing model and player-facing
   recommendations (a new advisory-ownership decision, not an extension of the
   existing manager-advisory engines).
-- The readiness evaluation trusts declared evidence gathered by composition
-  roots from canonical owners; it does not re-run adapter conversion itself.
-  The demo and tests always derive evidence from the real kit, and the
-  calibration/coverage cross-checks fail closed on inconsistent claims.
+- The readiness evaluation consumes declared evidence gathered by
+  composition roots from canonical owners; it does not re-run adapter
+  conversion itself. The package cross-checks every claim it can against
+  the validated commissioned site: an adapter-channel claim the site does
+  not bind fails closed, every commissioned calibrated sensor must have a
+  declared profile calibration identity that matches the commissioned one
+  (an empty or partial declaration fails, never passes vacuously), and a
+  declared fixture channel may neither duplicate adapter coverage,
+  impersonate a commissioned binding, nor exceed the requirement set. What
+  remains declared trust — the `composed` flag, adapter-local raw-only
+  profile identities, and `root_is_empty` — must be made true by the
+  composition root (the demo proves `root_is_empty` against the real
+  filesystem via `runtime_evidence_root_is_empty`). No untrusted serialized
+  input can reach a verdict: evaluation inputs are typed constructor-
+  validated objects, not parsed documents.
 - V0 registers exactly the three pilot workflows; adding a fourth workflow
   requires a new evaluator, requirement set, and architecture review — the
   registry deliberately rejects unknown IDs instead of accepting arbitrary

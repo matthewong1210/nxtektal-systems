@@ -9,7 +9,12 @@ import dataclasses
 
 import pytest
 
-from nxt_agent_runtime import AgentRuntime, CycleKind, FailurePolicy
+from nxt_agent_runtime import (
+    AgentRuntime,
+    CycleKind,
+    EvaluationJournal,
+    FailurePolicy,
+)
 from nxt_workflow_enablement import (
     RANGE_OPS_WORKFLOW_ID,
     ReadinessVerdict,
@@ -90,8 +95,6 @@ class TestReadyAssembly:
             plan, enablement_site(payload), root
         )
         runtime.run(max_cycles=MAX_SHADOW_CYCLES)
-        from nxt_agent_runtime import EvaluationJournal
-
         records = EvaluationJournal(root / "evaluations.jsonl").read()
         assert [record.sequence_number for record in records] == [0, 1]
         assert len({record.evaluation_id for record in records}) == 2
@@ -103,8 +106,6 @@ class TestReadyAssembly:
         root = tmp_path / "range"
         first_life = assemble_range_ops_runtime(plan, site, root)
         first_life.run(max_cycles=MAX_SHADOW_CYCLES)
-        from nxt_agent_runtime import EvaluationJournal
-
         journal_before = [
             (record.sequence_number, record.evaluation_id)
             for record in EvaluationJournal(root / "evaluations.jsonl").read()
@@ -146,8 +147,6 @@ class TestReadyAssembly:
         kinds = [outcome.kind for outcome in outcomes]
         assert kinds[0] is CycleKind.REJECTED
         assert CycleKind.EVALUATED in kinds
-        from nxt_agent_runtime import EvaluationJournal
-
         records = EvaluationJournal(root / "evaluations.jsonl").read()
         # Only the corrected redelivery was evaluated; the rejected
         # frame produced no journal record and reused sequence 0.
@@ -193,6 +192,40 @@ class TestNothingAssembledWhenNotReady:
             ready_plan(payload), deployment_id="some-other-deployment"
         )
         with pytest.raises(WorkflowEnablementError, match="identity"):
+            assemble_range_ops_runtime(
+                plan, enablement_site(payload), tmp_path / "range"
+            )
+        assert not (tmp_path / "range").exists()
+
+    @pytest.mark.parametrize(
+        "field, value, match",
+        [
+            ("transport_mode", "LIVE_MODBUS", "fixture-only"),
+            ("runtime_mode", "ACTIVE", "Shadow Mode"),
+        ],
+    )
+    def test_a_plan_outside_the_v0_envelope_is_refused(
+        self, tmp_path, field, value, match
+    ):
+        payload = enablement_manifest_payload()
+        plan = dataclasses.replace(ready_plan(payload), **{field: value})
+        with pytest.raises(WorkflowEnablementError, match=match):
+            assemble_range_ops_runtime(
+                plan, enablement_site(payload), tmp_path / "range"
+            )
+        assert not (tmp_path / "range").exists()
+
+    def test_a_plan_with_a_foreign_evidence_layout_is_refused(
+        self, tmp_path
+    ):
+        # The factory creates exactly one evidence layout; a plan that
+        # declares a different one must be refused rather than silently
+        # ignored, so the plan's evidence_paths stay load-bearing.
+        payload = enablement_manifest_payload()
+        plan = dataclasses.replace(
+            ready_plan(payload), evidence_paths=("other/layout.jsonl",)
+        )
+        with pytest.raises(WorkflowEnablementError, match="evidence layout"):
             assemble_range_ops_runtime(
                 plan, enablement_site(payload), tmp_path / "range"
             )

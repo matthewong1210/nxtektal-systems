@@ -1,10 +1,14 @@
 """Fixture-only Shadow Mode launch-plan data for a READY workflow.
 
-A launch plan is pure data.  Turning it into a running composition is
-composition-root work; this module only proves eligibility and fails
-closed for anything that is not a READY Range Operations workflow.
-Grounds Condition Intelligence and Player Caddy Experience have no v0
-runtime, so no plan can exist for them.
+A launch plan is pure public data, **not an unforgeable capability**:
+nothing here can prove a plan instance came from
+:func:`plan_range_ops_launch`.  The planner is the only honest issuer --
+it fails closed for every NOT_READY workflow -- and the composition
+root is the trusted boundary that must obtain plans from it.  What the
+contract does enforce mechanically is structure: a plan whose fields
+are not a coherent fixture-only Shadow Mode posture cannot be
+constructed at all.  Grounds Condition Intelligence and Player Caddy
+Experience have no v0 runtime, so no plan can exist for them.
 """
 
 from __future__ import annotations
@@ -22,8 +26,14 @@ from .evidence import (
     RangeOpsEvidence,
     RuntimeMode,
     TransportMode,
+    simulation_midnight_issue,
+    validate_relative_evidence_paths,
 )
-from .identity import RANGE_OPS_WORKFLOW_ID, WorkflowEnablementError
+from .identity import (
+    RANGE_OPS_WORKFLOW_ID,
+    WorkflowEnablementError,
+    _require_non_blank,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +49,34 @@ class RangeOpsLaunchPlan:
     simulation_midnight_iso: str
     clean_sensed_valid: bool
     evidence_paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _require_non_blank("workflow_id", self.workflow_id)
+        _require_non_blank("site_id", self.site_id)
+        _require_non_blank("deployment_id", self.deployment_id)
+        _require_non_blank("transport_mode", self.transport_mode)
+        _require_non_blank("runtime_mode", self.runtime_mode)
+        if (
+            isinstance(self.max_cycles, bool)
+            or not isinstance(self.max_cycles, int)
+            or self.max_cycles < 1
+        ):
+            raise WorkflowEnablementError(
+                "max_cycles must be a positive integer"
+            )
+        _require_non_blank(
+            "simulation_midnight_iso", self.simulation_midnight_iso
+        )
+        midnight_issue = simulation_midnight_issue(
+            self.simulation_midnight_iso
+        )
+        if midnight_issue is not None:
+            raise WorkflowEnablementError(midnight_issue)
+        if type(self.clean_sensed_valid) is not bool:
+            raise WorkflowEnablementError(
+                "clean_sensed_valid must be a boolean"
+            )
+        validate_relative_evidence_paths(self.evidence_paths)
 
 
 def plan_range_ops_launch(
@@ -67,6 +105,16 @@ def plan_range_ops_launch(
         raise WorkflowEnablementError(
             "readiness is not runtime-assembly eligible; refusing to plan"
         )
+    if not isinstance(evidence, RangeOpsEvidence):
+        raise WorkflowEnablementError(
+            "evidence must be a RangeOpsEvidence"
+        )
+    if readiness.requirements_version != evidence.requirements_version:
+        raise WorkflowEnablementError(
+            "launch planning requirements version disagreement: readiness "
+            f"declares {readiness.requirements_version!r}, evidence "
+            f"declares {evidence.requirements_version!r}"
+        )
     if (
         not isinstance(shared, SharedSiteResult)
         or shared.verdict is not SharedSiteVerdict.VALID
@@ -79,10 +127,6 @@ def plan_range_ops_launch(
     if not isinstance(context, EnablementContext):
         raise WorkflowEnablementError(
             "context must be an EnablementContext"
-        )
-    if not isinstance(evidence, RangeOpsEvidence):
-        raise WorkflowEnablementError(
-            "evidence must be a RangeOpsEvidence"
         )
     if context.transport_mode != TransportMode.FIXTURE_ONLY.value:
         raise WorkflowEnablementError(

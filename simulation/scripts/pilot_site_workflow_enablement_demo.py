@@ -52,7 +52,6 @@ from scripts.pilot_course_a_enablement_fixture import (  # noqa: E402
     BROKEN_CHANNEL,
     DEPLOYMENT_ID,
     DISCLAIMER,
-    MAX_SHADOW_CYCLES,
     SITE_ID,
     assemble_range_ops_runtime,
     broken_manifest_payload,
@@ -61,6 +60,7 @@ from scripts.pilot_course_a_enablement_fixture import (  # noqa: E402
     enablement_site,
     evaluate_enablement,
     range_ops_evidence,
+    runtime_evidence_root_is_empty,
 )
 
 NOT_READY_REPORT_NAME = "workflow_enablement_report.not_ready.json"
@@ -126,7 +126,13 @@ def run_demo(out_dir: Path) -> str:
     # candidate manifest omits one commissioned dispenser binding, so
     # the shared site stays valid while Range Operations fails closed.
     broken_payload = broken_manifest_payload()
-    broken_evaluation, broken_report = evaluate_enablement(broken_payload)
+    # root_is_empty is declared evidence: prove it against the real
+    # filesystem before declaring it.
+    runtime_root = root / RANGE_OPS_WORKFLOW_ID
+    root_is_empty = runtime_evidence_root_is_empty(runtime_root)
+    broken_evaluation, broken_report = evaluate_enablement(
+        broken_payload, root_is_empty=root_is_empty
+    )
     broken_payload_dict = broken_report.to_payload()
     (root / NOT_READY_REPORT_NAME).write_text(
         canonical_report_json(broken_report), encoding="utf-8"
@@ -159,7 +165,9 @@ def run_demo(out_dir: Path) -> str:
 
     # --- Step 2: the corrected shared manifest.
     payload = enablement_manifest_payload()
-    evaluation, report = evaluate_enablement(payload)
+    evaluation, report = evaluate_enablement(
+        payload, root_is_empty=runtime_evidence_root_is_empty(runtime_root)
+    )
     report_payload = report.to_payload()
     (root / READY_REPORT_NAME).write_text(
         canonical_report_json(report), encoding="utf-8"
@@ -187,9 +195,8 @@ def run_demo(out_dir: Path) -> str:
     # --- Step 3: assemble and run the existing fixture-backed loop for
     # the one READY workflow only.
     site = enablement_site(payload)
-    runtime_root = root / plan.workflow_id
     runtime = assemble_range_ops_runtime(plan, site, runtime_root)
-    outcomes = runtime.run(max_cycles=MAX_SHADOW_CYCLES)
+    outcomes = runtime.run(max_cycles=plan.max_cycles)
     life1_status = runtime.status().to_dict()
     pending = [
         {
@@ -222,10 +229,25 @@ def run_demo(out_dir: Path) -> str:
     # --- Step 4: restart recomposition with stable identities.  The
     # in-memory fixture feed resumes explicitly, exactly like a real
     # at-least-once reader must.
+    # A cycle is consumed only when the at-least-once feed advanced past
+    # it: an acknowledged evaluation (or idempotent replay skip).  A
+    # retained or deferred frame still sits in the feed, so counting bare
+    # sequence numbers would resume past an undelivered cycle.  A general
+    # resume must read the feed cursor itself; the bounded storyline here
+    # acknowledges every delivered cycle.
     completed_cycles = sum(
-        1 for outcome in outcomes if outcome.sequence_number is not None
+        1
+        for outcome in outcomes
+        if outcome.kind.value in ("evaluated", "replay_skipped")
+        and outcome.acknowledged
     )
-    next_sequence = life1_status["last_published_sequence"] + 1
+    last_published = life1_status["last_published_sequence"]
+    if last_published is None:
+        raise SystemExit(
+            "restart recomposition requires a published sequence; the site "
+            "checkpoint reported none after the bounded Shadow Mode run"
+        )
+    next_sequence = last_published + 1
     restarted = assemble_range_ops_runtime(
         plan,
         site,
@@ -326,7 +348,9 @@ def run_demo(out_dir: Path) -> str:
         + ", ".join(workflow_evidence_dirs)
     )
     lines.append("evidence artifacts:")
-    lines.extend(f"  {name}" for name in sorted(artifacts + [DEMO_EVIDENCE_NAME]))
+    lines.extend(
+        f"  {name}" for name in sorted([*artifacts, DEMO_EVIDENCE_NAME])
+    )
     lines.append("")
     lines.append(DISCLAIMER)
     return "\n".join(lines)

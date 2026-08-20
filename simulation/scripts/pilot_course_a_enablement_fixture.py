@@ -246,6 +246,17 @@ def shared_site_expectation() -> SharedSiteExpectation:
     )
 
 
+def runtime_evidence_root_is_empty(evidence_root: Path) -> bool:
+    """Check the real filesystem for the declared collision-safety fact.
+
+    ``OutputLocationPlan.root_is_empty`` is declared evidence inside the
+    package (which never touches a filesystem); the composition root is
+    responsible for making the declaration true.  This helper is that
+    check.
+    """
+    return not evidence_root.exists() or not any(evidence_root.iterdir())
+
+
 def enablement_context(*, root_is_empty: bool = True) -> EnablementContext:
     return EnablementContext(
         scenario_name=ENABLEMENT_SCENARIO_NAME,
@@ -312,17 +323,22 @@ def assemble_range_ops_runtime(
 ) -> AgentRuntime:
     """Bounded composition factory: a READY plan becomes the existing loop.
 
-    Only a plan issued by ``plan_range_ops_launch`` can reach this
-    factory, and that planner fails closed for every NOT_READY workflow,
-    so no runtime, state, evaluation, or evidence can exist for a
-    workflow that did not pass its own gates.  The resume parameters
-    mirror the underlying fixture source: a restarted composition must
-    not replay from the beginning.
+    Trust boundary: ``RangeOpsLaunchPlan`` is plain public data, not an
+    unforgeable capability, so this factory cannot prove a plan came from
+    ``plan_range_ops_launch``.  The composition root is the trusted
+    boundary -- it must obtain the plan from the planner, which fails
+    closed for every NOT_READY workflow.  The factory revalidates every
+    structural claim it can (plan type, workflow identity, site and
+    deployment identity, fixture-only transport, Shadow-Mode posture)
+    and refuses anything else, but a caller that hand-builds a plan is
+    bypassing readiness evaluation and owns that violation.  The resume
+    parameters mirror the underlying fixture source: a restarted
+    composition must not replay from the beginning.
     """
     if not isinstance(plan, RangeOpsLaunchPlan):
         raise WorkflowEnablementError(
-            "runtime assembly requires a RangeOpsLaunchPlan issued by the "
-            "enablement evaluation; refusing to assemble without one"
+            "runtime assembly requires a RangeOpsLaunchPlan; refusing to "
+            "assemble without one"
         )
     if plan.workflow_id != RANGE_OPS_WORKFLOW_ID:
         raise WorkflowEnablementError(
@@ -342,6 +358,12 @@ def assemble_range_ops_runtime(
     if plan.runtime_mode != RuntimeMode.SHADOW.value:
         raise WorkflowEnablementError(
             "runtime assembly is Shadow Mode only in v0"
+        )
+    if plan.evidence_paths != EVIDENCE_RELATIVE_PATHS:
+        raise WorkflowEnablementError(
+            "the plan declares a different evidence layout than this "
+            f"factory creates: {plan.evidence_paths!r} vs "
+            f"{EVIDENCE_RELATIVE_PATHS!r}"
         )
     source = pilot_observation_source(
         site,
@@ -392,5 +414,6 @@ __all__ = [
     "evaluate_enablement",
     "range_ops_evidence",
     "runtime_declaration",
+    "runtime_evidence_root_is_empty",
     "shared_site_expectation",
 ]

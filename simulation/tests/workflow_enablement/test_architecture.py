@@ -217,8 +217,8 @@ def test_code_text_strips_prose_but_keeps_code():
     probe = PACKAGE_ROOT / "launch.py"
     raw = probe.read_text(encoding="utf-8")
     code = _code_text(probe)
-    assert "composition-root work" in raw
-    assert "composition-root work" not in code
+    assert "not an unforgeable capability" in raw
+    assert "not an unforgeable capability" not in code
     assert "class RangeOpsLaunchPlan" in code
 
 

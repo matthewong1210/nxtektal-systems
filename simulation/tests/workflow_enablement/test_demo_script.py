@@ -23,12 +23,16 @@ def run_demo(out_dir: Path, *, hash_seed: str | None = None):
     environment = dict(os.environ)
     if hash_seed is not None:
         environment["PYTHONHASHSEED"] = hash_seed
+    # Finite so a regression that hangs the demo fails the test instead
+    # of blocking the suite; generous because a cold endpoint-scanner
+    # pass over a fresh venv can make the first run legitimately slow.
     return subprocess.run(
         [sys.executable, "-B", str(SCRIPT), "--out", str(out_dir)],
         capture_output=True,
         text=True,
         cwd=SIMULATION_ROOT,
         env=environment,
+        timeout=300,
     )
 
 

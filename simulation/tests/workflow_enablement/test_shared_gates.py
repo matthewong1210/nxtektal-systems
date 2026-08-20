@@ -166,6 +166,32 @@ class TestSharedSiteFailures:
         assert not gate_by_id(result)["transport_fixture_only"].passed
 
 
+class TestEnablementContextScenarioTime:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            False,
+            -1.0,
+            -0.001,
+        ],
+    )
+    def test_non_finite_bool_and_negative_scenario_times_fail_closed(
+        self, value
+    ):
+        # A non-finite value must fail at contract construction, before
+        # any report hashing or canonical JSON serialization can see it.
+        with pytest.raises(WorkflowEnablementError):
+            make_context(scenario_t_s=value)
+
+    @pytest.mark.parametrize("value", [0, 0.0, 63000.0, 86399.5])
+    def test_finite_non_negative_scenario_times_are_accepted(self, value):
+        assert make_context(scenario_t_s=value).scenario_t_s == value
+
+
 class TestOutputLocationPlan:
     @pytest.mark.parametrize(
         "bad_path",

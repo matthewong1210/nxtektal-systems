@@ -257,6 +257,110 @@ class TestRangeOpsGateFailures:
             is RequirementStatus.MISSING
         )
 
+    def test_fabricated_adapter_channel_cannot_satisfy_coverage(
+        self, payload, expectation, context, range_ops_evidence
+    ):
+        # scan.zone.Z1.balls is a required channel, but the commissioned
+        # site binds no sensor to it; an adapter-evidence claim for it is
+        # a fabrication and must fail closed rather than fill coverage.
+        adapter = dataclasses.replace(
+            range_ops_evidence.adapter,
+            adapter_channels=(
+                range_ops_evidence.adapter.adapter_channels
+                + ("scan.zone.Z1.balls",)
+            ),
+        )
+        evidence = dataclasses.replace(
+            range_ops_evidence,
+            adapter=adapter,
+            declared_fixture_channels=tuple(
+                channel
+                for channel in range_ops_evidence.declared_fixture_channels
+                if channel != "scan.zone.Z1.balls"
+            ),
+        )
+        readiness = range_ops_of(
+            evaluate(payload, expectation, context, evidence)
+        )
+        assert readiness.verdict is ReadinessVerdict.NOT_READY
+        assert (
+            requirement_status(readiness, "adapter_conversion_profiles")
+            is RequirementStatus.MISSING
+        )
+
+    def test_empty_profile_calibration_ids_cannot_bypass_calibration(
+        self, payload, expectation, context, range_ops_evidence
+    ):
+        evidence = dataclasses.replace(
+            range_ops_evidence,
+            adapter=dataclasses.replace(
+                range_ops_evidence.adapter, profile_calibration_ids=()
+            ),
+        )
+        readiness = range_ops_of(
+            evaluate(payload, expectation, context, evidence)
+        )
+        assert readiness.verdict is ReadinessVerdict.NOT_READY
+        assert (
+            requirement_status(readiness, "calibration_profile_match")
+            is RequirementStatus.MISSING
+        )
+
+    def test_omitting_one_calibrated_sensor_profile_fails(
+        self, payload, expectation, context, range_ops_evidence
+    ):
+        adapter = range_ops_evidence.adapter
+        evidence = dataclasses.replace(
+            range_ops_evidence,
+            adapter=dataclasses.replace(
+                adapter,
+                profile_calibration_ids=tuple(
+                    pair
+                    for pair in adapter.profile_calibration_ids
+                    if pair[0] != "sensor-lc-washer-wip"
+                ),
+            ),
+        )
+        readiness = range_ops_of(
+            evaluate(payload, expectation, context, evidence)
+        )
+        assert readiness.verdict is ReadinessVerdict.NOT_READY
+        assert (
+            requirement_status(readiness, "calibration_profile_match")
+            is RequirementStatus.MISSING
+        )
+
+    def test_fixture_channel_cannot_impersonate_a_commissioned_binding(
+        self, payload, expectation, context, range_ops_evidence
+    ):
+        # Drop the washer channel from adapter evidence and declare it as
+        # a fixture input instead: a fixture claim for a commissioned
+        # bound channel impersonates adapter output and must fail.
+        adapter = dataclasses.replace(
+            range_ops_evidence.adapter,
+            adapter_channels=tuple(
+                channel
+                for channel in range_ops_evidence.adapter.adapter_channels
+                if channel != "wash.washer.wip"
+            ),
+        )
+        evidence = dataclasses.replace(
+            range_ops_evidence,
+            adapter=adapter,
+            declared_fixture_channels=(
+                range_ops_evidence.declared_fixture_channels
+                + ("wash.washer.wip",)
+            ),
+        )
+        readiness = range_ops_of(
+            evaluate(payload, expectation, context, evidence)
+        )
+        assert readiness.verdict is ReadinessVerdict.NOT_READY
+        assert (
+            requirement_status(readiness, "no_unsupported_channel_claims")
+            is RequirementStatus.MISSING
+        )
+
     def test_requirements_version_mismatch_fails_visibly(
         self, payload, expectation, context, range_ops_evidence
     ):
@@ -268,6 +372,37 @@ class TestRangeOpsGateFailures:
             WorkflowEnablementError, match="requirements version"
         ):
             evaluate(payload, expectation, context, evidence)
+
+
+class TestAdapterEvidenceContract:
+    @pytest.mark.parametrize(
+        "bad_error", [RuntimeError("boom"), 7, b"bytes", "", "   "]
+    )
+    def test_a_failed_composition_requires_a_string_error_detail(
+        self, bad_error
+    ):
+        # A non-string error would serialize via repr (potentially with a
+        # memory address) and break byte-identical reports.
+        from nxt_workflow_enablement import AdapterCompositionEvidence
+
+        with pytest.raises(WorkflowEnablementError, match="string"):
+            AdapterCompositionEvidence(
+                composed=False,
+                error=bad_error,
+                adapter_channels=(),
+                profile_calibration_ids=(),
+            )
+
+    def test_a_failed_composition_with_a_string_error_is_accepted(self):
+        from nxt_workflow_enablement import AdapterCompositionEvidence
+
+        evidence = AdapterCompositionEvidence(
+            composed=False,
+            error="EdgeAdapterError: duplicate profile",
+            adapter_channels=(),
+            profile_calibration_ids=(),
+        )
+        assert evidence.error == "EdgeAdapterError: duplicate profile"
 
 
 class TestCommissioningOwnedGates:

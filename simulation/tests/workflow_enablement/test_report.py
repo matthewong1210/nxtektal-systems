@@ -141,3 +141,43 @@ class TestReportDeterminism:
         decoded["transport_mode"] = "TAMPERED"
         with pytest.raises(WorkflowEnablementError, match="report_id"):
             verify_report_payload(decoded)
+
+    def test_verification_rejects_a_foreign_or_missing_schema(
+        self, payload, expectation, context
+    ):
+        import pytest
+
+        from nxt_workflow_enablement import (
+            WorkflowEnablementError,
+            verify_report_payload,
+        )
+
+        decoded = json.loads(
+            canonical_report_json(build_report(payload, expectation, context))
+        )
+        foreign = dict(decoded)
+        foreign["schema"] = "some-other-report/v9"
+        with pytest.raises(WorkflowEnablementError, match="schema"):
+            verify_report_payload(foreign)
+        del foreign["schema"]
+        with pytest.raises(WorkflowEnablementError, match="schema"):
+            verify_report_payload(foreign)
+
+    def test_verification_rejects_workflow_set_inconsistency(
+        self, payload, expectation, context
+    ):
+        import pytest
+
+        from nxt_workflow_enablement import (
+            WorkflowEnablementError,
+            verify_report_payload,
+        )
+
+        decoded = json.loads(
+            canonical_report_json(build_report(payload, expectation, context))
+        )
+        decoded["registered_workflow_ids"] = decoded[
+            "registered_workflow_ids"
+        ][:-1]
+        with pytest.raises(WorkflowEnablementError, match="workflow"):
+            verify_report_payload(decoded)
