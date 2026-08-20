@@ -13,7 +13,7 @@ Robots solve tasks. NXTektal coordinates the facility.
 
 | Layer | Role | Repository evidence |
 |---|---|---|
-| **AI operations** | Maintains trusted facility state, orchestrates publication-quality state flow, evaluates operating conditions, produces auditable recommendations, and preserves decision evidence | `nxt_commissioning`, `nxt_telemetry`, `nxt_site_runtime`, `nxt_facility`, `nxt_pilot_ops`, `nxt_memory` |
+| **AI operations** | Maintains trusted facility state, orchestrates publication-quality state flow, evaluates operating conditions, produces auditable recommendations, and preserves decision evidence | `nxt_commissioning`, `nxt_telemetry`, `nxt_site_runtime`, `nxt_facility`, `nxt_pilot_ops`, `nxt_memory`, `nxt_workflow_enablement` |
 | **Digital twin** | Turns the same operational state into a time-indexed spatial representation | `nxt_range_twin` |
 | **Robots** | Execute bounded tasks behind deterministic safety and control interfaces | `nxt_sim`; mock execution is implemented, while the Isaac Sim and physical ROS 2 adapters are stubs |
 
@@ -117,7 +117,8 @@ row; the "What is working now" section above describes `main` only.
 | `simulation/nxt_memory/` | Append-only operational evidence for offline analysis | Implemented; no live-loop feedback |
 | `simulation/nxt_range_twin/` | State/layout validation and USD projection | Implemented projection layer |
 | `simulation/nxt_agent_runtime/` | Deterministic composition of Site Runtime output through Shadow Ops evaluation, with evaluation checkpoints, journal, and pending manager decisions | Implemented composition layer; synthetic sources only, advisory only |
-| `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented on an unmerged branch; fixture-backed only, no transport, device connection, or command path |
+| `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented conversion kit; fixture-backed only, no transport, device connection, or command path |
+| `simulation/nxt_workflow_enablement/` | Shared-site commissioning gates, independent per-workflow readiness verdicts, and the deterministic enablement report | Implemented readiness layer; fixture-only, evaluation only, no runtime construction or execution path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |

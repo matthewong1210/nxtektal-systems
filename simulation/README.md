@@ -46,6 +46,7 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 | `nxt_site_runtime` | Input sequencing, publication-quality state envelopes, checkpoint/recovery, and idempotent state-publication coordination |
 | `nxt_agent_runtime` | Deterministic runtime lifecycle over Site Runtime and Shadow Ops: deferred acknowledgement, evaluation checkpoint, journal, and read-only status |
 | `nxt_edge_observation` | Raw device sample conversion into canonical observations, with explicit adapter diagnostics; fixture-backed, no transport or command surface |
+| `nxt_workflow_enablement` | Workflow identity registry, shared-site gates, independent per-workflow readiness verdicts, deterministic enablement report, and fixture-only launch-plan data |
 | `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
 
 The robot handoff packages and Site OS packages remain separate layers. The
