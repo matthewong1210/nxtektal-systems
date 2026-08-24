@@ -153,6 +153,39 @@ class TestReadyAssembly:
         assert [record.sequence_number for record in records] == [0]
 
 
+class TestEvidenceRootCheck:
+    def test_missing_and_empty_roots_are_empty(self, tmp_path):
+        from scripts.pilot_course_a_enablement_fixture import (
+            runtime_evidence_root_is_empty,
+        )
+
+        assert runtime_evidence_root_is_empty(tmp_path / "missing") is True
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert runtime_evidence_root_is_empty(empty) is True
+
+    def test_a_populated_root_is_not_empty(self, tmp_path):
+        from scripts.pilot_course_a_enablement_fixture import (
+            runtime_evidence_root_is_empty,
+        )
+
+        populated = tmp_path / "populated"
+        populated.mkdir()
+        (populated / "snapshots.jsonl").write_text("", encoding="utf-8")
+        assert runtime_evidence_root_is_empty(populated) is False
+
+    def test_a_file_valued_root_fails_closed_instead_of_raising(
+        self, tmp_path
+    ):
+        from scripts.pilot_course_a_enablement_fixture import (
+            runtime_evidence_root_is_empty,
+        )
+
+        file_root = tmp_path / "evidence"
+        file_root.write_text("not a directory", encoding="utf-8")
+        assert runtime_evidence_root_is_empty(file_root) is False
+
+
 class TestNothingAssembledWhenNotReady:
     def test_not_ready_yields_no_plan_and_no_runtime(self, tmp_path):
         payload = broken_manifest_payload()
