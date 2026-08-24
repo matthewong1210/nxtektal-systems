@@ -185,6 +185,87 @@ class TestEvidenceRootCheck:
         file_root.write_text("not a directory", encoding="utf-8")
         assert runtime_evidence_root_is_empty(file_root) is False
 
+    def test_an_unreadable_root_fails_closed_instead_of_raising(
+        self, tmp_path, monkeypatch
+    ):
+        # When the filesystem refuses to prove collision safety, the
+        # declaration must become False, never an exception.
+        from pathlib import Path
+
+        from scripts.pilot_course_a_enablement_fixture import (
+            runtime_evidence_root_is_empty,
+        )
+
+        unreadable = tmp_path / "unreadable"
+        unreadable.mkdir()
+
+        def refuse(self):
+            raise PermissionError(13, "Permission denied", str(self))
+
+        monkeypatch.setattr(Path, "iterdir", refuse)
+        assert runtime_evidence_root_is_empty(unreadable) is False
+
+    def test_a_file_valued_root_makes_the_shared_site_not_ready(
+        self, tmp_path
+    ):
+        from nxt_workflow_enablement import SharedSiteVerdict
+        from scripts.pilot_course_a_enablement_fixture import (
+            RANGE_OPS_WORKFLOW_ID as WORKFLOW_ID,
+        )
+        from scripts.pilot_course_a_enablement_fixture import (
+            evaluate_enablement,
+            runtime_evidence_root_is_empty,
+        )
+
+        runtime_root = tmp_path / WORKFLOW_ID
+        runtime_root.write_text("collision", encoding="utf-8")
+        payload = enablement_manifest_payload()
+        evaluation, _ = evaluate_enablement(
+            payload,
+            root_is_empty=runtime_evidence_root_is_empty(runtime_root),
+        )
+        assert evaluation.shared.verdict is SharedSiteVerdict.INVALID
+        assert "output_location_collision" in evaluation.shared.failures
+        assert all(
+            item.verdict is ReadinessVerdict.NOT_READY
+            for item in evaluation.workflows
+        )
+
+    def test_a_file_valued_root_yields_no_plan_and_no_evidence(
+        self, tmp_path
+    ):
+        from scripts.pilot_course_a_enablement_fixture import (
+            RANGE_OPS_WORKFLOW_ID as WORKFLOW_ID,
+        )
+        from scripts.pilot_course_a_enablement_fixture import (
+            enablement_context,
+            evaluate_enablement,
+            runtime_evidence_root_is_empty,
+        )
+
+        runtime_root = tmp_path / WORKFLOW_ID
+        runtime_root.write_text("collision", encoding="utf-8")
+        payload = enablement_manifest_payload()
+        root_is_empty = runtime_evidence_root_is_empty(runtime_root)
+        evaluation, _ = evaluate_enablement(
+            payload, root_is_empty=root_is_empty
+        )
+        readiness = next(
+            item
+            for item in evaluation.workflows
+            if item.workflow_id == WORKFLOW_ID
+        )
+        with pytest.raises(WorkflowEnablementError):
+            plan_range_ops_launch(
+                readiness=readiness,
+                shared=evaluation.shared,
+                context=enablement_context(root_is_empty=root_is_empty),
+                evidence=range_ops_evidence(payload),
+            )
+        # The colliding path is untouched and no evidence stream exists.
+        assert runtime_root.read_text(encoding="utf-8") == "collision"
+        assert sorted(tmp_path.iterdir()) == [runtime_root]
+
 
 class TestNothingAssembledWhenNotReady:
     def test_not_ready_yields_no_plan_and_no_runtime(self, tmp_path):

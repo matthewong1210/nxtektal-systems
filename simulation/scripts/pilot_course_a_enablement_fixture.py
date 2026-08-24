@@ -252,15 +252,20 @@ def runtime_evidence_root_is_empty(evidence_root: Path) -> bool:
     ``OutputLocationPlan.root_is_empty`` is declared evidence inside the
     package (which never touches a filesystem); the composition root is
     responsible for making the declaration true.  This helper is that
-    check.  A root that exists but is not a directory is a collision,
-    not an error: the declaration becomes False and readiness fails
-    closed instead of raising.
+    check.  It only observes: the path is never created, deleted, or
+    mutated here.  A root that exists but is not a directory is a
+    collision, and a filesystem error that prevents proving collision
+    safety is treated the same way -- the declaration becomes False and
+    readiness fails closed instead of raising.
     """
-    if not evidence_root.exists():
-        return True
-    if not evidence_root.is_dir():
+    try:
+        if not evidence_root.exists():
+            return True
+        if not evidence_root.is_dir():
+            return False
+        return not any(evidence_root.iterdir())
+    except OSError:
         return False
-    return not any(evidence_root.iterdir())
 
 
 def enablement_context(*, root_is_empty: bool = True) -> EnablementContext:
