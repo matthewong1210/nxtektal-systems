@@ -17,20 +17,80 @@ the supplied checkout.
 
 The standalone root commit was not cherry-picked and no unrelated Git history
 was merged. Its clean source was inspected from the verified commit tree, then
-the replay UI, styles, page shell, metadata, lockfile, and preview asset were
-relocated under `apps/operational-replay/`. Text files were adapted in place
-for the canonical repository.
+the replay UI, styles, page shell, metadata, lockfile, and original preview
+asset were relocated under `apps/operational-replay/`. Text files were adapted
+in place for the canonical repository.
 
 The Sites-specific hosting identity, Cloudflare/vinext worker, optional
 database example, authentication helper, and unused migration scaffold were
 excluded. The app now uses the standard Next.js runtime and has no runtime
 dependency on the private Sites repository or the historical legacy source
-repository. The social preview image remains byte-identical to the recovered
-commit.
+repository. The recovered social preview was initially imported byte-for-byte,
+then retired and replaced as recorded below.
 
 `SOURCE_FILE_MAP.json` accounts for every file in the recovered 25-file commit.
 Three untracked Finder-style duplicate files in the supplied checkout were not
 part of that commit and were not imported.
+
+## Public social-preview replacement
+
+Issue [#4](https://github.com/matthewong1210/nxtektal-systems/issues/4)
+tracked the lack of public/commercial-use clearance for the recovered
+`public/og.png`. Embedded metadata was not treated as rights clearance.
+
+### Retired recovered asset
+
+- Path: `public/og.png`
+- Dimensions: `1659 × 948`
+- Size: `1,679,582` bytes
+- SHA-256: `340b52286f97ae5fd8ea80bd60333dfdc2548f43a4201f0de03602c83f3c2606`
+- Disposition: replaced in full. The recovered bytes are not present in the
+  current application tree and are not an input to the replacement generator.
+  The hash remains here solely as disposition evidence and in Git history.
+
+### Active repository-authored asset
+
+- Source artwork:
+  `assets/social-preview/operational-replay.svg`
+- Capture implementation:
+  `scripts/generate-social-preview.mjs`
+- Repository design references:
+  `lib/edge-gateway-model/manifest.ts` and
+  `components/edge-gateway-3d/GatewayCanvas.tsx`
+- Output: `public/og.png`
+- Dimensions: `1200 × 630`
+- MIME: `image/png`
+- Size: `310,600` bytes
+- SHA-256: `9d715678dd5910471591e7c45bd2ca7c9d88178355d0829e655b641e10d844eb`
+- External content/runtime dependencies: none
+
+The SVG and capture script are original NXTektal repository work authored for
+issue #4 under project direction. The enclosure line art uses only the
+repository's own conceptual procedural-geometry vocabulary and palette; it is
+not manufacturing CAD or physical truth. The source contains inline SVG
+primitives and NXTektal text branding only. It contains no recovered-image
+pixels, generative-image output, stock or scraped imagery, customer data,
+external logo, model, texture, linked resource, data URI, font file, or
+third-party content. Text uses the local system-font stack, and no font program
+is embedded or redistributed. On that original-work and no-external-content
+basis, the replacement is designated for NXTektal repository, public-preview,
+and commercial use.
+
+Generate the PNG from the application directory with:
+
+```bash
+npm run preview:generate
+```
+
+The script uses Node.js built-ins and a locally installed Chrome/Chromium. It
+validates the self-contained `1200 × 630` SVG, disables browser background
+networking, captures at device scale `1` in two isolated profiles, and refuses
+the output unless both PNG byte streams match. The committed capture used
+Node.js `22.23.2` and Google Chrome `151.0.7922.169` on macOS `26.2` (`arm64`).
+System-font rasterization can vary across operating systems, so the committed
+SVG is the reviewable artwork authority and the PNG hash above is the active
+byte identity. The PNG is self-contained and requires no runtime or external
+request to render.
 
 ## Architecture status
 

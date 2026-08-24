@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <title>NXTektal Operational Replay social preview</title>
+  <desc>
+    Repository-authored read-only operating-layer artwork with a conceptual
+    Edge Gateway enclosure, connected evidence nodes, and NXTektal text branding.
+  </desc>
+
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050807" />
+      <stop offset="0.56" stop-color="#0b100e" />
+      <stop offset="1" stop-color="#111a16" />
+    </linearGradient>
+    <radialGradient id="gateway-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#2d8d56" stop-opacity="0.22" />
+      <stop offset="1" stop-color="#2d8d56" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="signal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#23583a" />
+      <stop offset="0.52" stop-color="#63f59c" />
+      <stop offset="1" stop-color="#b7ffcf" />
+    </linearGradient>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#31503f" stroke-opacity="0.13" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#background)" />
+  <rect width="1200" height="630" fill="url(#grid)" />
+  <ellipse cx="942" cy="285" rx="330" ry="330" fill="url(#gateway-glow)" />
+  <path d="M0 88 H1200 M0 548 H1200" stroke="#98b8a6" stroke-opacity="0.12" />
+
+  <g font-family="system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
+    <text x="64" y="73" fill="#edf5f0" font-size="29" font-weight="650" letter-spacing="8">
+      <tspan fill="#63f59c">NXT</tspan><tspan>ektal</tspan>
+    </text>
+    <text x="64" y="111" fill="#7fa18f" font-size="12" font-weight="650" letter-spacing="3.7">
+      SITE OPERATING LAYER · READ-ONLY EVIDENCE
+    </text>
+
+    <text x="62" y="218" fill="#edf5f0" font-size="68" font-weight="720" letter-spacing="-2">
+      Operational
+    </text>
+    <text x="60" y="309" fill="#edf5f0" font-size="92" font-weight="760" letter-spacing="-3">
+      Replay
+    </text>
+    <rect x="64" y="339" width="570" height="2" fill="url(#signal)" />
+    <text x="64" y="379" fill="#b5c2bc" font-size="18" font-weight="520" letter-spacing="0.5">
+      State → risk → advice → simulated task → outcome
+    </text>
+    <text x="64" y="412" fill="#6f8a7b" font-size="13" font-weight="600" letter-spacing="2.1">
+      SIMULATION-DERIVED · PRESENTATION ONLY
+    </text>
+
+    <g aria-label="Operating-layer evidence sequence">
+      <path d="M92 495 H625" stroke="#2d5f42" stroke-width="2" />
+      <path d="M92 495 H625" stroke="url(#signal)" stroke-width="2" stroke-dasharray="3 13" />
+
+      <g transform="translate(92 495)">
+        <circle r="17" fill="#0d1612" stroke="#63f59c" stroke-width="2" />
+        <circle r="5" fill="#63f59c" />
+        <text x="0" y="47" fill="#a6b7ad" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1.5">STATE</text>
+      </g>
+      <g transform="translate(225 495)">
+        <circle r="17" fill="#0d1612" stroke="#63f59c" stroke-width="2" />
+        <path d="M-7 5 L0 -7 7 5 Z" fill="none" stroke="#b7ffcf" stroke-width="2" />
+        <text x="0" y="47" fill="#a6b7ad" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1.5">RISK</text>
+      </g>
+      <g transform="translate(358 495)">
+        <circle r="17" fill="#0d1612" stroke="#63f59c" stroke-width="2" />
+        <path d="M-7 0 H7 M2 -5 L7 0 2 5" fill="none" stroke="#b7ffcf" stroke-width="2" />
+        <text x="0" y="47" fill="#a6b7ad" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1.5">ADVICE</text>
+      </g>
+      <g transform="translate(491 495)">
+        <circle r="17" fill="#0d1612" stroke="#63f59c" stroke-width="2" />
+        <rect x="-7" y="-7" width="14" height="14" fill="none" stroke="#b7ffcf" stroke-width="2" />
+        <text x="0" y="47" fill="#a6b7ad" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1.5">TASK</text>
+      </g>
+      <g transform="translate(624 495)">
+        <circle r="17" fill="#0d1612" stroke="#b7ffcf" stroke-width="2" />
+        <path d="M-7 0 L-2 5 8 -6" fill="none" stroke="#b7ffcf" stroke-width="2.5" />
+        <text x="0" y="47" fill="#a6b7ad" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="1.5">OUTCOME</text>
+      </g>
+    </g>
+
+    <g aria-label="Conceptual repository-authored Edge Gateway line drawing">
+      <path d="M793 97 H1054 L1081 124 V475 L1054 502 H793 L766 475 V124 Z" fill="#0b1210" stroke="#6ba182" stroke-width="2" />
+      <path d="M810 119 H1037 L1058 140 V459 L1037 480 H810 L789 459 V140 Z" fill="#101915" stroke="#294d39" />
+      <circle cx="810" cy="140" r="4" fill="#63f59c" />
+      <circle cx="1037" cy="140" r="4" fill="#63f59c" />
+      <circle cx="810" cy="459" r="4" fill="#63f59c" />
+      <circle cx="1037" cy="459" r="4" fill="#63f59c" />
+
+      <text x="923" y="153" fill="#8db09c" font-size="11" font-weight="700" text-anchor="middle" letter-spacing="2">EDGE GATEWAY</text>
+      <text x="923" y="172" fill="#4e725e" font-size="9" font-weight="650" text-anchor="middle" letter-spacing="1.4">CONCEPTUAL ENCLOSURE</text>
+
+      <rect x="823" y="203" width="125" height="72" rx="5" fill="#14211b" stroke="#63f59c" />
+      <path d="M840 225 H931 M840 239 H902 M840 253 H918" stroke="#315d45" stroke-width="2" />
+      <circle cx="933" cy="255" r="5" fill="#63f59c" />
+      <text x="835" y="221" fill="#d9e7df" font-size="10" font-weight="700" letter-spacing="1.2">EDGE COMPUTE</text>
+
+      <rect x="970" y="203" width="63" height="72" rx="5" fill="#121d19" stroke="#4d8062" />
+      <path d="M981 225 H1022 M981 238 H1022 M981 251 H1022" stroke="#63f59c" stroke-width="2" stroke-dasharray="4 4" />
+      <text x="1002" y="220" fill="#d9e7df" font-size="9" font-weight="700" text-anchor="middle">NET</text>
+
+      <rect x="823" y="301" width="89" height="65" rx="5" fill="#121d19" stroke="#4d8062" />
+      <g fill="#63f59c">
+        <circle cx="839" cy="333" r="3" /><circle cx="853" cy="333" r="3" /><circle cx="867" cy="333" r="3" /><circle cx="881" cy="333" r="3" />
+      </g>
+      <text x="867" y="320" fill="#d9e7df" font-size="9" font-weight="700" text-anchor="middle">REMOTE I/O</text>
+
+      <rect x="929" y="301" width="104" height="65" rx="5" fill="#121d19" stroke="#4d8062" />
+      <path d="M948 345 L962 318 976 345 990 318 1004 345" fill="none" stroke="#63f59c" stroke-width="2" />
+      <text x="981" y="320" fill="#d9e7df" font-size="9" font-weight="700" text-anchor="middle">PROTECTED POWER</text>
+
+      <path d="M885 275 V288 H1002 V275 M867 366 V394 H981 V366 M923 288 V394" fill="none" stroke="#315d45" stroke-width="2" />
+      <circle cx="923" cy="288" r="4" fill="#63f59c" />
+      <circle cx="923" cy="394" r="4" fill="#63f59c" />
+      <rect x="823" y="394" width="210" height="34" rx="4" fill="#101b16" stroke="#315d45" />
+      <path d="M838 411 H1018" stroke="#63f59c" stroke-width="2" stroke-dasharray="5 7" />
+      <text x="923" y="450" fill="#668471" font-size="9" font-weight="650" text-anchor="middle" letter-spacing="1.5">LOCAL OBSERVATION BOUNDARY</text>
+
+      <path d="M766 229 H712 L688 205" fill="none" stroke="#63f59c" stroke-width="2" />
+      <circle cx="687" cy="204" r="6" fill="#0c1511" stroke="#63f59c" stroke-width="2" />
+      <text x="677" y="188" fill="#90aa9b" font-size="10" font-weight="700" text-anchor="end" letter-spacing="1.1">OBSERVE</text>
+
+      <path d="M1081 257 H1133" fill="none" stroke="#63f59c" stroke-width="2" />
+      <circle cx="1139" cy="257" r="6" fill="#0c1511" stroke="#63f59c" stroke-width="2" />
+      <text x="1139" y="239" fill="#90aa9b" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="1.1">ASSEMBLE</text>
+
+      <path d="M1081 395 H1120 L1140 415" fill="none" stroke="#63f59c" stroke-width="2" />
+      <circle cx="1145" cy="420" r="6" fill="#0c1511" stroke="#b7ffcf" stroke-width="2" />
+      <text x="1146" y="444" fill="#90aa9b" font-size="10" font-weight="700" text-anchor="middle" letter-spacing="1.1">EVIDENCE</text>
+    </g>
+
+    <text x="64" y="596" fill="#587061" font-size="11" font-weight="600" letter-spacing="2.3">
+      NXTektal · REPOSITORY-AUTHORED PREVIEW · NO EXTERNAL ASSETS
+    </text>
+    <text x="1136" y="596" fill="#587061" font-size="11" font-weight="600" text-anchor="end" letter-spacing="2.3">
+      1200 × 630
+    </text>
+  </g>
+</svg>

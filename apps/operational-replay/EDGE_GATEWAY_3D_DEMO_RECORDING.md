@@ -24,11 +24,16 @@ After the production build completes, the repeatable browser check and its
 uncommitted screenshots can be generated outside the repository with:
 
 ```bash
-node tests/edge-gateway-demo/browser-verify.mjs --output-dir "$(mktemp -d)"
+node tests/edge-gateway-demo/browser-verify.mjs \
+  --base-url http://localhost:3000 \
+  --output-dir "$(mktemp -d)"
 ```
 
-The route's page metadata deliberately omits the unresolved `public/og.png`.
-The root asset remains untouched and continues to block public deployment.
+The route and root page metadata use the cleared, repository-authored
+`public/og.png`. Its reviewable SVG source, deterministic double-capture method,
+active hash, and retired recovered-asset disposition are recorded in
+[`SOURCE_PROVENANCE.md`](SOURCE_PROVENANCE.md). This local capture guide still
+does not perform or authorize a public deployment.
 
 ## Capture setup
 

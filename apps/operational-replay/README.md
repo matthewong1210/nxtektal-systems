@@ -23,6 +23,28 @@ artifacts**.
 Set `NEXT_PUBLIC_REPLAY_SITE_URL` to the deployed origin when validating social
 metadata outside local development. It defaults to `http://localhost:3000`.
 
+## Social preview
+
+`public/og.png` is a `1200 × 630` repository-authored social preview generated
+from the reviewable
+[`assets/social-preview/operational-replay.svg`](assets/social-preview/operational-replay.svg)
+source. The artwork uses NXTektal text branding, inline operating-layer and
+conceptual Edge Gateway geometry, and a system-font stack. It contains no
+external image, model, logo, texture, font file, customer data, or runtime
+dependency or external request.
+
+Regenerate it from this directory with:
+
+```bash
+npm run preview:generate
+```
+
+The capture script disables background networking and accepts the PNG only
+after two isolated renders produce byte-identical files. See
+[SOURCE_PROVENANCE.md](SOURCE_PROVENANCE.md) for authorship, the retired asset's
+disposition, the capture environment, dimensions, MIME, size, SHA-256, and the
+public/commercial-use basis.
+
 ## Edge Gateway 3D demo
 
 The separately code-split CAD-style presentation is available at:
@@ -186,23 +208,21 @@ committed unless repository policy and licensing explicitly permit them.
 
 ## Deployment
 
-Public deployment remains blocked by
-[canonical issue #4](https://github.com/matthewong1210/nxtektal-systems/issues/4)
-until `public/og.png` is cleared or replaced. The repository CI workflow is
-validation-only and does not deploy this application.
-
-The Edge Gateway route's page metadata deliberately omits `public/og.png` and
-does not add another social-image asset. That omission does not resolve or
-authorize the existing root asset: issue #4 remains the deployment blocker,
-and this demo has not been publicly deployed.
+The repository-authored `public/og.png` replacement addresses the asset
+provenance blocker tracked in
+[canonical issue #4](https://github.com/matthewong1210/nxtektal-systems/issues/4).
+Root and Edge Gateway metadata now reference that one cleared asset. The
+repository CI workflow remains validation-only: it does not deploy this
+application, and the replacement does not itself authorize or perform a
+deployment.
 
 The canonical repository has no root JavaScript workspace and this migration
-adds no host-specific deployment binding. After the blocker is resolved,
-configure a host's project/root directory as `apps/operational-replay`, install
-with `npm ci`, build with `npm run build`, and serve with `npm run start`. Set
-`NEXT_PUBLIC_REPLAY_SITE_URL` to the public origin so social metadata resolves
-against the deployed site. The historical Sites/Cloudflare project identity is
-intentionally not reused.
+adds no host-specific deployment binding. For a separately approved future
+deployment, configure a host's project/root directory as
+`apps/operational-replay`, install with `npm ci`, build with `npm run build`,
+and serve with `npm run start`. Set `NEXT_PUBLIC_REPLAY_SITE_URL` to the public
+origin so social metadata resolves against the deployed site. The historical
+Sites/Cloudflare project identity is intentionally not reused.
 
 ## Artifact input
 
