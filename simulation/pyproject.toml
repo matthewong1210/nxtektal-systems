@@ -58,7 +58,11 @@ build-backend = "hatchling.build"
 # nxt_edge_observation converts already-read raw device samples into the
 # existing canonical Observation contract. It is transport-neutral and
 # fixture-backed: no live transport, physical device, or command surface.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation"]
+# nxt_workflow_enablement is the deterministic multi-workflow commissioning
+# readiness layer: workflow identity registration, per-workflow requirement
+# evaluation, the enablement report, and fixture-only launch-plan data. It
+# owns no observation, state, policy, runtime, or execution semantics.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

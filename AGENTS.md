@@ -128,8 +128,9 @@ Use, in order:
    `simulation/docs/range_ops.md`, `simulation/docs/spatial_twin_design.md`, and
    `simulation/docs/shadow_ops_v0.md`, `simulation/docs/commissioning_v0.md`,
    `simulation/docs/site_runtime_design.md`,
-   `simulation/docs/agent_runtime_v1.md`, and
-   `simulation/docs/edge_observation_v0.md`.
+   `simulation/docs/agent_runtime_v1.md`,
+   `simulation/docs/edge_observation_v0.md`, and
+   `simulation/docs/workflow_enablement_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -184,6 +185,23 @@ An untracked document is never repository authority by itself.
   randomness modules, and no existing package may import it. Composing its
   output into `ObservationSource`/`SequencedObservationFrame` belongs to a
   composition root, because only `nxt_agent_runtime` may import the runtime.
+- Keep `nxt_workflow_enablement` a deterministic commissioning-readiness leaf.
+  It may import only `nxt_commissioning`'s public contract/validation/
+  projection surface; adapter and runtime facts reach it as declared
+  plain-data evidence from composition roots. It owns workflow identity
+  registration, versioned per-workflow requirement definitions, independent
+  per-workflow readiness evaluation, the deterministic enablement report, and
+  fixture-only launch-plan data. It owns no observation, state, policy,
+  recommendation, trace, workflow-case, memory, or execution semantics;
+  registering a workflow or a prerequisite never implies the capability is
+  implemented; a NOT_READY workflow gets no runtime, state, evaluation, or
+  evidence; and one workflow's readiness never blocks or satisfies another's.
+  It must not import the simulator, telemetry, edge adapters, Site Runtime,
+  Agent Runtime, Shadow Ops, memory, twin, viewer, robot, ROS, actuator,
+  transport/field-bus, network, filesystem, subprocess, threading, wall-clock,
+  or randomness modules, and no existing package may import it. Turning a
+  READY launch plan into the existing runtime composition belongs to
+  composition roots.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula

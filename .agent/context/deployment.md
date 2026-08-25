@@ -42,6 +42,18 @@ fixture-backed: it opens no connection, drives no device, writes no register,
 and has no robot, actuator, or emergency-stop surface. It is not a physical
 telemetry adapter and does not change the "Not implemented" row above.
 
+Also added after that baseline (verify merge status against the current
+branch): `nxt_workflow_enablement`, Pilot Site Workflow Enablement V0 — a
+deterministic readiness layer that registers the three pilot workflow
+identities, evaluates one shared validated `CommissionedSite` plus declared
+plain-data evidence per workflow, and emits a content-addressed enablement
+report with fixture-only launch-plan data for the READY Range Operations
+workflow. Grounds Condition Intelligence and Player Caddy Experience are
+registered but unimplemented and always NOT_READY in V0; registration never
+implies a course model, camera, inspection, or player capability exists. It
+is evaluation-only: no transport, no device, no runtime construction, and no
+change to the "Not implemented" row above.
+
 ## Static truth versus dynamic evidence
 
 For a physical facility, commissioning owns **what exists and how it is
@@ -160,6 +172,7 @@ give Site Runtime ownership of simulation truth.
 | Surveyed/static physical site fact or calibration | `nxt_commissioning` |
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
+| Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |

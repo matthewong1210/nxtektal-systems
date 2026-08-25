@@ -34,6 +34,7 @@ Classify the feature before choosing a directory:
 | Broad deterministic manager advice over FacilityState | `nxt_facility.decisions` |
 | Observation contract/assembly/quality | `nxt_telemetry` |
 | Raw device payload conversion into a canonical observation | `nxt_edge_observation` (conversion plus the source-side delivery cursor; no transport, sequence validation, state, or command) |
+| Workflow identity registration, per-workflow readiness evaluation, enablement report, launch-plan data | `nxt_workflow_enablement` (readiness gating only; runtime assembly stays in composition roots) |
 | Physical static onboarding facts | `nxt_commissioning` |
 | Policy-specific trust, trace, evaluation, workflow, ledger | `nxt_pilot_ops` |
 | Historical evidence | `nxt_memory` |

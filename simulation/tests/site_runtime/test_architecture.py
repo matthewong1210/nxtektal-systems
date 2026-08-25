@@ -100,6 +100,9 @@ def test_upstream_and_consumers_do_not_depend_on_runtime():
         # a SequencedObservationFrame belongs to a composition root, not to
         # the package.  Only nxt_agent_runtime may import the runtime.
         "nxt_edge_observation",
+        # Workflow enablement gates readiness before any runtime exists;
+        # assembling the runtime it authorizes is composition-root work.
+        "nxt_workflow_enablement",
     )
     for package_name in ("nxt_commissioning", "nxt_pilot_ops", "nxt_edge_observation"):
         assert (SIMULATION_ROOT / package_name).is_dir(), (

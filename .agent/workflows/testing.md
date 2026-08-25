@@ -25,8 +25,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 ```
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
-`twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`, and
-`edge_observation`.
+`twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
+`edge_observation`, and `workflow_enablement`.
 Root Phase 0 tests live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
@@ -49,22 +49,24 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_runtime/test_rejection.py \
   tests/agent_runtime/test_architecture.py \
   tests/edge_observation/test_architecture.py \
+  tests/workflow_enablement/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
   tests/test_emergency_stop.py
 ```
 
-For changes to merged Commissioning, Site Runtime, Agent Runtime, or the Edge
-Observation adapter kit, run the entire relevant package suites in addition to
-the architecture/safety subset:
+For changes to merged Commissioning, Site Runtime, Agent Runtime, the Edge
+Observation adapter kit, or Workflow Enablement, run the entire relevant
+package suites in addition to the architecture/safety subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/commissioning \
   tests/site_runtime \
   tests/agent_runtime \
-  tests/edge_observation
+  tests/edge_observation \
+  tests/workflow_enablement
 ```
 
 Run the full suite before handing off a Python production/contract change:

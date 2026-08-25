@@ -137,6 +137,11 @@ jobs:
         run: >-
           uv run --no-sync python -B -m pytest -o addopts='' -q
           -p no:cacheprovider tests/edge_observation
+      - name: Test Workflow Enablement
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider tests/workflow_enablement
       - name: Test architecture, imports, and safety
         working-directory: simulation
         run: |
@@ -157,6 +162,7 @@ jobs:
             tests/site_runtime/test_rejection.py \
             tests/agent_runtime/test_architecture.py \
             tests/edge_observation/test_architecture.py \
+            tests/workflow_enablement/test_architecture.py \
             tests/test_state_machine.py \
             tests/test_retry_recovery.py \
             tests/test_unload_retry.py \
@@ -177,7 +183,7 @@ jobs:
             nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
             nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
             nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
-            nxt_edge_observation \
+            nxt_edge_observation nxt_workflow_enablement \
             scripts ../.github/scripts
       - name: Build and inspect wheel and source distribution
         working-directory: simulation
@@ -218,7 +224,7 @@ jobs:
               "nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory",
               "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
               "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
-              "nxt_edge_observation",
+              "nxt_edge_observation", "nxt_workflow_enablement",
           )
           repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 
