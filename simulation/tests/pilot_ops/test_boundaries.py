@@ -18,6 +18,7 @@ UPSTREAM_PACKAGES = (
     "nxt_range_agent",
     "nxt_range_demo",
     "nxt_workflow_enablement",
+    "nxt_course_world_model",
 )
 CORE_BANNED_ROOTS = {
     *UPSTREAM_PACKAGES,
