@@ -11,6 +11,7 @@ const DEMO_PRODUCTION_ROOTS = [
   join(ROOT, "components", "edge-gateway-3d"),
   join(ROOT, "lib", "edge-gateway-model"),
 ];
+const YC_DISPATCH_REPORT_ROOT = join(ROOT, "app", "yc-dispatch-report");
 const FORBIDDEN_RUNTIME_IMPORT =
   /(?:^|\/)nxt_|@nxtektal\/roi-engine|nxtektal-roi-engine/;
 
@@ -66,6 +67,46 @@ describe("package and safety boundaries", () => {
       const source = readFileSync(path, "utf8");
       expect(source, relative(ROOT, path)).not.toMatch(
         /\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\s*\(|https?:\/\/|wss?:\/\//,
+      );
+    }
+  });
+
+  test("keeps the YC filming route presentation-only and configuration-owned", () => {
+    const paths = filesUnder(YC_DISPATCH_REPORT_ROOT);
+    const sources = paths.map((path) => readFileSync(path, "utf8"));
+    const combined = sources.join("\n");
+
+    expect(combined).not.toMatch(
+      /\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\s*\(|\bEventSource\s*\(|\bsendBeacon\s*\(|https?:\/\/|wss?:\/\//,
+    );
+    expect(combined).not.toMatch(
+      /@react-three\/fiber|(?:from\s+|import\s*\()["']three["']|ReplayStory|edge-gateway/i,
+    );
+    expect(combined).not.toMatch(
+      /<(?:canvas|svg)\b|\brequestAnimationFrame\b|\b(?:map|route|telemetry|chart)\b/i,
+    );
+    expect(combined).not.toMatch(
+      /No intervention required|Fully autonomous|Autonomous mission completed/i,
+    );
+
+    const configPath = join(
+      YC_DISPATCH_REPORT_ROOT,
+      "yc-dispatch-report.config.ts",
+    );
+    const nonConfigSource = paths
+      .filter((path) => path !== configPath)
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
+    for (const configuredValue of [
+      "RGO-0828-01",
+      "Picker-01",
+      "Collect range balls",
+      "Zone A",
+      "Update after field run",
+      "Supervised prototype",
+    ]) {
+      expect(nonConfigSource, `${configuredValue} is outside the filming config`).not.toContain(
+        configuredValue,
       );
     }
   });

@@ -419,6 +419,46 @@ function withServerOutput(error, output) {
   return new Error(`${error.message}\n${output}`, { cause: error });
 }
 
+function unwrapRuntimeResult(result, phase) {
+  if (result.kind === "exit") {
+    throw unexpectedExitError(result.status, phase);
+  }
+  if (result.kind === "interrupt") {
+    throw interruptionError(result.signal);
+  }
+  if (result.kind === "error") {
+    throw result.error;
+  }
+  return result.value;
+}
+
+async function fetchSmokePage({
+  url,
+  lifecycle,
+  interruptions,
+  fetchImpl,
+  fetchTimeoutMs,
+  bodyTimeoutMs,
+}) {
+  const response = unwrapRuntimeResult(
+    await raceRuntime(
+      lifecycle,
+      interruptions,
+      fetchWithTimeout(url, fetchTimeoutMs, fetchImpl),
+    ),
+    "before route smoke completed",
+  );
+  const html = unwrapRuntimeResult(
+    await raceRuntime(
+      lifecycle,
+      interruptions,
+      readResponseTextWithTimeout(response, bodyTimeoutMs),
+    ),
+    "before route smoke completed",
+  );
+  return { response, html };
+}
+
 export async function runHttpSmoke({
   port: requestedPort,
   spawnServer = spawnReplayServer,
@@ -498,6 +538,56 @@ export async function runHttpSmoke({
     assert.match(html, /Operational replay/);
     assert.match(html, /Simulation results/);
     assert.match(html, /Presentation layer only/);
+
+    const dispatch = await fetchSmokePage({
+      url: `${baseUrl}/yc-dispatch-report`,
+      lifecycle,
+      interruptions,
+      fetchImpl,
+      fetchTimeoutMs,
+      bodyTimeoutMs,
+    });
+    assert.equal(dispatch.response.status, 200);
+    assert.match(
+      dispatch.response.headers.get("content-type") ?? "",
+      /^text\/html\b/i,
+    );
+    assert.match(
+      dispatch.html,
+      /<title>YC Dispatch \/ Report \| NXTektal Systems<\/title>/i,
+    );
+    assert.match(dispatch.html, /data-active-state="dispatch"/i);
+    assert.match(dispatch.html, /data-demo-state="dispatch"/i);
+    assert.match(dispatch.html, /<strong[^>]*>Dispatched<\/strong>/i);
+    assert.doesNotMatch(dispatch.html, /data-demo-state="report"/i);
+    assert.match(
+      dispatch.html,
+      /Prototype orchestration demo · supervised hardware execution/i,
+    );
+
+    const report = await fetchSmokePage({
+      url: `${baseUrl}/yc-dispatch-report?state=report`,
+      lifecycle,
+      interruptions,
+      fetchImpl,
+      fetchTimeoutMs,
+      bodyTimeoutMs,
+    });
+    assert.equal(report.response.status, 200);
+    assert.match(
+      report.response.headers.get("content-type") ?? "",
+      /^text\/html\b/i,
+    );
+    assert.match(
+      report.html,
+      /<title>YC Dispatch \/ Report \| NXTektal Systems<\/title>/i,
+    );
+    assert.match(report.html, /data-active-state="report"/i);
+    assert.match(report.html, /data-demo-state="report"/i);
+    assert.match(report.html, /<strong[^>]*>Complete<\/strong>/i);
+    assert.doesNotMatch(report.html, /data-demo-state="dispatch"/i);
+    assert.match(report.html, /Supervised prototype/i);
+    assert.match(report.html, /Scripted presentation copy · no live log write/i);
     if (interruptions.signalName) {
       throw interruptionError(interruptions.signalName);
     }
