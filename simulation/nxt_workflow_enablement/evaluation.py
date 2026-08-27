@@ -8,8 +8,11 @@ identity expectations, evidence-location safety, transport posture, and
 per-workflow requirement satisfaction.
 
 Isolation is structural: each workflow evaluator receives the shared
-result plus that workflow's own declared evidence and nothing else, so
-one workflow's prerequisites can neither block nor satisfy another's.
+result plus the declared evidence its own requirement set references
+and nothing else, so one workflow's prerequisites can neither block
+nor satisfy another's.  Declared Course Model evidence is shared
+*spatial* evidence referenced only by the two course workflows'
+requirement sets; the Range Operations evaluator never receives it.
 A shared-site failure is the only thing that makes every workflow
 NOT_READY.
 """

@@ -207,6 +207,7 @@ class CartPath:
             raise CourseWorldModelError(
                 f"width_m must be positive; got {self.width_m!r}"
             )
+        object.__setattr__(self, "width_m", width)
         _optional_feature_id(self.hole_id, "hole_id")
 
     def covers(self, x: float, y: float) -> bool:
@@ -382,6 +383,12 @@ class ScanSourceReference:
         raw_provenance = data["provenance"]
         if not isinstance(raw_provenance, Mapping):
             raise CourseWorldModelError("provenance must be a mapping")
+        try:
+            provenance = Provenance.from_dict(raw_provenance)
+        except (TypeError, ValueError) as exc:
+            raise CourseWorldModelError(
+                f"scan source provenance is invalid: {exc}"
+            ) from exc
         return cls(
             source_id=data["source_id"],  # type: ignore[arg-type]
             source_type=data["source_type"],  # type: ignore[arg-type]
@@ -391,7 +398,7 @@ class ScanSourceReference:
             ],
             source_uri=data["source_uri"],  # type: ignore[arg-type]
             source_digest=data["source_digest"],  # type: ignore[arg-type]
-            provenance=Provenance.from_dict(raw_provenance),
+            provenance=provenance,
         )
 
 

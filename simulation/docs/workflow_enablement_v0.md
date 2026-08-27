@@ -315,9 +315,18 @@ produces byte-identical stdout and artifacts across repeat runs and across
   remains declared trust — the `composed` flag, adapter-local raw-only
   profile identities, and `root_is_empty` — must be made true by the
   composition root (the demo proves `root_is_empty` against the real
-  filesystem via `runtime_evidence_root_is_empty`). No untrusted serialized
-  input can reach a verdict: evaluation inputs are typed constructor-
-  validated objects, not parsed documents.
+  filesystem via `runtime_evidence_root_is_empty`). The same boundary
+  applies to Course Model evidence: the evaluators cross-check every
+  claim the validated site can falsify (site, deployment, coordinate-
+  reference identity, frame origin), while the model identity, content
+  digest, frame ID, resolution, and supported-query declaration are
+  declared trust made true by the composition root's honest derivation
+  from a validated model — a fabricated-but-identity-matched declaration
+  is recorded verbatim in the satisfied details, buys no verdict change,
+  and is pinned as the documented boundary by
+  `tests/workflow_enablement/test_course_model_evidence.py`. No
+  untrusted serialized input can reach a verdict: evaluation inputs are
+  typed constructor-validated objects, not parsed documents.
 - V0 registers exactly the three pilot workflows; adding a fourth workflow
   requires a new evaluator, requirement set, and architecture review — the
   registry deliberately rejects unknown IDs instead of accepting arbitrary

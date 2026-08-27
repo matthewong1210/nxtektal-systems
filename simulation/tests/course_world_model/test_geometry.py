@@ -169,3 +169,125 @@ class TestPolyline:
         assert line.distance_to(5.0, 3.0) == pytest.approx(3.0)
         assert line.distance_to(-4.0, 0.0) == pytest.approx(4.0)
         assert line.distance_to(5.0, 0.0) == 0.0
+
+
+class TestInteriorOverlapCompleteness:
+    """Regression coverage: region overlaps that defeat witness sampling.
+
+    Two simple rings can overlap in a region while every vertex, edge
+    midpoint, and centroid of each lies outside or on the boundary of
+    the other. The detector must be complete for simple rings, not a
+    witness sampler.
+    """
+
+    def u_shape(self):
+        return PolygonRing(
+            vertices=(
+                (0.0, 0.0),
+                (3.0, 0.0),
+                (3.0, 3.0),
+                (2.0, 3.0),
+                (2.0, 1.0),
+                (1.0, 1.0),
+                (1.0, 3.0),
+                (0.0, 3.0),
+            )
+        )
+
+    def rotated_u_shape(self):
+        # The same U rotated 180 degrees about (1.5, 1.5).
+        return PolygonRing(
+            vertices=(
+                (3.0, 3.0),
+                (0.0, 3.0),
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 2.0),
+                (2.0, 2.0),
+                (2.0, 0.0),
+                (3.0, 0.0),
+            )
+        )
+
+    def test_interlocking_u_shapes_overlap(self):
+        first = self.u_shape()
+        second = self.rotated_u_shape()
+        # (0.5, 1.5) is strictly inside both rings: a true region overlap.
+        assert first.strictly_contains(0.5, 1.5)
+        assert second.strictly_contains(0.5, 1.5)
+        assert rings_interiors_overlap(first, second)
+        assert rings_interiors_overlap(second, first)
+
+    def test_identical_interiors_with_an_extra_collinear_vertex(self):
+        # Same L-shaped region; the second ring carries one extra
+        # collinear vertex, so the identical-vertex shortcut cannot fire
+        # and the vertex-average centroid falls outside the ring.
+        first = PolygonRing(
+            vertices=(
+                (0.0, 0.0),
+                (4.0, 0.0),
+                (4.0, 1.0),
+                (1.0, 1.0),
+                (1.0, 4.0),
+                (0.0, 4.0),
+            )
+        )
+        second = PolygonRing(
+            vertices=(
+                (0.0, 0.0),
+                (2.0, 0.0),
+                (4.0, 0.0),
+                (4.0, 1.0),
+                (1.0, 1.0),
+                (1.0, 4.0),
+                (0.0, 4.0),
+            )
+        )
+        assert rings_interiors_overlap(first, second)
+        assert rings_interiors_overlap(second, first)
+
+    def test_collinear_band_overlap_is_detected(self):
+        first = PolygonRing(vertices=rectangle(0.0, 0.0, 10.0, 4.0))
+        second = PolygonRing(vertices=rectangle(0.0, 2.0, 10.0, 6.0))
+        assert rings_interiors_overlap(first, second)
+
+    def test_edge_through_vertex_overlap_is_detected(self):
+        # A square and a diamond whose boundaries meet only at the
+        # square's edge midpoints (the diamond's vertices): every
+        # boundary intersection is a touch, yet the interiors overlap.
+        square = PolygonRing(vertices=rectangle(0.0, 0.0, 4.0, 4.0))
+        diamond = PolygonRing(
+            vertices=((2.0, -1.0), (5.0, 2.0), (2.0, 5.0), (-1.0, 2.0))
+        )
+        assert rings_interiors_overlap(square, diamond)
+        assert rings_interiors_overlap(diamond, square)
+
+    def test_abutting_rings_still_do_not_overlap(self):
+        first = PolygonRing(vertices=rectangle(0.0, 0.0, 10.0, 10.0))
+        second = PolygonRing(vertices=rectangle(10.0, 0.0, 20.0, 10.0))
+        assert not rings_interiors_overlap(first, second)
+        # A shorter shared edge (a subset of the neighbour's edge) is
+        # still only a touch, never an interior overlap.
+        third = PolygonRing(vertices=rectangle(10.0, 2.0, 14.0, 8.0))
+        assert not rings_interiors_overlap(first, third)
+
+    def test_corner_touching_rings_do_not_overlap(self):
+        first = PolygonRing(vertices=rectangle(0.0, 0.0, 10.0, 10.0))
+        second = PolygonRing(vertices=rectangle(10.0, 10.0, 20.0, 20.0))
+        assert not rings_interiors_overlap(first, second)
+
+
+class TestNumericContractBounds:
+    def test_astronomical_coordinates_are_rejected_with_the_contract_error(
+        self,
+    ):
+        # A metres-based course frame bounds coordinate magnitude, so
+        # downstream interpolation arithmetic can never overflow, and an
+        # enormous int raises the contracted error, never a raw
+        # OverflowError.
+        with pytest.raises(CourseWorldModelError):
+            PolygonRing(
+                vertices=((0.0, 0.0), (10**400, 0.0), (1.0, 1.0))
+            )
+        with pytest.raises(CourseWorldModelError):
+            PolygonRing(vertices=((0.0, 0.0), (1e10, 0.0), (1.0, 1.0)))

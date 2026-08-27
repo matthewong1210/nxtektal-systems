@@ -126,12 +126,15 @@ class CourseCoordinateFrame:
                 "crs_axes must be exactly ('east', 'north', 'up') or "
                 f"('x', 'y', 'z'); got {self.crs_axes!r}"
             )
-        for field_name, value in (
-            ("origin_crs_x", self.origin_crs_x),
-            ("origin_crs_y", self.origin_crs_y),
-            ("origin_crs_z", self.origin_crs_z),
-        ):
-            require_finite_number(value, field_name)
+        for field_name in ("origin_crs_x", "origin_crs_y", "origin_crs_z"):
+            # Stored as floats so canonical serialization (and the model
+            # content digest) never depends on int-versus-float spelling
+            # of the same origin value.
+            object.__setattr__(
+                self,
+                field_name,
+                require_finite_number(getattr(self, field_name), field_name),
+            )
         _require_non_blank(self.vertical_basis, "vertical_basis")
 
     def to_dict(self) -> dict[str, object]:

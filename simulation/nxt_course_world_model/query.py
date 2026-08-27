@@ -34,6 +34,7 @@ from .features import (
     SurfaceFeature,
     SurfaceType,
 )
+from .geometry import MAX_ABS_COORDINATE_M
 from .model import CourseWorldModel
 
 SUPPORTED_QUERY_KINDS = (
@@ -45,8 +46,6 @@ SUPPORTED_QUERY_KINDS = (
     "surface",
     "trajectory_terrain_intersection",
 )
-
-_BISECTION_ITERATIONS = 60
 
 _SURFACE_RANK = {
     surface_type: index
@@ -71,9 +70,18 @@ def _require_query_number(value: object, field_name: str) -> float:
             f"{field_name} must be an int or float, not "
             f"{type(value).__name__}"
         )
-    numeric = float(value)
+    try:
+        numeric = float(value)
+    except OverflowError as exc:
+        raise CourseModelQueryError(f"{field_name} must be finite") from exc
     if not math.isfinite(numeric):
         raise CourseModelQueryError(f"{field_name} must be finite")
+    if abs(numeric) > MAX_ABS_COORDINATE_M:
+        raise CourseModelQueryError(
+            f"{field_name} magnitude must not exceed "
+            f"{MAX_ABS_COORDINATE_M!r}; the course frame is metric and "
+            f"bounded, got {numeric!r}"
+        )
     return numeric
 
 
@@ -642,14 +650,6 @@ class MapQueryService:
                 "intersection is ambiguous and will not be fabricated"
             )
 
-        def clearance_along(
-            start: TrajectorySample, end: TrajectorySample, parameter: float
-        ) -> float:
-            x = start.x + parameter * (end.x - start.x)
-            y = start.y + parameter * (end.y - start.y)
-            z = start.z + parameter * (end.z - start.z)
-            return z - elevation.elevation_at(x, y)
-
         for index in range(len(samples) - 1):
             start = samples[index]
             end = samples[index + 1]
@@ -665,17 +665,17 @@ class MapQueryService:
                     surface_type=None,
                     surface_feature_id=None,
                 )
-            end_clearance = end.z - elevation.elevation_at(end.x, end.y)
-            if end_clearance <= 0.0:
-                low, high = 0.0, 1.0
-                for _ in range(_BISECTION_ITERATIONS):
-                    midpoint = (low + high) / 2.0
-                    if clearance_along(start, end, midpoint) > 0.0:
-                        low = midpoint
-                    else:
-                        high = midpoint
-                hit_x = start.x + high * (end.x - start.x)
-                hit_y = start.y + high * (end.y - start.y)
+            # Terrain is bilinear per cell, so the clearance along the
+            # straight segment is piecewise quadratic; the grid solves
+            # each piece analytically, which catches a crossing inside
+            # the segment even when both sample endpoints are above the
+            # terrain, and always reports the first contact.
+            parameter = elevation.first_descent_crossing(
+                start.x, start.y, start.z, end.x, end.y, end.z
+            )
+            if parameter is not None:
+                hit_x = start.x + parameter * (end.x - start.x)
+                hit_y = start.y + parameter * (end.y - start.y)
                 hit_z = elevation.elevation_at(hit_x, hit_y)
                 winner = self._classify_primary(hit_x, hit_y)
                 return TrajectoryIntersectionResult(

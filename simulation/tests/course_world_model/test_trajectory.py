@@ -191,3 +191,138 @@ class TestTrajectoryRejection:
                 ((0.0, 100.0, 100.0, 40.0), (1.0, 120.0, 100.0, 30.0)),
                 frame_id=FRAME_ID,
             )
+
+
+def ridge_model():
+    """A small model whose terrain has two 30 m ridges (x=10 and x=30).
+
+    Terrain along any west-east line is piecewise linear:
+    0 -> 30 -> 0 -> 30 -> 0 at x = 0, 10, 20, 30, 40.  A chord between
+    two above-terrain samples can pass straight through a ridge, so
+    endpoint-only clearance checks are provably insufficient here.
+    """
+    from nxt_course_world_model import (
+        ElevationGrid,
+        HoleDefinition,
+        PolygonRing,
+        SurfaceFeature,
+        build_course_world_model,
+    )
+    from tests.course_world_model.conftest import (
+        fixture_scan_sources,
+        make_frame,
+        rectangle,
+    )
+
+    column_heights = (0.0, 30.0, 0.0, 30.0, 0.0)
+    grid = ElevationGrid(
+        origin_x=0.0,
+        origin_y=0.0,
+        cell_size_m=10.0,
+        n_rows=3,
+        n_cols=5,
+        heights=column_heights * 3,
+    )
+    return build_course_world_model(
+        course_model_id="pilot-course-a.ridge-map",
+        model_version="v1",
+        supersedes_version=None,
+        effective_from="2026-07-20T00:00:00+08:00",
+        site_id="pilot-course-a",
+        deployment_id="pilot-a-enablement-v0",
+        display_name="Synthetic ridge terrain regression fixture",
+        frame=make_frame(),
+        elevation=grid,
+        course_boundary=PolygonRing(vertices=rectangle(1.0, 1.0, 39.0, 19.0)),
+        holes=(
+            HoleDefinition(
+                hole_id="hole-r",
+                hole_number=1,
+                boundary=PolygonRing(
+                    vertices=rectangle(2.0, 2.0, 38.0, 18.0)
+                ),
+            ),
+        ),
+        surfaces=(
+            SurfaceFeature(
+                feature_id="hole-r-fairway",
+                surface_type=SurfaceType.FAIRWAY,
+                polygon=PolygonRing(vertices=rectangle(2.0, 2.0, 38.0, 18.0)),
+                hole_id="hole-r",
+            ),
+        ),
+        cart_paths=(),
+        restricted_zones=(),
+        scan_sources=fixture_scan_sources(),
+    )
+
+
+@pytest.fixture(scope="module")
+def ridge_service():
+    return MapQueryService(ridge_model())
+
+
+class TestNonPlanarTerrainHonesty:
+    """Regression coverage: endpoint-only clearance checks are dishonest.
+
+    Terrain is bilinear per cell, so clearance along a straight segment
+    is piecewise quadratic; the service must find the first contact
+    analytically instead of sampling segment endpoints.
+    """
+
+    def test_a_chord_through_a_ridge_is_an_intersection(
+        self, ridge_service
+    ):
+        # Both endpoints sit 5 m above the terrain, but the chord passes
+        # straight through the first 30 m ridge.
+        track = (
+            sample(0.0, 5.0, 10.0, 20.0),
+            sample(1.0, 35.0, 10.0, 20.0),
+        )
+        result = ridge_service.intersect_trajectory_with_terrain(
+            track, frame_id=FRAME_ID
+        )
+        assert result.status is QueryStatus.OK
+        assert result.segment_index == 0
+        # Terrain rises 3 m per metre from x=0, so z=20 is reached at
+        # x = 20/3 on the first upslope.
+        assert result.x == pytest.approx(20.0 / 3.0, abs=1e-6)
+        assert result.z == pytest.approx(20.0, abs=1e-6)
+
+    def test_the_first_crossing_wins_inside_one_segment(
+        self, ridge_service
+    ):
+        # One descending segment whose clearance profile crosses zero
+        # several times (+, -, +, -): the reported hit must be the
+        # first crossing on the first ridge, not a later one.
+        track = (
+            sample(0.0, 5.0, 10.0, 20.0),
+            sample(1.0, 35.0, 10.0, 2.0),
+        )
+        result = ridge_service.intersect_trajectory_with_terrain(
+            track, frame_id=FRAME_ID
+        )
+        assert result.status is QueryStatus.OK
+        assert result.segment_index == 0
+        # z(u) = 20 - 18 u and terrain = 15 + 90 u on the first
+        # upslope, so the first contact is at u = 5/108.
+        expected_x = 5.0 + 30.0 * (5.0 / 108.0)
+        assert result.x == pytest.approx(expected_x, abs=1e-6)
+
+    def test_a_track_above_every_ridge_is_a_true_negative(
+        self, ridge_service
+    ):
+        track = (
+            sample(0.0, 5.0, 10.0, 40.0),
+            sample(1.0, 35.0, 10.0, 35.0),
+        )
+        result = ridge_service.intersect_trajectory_with_terrain(
+            track, frame_id=FRAME_ID
+        )
+        assert result.status is QueryStatus.NO_INTERSECTION
+
+    def test_astronomical_sample_values_are_rejected(self, ridge_service):
+        with pytest.raises(CourseModelQueryError):
+            TrajectorySample(t_s=0.0, x=10**400, y=0.0, z=10.0)
+        with pytest.raises(CourseModelQueryError):
+            TrajectorySample(t_s=0.0, x=5.0, y=10.0, z=1e308)

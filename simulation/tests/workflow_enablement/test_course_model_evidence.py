@@ -439,3 +439,60 @@ class TestRequirementVersioning:
                 range_ops_evidence=range_ops_evidence,
                 registry=registry,
             )
+
+
+class TestDeclaredTrustBoundary:
+    """Pin the documented trust boundary for unverifiable evidence fields.
+
+    The enablement layer cross-checks every claim the validated
+    commissioned site can falsify (site, deployment, CRS identity,
+    frame origin).  The model identity, content digest, frame id,
+    resolution, and supported-query declaration are declared plain data
+    the site cannot falsify: they are made true by the composition
+    root, exactly like the adapter `composed` flag and `root_is_empty`.
+    This test pins that boundary so it stays a documented decision, not
+    a surprise: fabricated-but-identity-matched evidence satisfies the
+    map prerequisites, changes nothing else, and never makes any
+    workflow READY.
+    """
+
+    def test_identity_matched_fabrications_stay_inside_the_boundary(
+        self, payload, expectation, context, range_ops_evidence, valid_evidence
+    ):
+        fabricated = dataclasses.replace(
+            valid_evidence,
+            course_model_id="totally-invented-map",
+            model_version="v999",
+            content_digest="sha256:" + "ab" * 32,
+            frame_id="invented-frame",
+            resolution_m=0.125,
+        )
+        evaluation = evaluate(
+            payload,
+            expectation,
+            context,
+            range_ops_evidence,
+            course_model=fabricated,
+        )
+        workflows = by_workflow(evaluation)
+        grounds = workflows[GROUNDS_WORKFLOW_ID]
+        for requirement_id in GROUNDS_MAP_PREREQUISITES:
+            assert statuses(grounds)[requirement_id] is (
+                RequirementStatus.SATISFIED
+            )
+        # The details carry the *declared* identity verbatim, so a
+        # consumer can audit exactly what was claimed.
+        details = {
+            item.requirement_id: item.detail
+            for item in grounds.requirements
+        }
+        assert "totally-invented-map" in details["course_model_version"]
+        # Fabrication buys no readiness: every verdict is unchanged.
+        assert grounds.verdict is ReadinessVerdict.NOT_READY
+        assert workflows[PLAYER_CADDY_WORKFLOW_ID].verdict is (
+            ReadinessVerdict.NOT_READY
+        )
+        assert workflows[RANGE_OPS_WORKFLOW_ID].verdict is (
+            ReadinessVerdict.READY_FOR_FIXTURE_SHADOW_MODE
+        )
+        assert grounds.runtime_assembly_eligible is False

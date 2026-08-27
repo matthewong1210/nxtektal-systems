@@ -30,6 +30,7 @@ from tests.course_world_model.conftest import (
     DEPLOYMENT_ID,
     SITE_ID,
     build_fixture_model,
+    fixture_cart_paths,
     fixture_scan_sources,
     fixture_surfaces,
     make_frame,
@@ -358,3 +359,204 @@ class TestSiteBinding:
         stray = build_fixture_model(restricted_zones=zones)
         with pytest.raises(CourseWorldModelError):
             validate_model_against_site(stray, enablement_site())
+
+
+def shifted(vertices, dx, dy):
+    return tuple((x + dx, y + dy) for x, y in vertices)
+
+
+class TestAdversarialGeometryRejection:
+    """Regression coverage: witness-evading overlaps must fail validation."""
+
+    U_SHAPE = (
+        (0.0, 0.0),
+        (30.0, 0.0),
+        (30.0, 30.0),
+        (20.0, 30.0),
+        (20.0, 10.0),
+        (10.0, 10.0),
+        (10.0, 30.0),
+        (0.0, 30.0),
+    )
+    ROTATED_U_SHAPE = (
+        (30.0, 30.0),
+        (0.0, 30.0),
+        (0.0, 0.0),
+        (10.0, 0.0),
+        (10.0, 20.0),
+        (20.0, 20.0),
+        (20.0, 0.0),
+        (30.0, 0.0),
+    )
+
+    def test_interlocking_u_surfaces_are_rejected(self):
+        surfaces = fixture_surfaces() + (
+            SurfaceFeature(
+                feature_id="adv-green",
+                surface_type=SurfaceType.GREEN,
+                polygon=PolygonRing(
+                    vertices=shifted(self.U_SHAPE, 250.0, 120.0)
+                ),
+                hole_id=None,
+            ),
+            SurfaceFeature(
+                feature_id="adv-water",
+                surface_type=SurfaceType.WATER,
+                polygon=PolygonRing(
+                    vertices=shifted(self.ROTATED_U_SHAPE, 250.0, 120.0)
+                ),
+                hole_id=None,
+            ),
+        )
+        with pytest.raises(CourseWorldModelError) as excinfo:
+            build_fixture_model(surfaces=surfaces)
+        assert "overlap" in str(excinfo.value)
+
+    def test_identical_interiors_with_extra_collinear_vertex_rejected(self):
+        first = (
+            (250.0, 120.0),
+            (290.0, 120.0),
+            (290.0, 130.0),
+            (260.0, 130.0),
+            (260.0, 160.0),
+            (250.0, 160.0),
+        )
+        second = (
+            (250.0, 120.0),
+            (270.0, 120.0),
+            (290.0, 120.0),
+            (290.0, 130.0),
+            (260.0, 130.0),
+            (260.0, 160.0),
+            (250.0, 160.0),
+        )
+        surfaces = fixture_surfaces() + (
+            SurfaceFeature(
+                feature_id="adv-green",
+                surface_type=SurfaceType.GREEN,
+                polygon=PolygonRing(vertices=first),
+                hole_id=None,
+            ),
+            SurfaceFeature(
+                feature_id="adv-water",
+                surface_type=SurfaceType.WATER,
+                polygon=PolygonRing(vertices=second),
+                hole_id=None,
+            ),
+        )
+        with pytest.raises(CourseWorldModelError) as excinfo:
+            build_fixture_model(surfaces=surfaces)
+        assert "overlap" in str(excinfo.value)
+
+
+class TestHoleAttributionConsistency:
+    """A declared hole reference must be geometrically consistent."""
+
+    def test_a_surface_outside_its_declared_hole_is_rejected(self):
+        surfaces = fixture_surfaces() + (
+            SurfaceFeature(
+                feature_id="hole-7-stray-rough",
+                surface_type=SurfaceType.ROUGH,
+                polygon=PolygonRing(
+                    vertices=rectangle(292.0, 170.0, 296.0, 180.0)
+                ),
+                hole_id="hole-7",
+            ),
+        )
+        with pytest.raises(CourseWorldModelError) as excinfo:
+            build_fixture_model(surfaces=surfaces)
+        assert "hole" in str(excinfo.value)
+
+    def test_a_cart_path_outside_its_declared_hole_is_rejected(self):
+        from nxt_course_world_model import CartPath, Polyline
+
+        paths = fixture_cart_paths() + (
+            CartPath(
+                feature_id="stray-path",
+                centerline=Polyline(
+                    vertices=((292.0, 170.0), (296.0, 180.0))
+                ),
+                width_m=2.0,
+                hole_id="hole-7",
+            ),
+        )
+        with pytest.raises(CourseWorldModelError):
+            build_fixture_model(cart_paths=paths)
+
+
+class TestZoneReferenceReconciliation:
+    """A commissioned-zone reference must match the surveyed extent."""
+
+    def test_a_disjoint_zone_reference_is_rejected(self, model):
+        import dataclasses
+
+        zones = tuple(
+            dataclasses.replace(
+                zone,
+                polygon=PolygonRing(
+                    vertices=rectangle(250.0, 150.0, 252.0, 152.0)
+                ),
+            )
+            if zone.commissioned_zone_id == "Z1"
+            else zone
+            for zone in model.restricted_zones
+        )
+        stray = build_fixture_model(restricted_zones=zones)
+        with pytest.raises(CourseWorldModelError) as excinfo:
+            validate_model_against_site(stray, enablement_site())
+        assert "Z1" in str(excinfo.value)
+
+
+class TestVerificationAndDigestHardening:
+    def test_verify_rejects_structurally_invalid_payloads(
+        self, model_payload
+    ):
+        import hashlib
+
+        from nxt_commissioning import canonical_projection_json
+
+        model_payload["holes"] = "not-a-list-at-all"
+        identity = {
+            key: value
+            for key, value in model_payload.items()
+            if key not in ("content_digest", "display_name")
+        }
+        model_payload["content_digest"] = "sha256:" + hashlib.sha256(
+            canonical_projection_json(identity).encode("utf-8")
+        ).hexdigest()
+        with pytest.raises(CourseWorldModelError):
+            verify_model_payload(model_payload)
+
+    def test_verify_wraps_non_finite_payload_values(self, model_payload):
+        model_payload["elevation"]["heights"][0] = float("nan")
+        with pytest.raises(CourseWorldModelError):
+            verify_model_payload(model_payload)
+
+    def test_numeric_representation_does_not_change_identity(self, model):
+        from nxt_course_world_model import require_consistent_content
+
+        as_int = build_fixture_model(frame=make_frame(origin_crs_z=5))
+        as_float = build_fixture_model(frame=make_frame(origin_crs_z=5.0))
+        assert as_int.content_digest == as_float.content_digest
+        require_consistent_content(as_int, as_float)
+
+    def test_integer_heights_digest_like_their_float_values(self):
+        from tests.course_world_model.conftest import make_grid
+
+        flat_int = make_grid(heights=(2,) * (21 * 31))
+        flat_float = make_grid(heights=(2.0,) * (21 * 31))
+        int_model = build_fixture_model(elevation=flat_int)
+        float_model = build_fixture_model(elevation=flat_float)
+        assert int_model.content_digest == float_model.content_digest
+
+    def test_astronomical_query_inputs_raise_the_contract_error(self, model):
+        from nxt_course_world_model import (
+            CourseModelQueryError,
+            MapQueryService,
+        )
+
+        service = MapQueryService(model)
+        with pytest.raises(CourseModelQueryError):
+            service.get_elevation(10**400, 0.0)
+        with pytest.raises(CourseModelQueryError):
+            service.get_nearby_hazards(150.0, 100.0, 10**400)

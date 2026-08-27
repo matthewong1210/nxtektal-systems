@@ -22,22 +22,40 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from decimal import Decimal
+from fractions import Fraction
 
 from .errors import CourseWorldModelError
 
 _MINIMUM_RING_VERTICES = 3
 _MINIMUM_POLYLINE_VERTICES = 2
 
+# The metric contract bound: every coordinate, height, and length in the
+# course-local frame (and the commissioned CRS values the frame records)
+# must stay within one gigametre.  Any terrestrial coordinate fits with
+# enormous margin, and the bound guarantees that every downstream
+# interpolation, slope, distance, and clearance computation stays far
+# from float overflow, so a finite-but-absurd value can never turn into
+# a silently wrong result.
+MAX_ABS_COORDINATE_M = 1e9
+
 
 def require_finite_number(value: object, field_name: str) -> float:
-    """Validate one finite numeric value and return it as a float."""
+    """Validate one finite, contract-bounded number; return it as float."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise CourseWorldModelError(
             f"{field_name} must be an int or float, not {type(value).__name__}"
         )
-    numeric = float(value)
+    try:
+        numeric = float(value)
+    except OverflowError as exc:
+        raise CourseWorldModelError(f"{field_name} must be finite") from exc
     if not math.isfinite(numeric):
         raise CourseWorldModelError(f"{field_name} must be finite")
+    if abs(numeric) > MAX_ABS_COORDINATE_M:
+        raise CourseWorldModelError(
+            f"{field_name} magnitude must not exceed "
+            f"{MAX_ABS_COORDINATE_M!r} metres; got {numeric!r}"
+        )
     return numeric
 
 
@@ -278,20 +296,6 @@ class PolygonRing:
             _point_segment_distance(x, y, *edge) for edge in self._edges()
         )
 
-    def _interior_witnesses(self) -> tuple[tuple[float, float], ...]:
-        witnesses = list(self.vertices)
-        witnesses.extend(
-            ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
-            for a, b in self._edges()
-        )
-        centroid = (
-            sum(vertex[0] for vertex in self.vertices) / len(self.vertices),
-            sum(vertex[1] for vertex in self.vertices) / len(self.vertices),
-        )
-        if self.strictly_contains(*centroid):
-            witnesses.append(centroid)
-        return tuple(witnesses)
-
     def to_dict(self) -> dict[str, object]:
         return {
             "vertices": [[vertex[0], vertex[1]] for vertex in self.vertices]
@@ -316,14 +320,213 @@ class PolygonRing:
         return cls(vertices=tuple(vertices))
 
 
-def rings_interiors_overlap(first: PolygonRing, second: PolygonRing) -> bool:
-    """True when two rings share interior area.
+# ---------------------------------------------------------------------------
+# Exact-rational predicates for validation-time region decisions.
+#
+# ``Fraction(str(value))`` preserves the shortest exact decimal form of
+# every coordinate, so intersection parameters, partition midpoints,
+# and containment ray casts below are computed without any rounding at
+# all: the interior-overlap decision is exact, not sampled.
+# ---------------------------------------------------------------------------
 
-    Shared edges and touching vertices are not interior overlap.  The
-    V0 detection combines proper edge crossings, strict containment of
-    the other ring's vertices, edge midpoints, and interior centroids,
-    and an identical-vertex-set check; it is exhaustive for the simple
-    convex-and-mildly-concave rings this contract stores.
+_FractionPoint = tuple[Fraction, Fraction]
+
+
+def _fraction_vertices(
+    vertices: tuple[tuple[float, float], ...],
+) -> tuple[_FractionPoint, ...]:
+    return tuple(
+        (Fraction(str(vertex[0])), Fraction(str(vertex[1])))
+        for vertex in vertices
+    )
+
+
+def _exact_edges(
+    vertices: tuple[_FractionPoint, ...], *, closed: bool
+) -> tuple[tuple[_FractionPoint, _FractionPoint], ...]:
+    count = len(vertices)
+    pairs = [
+        (vertices[index], vertices[index + 1]) for index in range(count - 1)
+    ]
+    if closed:
+        pairs.append((vertices[-1], vertices[0]))
+    return tuple(pairs)
+
+
+def _orientation_exact(
+    a: _FractionPoint, b: _FractionPoint, c: _FractionPoint
+) -> int:
+    cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    if cross > 0:
+        return 1
+    if cross < 0:
+        return -1
+    return 0
+
+
+def _within_box_exact(
+    point: _FractionPoint, a: _FractionPoint, b: _FractionPoint
+) -> bool:
+    return (
+        min(a[0], b[0]) <= point[0] <= max(a[0], b[0])
+        and min(a[1], b[1]) <= point[1] <= max(a[1], b[1])
+    )
+
+
+def _on_segment_exact(
+    point: _FractionPoint, a: _FractionPoint, b: _FractionPoint
+) -> bool:
+    return _orientation_exact(a, b, point) == 0 and _within_box_exact(
+        point, a, b
+    )
+
+
+def _proper_cross_exact(
+    p1: _FractionPoint,
+    p2: _FractionPoint,
+    q1: _FractionPoint,
+    q2: _FractionPoint,
+) -> bool:
+    o1 = _orientation_exact(p1, p2, q1)
+    o2 = _orientation_exact(p1, p2, q2)
+    o3 = _orientation_exact(q1, q2, p1)
+    o4 = _orientation_exact(q1, q2, p2)
+    return 0 not in (o1, o2, o3, o4) and o1 != o2 and o3 != o4
+
+
+def _ring_contains_exact(
+    vertices: tuple[_FractionPoint, ...],
+    point: _FractionPoint,
+    *,
+    strict: bool,
+) -> bool:
+    for a, b in _exact_edges(vertices, closed=True):
+        if _on_segment_exact(point, a, b):
+            return not strict
+    inside = False
+    count = len(vertices)
+    previous = count - 1
+    for index in range(count):
+        xi, yi = vertices[index]
+        xj, yj = vertices[previous]
+        if (yi > point[1]) != (yj > point[1]):
+            crossing_x = xi + (xj - xi) * (point[1] - yi) / (yj - yi)
+            if point[0] < crossing_x:
+                inside = not inside
+        previous = index
+    return inside
+
+
+def _segment_intersection_params(
+    a: _FractionPoint,
+    b: _FractionPoint,
+    c: _FractionPoint,
+    d: _FractionPoint,
+) -> tuple[Fraction, ...]:
+    """Parameters on segment a-b (in [0, 1]) where it meets segment c-d."""
+    r = (b[0] - a[0], b[1] - a[1])
+    s = (d[0] - c[0], d[1] - c[1])
+    denominator = r[0] * s[1] - r[1] * s[0]
+    offset = (c[0] - a[0], c[1] - a[1])
+    if denominator != 0:
+        t = (offset[0] * s[1] - offset[1] * s[0]) / denominator
+        u = (offset[0] * r[1] - offset[1] * r[0]) / denominator
+        if 0 <= t <= 1 and 0 <= u <= 1:
+            return (t,)
+        return ()
+    if _orientation_exact(a, b, c) != 0:
+        return ()  # parallel but not collinear
+    length_squared = r[0] * r[0] + r[1] * r[1]
+    t_c = ((c[0] - a[0]) * r[0] + (c[1] - a[1]) * r[1]) / length_squared
+    t_d = ((d[0] - a[0]) * r[0] + (d[1] - a[1]) * r[1]) / length_squared
+    low, high = (t_c, t_d) if t_c <= t_d else (t_d, t_c)
+    low = max(low, Fraction(0))
+    high = min(high, Fraction(1))
+    if low > high:
+        return ()
+    if low == high:
+        return (low,)
+    return (low, high)
+
+
+def _collinear_overlap_interval(
+    a: _FractionPoint,
+    b: _FractionPoint,
+    c: _FractionPoint,
+    d: _FractionPoint,
+) -> tuple[Fraction, Fraction] | None:
+    """The positive-length collinear overlap of c-d on a-b, or None."""
+    r = (b[0] - a[0], b[1] - a[1])
+    s = (d[0] - c[0], d[1] - c[1])
+    if r[0] * s[1] - r[1] * s[0] != 0:
+        return None
+    if _orientation_exact(a, b, c) != 0:
+        return None
+    length_squared = r[0] * r[0] + r[1] * r[1]
+    t_c = ((c[0] - a[0]) * r[0] + (c[1] - a[1]) * r[1]) / length_squared
+    t_d = ((d[0] - a[0]) * r[0] + (d[1] - a[1]) * r[1]) / length_squared
+    low, high = (t_c, t_d) if t_c <= t_d else (t_d, t_c)
+    low = max(low, Fraction(0))
+    high = min(high, Fraction(1))
+    if low >= high:
+        return None
+    return (low, high)
+
+
+def _ring_is_ccw(vertices: tuple[_FractionPoint, ...]) -> bool:
+    total = Fraction(0)
+    count = len(vertices)
+    for index in range(count):
+        ax, ay = vertices[index]
+        bx, by = vertices[(index + 1) % count]
+        total += ax * by - ay * bx
+    return total > 0
+
+
+def _interior_normal(
+    a: _FractionPoint, b: _FractionPoint, *, ccw: bool
+) -> _FractionPoint:
+    direction = (b[0] - a[0], b[1] - a[1])
+    if ccw:
+        return (-direction[1], direction[0])
+    return (direction[1], -direction[0])
+
+
+def _partition_midpoint_strictly_inside(
+    edges: tuple[tuple[_FractionPoint, _FractionPoint], ...],
+    other_vertices: tuple[_FractionPoint, ...],
+) -> bool:
+    other_edges = _exact_edges(other_vertices, closed=True)
+    for a, b in edges:
+        parameters = {Fraction(0), Fraction(1)}
+        for c, d in other_edges:
+            parameters.update(_segment_intersection_params(a, b, c, d))
+        ordered = sorted(parameters)
+        for low, high in zip(ordered, ordered[1:]):
+            midpoint_parameter = (low + high) / 2
+            midpoint = (
+                a[0] + (b[0] - a[0]) * midpoint_parameter,
+                a[1] + (b[1] - a[1]) * midpoint_parameter,
+            )
+            if _ring_contains_exact(other_vertices, midpoint, strict=True):
+                return True
+    return False
+
+
+def rings_interiors_overlap(first: PolygonRing, second: PolygonRing) -> bool:
+    """True exactly when two simple rings share interior area.
+
+    Shared edges and touching vertices are never interior overlap.  The
+    decision is complete for simple rings, by case analysis on the
+    shared region's boundary: if the interiors share area then either
+    (1) two boundary edges properly cross; or (2) one ring's vertex
+    lies strictly inside the other; or the shared region's boundary
+    contains an arc of one ring that (3) runs collinearly along the
+    other ring's boundary with both interiors on the same side, or
+    (4) lies strictly inside the other ring, in which case the midpoint
+    of that edge's partition segment (edges split at every exact
+    intersection with the other boundary) is strictly interior.  All
+    four tests run in exact rational arithmetic.
     """
     if not isinstance(first, PolygonRing) or not isinstance(
         second, PolygonRing
@@ -338,20 +541,68 @@ def rings_interiors_overlap(first: PolygonRing, second: PolygonRing) -> bool:
         or b_max_y < a_min_y
     ):
         return False
-    if len(first.vertices) == len(second.vertices) and set(
-        first.vertices
-    ) == set(second.vertices):
-        return True
-    for edge_a in first._edges():
-        for edge_b in second._edges():
-            if segments_properly_cross(*edge_a, *edge_b):
+    first_vertices = _fraction_vertices(first.vertices)
+    second_vertices = _fraction_vertices(second.vertices)
+    first_edges = _exact_edges(first_vertices, closed=True)
+    second_edges = _exact_edges(second_vertices, closed=True)
+    for edge_a in first_edges:
+        for edge_b in second_edges:
+            if _proper_cross_exact(*edge_a, *edge_b):
                 return True
-    for witness in first._interior_witnesses():
-        if second.strictly_contains(*witness) and first.contains(*witness):
+    for vertex in first_vertices:
+        if _ring_contains_exact(second_vertices, vertex, strict=True):
             return True
-    for witness in second._interior_witnesses():
-        if first.strictly_contains(*witness) and second.contains(*witness):
+    for vertex in second_vertices:
+        if _ring_contains_exact(first_vertices, vertex, strict=True):
             return True
+    first_ccw = _ring_is_ccw(first_vertices)
+    second_ccw = _ring_is_ccw(second_vertices)
+    for a, b in first_edges:
+        for c, d in second_edges:
+            interval = _collinear_overlap_interval(a, b, c, d)
+            if interval is None:
+                continue
+            normal_first = _interior_normal(a, b, ccw=first_ccw)
+            normal_second = _interior_normal(c, d, ccw=second_ccw)
+            dot = (
+                normal_first[0] * normal_second[0]
+                + normal_first[1] * normal_second[1]
+            )
+            if dot > 0:
+                return True
+    if _partition_midpoint_strictly_inside(first_edges, second_vertices):
+        return True
+    if _partition_midpoint_strictly_inside(second_edges, first_vertices):
+        return True
+    return False
+
+
+def chain_properly_crosses_ring(
+    vertices: tuple[tuple[float, float], ...],
+    ring: PolygonRing,
+    *,
+    closed: bool,
+) -> bool:
+    """True when any chain edge properly crosses the ring boundary.
+
+    Touching the boundary or running along it is not a crossing; a
+    proper crossing means the chain passes from one side of the ring
+    boundary to the other through an edge interior, which (together
+    with vertex containment) is how a feature is proven to escape its
+    declared hole.
+    """
+    if not isinstance(ring, PolygonRing):
+        raise CourseWorldModelError(
+            "chain crossing requires a PolygonRing boundary"
+        )
+    chain = _fraction_vertices(tuple(vertices))
+    if len(chain) < 2:
+        return False
+    ring_edges = _exact_edges(_fraction_vertices(ring.vertices), closed=True)
+    for edge in _exact_edges(chain, closed=closed):
+        for boundary_edge in ring_edges:
+            if _proper_cross_exact(*edge, *boundary_edge):
+                return True
     return False
 
 
@@ -414,8 +665,10 @@ class Polyline:
 
 
 __all__ = [
+    "MAX_ABS_COORDINATE_M",
     "PolygonRing",
     "Polyline",
+    "chain_properly_crosses_ring",
     "point_on_segment",
     "require_finite_number",
     "rings_interiors_overlap",

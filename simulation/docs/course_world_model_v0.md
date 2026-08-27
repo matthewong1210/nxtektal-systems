@@ -160,19 +160,32 @@ Closed vocabularies, deterministic rules:
   last vertex must not repeat the first); no self-intersection; non-zero
   area; either winding; every vertex inside model bounds. Primary surface
   interiors are mutually exclusive — shared edges are legal, shared
-  interior area fails validation. Rings are closed point sets, so a
+  interior area fails validation, and the interior-overlap decision is
+  complete for simple rings: proper edge crossings, strict vertex
+  containment, collinear shared sub-segments with both interiors on the
+  same side, and exact partition-midpoint containment are all evaluated
+  in exact rational arithmetic, so witness-evading concave or collinear
+  overlaps cannot pass. Rings are closed point sets, so a
   boundary point is contained; a point on a shared boundary resolves by
   the fixed tie-break (green, tee, bunker, water, fairway, rough; then
   lexicographic feature ID).
 - **Holes**: identity (`hole_id`, unique positive `hole_number`) plus a
-  boundary ring; hole interiors must not overlap. A surface may reference
-  its hole; the reference must exist.
+  boundary ring; hole interiors must not overlap. A feature that
+  declares a hole must be geometrically consistent with it: every
+  vertex inside the hole's closed boundary and no edge properly
+  crossing it, so a declared attribution can never contradict the
+  geometric hole context a query reports.
 - **Overlays**: cart paths (a polyline centerline with positive finite
   width) and restricted zones (`no_go`, `maintenance_only`) may coexist
   with any primary surface; queries report the overlay alongside the
   primary classification instead of resolving it away. A restricted zone
   may reference a commissioned zone ID; the referenced zone must exist in
-  the validated site. There is no second zone registry.
+  the validated site, and `validate_model_against_site` also reconciles
+  it spatially — the commissioned polygon, translated into the course
+  frame by the same subtraction-only re-origining the commissioning
+  twin-layout projection uses, must share area with the model's
+  restricted polygon, so a reference cannot point at one zone while
+  drawing another. There is no second zone registry.
 - **Hazards** are exactly the `bunker` and `water` surfaces — no separate
   hazard store.
 - Feature identifiers are unique across holes, surfaces, cart paths, and
@@ -203,7 +216,14 @@ Closed vocabularies, deterministic rules:
 - serialization: `dumps_model` emits canonical JSON (sorted keys, compact
   separators, `allow_nan=False`) plus one trailing newline, byte-identical
   across processes and `PYTHONHASHSEED` values; collections are canonically
-  sorted at construction so authoring order never changes bytes;
+  sorted at construction, and every numeric contract value is stored as a
+  float, so authoring order and int-versus-float spelling of the same
+  value can never change bytes or the digest;
+- numeric contract bounds: every coordinate, height, and length must stay
+  within one gigametre (`±1e9 m`) and the grid cell size at or above one
+  micrometre, so interpolation, slope, distance, and clearance arithmetic
+  is provably overflow-free and a finite-but-absurd value can never turn
+  into a silently wrong answer;
 - revisions: models are immutable; a course change produces a new
   `model_version` whose `supersedes_version` names the current version.
   `validate_revision` fails closed on identity drift (model ID, site,
@@ -242,14 +262,20 @@ the model's own geometry payload.
 
 The trajectory query only intersects an externally supplied, ordered,
 finite sample sequence (strictly increasing `t_s`, declared frame equal to
-the model frame) with the terrain surface, using deterministic fixed-count
-bisection inside the first descending segment whose endpoint reaches or
-crosses terrain. It rejects fewer than two samples, non-finite values,
-unordered times, frame mismatches, a start outside bounds or at/below
-terrain (ambiguous), and a trajectory entirely outside the model; a track
-that leaves the modeled area while still airborne is `unprovable` and a
-track that stays airborne to its end is `no_intersection` — an intersection
-is never fabricated. Shot physics — aerodynamics, drag, Magnus force, wind,
+the model frame) with the terrain surface. Terrain is bilinear per grid
+cell, so the clearance along each straight segment between consecutive
+samples is piecewise quadratic; the query splits every segment at its
+grid-line crossings and solves each piece analytically, which finds a
+crossing *inside* a segment even when both sample endpoints are above
+terrain (no tunneling through a ridge) and always reports the first
+contact. The straight segments themselves remain the caller's sampling
+of the flight path — the query never invents curvature between samples.
+It rejects fewer than two samples, non-finite or out-of-contract-bound
+values, unordered times, frame mismatches, a start outside bounds or
+at/below terrain (ambiguous), and a trajectory entirely outside the
+model; a track that leaves the modeled area while still airborne is
+`unprovable` and a track that stays strictly above terrain to its end is
+`no_intersection` — an intersection is never fabricated. Shot physics — aerodynamics, drag, Magnus force, wind,
 launch-monitor interpretation, bounce/roll, landing prediction — is
 explicitly not implemented here; that is the later Shot Intelligence
 Simulation milestone, and `deterministic_landing_model_owner` remains an
@@ -310,7 +336,8 @@ Synthetic Hole 7 Spatial Baseline** for the shared enablement deployment
 (`pilot-course-a` / `pilot-a-enablement-v0`): one hole boundary, a tee,
 fairway, two rough patches, green, greenside bunker, water pond, a cart
 path, two restricted zones (one referencing commissioned zone `Z1`), a
-non-flat planar-sloped elevation grid (301 x 201 m at 10 m resolution),
+non-flat planar-sloped elevation grid covering 300 m x 200 m (31 x 21
+nodes at 10 m spacing),
 synthetic scan provenance, and the commissioned EPSG:32651 frame binding.
 
 ```bash
@@ -348,15 +375,26 @@ artifacts across repeat runs and documented `PYTHONHASHSEED` values.
 ## Known V0 limitations
 
 - One synthetic hole; no claim of a complete course, and course-boundary
-  containment of features is not enforced (bounds containment is).
+  containment of features is not enforced (bounds containment and
+  declared-hole containment are).
 - The elevation surface is a synthetic plane-based fixture; accuracy and
   resolution are declared metadata, not measured performance.
-- Interior-overlap detection combines proper edge crossings, strict
-  vertex/midpoint/centroid witnesses, and an identical-vertex-set check;
-  it is exhaustive for the simple rings this contract stores and is
-  documented as V0 numerical scope, not a general polygon-clipping engine.
 - Cart-path corridors are validated by centerline vertices; a corridor
   half-width may touch the model boundary.
+- `vertical_basis` is a validated free-form declaration, not a closed
+  vocabulary; a future datum/extrinsics consumer that must machine-check
+  vertical compatibility will need a closed vocabulary revision.
+- `TrajectoryIntersectionResult` carries the spatial contact only; a
+  time-of-impact field is an additive future extension for the Shot
+  Intelligence consumer.
+- The map-query parity pin requires exact equality between the required
+  and offered query-kind sets, so an additive future query kind is a
+  deliberate coordinated change with the readiness layer (a drift alarm,
+  chosen over silent divergence).
+- Evidence fields the commissioned site cannot falsify (model identity,
+  content digest, frame ID, resolution, supported queries) remain
+  declared trust made true by the composition root — see the
+  workflow-enablement contract.
 - Revisions validate pairwise (`current`, `candidate`); a persistent
   revision-chain store is future work.
 - No device-frame transforms, no live updates, no map distribution, no

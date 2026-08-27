@@ -25,9 +25,73 @@ from .geometry import require_finite_number
 
 _MINIMUM_NODES_PER_AXIS = 2
 
+# The metric contract's resolution floor: a cell finer than a
+# micrometre has no physical meaning for a course surface, and the
+# floor keeps every division by the cell size far from float overflow.
+_MIN_CELL_SIZE_M = 1e-6
+
 _GRID_KEYS = frozenset(
     {"origin_x", "origin_y", "cell_size_m", "n_rows", "n_cols", "heights"}
 )
+
+
+def _smallest_clearance_root(
+    *,
+    quadratic: float,
+    linear: float,
+    constant: float,
+    low: float,
+    high: float,
+) -> float | None:
+    """The smallest u in (low, high] where the clearance is <= 0.
+
+    The clearance g(u) = quadratic*u^2 + linear*u + constant is
+    strictly positive at ``low`` on entry (each earlier piece certified
+    that before handing over); a float disagreement at a shared piece
+    boundary is resolved deterministically as contact at ``low``.
+    """
+
+    def clearance(u: float) -> float:
+        return (quadratic * u + linear) * u + constant
+
+    if clearance(low) <= 0.0:
+        return low
+    candidates: list[float] = []
+    if quadratic == 0.0:
+        if linear != 0.0:
+            root = -constant / linear
+            if low < root <= high:
+                candidates.append(root)
+    else:
+        discriminant = linear * linear - 4.0 * quadratic * constant
+        if discriminant >= 0.0:
+            square_root = math.sqrt(discriminant)
+            if linear >= 0.0:
+                q = -(linear + square_root) / 2.0
+            else:
+                q = -(linear - square_root) / 2.0
+            roots = {q / quadratic}
+            if q != 0.0:
+                roots.add(constant / q)
+            else:
+                roots.add(0.0)
+            for root in roots:
+                if low < root <= high:
+                    candidates.append(root)
+    if candidates:
+        return min(candidates)
+    if clearance(high) <= 0.0:
+        # Continuity guarantees a crossing that float root-finding
+        # missed; a fixed-count bisection resolves it deterministically.
+        bracket_low, bracket_high = low, high
+        for _ in range(60):
+            midpoint = (bracket_low + bracket_high) / 2.0
+            if clearance(midpoint) > 0.0:
+                bracket_low = midpoint
+            else:
+                bracket_high = midpoint
+        return bracket_high
+    return None
 
 
 def _require_axis_count(value: object, field_name: str) -> int:
@@ -53,13 +117,22 @@ class ElevationGrid:
     heights: tuple[float, ...]
 
     def __post_init__(self) -> None:
-        require_finite_number(self.origin_x, "origin_x")
-        require_finite_number(self.origin_y, "origin_y")
+        # Numeric fields are stored as floats so canonical serialization
+        # (and therefore the content digest) never depends on whether a
+        # producer supplied an int or its equal float.
+        object.__setattr__(
+            self, "origin_x", require_finite_number(self.origin_x, "origin_x")
+        )
+        object.__setattr__(
+            self, "origin_y", require_finite_number(self.origin_y, "origin_y")
+        )
         cell = require_finite_number(self.cell_size_m, "cell_size_m")
-        if cell <= 0.0:
+        if cell < _MIN_CELL_SIZE_M:
             raise CourseWorldModelError(
-                f"cell_size_m must be positive; got {self.cell_size_m!r}"
+                f"cell_size_m must be at least {_MIN_CELL_SIZE_M!r} m; "
+                f"got {self.cell_size_m!r}"
             )
+        object.__setattr__(self, "cell_size_m", cell)
         _require_axis_count(self.n_rows, "n_rows")
         _require_axis_count(self.n_cols, "n_cols")
         if not isinstance(self.heights, tuple):
@@ -70,8 +143,16 @@ class ElevationGrid:
                 f"heights must contain exactly n_rows * n_cols = {expected} "
                 f"values; got {len(self.heights)}"
             )
-        for index, height in enumerate(self.heights):
-            require_finite_number(height, f"heights[{index}]")
+        object.__setattr__(
+            self,
+            "heights",
+            tuple(
+                require_finite_number(height, f"heights[{index}]")
+                for index, height in enumerate(self.heights)
+            ),
+        )
+        require_finite_number(self.max_x, "grid coverage max_x")
+        require_finite_number(self.max_y, "grid coverage max_y")
 
     @property
     def resolution_m(self) -> float:
@@ -150,6 +231,80 @@ class ElevationGrid:
         dz_dx = ((1.0 - v) * (z10 - z00) + v * (z11 - z01)) / self.cell_size_m
         dz_dy = ((1.0 - u) * (z01 - z00) + u * (z11 - z10)) / self.cell_size_m
         return dz_dx, dz_dy
+
+    def first_descent_crossing(
+        self,
+        x0: float,
+        y0: float,
+        z0: float,
+        x1: float,
+        y1: float,
+        z1: float,
+    ) -> float | None:
+        """The smallest u in (0, 1] where the segment first meets terrain.
+
+        The straight segment from (x0, y0, z0) to (x1, y1, z1) must have
+        both endpoints inside the grid coverage and must start strictly
+        above the terrain (the caller checks both).  Terrain is bilinear
+        per cell, so the clearance along the segment is piecewise
+        quadratic: the segment is split at every grid-line crossing and
+        each piece's quadratic is solved analytically, which finds a
+        crossing *inside* a piece even when both piece endpoints are
+        above terrain.  Returns the first contact parameter, or None
+        when the segment stays strictly above terrain throughout.
+        """
+        delta_x = x1 - x0
+        delta_y = y1 - y0
+        delta_z = z1 - z0
+        breakpoints = {0.0, 1.0}
+        for delta, origin, count, start in (
+            (delta_x, self.origin_x, self.n_cols, x0),
+            (delta_y, self.origin_y, self.n_rows, y0),
+        ):
+            if delta == 0.0:
+                continue
+            for index in range(count):
+                parameter = (origin + index * self.cell_size_m - start) / (
+                    delta
+                )
+                if 0.0 < parameter < 1.0:
+                    breakpoints.add(parameter)
+        ordered = sorted(breakpoints)
+        for piece_start, piece_end in zip(ordered, ordered[1:]):
+            midpoint = (piece_start + piece_end) / 2.0
+            row, column, _, _ = self._cell_for(
+                x0 + midpoint * delta_x, y0 + midpoint * delta_y
+            )
+            cell_x = self.origin_x + column * self.cell_size_m
+            cell_y = self.origin_y + row * self.cell_size_m
+            s0 = (x0 - cell_x) / self.cell_size_m
+            su = delta_x / self.cell_size_m
+            t0 = (y0 - cell_y) / self.cell_size_m
+            tu = delta_y / self.cell_size_m
+            z00 = self._node_height(row, column)
+            z10 = self._node_height(row, column + 1)
+            z01 = self._node_height(row + 1, column)
+            z11 = self._node_height(row + 1, column + 1)
+            twist = z11 - z10 - z01 + z00
+            terrain_2 = twist * su * tu
+            terrain_1 = (
+                (z10 - z00) * su
+                + (z01 - z00) * tu
+                + twist * (s0 * tu + t0 * su)
+            )
+            terrain_0 = (
+                z00 + (z10 - z00) * s0 + (z01 - z00) * t0 + twist * s0 * t0
+            )
+            root = _smallest_clearance_root(
+                quadratic=-terrain_2,
+                linear=delta_z - terrain_1,
+                constant=z0 - terrain_0,
+                low=piece_start,
+                high=piece_end,
+            )
+            if root is not None:
+                return root
+        return None
 
     def to_dict(self) -> dict[str, object]:
         return {

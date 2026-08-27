@@ -22,7 +22,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from nxt_commissioning import CommissionedSite, canonical_projection_json
+from nxt_commissioning import (
+    CommissionedSite,
+    GeometryType,
+    canonical_projection_json,
+)
 
 from .elevation import ElevationGrid
 from .errors import CourseWorldModelError
@@ -37,6 +41,7 @@ from .features import (
 from .frame import CourseCoordinateFrame
 from .geometry import (
     PolygonRing,
+    chain_properly_crosses_ring,
     require_finite_number,
     rings_interiors_overlap,
 )
@@ -119,13 +124,12 @@ class ModelBounds:
     max_y: float
 
     def __post_init__(self) -> None:
-        for field_name, value in (
-            ("min_x", self.min_x),
-            ("min_y", self.min_y),
-            ("max_x", self.max_x),
-            ("max_y", self.max_y),
-        ):
-            require_finite_number(value, field_name)
+        for field_name in ("min_x", "min_y", "max_x", "max_y"):
+            object.__setattr__(
+                self,
+                field_name,
+                require_finite_number(getattr(self, field_name), field_name),
+            )
         if self.min_x >= self.max_x or self.min_y >= self.max_y:
             raise CourseWorldModelError(
                 "bounds must satisfy min_x < max_x and min_y < max_y"
@@ -240,6 +244,39 @@ def _require_within_bounds(
             raise CourseWorldModelError(
                 f"{label} has vertex {vertex!r} outside the model bounds"
             )
+
+
+def _require_within_declared_hole(
+    holes_by_id: Mapping[str, HoleDefinition],
+    hole_id: str,
+    vertices: tuple[tuple[float, float], ...],
+    label: str,
+    *,
+    closed: bool,
+) -> None:
+    """A declared hole reference must be geometrically consistent.
+
+    Every vertex of the feature must lie within the declared hole's
+    closed boundary and no feature edge may properly cross it, so a
+    query classifying the feature can never attribute a hole the point
+    is not actually in.
+    """
+    hole = holes_by_id.get(hole_id)
+    if hole is None:
+        raise CourseWorldModelError(
+            f"{label} references unknown hole {hole_id!r}"
+        )
+    for vertex in vertices:
+        if not hole.boundary.contains(vertex[0], vertex[1]):
+            raise CourseWorldModelError(
+                f"{label} declares hole {hole_id!r} but has vertex "
+                f"{vertex!r} outside that hole's boundary"
+            )
+    if chain_properly_crosses_ring(vertices, hole.boundary, closed=closed):
+        raise CourseWorldModelError(
+            f"{label} declares hole {hole_id!r} but its geometry crosses "
+            "that hole's boundary"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,7 +418,7 @@ class CourseWorldModel:
         _require_within_bounds(
             self.bounds, self.course_boundary.vertices, "course boundary"
         )
-        hole_ids = {hole.hole_id for hole in self.holes}
+        holes_by_id = {hole.hole_id: hole for hole in self.holes}
         for hole in self.holes:
             _require_within_bounds(
                 self.bounds,
@@ -394,10 +431,13 @@ class CourseWorldModel:
                 feature.polygon.vertices,
                 f"surface {feature.feature_id!r}",
             )
-            if feature.hole_id is not None and feature.hole_id not in hole_ids:
-                raise CourseWorldModelError(
-                    f"surface {feature.feature_id!r} references unknown "
-                    f"hole {feature.hole_id!r}"
+            if feature.hole_id is not None:
+                _require_within_declared_hole(
+                    holes_by_id,
+                    feature.hole_id,
+                    feature.polygon.vertices,
+                    f"surface {feature.feature_id!r}",
+                    closed=True,
                 )
         for path in self.cart_paths:
             _require_within_bounds(
@@ -405,10 +445,13 @@ class CourseWorldModel:
                 path.centerline.vertices,
                 f"cart path {path.feature_id!r}",
             )
-            if path.hole_id is not None and path.hole_id not in hole_ids:
-                raise CourseWorldModelError(
-                    f"cart path {path.feature_id!r} references unknown "
-                    f"hole {path.hole_id!r}"
+            if path.hole_id is not None:
+                _require_within_declared_hole(
+                    holes_by_id,
+                    path.hole_id,
+                    path.centerline.vertices,
+                    f"cart path {path.feature_id!r}",
+                    closed=False,
                 )
         for zone in self.restricted_zones:
             _require_within_bounds(
@@ -624,14 +667,16 @@ def dumps_model(model: CourseWorldModel) -> str:
 
 
 def verify_model_payload(payload: Mapping[str, Any]) -> None:
-    """Fail closed on schema, shape, or content-digest violations.
+    """Fail closed on schema, structural, or content-digest violations.
 
-    This is *content* verification only: a matching digest proves the
-    payload still matches its own declared content.  It is not a
-    signature and proves nothing about who produced the model, whether
-    a survey was accurate, or whether issuance was trusted; a consumer
-    that needs provenance must obtain the model from a trusted
-    composition root.
+    The digest check proves *content consistency* only: a matching
+    digest proves the payload still matches its own declared content.
+    It is not a signature and proves nothing about who produced the
+    model, whether a survey was accurate, or whether issuance was
+    trusted; a consumer that needs provenance must obtain the model
+    from a trusted composition root.  After the digest check the whole
+    payload is reconstructed through ``from_dict``, so a digest that
+    was recomputed over structurally invalid content still fails.
     """
     if not isinstance(payload, Mapping):
         raise CourseWorldModelError("payload must be a mapping")
@@ -660,13 +705,26 @@ def verify_model_payload(payload: Mapping[str, Any]) -> None:
         for key, value in payload.items()
         if key not in ("content_digest", "display_name")
     }
-    expected = _compute_content_digest(identity)
+    try:
+        expected = _compute_content_digest(identity)
+    except (TypeError, ValueError) as exc:
+        raise CourseWorldModelError(
+            f"the payload cannot be canonically serialized: {exc}"
+        ) from exc
     if declared != expected:
         raise CourseWorldModelError(
             f"content_digest {declared!r} does not match the payload "
             f"digest {expected!r}; the payload no longer matches its own "
             "content digest"
         )
+    try:
+        CourseWorldModel.from_dict(payload)
+    except CourseWorldModelError:
+        raise
+    except (TypeError, ValueError) as exc:
+        raise CourseWorldModelError(
+            f"the model payload is structurally invalid: {exc}"
+        ) from exc
 
 
 def validate_revision(
@@ -807,17 +865,67 @@ def validate_model_against_site(
             f"facility origin ({origin.x!r}, {origin.y!r}, {origin.z!r})"
         )
     commissioned_zones = {
-        zone.zone_id for zone in site.spatial_reference.zone_definitions
+        zone.zone_id: zone
+        for zone in site.spatial_reference.zone_definitions
+    }
+    commissioned_geometries = {
+        geometry.geometry_id: geometry
+        for geometry in site.spatial_reference.geometry_references
     }
     for zone in model.restricted_zones:
-        if (
-            zone.commissioned_zone_id is not None
-            and zone.commissioned_zone_id not in commissioned_zones
-        ):
+        if zone.commissioned_zone_id is None:
+            continue
+        commissioned = commissioned_zones.get(zone.commissioned_zone_id)
+        if commissioned is None:
             raise CourseWorldModelError(
                 f"restricted zone {zone.feature_id!r} references "
                 f"commissioned zone {zone.commissioned_zone_id!r}, which "
                 "this site does not declare"
+            )
+        # A referenced commissioned zone must also be spatially
+        # reconcilable: the commissioned polygon, translated into the
+        # course frame by the same subtraction-only re-origining the
+        # commissioning twin-layout projection uses, must share area
+        # with the model's restricted polygon.  A reference whose
+        # geometry is somewhere else entirely is a mislabel, not a
+        # reference.
+        geometry = commissioned_geometries.get(
+            commissioned.geometry_reference
+        )
+        if geometry is None:
+            raise CourseWorldModelError(
+                f"commissioned zone {zone.commissioned_zone_id!r} names "
+                f"geometry {commissioned.geometry_reference!r}, which "
+                "this site does not declare"
+            )
+        if geometry.geometry_type is not GeometryType.POLYGON:
+            raise CourseWorldModelError(
+                f"restricted zone {zone.feature_id!r} references "
+                f"commissioned zone {zone.commissioned_zone_id!r}, whose "
+                f"geometry {commissioned.geometry_reference!r} is not a "
+                "polygon and cannot be spatially reconciled in V0"
+            )
+        local_vertices = [
+            (point.x - origin.x, point.y - origin.y)
+            for point in geometry.points
+        ]
+        if len(local_vertices) > 1 and local_vertices[0] == local_vertices[-1]:
+            local_vertices = local_vertices[:-1]
+        try:
+            commissioned_ring = PolygonRing(
+                vertices=tuple(local_vertices)
+            )
+        except CourseWorldModelError as exc:
+            raise CourseWorldModelError(
+                f"commissioned zone {zone.commissioned_zone_id!r} geometry "
+                f"cannot be reconciled with the course frame: {exc}"
+            ) from exc
+        if not rings_interiors_overlap(zone.polygon, commissioned_ring):
+            raise CourseWorldModelError(
+                f"restricted zone {zone.feature_id!r} references "
+                f"commissioned zone {zone.commissioned_zone_id!r} but its "
+                "geometry does not share any area with that zone's "
+                "surveyed extent (translated into the course frame)"
             )
 
 
