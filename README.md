@@ -119,9 +119,11 @@ row; the "What is working now" section above describes `main` only.
 | `simulation/nxt_agent_runtime/` | Deterministic composition of Site Runtime output through Shadow Ops evaluation, with evaluation checkpoints, journal, and pending manager decisions | Implemented composition layer; synthetic sources only, advisory only |
 | `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented conversion kit; fixture-backed only, no transport, device connection, or command path |
 | `simulation/nxt_workflow_enablement/` | Shared-site commissioning gates, independent per-workflow readiness verdicts, and the deterministic enablement report | Implemented readiness layer; fixture-only, evaluation only, no runtime construction or execution path |
+| `simulation/nxt_site_agent/` | Local readiness-gated service around the Agent Runtime, with a versioned loopback Manager API, projections, and shift briefing | Implemented application shell; fixture-backed Shadow Mode only, loopback-only, no authentication, no physical device or command path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |
+| `apps/site-agent-console/` | Manager Console for the local fixture-backed Site Agent service | Implemented static export; consumes only the local Manager API, clearly labeled simulated |
 | `nxtektal-roi-engine/` | Versioned, deterministic ROI calculations | Implemented standalone package |
 | `AGENTS.md`, `.agent/`, `docs/AGENT_OPERATING_MANUAL.md` | AI engineering governance and architecture-safe workflows | Implemented repository operating system |
 

@@ -213,6 +213,9 @@ runtime dependency between them.
 - [`simulation/docs/workflow_enablement_v0.md`](../simulation/docs/workflow_enablement_v0.md):
   shared-site gates, independent per-workflow readiness, the deterministic
   enablement report, and the fixture-only launch boundary.
+- [`simulation/docs/site_agent_v0.md`](../simulation/docs/site_agent_v0.md):
+  the local fixture-backed Site Agent service, the versioned loopback
+  Manager API, the Manager Console, and the recorded no-execution boundary.
 - [`simulation/docs/architecture.md`](../simulation/docs/architecture.md): micro
   handoff controller and robot interface.
 - [`docs/AGENT_OPERATING_MANUAL.md`](AGENT_OPERATING_MANUAL.md): merged AI

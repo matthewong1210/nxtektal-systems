@@ -54,6 +54,18 @@ implies a course model, camera, inspection, or player capability exists. It
 is evaluation-only: no transport, no device, no runtime construction, and no
 change to the "Not implemented" row above.
 
+Also added after that baseline (verify merge status against the current
+branch): `nxt_site_agent` plus `apps/site-agent-console`, the Pilot Site
+Agent Service V0 — a local, loopback-only, fixture-backed application
+boundary that verifies a READY enablement report, drives the existing
+Agent Runtime one bounded cycle at a time, persists the fixture source
+resume cursor, projects existing evidence through a versioned local
+Manager API, and serves a static Manager Console. Manager acceptance
+remains workflow evidence only. It is not a production or cloud
+service: no authentication, no public exposure, no physical sensor,
+transport, or device connection, no robot/actuator command path, and
+no change to the "Not implemented" rows above.
+
 ## Static truth versus dynamic evidence
 
 For a physical facility, commissioning owns **what exists and how it is
@@ -173,6 +185,7 @@ give Site Runtime ownership of simulation truth.
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
+| Local service lifecycle, Manager API projection transport, fixture source-cursor persistence, service diagnostics | `nxt_site_agent` (noncanonical application shell; loopback-only; no state, policy, workflow, or execution semantics) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |

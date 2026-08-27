@@ -91,6 +91,7 @@ runtime dependency.
 - `simulation/docs/agent_runtime_v1.md`
 - `simulation/docs/edge_observation_v0.md`
 - `simulation/docs/workflow_enablement_v0.md`
+- `simulation/docs/site_agent_v0.md`
 - `nxtektal-roi-engine/README.md`
 - `nxtektal-roi-engine/docs/api-contract.md`
 

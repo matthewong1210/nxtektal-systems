@@ -168,6 +168,10 @@ coupling in named seams:
   over `nxt_commissioning`'s public surface; adapter and runtime facts reach
   it as declared plain-data evidence, and assembling a READY launch plan is
   composition-root work
+- `nxt_site_agent` as the local application boundary over the public
+  `nxt_agent_runtime`, `nxt_pilot_ops`, and `nxt_workflow_enablement` surfaces
+  (readiness-gated service lifecycle, loopback Manager API, noncanonical
+  projections only; fixture composition is injected from scripts)
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
@@ -221,6 +225,7 @@ type:
 | Agent Runtime approved-surface imports, no execution/network/wall-clock surface, and no reverse dependency | `simulation/tests/agent_runtime/test_architecture.py` |
 | Edge adapter kit single-import conversion leaf, transport/process/nondeterminism bans, and no reverse dependency | `simulation/tests/edge_observation/test_architecture.py` |
 | Workflow enablement commissioning-only imports, purity bans, no canonical-contract duplication, and no reverse dependency | `simulation/tests/workflow_enablement/test_architecture.py` |
+| Site Agent service approved-surface imports, stdlib whitelist, execution/LLM/nondeterminism bans, script transport bans, and no reverse dependency | `simulation/tests/site_agent/test_architecture.py` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
 | Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |
