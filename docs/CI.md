@@ -20,7 +20,7 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs every Python extra from the current lock; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Edge Gateway composition, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
@@ -67,31 +67,40 @@ test -z "$(git ls-files --others --exclude-standard)"
 
 ### Python
 
-The current `uv.lock` omits the declared `twin` extra. Preserve the lockfile:
+Require the lock to match the manifest, then install every declared extra:
 
 ```bash
 cd simulation
-uv sync --python 3.13.14 --frozen --all-extras
-uv pip install --python .venv/bin/python "usd-core==26.8"
+uv lock --check
+uv sync --python 3.13.14 --locked --all-extras
 uv run --no-sync python -B - <<'PY'
 from importlib.metadata import version
+
+from paho.mqtt.client import CallbackAPIVersion
 from pxr import Usd
 from streamlit.testing.v1 import AppTest
 
 assert version("usd-core") == "26.8"
-print("optional coverage imports passed:", Usd.__name__, AppTest.__name__)
+assert version("paho-mqtt") == "2.1.0"
+print(
+    "optional coverage imports passed:",
+    Usd.__name__,
+    AppTest.__name__,
+    CallbackAPIVersion.VERSION2.name,
+)
 PY
 uv pip check --python .venv/bin/python
 ```
 
-Every later project invocation uses `--no-sync` so uv does not remove the
-manually installed USD package:
+Every later project invocation uses `--no-sync` so it runs against that exact
+verified locked environment:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_runtime
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/pilot_ops
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/commissioning
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_observation
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_gateway_live_input
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/workflow_enablement
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
@@ -110,6 +119,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_runtime/test_rejection.py \
   tests/agent_runtime/test_architecture.py \
   tests/edge_observation/test_architecture.py \
+  tests/edge_gateway_live_input/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
@@ -172,9 +182,6 @@ git diff --check HEAD --
 git diff --exit-code HEAD --
 test -z "$(git ls-files --others --exclude-standard)"
 ```
-
-Do not substitute `uv lock --check`: it currently fails because of the known
-`twin`-extra gap. Repairing `uv.lock` is a separate dependency change.
 
 ### ROI
 

@@ -54,6 +54,19 @@ implies a course model, camera, inspection, or player capability exists. It
 is evaluation-only: no transport, no device, no runtime construction, and no
 change to the "Not implemented" row above.
 
+Also added after that baseline (verify merge status against the current
+branch): Edge Gateway Live Input V0 under `simulation/scripts/` — a local
+deployment composition with strict `nxt.edge.load-cell.raw/v1` decoding, a
+loopback-bound nonpersistent Mosquitto stack, a deterministic mock publisher,
+commissioned identity/time validation, process-local replay tracking, and
+read-only status. Diagnostic mode stops at existing canonical Observation plus
+`EdgeAdapterReport`; hybrid mode overlays only the matching MQTT load-cell
+channel on explicitly simulation-labelled Pilot Course A inputs before using
+the existing Site/Agent Runtime path. This is not a shipped package, physical
+device adapter, customer telemetry integration, production MQTT service, or
+durable source. It does not change the physical-telemetry, production-delivery,
+or real-site rows above.
+
 ## Static truth versus dynamic evidence
 
 For a physical facility, commissioning owns **what exists and how it is
@@ -118,6 +131,23 @@ abstract ObservationSource
     -> source acknowledgement
 ```
 
+The local Edge Gateway rehearsal composes into that unchanged flow:
+
+```text
+deterministic mock publisher -> local Mosquitto
+    -> scripts/edge_gateway_live_input_v0.py
+       -> strict wire/topic/time/replay validation
+       -> existing nxt_edge_observation conversion
+       -> diagnostic Observation + EdgeAdapterReport (no FacilityState), or
+       -> one SENSOR channel + explicitly SIMULATION-labelled fixture channels
+          -> existing ObservationSource -> Site Runtime -> Agent Runtime
+```
+
+MQTT, the civil-time mapper, boot/device sequencing, and HTTP status remain in
+the script composition. They are not imported by Edge Observation, Site
+Runtime, Agent Runtime, or another shipped package. The raw-message cursor and
+deduplication state are in memory and do not survive restart.
+
 Runtime v0 deliberately does not pass a previous `FacilityState` to the
 assembler. It rejects missing or stale required input before publication rather
 than presenting prior/default backfill as current physical truth. Its quality
@@ -172,6 +202,7 @@ give Site Runtime ownership of simulation truth.
 | Surveyed/static physical site fact or calibration | `nxt_commissioning` |
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
+| Local mock-MQTT wire/topic/time/replay handling and hybrid source composition | `simulation/scripts/edge_gateway_live_input_v0.py` (deployment composition only; no physical-device or production-service claim) |
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |

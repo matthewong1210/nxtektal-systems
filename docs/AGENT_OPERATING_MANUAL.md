@@ -336,10 +336,10 @@ The executable sequence is in
 
 Use the exact commands in
 [`.agent/workflows/testing.md`](../.agent/workflows/testing.md), the single
-normative testing source. It covers all-extras Python setup, the current
-`uv.lock`/`twin`-extra gap, focused package tests, architecture guards, the full
-suite, config validation, package builds, ROI typecheck/tests/build, and root
-documentation and agent-infrastructure checks.
+normative testing source. It covers lock-consistent all-extras Python setup,
+focused package tests, architecture guards, the full suite, config validation,
+package builds, ROI typecheck/tests/build, and root documentation and
+agent-infrastructure checks.
 
 The core rule is evidence outward from the change: focused regression, package,
 boundary/parity/determinism, then the full surface. Optional dependency skips

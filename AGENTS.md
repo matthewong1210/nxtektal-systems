@@ -232,8 +232,8 @@ Use the exact, normative commands in
 [`.agent/workflows/testing.md`](.agent/workflows/testing.md). Python production
 changes require a complete all-extras environment, focused/boundary checks, the
 full suite, and config validation. ROI changes require typecheck, tests, and a
-build. The workflow also records the current `uv.lock`/`twin`-extra gap so an
-agent does not silently change the lock or skip USD coverage.
+build. The workflow requires a lock-consistent all-extras setup so an agent does
+not silently change the lock or skip optional USD or MQTT coverage.
 
 No Python formatter, linter, or type checker is currently configured. The
 repository CI workflow and exact local equivalents are documented in

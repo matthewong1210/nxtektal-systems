@@ -95,12 +95,11 @@ For the prepared 60–90 second narration and exact event timestamps, use
 
 ## Optional USD projection
 
-The twin package uses `usd-core==26.8`, which is declared in `pyproject.toml`
-but not present in the current lockfile. Preserve the lockfile during this
-documentation/demo workflow:
+The twin package uses the locked `usd-core==26.8` optional dependency. Install
+the complete lock-consistent environment before running this projection:
 
 ```bash
-uv pip install --python .venv/bin/python "usd-core==26.8"
+uv sync --locked --all-extras
 
 uv run --no-sync python -m nxt_range_twin \
   --episode-dir reports/digital_twin/sim-baseline/dev/demand_spike-seed101

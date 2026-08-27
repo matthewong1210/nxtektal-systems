@@ -24,7 +24,8 @@ mutable runtime. In simulation, `RangeSimulation` remains live truth and
 flowchart TB
     subgraph Inputs["Operational inputs"]
       Scenario["Scenario + seed"]
-      Observations["Sequenced ObservationFrame\nsynthetic today"]
+      Observations["Sequenced ObservationFrame\nsynthetic or explicit hybrid rehearsal"]
+      LocalMQTT["Local mock MQTT load cell\nscript composition only"]
       Physical["Physical telemetry adapters\nnot implemented"]
       Static["CommissionedSite\nimmutable static truth"]
     end
@@ -62,6 +63,7 @@ flowchart TB
     Sim <--> Ledger
     Sim --> State
     Static --> Binding --> SiteRuntime
+    LocalMQTT --> Observations
     Observations --> SiteRuntime
     Physical -. "future integration" .-> SiteRuntime
     SiteRuntime --> Assemble
@@ -87,7 +89,10 @@ downstream package directly imports its upstream; file contracts, designated
 adapters, and composition seams preserve package isolation. Commissioning-to-
 runtime setup is implemented through `bind_commissioned_site()` and the
 explicit `project_legacy_site_config()` compatibility projection. No live
-physical observation source or production publisher/sink is implemented.
+physical observation source or production publisher/sink is implemented. Edge
+Gateway Live Input V0 adds a local mock-MQTT load-cell composition under
+`simulation/scripts/`; its hybrid mode labels every non-MQTT input as
+simulation and does not turn that rehearsal into physical-site truth.
 
 ## Source-of-truth boundaries
 
@@ -101,6 +106,7 @@ physical observation source or production publisher/sink is implemented.
 | Canonical downstream operational snapshot | Frozen `nxt_facility.state.FacilityState` | Advice, memory, twin stream |
 | Observation provenance and assembly quality | `ObservationFrame` and `AssemblyReport` | Must accompany deployment-path state |
 | Raw-device-to-canonical conversion and its diagnostics | `nxt_edge_observation` adapters and `EdgeAdapterReport` | Adapter evidence only; never facility truth, a second telemetry envelope, or a channel registry |
+| Local mock-MQTT routing, wire validation, civil-site-time mapping, and process diagnostics | `simulation/scripts/edge_gateway_live_input_v0.py` composition root | Canonical observations in diagnostic mode, or one sensor channel plus explicitly simulated fixture inputs in hybrid mode; never commissioning truth, a core transport dependency, or a physical deployment claim |
 | Multi-workflow commissioning readiness | `nxt_workflow_enablement` registry, requirement matrices, verdicts, and content-addressed enablement report | Readiness evidence only; never commissioning truth, state, policy output, or proof a registered capability exists |
 | Shadow policy evaluation and workflow evidence | `nxt_pilot_ops` recommendation, trace, workflow, and ledger contracts | Advisory records; never actuator acknowledgement by themselves |
 | Viewer replay/output | Independent deterministic `RangeOpsEnv` replay through public APIs | Viewer artifacts; never FacilityState input or upstream truth |
@@ -145,7 +151,10 @@ data-quality admission for state publication—not operational policy, physical
 command admission, or robot safety authorization. `ObservationSource`,
 `StatePublisher`, and `RuntimeSink` are protocols and test seams; no concrete
 physical source, vendor transport, production delivery service, or actuator
-port exists. The twin similarly authors downstream USD artifacts locally; live
+port exists. The script-level Edge Gateway V0 exercises those public contracts
+against a local Mosquitto broker and deterministic mock publisher without
+moving MQTT, clocks, or device sequencing into Site Runtime. The twin similarly
+authors downstream USD artifacts locally; live
 Omniverse/Nucleus delivery is not implemented, and USD never feeds operational
 truth or policy.
 
@@ -165,8 +174,9 @@ orienting a reviewer:
 | `nxt_pilot_ops` | Shadow Ops | Named-policy evaluation, decision trace, human workflow, and tamper-evident ledger; advisory only |
 | `nxt_commissioning` | Facility commissioning | Immutable static site/deployment truth and deterministic one-way projections |
 | `nxt_site_runtime` | Site Runtime | Sequencing, state-publication quality, envelope, checkpoint/recovery, and idempotent publication orchestration |
-| `nxt_agent_runtime` | Agent Runtime | Deterministic, restart-safe composition of Site Runtime output through Shadow Ops evaluation, with an evaluation checkpoint, evidence journal, pending manager-decision view, and health/status; synthetic sources only, advisory only |
+| `nxt_agent_runtime` | Agent Runtime | Deterministic, restart-safe composition of Site Runtime output through Shadow Ops evaluation, with an evaluation checkpoint, evidence journal, pending manager-decision view, and health/status; fixture-backed today, including the explicitly hybrid mock-MQTT rehearsal, and advisory only |
 | `nxt_edge_observation` | Edge Observation Adapter Kit V0 | Converts already-read load-cell, digital-I/O, and robot-status samples into canonical `Observation` objects using commissioned bindings, with explicit conversion diagnostics; fixture-backed, no transport, device, or command surface |
+| `simulation/scripts/edge_gateway_live_input_v0.py` | Edge Gateway Live Input V0 | Local deployment composition over strict mock-MQTT load-cell input; diagnostic-only or explicitly hybrid/simulated runtime rehearsal, with read-only status and no physical device or command surface |
 | `nxt_workflow_enablement` | Pilot Site Workflow Enablement V0 | Registers the three pilot workflow identities, evaluates the shared commissioned site and each workflow's requirements independently, and emits a deterministic enablement report plus fixture-only launch-plan data; readiness gating only, no runtime construction |
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
@@ -210,6 +220,9 @@ runtime dependency between them.
 - [`simulation/docs/edge_observation_v0.md`](../simulation/docs/edge_observation_v0.md):
   raw-device-to-canonical-observation conversion, coverage matrix, and the
   absent physical boundary.
+- [`simulation/docs/edge_gateway_live_input_v0.md`](../simulation/docs/edge_gateway_live_input_v0.md):
+  local mock-MQTT deployment composition, strict wire/time/replay contracts,
+  two honest modes, and read-only operations.
 - [`simulation/docs/workflow_enablement_v0.md`](../simulation/docs/workflow_enablement_v0.md):
   shared-site gates, independent per-workflow readiness, the deterministic
   enablement report, and the fixture-only launch boundary.

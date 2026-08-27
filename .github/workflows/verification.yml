@@ -100,21 +100,29 @@ jobs:
         with:
           version: "0.11.29"
           enable-cache: false
-      - name: Install locked Python environment with USD workaround
+      - name: Install locked Python environment
         working-directory: simulation
         run: |
-          uv sync --frozen --all-extras
-          uv pip install --python .venv/bin/python "usd-core==26.8"
+          uv lock --check
+          uv sync --locked --all-extras
       - name: Prove optional coverage is installed
         working-directory: simulation
         run: |
           uv run --no-sync python -B - <<'PY'
           from importlib.metadata import version
+
+          from paho.mqtt.client import CallbackAPIVersion
           from pxr import Usd
           from streamlit.testing.v1 import AppTest
 
           assert version("usd-core") == "26.8"
-          print("optional coverage imports passed:", Usd.__name__, AppTest.__name__)
+          assert version("paho-mqtt") == "2.1.0"
+          print(
+              "optional coverage imports passed:",
+              Usd.__name__,
+              AppTest.__name__,
+              CallbackAPIVersion.VERSION2.name,
+          )
           PY
           uv pip check --python .venv/bin/python
       - name: Test Site Runtime
@@ -137,6 +145,11 @@ jobs:
         run: >-
           uv run --no-sync python -B -m pytest -o addopts='' -q
           -p no:cacheprovider tests/edge_observation
+      - name: Test Edge Gateway local composition
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider tests/edge_gateway_live_input
       - name: Test Workflow Enablement
         working-directory: simulation
         run: >-
@@ -162,6 +175,7 @@ jobs:
             tests/site_runtime/test_rejection.py \
             tests/agent_runtime/test_architecture.py \
             tests/edge_observation/test_architecture.py \
+            tests/edge_gateway_live_input/test_architecture.py \
             tests/workflow_enablement/test_architecture.py \
             tests/test_state_machine.py \
             tests/test_retry_recovery.py \
@@ -399,11 +413,11 @@ jobs:
         with:
           version: "0.11.29"
           enable-cache: false
-      - name: Install locked replay environment with USD workaround
+      - name: Install locked replay environment
         working-directory: simulation
         run: |
-          uv sync --frozen --all-extras
-          uv pip install --python .venv/bin/python "usd-core==26.8"
+          uv lock --check
+          uv sync --locked --all-extras
       - name: Test benchmark, viewer, demo, capture, and USD paths
         working-directory: simulation
         run: |

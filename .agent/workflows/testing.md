@@ -2,21 +2,15 @@
 
 ## Python simulation and Site OS
 
-The merged-main Python project declares `twin = ["usd-core==26.8"]`, but its
-`uv.lock` does not contain that extra. Consequently,
-`uv sync --locked --all-extras` fails. Do not silently regenerate and commit the
-lock during an unrelated task. Provision the current environment without lock
-changes, then install the already pinned USD dependency explicitly:
+The Python lock intentionally includes every declared optional dependency,
+including `twin` (`usd-core==26.8`) and the script-confined `edge-gateway`
+MQTT client. Provision the complete environment while requiring the lock to
+remain current:
 
 ```bash
 cd simulation
-uv sync --frozen --all-extras
-uv pip install --python .venv/bin/python "usd-core==26.8"
+uv sync --locked --all-extras
 ```
-
-Treat this as a recorded dependency-hygiene gap. A dedicated dependency change
-may reconcile `pyproject.toml` and `uv.lock`, after which this workflow must be
-updated to a verified locked all-extras command.
 
 Run a focused package while iterating:
 
@@ -49,6 +43,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_runtime/test_rejection.py \
   tests/agent_runtime/test_architecture.py \
   tests/edge_observation/test_architecture.py \
+  tests/edge_gateway_live_input/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
@@ -168,8 +163,8 @@ git diff --check HEAD --
 ```
 
 The stable GitHub Actions checks, pinned tool versions, exact local equivalents,
-USD workaround, ROI audit policy, and replay verification path are documented
-in [`docs/CI.md`](../../docs/CI.md).
+locked all-extras coverage, ROI audit policy, and replay verification path are
+documented in [`docs/CI.md`](../../docs/CI.md).
 
 ## Reporting results
 
