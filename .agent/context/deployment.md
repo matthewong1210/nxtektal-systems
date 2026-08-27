@@ -49,10 +49,27 @@ identities, evaluates one shared validated `CommissionedSite` plus declared
 plain-data evidence per workflow, and emits a content-addressed enablement
 report with fixture-only launch-plan data for the READY Range Operations
 workflow. Grounds Condition Intelligence and Player Caddy Experience are
-registered but unimplemented and always NOT_READY in V0; registration never
-implies a course model, camera, inspection, or player capability exists. It
+registered but unimplemented and always NOT_READY; registration never
+implies a camera, inspection, or player capability exists. It
 is evaluation-only: no transport, no device, no runtime construction, and no
 change to the "Not implemented" row above.
+
+Also added after that baseline (verify merge status against the current
+branch): `nxt_course_world_model`, Course World Model V0 — the immutable,
+versioned spatial-truth leaf for one commissioned deployment: a course-local
+ENU frame bound to the commissioned coordinate reference and facility
+origin, a finite elevation surface with deterministic bilinear/slope
+queries, semantic course features (one synthetic hole with tee, fairway,
+rough, green, bunker, water, a cart path, and restricted areas), controlled
+content-addressed map revisions, and the pure read-only Map Query Service
+including a narrow trajectory/terrain intersection. It is derived from
+synthetic processed-scan fixtures only: no raw LAS/LAZ or point-cloud
+ingestion, no drone, camera, GPS/RTK, or live map update, no cart or robot
+positioning, no route planning or navigation, and no change to the "Not
+implemented" row above. With identity-matched Course Model evidence the two
+course workflows' requirement sets (now versioned `requirements/v2`)
+satisfy exactly their map prerequisites while both workflows remain
+NOT_READY and Range Operations readiness is byte-identical either way.
 
 ## Static truth versus dynamic evidence
 
@@ -173,6 +190,7 @@ give Site Runtime ownership of simulation truth.
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
+| Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
