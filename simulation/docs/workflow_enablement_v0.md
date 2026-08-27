@@ -42,6 +42,7 @@ SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA.
 | Fixture-only launch-plan data for a READY workflow | `nxt_workflow_enablement.launch` |
 | Static site/deployment truth, channels, units, calibration identity | `nxt_commissioning` (unchanged) |
 | Adapter conversion, coverage, and diagnostics | the edge adapter kit (unchanged); its outcome reaches this layer as declared plain-data evidence |
+| Course spatial truth, map versions, and map queries | the Course World Model owner (unchanged); its facts reach this layer as declared plain-data `CourseModelEvidence`, cross-checked against the validated site |
 | Runtime construction from a READY plan | composition roots under `simulation/scripts/` (`pilot_course_a_enablement_fixture.py`) |
 
 ## Package placement
@@ -64,11 +65,20 @@ may import those packages.
 
 V0 registers exactly three workflow identities:
 
-| Workflow ID | Requirements version | V0 status |
+| Workflow ID | Requirements version | Current status |
 |---|---|---|
 | `range.closed_loop_collection_handoff` | `range.closed_loop_collection_handoff/requirements/v1` | Fully evaluated; READY with the deterministic pilot fixture |
-| `course.grounds_condition_intelligence` | `course.grounds_condition_intelligence/requirements/v1` | Registered prerequisite scaffold; always NOT_READY |
-| `course.player_caddy_experience` | `course.player_caddy_experience/requirements/v1` | Registered prerequisite scaffold; always NOT_READY |
+| `course.grounds_condition_intelligence` | `course.grounds_condition_intelligence/requirements/v2` | Prerequisite scaffold whose three map prerequisites are evidence-evaluable; always NOT_READY (no runtime exists) |
+| `course.player_caddy_experience` | `course.player_caddy_experience/requirements/v2` | Prerequisite scaffold whose map-query prerequisite is evidence-evaluable; always NOT_READY (no runtime exists) |
+
+The course workflows moved from `requirements/v1` to `requirements/v2` when
+the canonical Course World Model owner landed: v1 defined the map
+prerequisites as definitionally missing ("no owner exists anywhere in the
+repository"), so making them evidence-evaluable is a semantic change and
+received an explicit new version instead of mutating v1 in place. Each
+evaluator pins the requirements version it implements and fails closed on
+any other, so a stale v1 registry can never be evaluated under v2
+semantics. Range Operations is unchanged at v1.
 
 Workflow IDs are validated against a closed shape, registered exactly once,
 independent of display labels, and pinned by literal-string tests so an
@@ -154,12 +164,18 @@ the Grounds and Player Caddy results byte-identical.
 
 ## Grounds Condition Intelligence scaffold
 
-Registered, never implemented in V0. Its requirement matrix distinguishes
-three honest classes:
+Registered, never implemented. Its requirement matrix distinguishes the
+same honest classes as v1, with one evidence-evaluable group in v2:
 
-- **missing** — no canonical owner exists anywhere in the repository yet:
-  `course_model_version`, `course_coordinate_reference`, `map_version`,
-  `cart_node_identity`;
+- **evidence-evaluable map prerequisites** — `course_model_version`,
+  `course_coordinate_reference`, and `map_version` are satisfied only by
+  declared, identity-matched Course Model evidence
+  (`CourseModelEvidence`, derived by a composition root from a validated
+  Course World Model). The evaluator cross-checks the declared site,
+  deployment, coordinate-reference identity, and frame origin against the
+  validated commissioned site and fails closed on any mismatch; without
+  declared evidence they stay `missing`;
+- **missing** — no canonical owner exists yet: `cart_node_identity`;
 - **unsupported_in_v0** — a commissioning vocabulary exists but cannot
   express the fact today: `cart_pose_binding` and `camera_device_binding`
   (the closed canonical channel vocabulary has no pose or camera channel),
@@ -172,21 +188,28 @@ three honest classes:
   `condition_issue_registry_contract`, `maintenance_briefing_policy`,
   `human_review_workflow`, `repair_verification_semantics`.
 
-No Course World Model, camera, coverage record, condition observation, issue
-registry, or briefing object is created anywhere — the scaffold is a list of
-absences, not placeholders.
+No camera, coverage record, condition observation, issue registry, or
+briefing object is created anywhere, and satisfying the map prerequisites
+can never make the workflow READY: everything else stays independently
+unsatisfied, and a course workflow has no runtime to assemble.
 
 ## Player Caddy Experience scaffold
 
-Registered, never implemented in V0, and never able to block the other
-workflows. Missing: `course_world_model_map_query`,
+Registered, never implemented, and never able to block the other
+workflows. Evidence-evaluable in v2: `course_world_model_map_query`,
+satisfied only by declared, identity-matched Course Model evidence whose
+supported query kinds cover the whole `REQUIRED_MAP_QUERY_KINDS` set
+(pinned two-directionally against the real query-service surface by
+`tests/workflow_enablement/test_map_query_parity.py`); partial coverage
+never satisfies it. Missing:
 `player_consent_privacy_policy`, `pseudonymous_player_identity`,
 `ball_found_event`, `deterministic_landing_model_owner`,
 `player_recommendation_owner`, `session_retention_deletion_policy`.
 Unsupported in V0: `cart_pose`,
 `launch_monitor_adapter_or_manual_fallback`. Deferred:
 `caddy_session_contract`, `session_event_contract`. No session state, player
-identity, or player-facing recommendation object exists.
+identity, or player-facing recommendation object exists, and a map-query
+surface alone can never make the workflow READY.
 
 ## Deterministic report
 
@@ -264,15 +287,18 @@ produces byte-identical stdout and artifacts across repeat runs and across
 
 ## Current limitations and next seams
 
-- Grounds Condition Intelligence needs, in order: a versioned Course World
-  Model owner (model identity, map version, coordinate alignment), cart-node
-  commissioning (asset + pose/camera channel vocabulary extensions — a
-  commissioning schema change with its own review), calibration-reference
-  contracts for intrinsics/extrinsics, a time-sync profile contract, and only
-  then the Inspection Coverage / Condition Observation / Issue Registry /
-  Maintenance Briefing contracts. Each addition slots into the existing
-  requirement matrix by flipping a prerequisite from missing/unsupported to
-  satisfied — the Range Operations contracts do not change.
+- Grounds Condition Intelligence's first seam — a versioned Course World
+  Model owner (model identity, map version, coordinate alignment) — now
+  exists (`simulation/docs/course_world_model_v0.md`), and its evidence
+  satisfies exactly the three map prerequisites. The remaining order:
+  cart-node commissioning (asset + pose/camera channel vocabulary
+  extensions — a commissioning schema change with its own review),
+  calibration-reference contracts for intrinsics/extrinsics, a time-sync
+  profile contract, and only then the Inspection Coverage / Condition
+  Observation / Issue Registry / Maintenance Briefing contracts. Each
+  addition slots into the requirement matrix by flipping a prerequisite
+  from missing/unsupported to satisfied under an explicit new requirements
+  version — the Range Operations contracts do not change.
 - Player Caddy Experience additionally needs consent/privacy and retention
   policy contracts plus named owners for the landing model and player-facing
   recommendations (a new advisory-ownership decision, not an extension of the

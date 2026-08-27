@@ -30,6 +30,7 @@ from nxt_commissioning import (
 )
 
 from .evidence import (
+    CourseModelEvidence,
     EnablementContext,
     RangeOpsEvidence,
     RuntimeMode,
@@ -46,9 +47,11 @@ from .identity import (
     WorkflowRegistry,
 )
 from .requirements import (
+    GROUNDS_MAP_PREREQUISITE_IDS,
     GROUNDS_REQUIREMENTS_VERSION,
     PLAYER_CADDY_REQUIREMENTS_VERSION,
     RANGE_OPS_REQUIREMENTS_VERSION,
+    REQUIRED_MAP_QUERY_KINDS,
     RequirementResult,
     RequirementStatus,
     grounds_prerequisites,
@@ -594,19 +597,35 @@ def evaluate_range_ops(
     )
 
 
-def _evaluate_prerequisite_scaffold(
+def _require_course_workflow_inputs(
     *,
-    shared: SharedSiteResult,
     definition: WorkflowDefinition,
     expected_version: str,
-    prerequisites: tuple[RequirementResult, ...],
-) -> WorkflowReadiness:
+    course_model: CourseModelEvidence | None,
+) -> None:
     if definition.requirements_version != expected_version:
         raise WorkflowEnablementError(
             f"{definition.workflow_id} requirements version mismatch: "
             f"this evaluator implements {expected_version!r}, the registry "
             f"requires {definition.requirements_version!r}"
         )
+    if course_model is not None and not isinstance(
+        course_model, CourseModelEvidence
+    ):
+        raise WorkflowEnablementError(
+            "course_model must be a CourseModelEvidence or None; untyped "
+            "serialized input can never reach a verdict"
+        )
+
+
+def _course_workflow_readiness(
+    *,
+    shared: SharedSiteResult,
+    definition: WorkflowDefinition,
+    prerequisites: tuple[RequirementResult, ...],
+) -> WorkflowReadiness:
+    # No course workflow has any implemented runtime, so assembly
+    # eligibility is structurally false regardless of prerequisites.
     failures = (
         (SHARED_SITE_INVALID,)
         if shared.verdict is not SharedSiteVerdict.VALID
@@ -627,27 +646,217 @@ def _evaluate_prerequisite_scaffold(
     )
 
 
+def _course_model_binding_issues(
+    site: CommissionedSite, course_model: CourseModelEvidence
+) -> tuple[str, ...]:
+    """Cross-check declared Course Model evidence against the valid site.
+
+    Evidence is declared plain data, so every claim the validated
+    commissioned site can falsify is checked here: site identity,
+    deployment identity, the coordinate-reference identity, and the
+    commissioned facility origin the course frame claims to sit on.
+    """
+    issues: list[str] = []
+    if course_model.site_id != site.site_id:
+        issues.append(
+            f"evidence names site {course_model.site_id!r}, the shared "
+            f"commissioned site is {site.site_id!r}"
+        )
+    if course_model.deployment_id != site.deployment_id:
+        issues.append(
+            f"evidence names deployment {course_model.deployment_id!r}, "
+            f"the shared commissioned deployment is {site.deployment_id!r}"
+        )
+    commissioned = site.spatial_reference.coordinate_system
+    if course_model.crs_kind != commissioned.kind.value:
+        issues.append(
+            f"evidence coordinate kind {course_model.crs_kind!r} does not "
+            f"match the commissioned kind {commissioned.kind.value!r}"
+        )
+    if course_model.crs_identifier != commissioned.identifier:
+        issues.append(
+            f"evidence coordinate reference "
+            f"{course_model.crs_identifier!r} does not match the "
+            f"commissioned reference {commissioned.identifier!r}"
+        )
+    if course_model.crs_horizontal_unit != commissioned.horizontal_unit:
+        issues.append(
+            f"evidence horizontal unit "
+            f"{course_model.crs_horizontal_unit!r} does not match the "
+            f"commissioned unit {commissioned.horizontal_unit!r}"
+        )
+    if course_model.crs_vertical_unit != commissioned.vertical_unit:
+        issues.append(
+            f"evidence vertical unit {course_model.crs_vertical_unit!r} "
+            f"does not match the commissioned unit "
+            f"{commissioned.vertical_unit!r}"
+        )
+    if course_model.crs_axes != tuple(commissioned.axes):
+        issues.append(
+            f"evidence axes {course_model.crs_axes!r} do not match the "
+            f"commissioned axes {tuple(commissioned.axes)!r}"
+        )
+    origin = site.spatial_reference.facility_origin
+    if (
+        course_model.origin_crs_x != origin.x
+        or course_model.origin_crs_y != origin.y
+        or course_model.origin_crs_z != origin.z
+    ):
+        issues.append(
+            "evidence frame origin "
+            f"({course_model.origin_crs_x!r}, "
+            f"{course_model.origin_crs_y!r}, "
+            f"{course_model.origin_crs_z!r}) does not match the "
+            f"commissioned facility origin ({origin.x!r}, {origin.y!r}, "
+            f"{origin.z!r})"
+        )
+    return tuple(issues)
+
+
 def evaluate_grounds(
-    *, shared: SharedSiteResult, definition: WorkflowDefinition
+    *,
+    shared: SharedSiteResult,
+    definition: WorkflowDefinition,
+    site: CommissionedSite | None = None,
+    course_model: CourseModelEvidence | None = None,
 ) -> WorkflowReadiness:
-    """Grounds Condition Intelligence: prerequisite scaffold only in v0."""
-    return _evaluate_prerequisite_scaffold(
-        shared=shared,
+    """Grounds Condition Intelligence: map prerequisites are evidence-
+    evaluable in requirements v2; everything else stays a scaffold."""
+    _require_course_workflow_inputs(
         definition=definition,
         expected_version=GROUNDS_REQUIREMENTS_VERSION,
-        prerequisites=grounds_prerequisites(),
+        course_model=course_model,
+    )
+    baseline = grounds_prerequisites()
+    if shared.verdict is not SharedSiteVerdict.VALID or site is None:
+        return _course_workflow_readiness(
+            shared=shared, definition=definition, prerequisites=baseline
+        )
+    if course_model is None:
+        return _course_workflow_readiness(
+            shared=shared, definition=definition, prerequisites=baseline
+        )
+    binding_issues = _course_model_binding_issues(site, course_model)
+    if binding_issues:
+        detail = (
+            "declared Course Model evidence does not bind to this "
+            "commissioned site: " + "; ".join(binding_issues)
+        )
+        overrides = {
+            requirement_id: RequirementResult(
+                requirement_id=requirement_id,
+                status=RequirementStatus.MISSING,
+                detail=detail,
+            )
+            for requirement_id in GROUNDS_MAP_PREREQUISITE_IDS
+        }
+    else:
+        overrides = {
+            "course_model_version": RequirementResult(
+                requirement_id="course_model_version",
+                status=RequirementStatus.SATISFIED,
+                detail=(
+                    f"Course World Model {course_model.course_model_id!r} "
+                    f"version {course_model.model_version!r} is declared "
+                    "for this commissioned site and deployment"
+                ),
+            ),
+            "course_coordinate_reference": RequirementResult(
+                requirement_id="course_coordinate_reference",
+                status=RequirementStatus.SATISFIED,
+                detail=(
+                    f"course frame {course_model.frame_id!r} declares the "
+                    "commissioned coordinate reference "
+                    f"{course_model.crs_identifier!r} "
+                    f"({course_model.crs_kind}, "
+                    f"{course_model.crs_horizontal_unit}/"
+                    f"{course_model.crs_vertical_unit}) at the "
+                    "commissioned facility origin"
+                ),
+            ),
+            "map_version": RequirementResult(
+                requirement_id="map_version",
+                status=RequirementStatus.SATISFIED,
+                detail=(
+                    f"map identity {course_model.course_model_id!r} "
+                    f"{course_model.model_version!r} with content digest "
+                    f"{course_model.content_digest} at declared resolution "
+                    f"{course_model.resolution_m} m"
+                ),
+            ),
+        }
+    prerequisites = tuple(
+        overrides.get(item.requirement_id, item) for item in baseline
+    )
+    return _course_workflow_readiness(
+        shared=shared, definition=definition, prerequisites=prerequisites
     )
 
 
 def evaluate_player_caddy(
-    *, shared: SharedSiteResult, definition: WorkflowDefinition
+    *,
+    shared: SharedSiteResult,
+    definition: WorkflowDefinition,
+    site: CommissionedSite | None = None,
+    course_model: CourseModelEvidence | None = None,
 ) -> WorkflowReadiness:
-    """Player Caddy Experience: prerequisite scaffold only in v0."""
-    return _evaluate_prerequisite_scaffold(
-        shared=shared,
+    """Player Caddy Experience: the map-query prerequisite is evidence-
+    evaluable in requirements v2; everything else stays a scaffold."""
+    _require_course_workflow_inputs(
         definition=definition,
         expected_version=PLAYER_CADDY_REQUIREMENTS_VERSION,
-        prerequisites=player_caddy_prerequisites(),
+        course_model=course_model,
+    )
+    baseline = player_caddy_prerequisites()
+    if shared.verdict is not SharedSiteVerdict.VALID or site is None:
+        return _course_workflow_readiness(
+            shared=shared, definition=definition, prerequisites=baseline
+        )
+    if course_model is None:
+        return _course_workflow_readiness(
+            shared=shared, definition=definition, prerequisites=baseline
+        )
+    binding_issues = _course_model_binding_issues(site, course_model)
+    missing_kinds = tuple(
+        kind
+        for kind in REQUIRED_MAP_QUERY_KINDS
+        if kind not in course_model.supported_queries
+    )
+    if binding_issues:
+        override = RequirementResult(
+            requirement_id="course_world_model_map_query",
+            status=RequirementStatus.MISSING,
+            detail=(
+                "declared Course Model evidence does not bind to this "
+                "commissioned site: " + "; ".join(binding_issues)
+            ),
+        )
+    elif missing_kinds:
+        override = RequirementResult(
+            requirement_id="course_world_model_map_query",
+            status=RequirementStatus.MISSING,
+            detail=(
+                "the declared map-query surface does not support every "
+                "required query kind; missing: " + ", ".join(missing_kinds)
+            ),
+        )
+    else:
+        override = RequirementResult(
+            requirement_id="course_world_model_map_query",
+            status=RequirementStatus.SATISFIED,
+            detail=(
+                "a deterministic map-query surface over Course World "
+                f"Model {course_model.course_model_id!r} "
+                f"{course_model.model_version!r} declares every required "
+                "query kind: " + ", ".join(REQUIRED_MAP_QUERY_KINDS)
+            ),
+        )
+    prerequisites = tuple(
+        override if item.requirement_id == override.requirement_id else item
+        for item in baseline
+    )
+    return _course_workflow_readiness(
+        shared=shared, definition=definition, prerequisites=prerequisites
     )
 
 
@@ -657,10 +866,24 @@ def evaluate_workflows(
     shared: SharedSiteResult,
     site: CommissionedSite | None,
     range_ops_evidence: RangeOpsEvidence,
+    course_model_evidence: CourseModelEvidence | None = None,
 ) -> tuple[WorkflowReadiness, ...]:
-    """Evaluate every registered workflow independently, in identity order."""
+    """Evaluate every registered workflow independently, in identity order.
+
+    ``course_model_evidence`` is shared spatial evidence: only the two
+    course workflows consume it, and the Range Operations evaluator
+    never receives it, so a Course Model can neither lend readiness to
+    nor subtract readiness from Range Operations.
+    """
     if not isinstance(registry, WorkflowRegistry):
         raise WorkflowEnablementError("registry must be a WorkflowRegistry")
+    if course_model_evidence is not None and not isinstance(
+        course_model_evidence, CourseModelEvidence
+    ):
+        raise WorkflowEnablementError(
+            "course_model_evidence must be a CourseModelEvidence or None; "
+            "untyped serialized input can never reach a verdict"
+        )
     readiness: list[WorkflowReadiness] = []
     for workflow_id in registry.workflow_ids:
         definition = registry.definition(workflow_id)
@@ -675,11 +898,21 @@ def evaluate_workflows(
             )
         elif workflow_id == GROUNDS_WORKFLOW_ID:
             readiness.append(
-                evaluate_grounds(shared=shared, definition=definition)
+                evaluate_grounds(
+                    shared=shared,
+                    definition=definition,
+                    site=site,
+                    course_model=course_model_evidence,
+                )
             )
         elif workflow_id == PLAYER_CADDY_WORKFLOW_ID:
             readiness.append(
-                evaluate_player_caddy(shared=shared, definition=definition)
+                evaluate_player_caddy(
+                    shared=shared,
+                    definition=definition,
+                    site=site,
+                    course_model=course_model_evidence,
+                )
             )
         else:
             raise WorkflowEnablementError(
@@ -696,6 +929,7 @@ def evaluate_pilot_site(
     context: EnablementContext,
     range_ops_evidence: RangeOpsEvidence,
     registry: WorkflowRegistry,
+    course_model_evidence: CourseModelEvidence | None = None,
 ) -> PilotSiteEvaluation:
     """One shared-site validation plus every registered workflow verdict."""
     site, shared = evaluate_shared_site(
@@ -706,6 +940,7 @@ def evaluate_pilot_site(
         shared=shared,
         site=site,
         range_ops_evidence=range_ops_evidence,
+        course_model_evidence=course_model_evidence,
     )
     return PilotSiteEvaluation(
         site=site if shared.verdict is SharedSiteVerdict.VALID else None,
