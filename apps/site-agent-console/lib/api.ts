@@ -93,6 +93,8 @@ export interface StateProjection {
     count_source: SourceReference | null;
     sensed_source: SourceReference | null;
     reading_age_s: number | null;
+    sensed_reading_age_s: number | null;
+    reading_status: string | null;
   } | null;
   facility_meta?: {
     t_s: number | null;
@@ -199,12 +201,13 @@ export interface Briefing {
     mode_label: string;
     run_directory: string;
   };
-  current_state: StateProjection;
   cycles: { admitted: number; rejected: number };
+  counts: {
+    no_action: number;
+    pending_review: number;
+    manager_decisions: number;
+  };
   timeline: BriefingEntry[];
-  no_action_records: Evaluation[];
-  pending_review: Recommendation[];
-  manager_decisions: Recommendation[];
   exceptions: BriefingException[];
   unresolved: string[];
 }

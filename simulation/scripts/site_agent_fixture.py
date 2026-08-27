@@ -50,6 +50,7 @@ from nxt_site_agent import (  # noqa: E402
     CompositionSeam,
     LaunchMaterials,
     SourceCursor,
+    scenario_time_label,
 )
 from nxt_workflow_enablement import (  # noqa: E402
     EnablementContext,
@@ -335,11 +336,6 @@ def service_launch_materials(
     )
 
 
-def _scenario_time_label(t_s: float) -> str:
-    minutes = int(t_s // 60)
-    return f"{(minutes // 60) % 24:02d}:{minutes % 60:02d}"
-
-
 def service_cycle_catalog() -> tuple[dict, ...]:
     """Fixture-only presentation data describing the declared storyline."""
     return tuple(
@@ -347,7 +343,9 @@ def service_cycle_catalog() -> tuple[dict, ...]:
             "cycle_index": spec.cycle_index,
             "label": spec.label,
             "scenario_t_s": spec.t_s,
-            "scenario_time": _scenario_time_label(spec.t_s),
+            # Reuse the package's clock helper so the catalog and the
+            # briefing timeline can never render one cycle at two times.
+            "scenario_time": scenario_time_label(spec.t_s),
             "variant": spec.variant,
             "source": "SIMULATED",
         }

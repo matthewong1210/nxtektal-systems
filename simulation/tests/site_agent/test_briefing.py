@@ -58,13 +58,19 @@ def test_briefing_over_the_full_storyline(tmp_path, launch):
     ]
     assert times == sorted(times)
 
-    # NO_ACTION is a positive, explained record
-    assert len(briefing["no_action_records"]) == 1
-    assert briefing["no_action_records"][0]["trace"]["rationale"]
+    # NO_ACTION is a positive, explained record (its rationale is on
+    # the timeline; the full record stays on /evaluations)
+    assert briefing["counts"]["no_action"] == 1
+    no_action_entries = [
+        entry
+        for entry in briefing["timeline"]
+        if entry["tag"] == TAG_DETECTED
+    ]
+    assert any("NO_ACTION" in entry["text"] for entry in no_action_entries)
 
     # one pending review remains, one decision recorded
-    assert len(briefing["pending_review"]) == 1
-    assert len(briefing["manager_decisions"]) == 1
+    assert briefing["counts"]["pending_review"] == 1
+    assert briefing["counts"]["manager_decisions"] == 1
     decision_entries = [
         entry
         for entry in briefing["timeline"]

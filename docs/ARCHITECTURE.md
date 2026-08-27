@@ -168,10 +168,12 @@ orienting a reviewer:
 | `nxt_agent_runtime` | Agent Runtime | Deterministic, restart-safe composition of Site Runtime output through Shadow Ops evaluation, with an evaluation checkpoint, evidence journal, pending manager-decision view, and health/status; synthetic sources only, advisory only |
 | `nxt_edge_observation` | Edge Observation Adapter Kit V0 | Converts already-read load-cell, digital-I/O, and robot-status samples into canonical `Observation` objects using commissioned bindings, with explicit conversion diagnostics; fixture-backed, no transport, device, or command surface |
 | `nxt_workflow_enablement` | Pilot Site Workflow Enablement V0 | Registers the three pilot workflow identities, evaluates the shared commissioned site and each workflow's requirements independently, and emits a deterministic enablement report plus fixture-only launch-plan data; readiness gating only, no runtime construction |
+| `nxt_site_agent` | Pilot Site Agent Service V0 | Local readiness-gated application shell around the Agent Runtime: loopback-only versioned Manager API, noncanonical projections and shift briefing, fixture source-cursor persistence; fixture-backed Shadow Mode only, no authentication, no physical device or command path |
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
 | `nxt_range_viewer` / `nxt_range_demo` | Demo and replay | Read-only presentation over exported artifacts |
 | `apps/operational-replay` | Operational Replay web app | Read-only browser storytelling over selected exported artifacts |
+| `apps/site-agent-console` | Site Agent Manager Console | Static export consuming only the local Manager API; decision-first operations view, clearly labeled simulated |
 | `@nxtektal/roi-engine` | ROI engine | Formula-locked economics with evidence-bearing inputs |
 | `AGENTS.md` and `.agent/` | AI engineering operating system | Repository truth, dependency, safety, testing, and review governance |
 
@@ -182,11 +184,13 @@ explicit without pretending the rename has occurred.
 
 ## Repository surfaces
 
-The standalone checkout contains three independent implementation surfaces:
+The standalone checkout contains four independent implementation surfaces:
 
 1. `simulation/`: the Python simulation and Site OS stack.
 2. `nxtektal-roi-engine/`: a standalone deterministic TypeScript package.
 3. `apps/operational-replay/`: a standalone read-only Next.js presentation app.
+4. `apps/site-agent-console/`: the standalone Manager Console static app for
+   the local fixture-backed Site Agent service.
 
 Root documentation and `.agent/` govern all surfaces without creating a
 runtime dependency between them.

@@ -19,7 +19,12 @@ snapshots, checkpoints) that keep their existing owners:
   decision truth, never read back as live input.
 
 None of these files is facility state, policy evidence, or workflow
-truth, and none of them feeds the live loop.
+truth.  ``launch.json`` and ``service_events.jsonl`` never feed the
+live loop.  ``source_cursor.json`` is the one exception the service
+depends on: it is not facility or decision truth, but on resume it
+supplies the fixture source's next publication position, so it is
+persisted fail-closed and must not be treated as discardable
+diagnostics.
 """
 
 from __future__ import annotations

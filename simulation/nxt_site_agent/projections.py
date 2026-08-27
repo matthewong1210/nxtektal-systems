@@ -53,6 +53,21 @@ def _reading_age_s(
     return age if age >= 0.0 else None
 
 
+_STATUS_SEVERITY = {"ok": 0, "stale": 1, "missing": 2}
+
+
+def _worst_status(*references: Mapping[str, Any] | None) -> str | None:
+    """Return the least-trustworthy status among the given references."""
+    statuses = [
+        str(reference.get("status"))
+        for reference in references
+        if reference is not None and reference.get("status") is not None
+    ]
+    if not statuses:
+        return None
+    return max(statuses, key=lambda status: _STATUS_SEVERITY.get(status, 3))
+
+
 def no_state_projection(reason: str) -> dict[str, Any]:
     """The explicit shape served before any envelope was published."""
     return {
@@ -115,6 +130,15 @@ def state_projection(
                 dict(sensed_reference) if sensed_reference else None
             ),
             "reading_age_s": _reading_age_s(count_reference, scenario_now_s),
+            "sensed_reading_age_s": _reading_age_s(
+                sensed_reference, scenario_now_s
+            ),
+            # The worst of the two dispenser channels' statuses, so a
+            # stale or missing sensed reading is never masked by a
+            # fresh count reading (or vice versa).
+            "reading_status": _worst_status(
+                count_reference, sensed_reference
+            ),
         },
         "facility_meta": {
             "t_s": meta.get("t_s"),

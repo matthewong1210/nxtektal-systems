@@ -143,7 +143,9 @@ the runtime exactly one bounded cycle per fixture advance, records a
 noncanonical cycle event (including rejection codes and adapter
 diagnostics captured by the composition), persists the cursor, and
 refuses advances once the source is exhausted or the plan's declared
-`max_cycles` bound is reached. Wall clock is never read: reading age,
+`max_cycles` bound is reached. The bound is enforced against the
+persisted cursor's resolved-cycle count, so it survives restarts and
+is not consumed by retryable deferrals that make no progress. Wall clock is never read: reading age,
 `responded_at`, and every briefing time use observation/scenario time,
 so identical action sequences produce byte-identical canonical
 evidence across runs (`tests/site_agent/test_service.py` proves it).
@@ -161,7 +163,12 @@ browser error can never mutate canonical evidence.
 Loopback-only (`127.0.0.1`/`localhost`; anything else is refused at
 construction). Every response carries the schema and the fixture
 disclaimer. No cross-origin headers exist: the console is served
-same-origin by the service.
+same-origin by the service, and requests carrying a foreign `Origin`
+or a non-loopback `Host` header are refused (drive-by CSRF and DNS
+rebinding defense — an unauthenticated local service must not be
+drivable by a page the operator merely visits). Request bodies are
+size-capped, chunked bodies are refused, and any framing error closes
+the connection so unread bytes are never parsed as a second request.
 
 | Endpoint | Meaning |
 |---|---|
@@ -271,7 +278,10 @@ canonical evidence remains read-only telemetry.
   or evidence.
 - POSIX-only, single site, single process, manual/fixture-advance
   cadence (a scheduler would live in this application boundary, not in
-  the runtime).
+  the runtime). One service process per runs directory: the canonical
+  stores are lock- and hash-protected and divergence fails closed, but
+  the noncanonical cursor file is last-writer-wins, so running two
+  service processes over the same runs directory is unsupported.
 - The exact next seam for real input is the source composition in
   `scripts/site_agent_fixture.py`: replace the fixture feed with a
   transport reader that emits the same raw-sample shapes and the same

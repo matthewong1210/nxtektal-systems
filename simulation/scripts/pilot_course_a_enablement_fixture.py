@@ -49,6 +49,7 @@ from nxt_agent_runtime import (  # noqa: E402
 )
 from nxt_pilot_ops.ledger import JsonlEventLedger  # noqa: E402
 from nxt_site_runtime.checkpoints import JsonCheckpointStore  # noqa: E402
+from nxt_site_runtime.ports import ObservationSource  # noqa: E402
 
 from nxt_workflow_enablement import (  # noqa: E402
     AdapterCompositionEvidence,
@@ -385,7 +386,28 @@ def assemble_range_ops_runtime(
             f"factory creates: {plan.evidence_paths!r} vs "
             f"{EVIDENCE_RELATIVE_PATHS!r}"
         )
-    if source is None:
+    if site_config is not None and not isinstance(site_config, SiteConfig):
+        raise WorkflowEnablementError(
+            "site_config must be a SiteConfig projected from the same "
+            "commissioned site; the composition root owns that consistency"
+        )
+    if source is not None:
+        if not isinstance(source, ObservationSource):
+            raise WorkflowEnablementError(
+                "source must implement the runtime ObservationSource "
+                "protocol (peek-until-ack, reject with sequence reuse)"
+            )
+        if (
+            specs is not ENABLEMENT_CYCLES
+            or consumed_cycles != 0
+            or first_sequence_number != 0
+        ):
+            raise WorkflowEnablementError(
+                "source= supersedes specs/consumed_cycles/"
+                "first_sequence_number; resume the supplied source "
+                "itself instead of passing resume parameters here"
+            )
+    else:
         source = pilot_observation_source(
             site,
             specs=specs,

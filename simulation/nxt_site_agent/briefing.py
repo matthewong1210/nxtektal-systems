@@ -250,8 +250,24 @@ def briefing_projection(
     service_events: Sequence[Mapping[str, Any]],
     response_scenario_seconds: Mapping[str, float],
     disclaimer: str,
+    read_errors: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Assemble the Shift Briefing from already-projected evidence."""
+    # Crash-window redelivery can append the same cycle event twice
+    # (once before the crash, once after the idempotent replay), so the
+    # briefing collapses exact duplicates — the projection must stay
+    # idempotent under redelivery, matching the canonical layer.
+    deduped_events: list[Mapping[str, Any]] = []
+    seen_cycle_events: set[str] = set()
+    for event in service_events:
+        if event.get("event") == "cycle":
+            key = repr(sorted(event.items(), key=lambda item: item[0]))
+            if key in seen_cycle_events:
+                continue
+            seen_cycle_events.add(key)
+        deduped_events.append(event)
+    service_events = deduped_events
+
     timeline = _cycle_entries(service_events)
     timeline.extend(_evaluation_entries(evaluations, len(timeline)))
     timeline.extend(
@@ -267,7 +283,16 @@ def briefing_projection(
         )
     )
 
-    admitted = sum(
+    # Count distinct admitted envelopes: an evaluated cycle and its
+    # post-crash replay_skipped redelivery are one admission, not two.
+    admitted_envelopes = {
+        event.get("envelope_id")
+        for event in service_events
+        if event.get("event") == "cycle"
+        and event.get("outcome") in ("evaluated", "replay_skipped")
+        and event.get("envelope_id")
+    }
+    admitted = len(admitted_envelopes) or sum(
         1
         for event in service_events
         if event.get("event") == "cycle"
@@ -323,6 +348,12 @@ def briefing_projection(
                 "detail": health.get("last_failure_detail"),
             }
         )
+    # A read failure must never render as a clean shift: an unreadable
+    # journal or queue is an explicit exception, not empty sections.
+    for detail in read_errors:
+        exceptions.append(
+            {"kind": "evidence_unreadable", "tag": TAG_SERVICE, "detail": detail}
+        )
 
     pending = [
         item
@@ -351,7 +382,14 @@ def briefing_projection(
         unresolved.append(
             "Service is in a failed state and refuses further cycles."
         )
+    for detail in read_errors:
+        unresolved.append(f"Canonical evidence could not be read: {detail}")
 
+    # `current_state`, `pending_review`, `manager_decisions`, and
+    # `no_action_records` are intentionally NOT duplicated here: the
+    # console reads them from `/state` and `/recommendations`, and
+    # embedding them would force an extra ledger/journal read per
+    # briefing and a second copy of those payload shapes to maintain.
     return {
         "disclaimer": disclaimer,
         "identity": dict(identity),
@@ -359,15 +397,16 @@ def briefing_projection(
             "mode": TAG_SIMULATED,
             "source": "fixture",
         },
-        "current_state": state,
         "cycles": {
             "admitted": admitted,
             "rejected": len(rejected_events),
         },
+        "counts": {
+            "no_action": len(no_action),
+            "pending_review": len(pending),
+            "manager_decisions": len(decided),
+        },
         "timeline": timeline,
-        "no_action_records": no_action,
-        "pending_review": pending,
-        "manager_decisions": decided,
         "exceptions": exceptions,
         "unresolved": unresolved,
     }

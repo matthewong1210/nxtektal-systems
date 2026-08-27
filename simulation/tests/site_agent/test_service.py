@@ -389,6 +389,14 @@ def test_cursor_write_failure_fails_the_service_closed(
     with pytest.raises(SiteAgentError) as excinfo:
         service.advance()
     assert excinfo.value.code == "cursor_write_failed"
+    # The service must actually fail closed: an unwritable cursor makes
+    # a future restart unsafe, so no further cycles may advance.
+    health = service.health_snapshot()
+    assert health["service_state"] == "failed"
+    assert health["degraded"] is True
+    with pytest.raises(SiteAgentError) as refused:
+        service.advance()
+    assert refused.value.code == "advance_refused"
 
 
 def test_event_append_failure_degrades_but_does_not_block(

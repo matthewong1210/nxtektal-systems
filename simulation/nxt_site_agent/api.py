@@ -56,6 +56,12 @@ _STATUS_BY_CODE = {
     "not_found": 404,
     "method_not_allowed": 405,
     "body_too_large": 413,
+    "forbidden_origin": 403,
+    "evidence_root_collision": 409,
+    "workflow_not_ready": 409,
+    "composition_failed": 500,
+    "runtime_failed": 500,
+    "runtime_stopped": 409,
 }
 
 _CONTENT_TYPES = {
@@ -93,6 +99,9 @@ class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "NXTSiteAgent/0"
     sys_version = ""
+    # Bound a stalled or slow client so keep-alive connections cannot
+    # accumulate handler threads indefinitely.
+    timeout = 30
 
     # -- plumbing --------------------------------------------------------
 
@@ -115,6 +124,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -122,19 +133,63 @@ class _Handler(BaseHTTPRequestHandler):
         status = _STATUS_BY_CODE.get(code, 500)
         self._send_json(status, _error_payload(code, detail))
 
+    def _allowed_authorities(self) -> set[str]:
+        host, port = self.server.server_address[:2]  # type: ignore[attr-defined]
+        hosts = {"127.0.0.1", "localhost"}
+        if host in hosts:
+            names = hosts
+        else:
+            names = {str(host)}
+        authorities: set[str] = set()
+        for name in names:
+            authorities.add(name)
+            authorities.add(f"{name}:{port}")
+        return authorities
+
+    def _request_allowed(self) -> tuple[bool, str | None]:
+        """Reject cross-origin and rebound-host requests.
+
+        The service is loopback-only with no authentication, so a page
+        the operator merely visits must not be able to drive it. A
+        cross-origin ``Origin`` (CSRF) and a foreign ``Host`` (DNS
+        rebinding) are both refused; same-origin console requests carry
+        a matching ``Origin``/``Host`` or omit ``Origin`` entirely.
+        """
+        allowed = self._allowed_authorities()
+        host_header = self.headers.get("Host")
+        if host_header is not None and host_header not in allowed:
+            return False, f"request Host {host_header!r} is not loopback"
+        origin = self.headers.get("Origin")
+        if origin is not None and origin != "null":
+            authority = origin.split("://", 1)[-1]
+            if authority not in allowed:
+                return False, f"cross-origin request from {origin!r} refused"
+        return True, None
+
     def _read_body(self) -> dict[str, Any]:
+        # An unsupported framing (chunked) or an error before the body is
+        # read leaves bytes on a keep-alive socket that would be parsed
+        # as the next request, so close the connection in those cases.
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            raise SiteAgentError(
+                "invalid_request", "chunked request bodies are not supported"
+            )
         raw_length = self.headers.get("Content-Length") or "0"
         try:
             length = int(raw_length)
         except ValueError as exc:
+            self.close_connection = True
             raise SiteAgentError(
                 "invalid_request", "Content-Length is not an integer"
             ) from exc
         if length < 0:
+            self.close_connection = True
             raise SiteAgentError(
                 "invalid_request", "Content-Length must be non-negative"
             )
         if length > _MAX_BODY_BYTES:
+            self.close_connection = True
             raise SiteAgentError(
                 "body_too_large",
                 f"request bodies are limited to {_MAX_BODY_BYTES} bytes",
@@ -159,6 +214,15 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler naming
         path = self.path.split("?", 1)[0]
         try:
+            allowed, reason = self._request_allowed()
+            if not allowed:
+                self._send_error_code("forbidden_origin", reason or "refused")
+                return
+            if self.headers.get("Content-Length") or self.headers.get(
+                "Transfer-Encoding"
+            ):
+                # A GET carrying an unread body would desync keep-alive.
+                self.close_connection = True
             if path == "/api/v0/health":
                 self._send_json(
                     200, _envelope(self._service.health_snapshot())
@@ -200,6 +264,11 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler naming
         path = self.path.split("?", 1)[0]
         try:
+            allowed, reason = self._request_allowed()
+            if not allowed:
+                self.close_connection = True
+                self._send_error_code("forbidden_origin", reason or "refused")
+                return
             body = self._read_body()
             if path == "/api/v0/demo/advance":
                 self._send_json(200, _envelope(self._service.advance()))
@@ -358,6 +427,7 @@ class SiteAgentApiServer:
         self._service = service
         self._server = _Server((host, port), service, resolved_console)
         self._thread: threading.Thread | None = None
+        self._serving = False
 
     @property
     def host(self) -> str:
@@ -372,13 +442,18 @@ class SiteAgentApiServer:
         return f"http://{self.host}:{self.port}"
 
     def serve_forever(self) -> None:
-        self._server.serve_forever()
+        self._serving = True
+        try:
+            self._server.serve_forever()
+        finally:
+            self._serving = False
 
     def start_background(self) -> None:
         if self._thread is not None:
             raise SiteAgentError(
                 "invalid_request", "the server is already running"
             )
+        self._serving = True
         thread = threading.Thread(
             target=self._server.serve_forever,
             name="site-agent-api",
@@ -388,11 +463,16 @@ class SiteAgentApiServer:
         self._thread = thread
 
     def shutdown(self) -> None:
-        self._server.shutdown()
+        # BaseServer.shutdown() blocks on an event only set by
+        # serve_forever(), so calling it before serving ever started
+        # would hang; skip straight to closing the socket in that case.
+        if self._serving:
+            self._server.shutdown()
         self._server.server_close()
         if self._thread is not None:
             self._thread.join(timeout=5.0)
             self._thread = None
+        self._serving = False
 
 
 __all__ = ["SiteAgentApiServer"]

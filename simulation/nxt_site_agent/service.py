@@ -35,6 +35,7 @@ from typing import Any
 from nxt_agent_runtime import (
     AgentRuntimeError,
     CycleOutcome,
+    CycleKind,
     EvaluationJournal,
     ManagerDecisionQueueError,
 )
@@ -120,20 +121,15 @@ class _ServiceRuntimeSink:
         )
 
 
-def _plain(value: Any) -> Any:
-    """Deep-copy mappings/sequences into JSON-serializable plain types."""
-    if isinstance(value, Mapping):
-        return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
-    return value
-
-
 def _run_number(name: str) -> int | None:
     if not name.startswith(_RUN_DIR_PREFIX):
         return None
     suffix = name[len(_RUN_DIR_PREFIX):]
-    if suffix.isdigit() and len(suffix) == 3:
+    # A run directory suffix is the number zero-padded to at least three
+    # digits (see _run_dir).  Accept exactly the strings that round-trip
+    # through that formatting, so counts above 999 stay parseable rather
+    # than orphaning the newest evidence root.
+    if suffix.isdigit() and f"{int(suffix):03d}" == suffix:
         return int(suffix)
     return None
 
@@ -297,8 +293,8 @@ class SiteAgentService:
         cursor = SourceCursor(consumed_cycles=0, next_sequence_number=0)
         storage.write_cursor(cursor)
         sink = _ServiceRuntimeSink()
-        composed = seam.composer(
-            materials.plan, storage.workflow_evidence_root, cursor, sink
+        composed = cls._compose_or_refuse(
+            seam, materials.plan, storage, cursor, sink
         )
         service = cls(
             storage=storage,
@@ -350,9 +346,7 @@ class SiteAgentService:
                 "record's report identity",
             )
         sink = _ServiceRuntimeSink()
-        composed = seam.composer(
-            plan, storage.workflow_evidence_root, cursor, sink
-        )
+        composed = cls._compose_or_refuse(seam, plan, storage, cursor, sink)
         return cls(
             storage=storage,
             seam=seam,
@@ -364,6 +358,34 @@ class SiteAgentService:
             sink=sink,
             resumed=True,
         )
+
+    @staticmethod
+    def _compose_or_refuse(
+        seam: CompositionSeam,
+        plan: RangeOpsLaunchPlan,
+        storage: ServiceStorage,
+        cursor: SourceCursor,
+        sink: "_ServiceRuntimeSink",
+    ) -> ComposedRuntime:
+        """Compose the runtime, converting any failure to a refusal.
+
+        The composition root may raise a bare ``ValueError`` (e.g. a
+        tampered cursor beyond the declared cycle count), which must
+        surface as a coded launch refusal rather than an unhandled
+        traceback or a silent HTTP 500.
+        """
+        try:
+            return seam.composer(
+                plan, storage.workflow_evidence_root, cursor, sink
+            )
+        except (LaunchRefusedError, WorkflowEnablementError):
+            raise
+        except Exception as exc:  # noqa: BLE001 - fail closed on launch
+            raise LaunchRefusedError(
+                "composition_failed",
+                f"could not compose the runtime: "
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
 
     @staticmethod
     def _verify_materials(
@@ -464,8 +486,33 @@ class SiteAgentService:
             )
             return
         status = self._composed.runtime.status()
+        # Scenario "now" must not regress across a restart: the site
+        # checkpoint only remembers the last *published* observation
+        # time, while rejected deliveries may have carried later times.
+        # The diagnostics stream records every delivery, so recover the
+        # maximum from it (best-effort: a lost stream degrades to the
+        # checkpoint time, never to an earlier response timestamp than
+        # the checkpoint proves).
+        delivered = [
+            value
+            for value in (
+                status.last_observation_timestamp_s,
+                self._last_delivered_observation_ts,
+                *(
+                    event.get("observation_timestamp_s")
+                    for event in self._storage.read_events()
+                    if isinstance(
+                        event.get("observation_timestamp_s"), (int, float)
+                    )
+                    and not isinstance(
+                        event.get("observation_timestamp_s"), bool
+                    )
+                ),
+            )
+            if value is not None
+        ]
         self._last_delivered_observation_ts = (
-            status.last_observation_timestamp_s
+            max(delivered) if delivered else None
         )
         self._append_event(
             {
@@ -570,14 +617,14 @@ class SiteAgentService:
                 trace = payload.get("decision_trace")
                 if isinstance(recommendation, Mapping):
                     key = str(recommendation.get("recommendation_id"))
-                    recommendations[key] = _plain(recommendation)
+                    recommendations[key] = to_primitive(recommendation)
                     if isinstance(trace, Mapping):
-                        traces[key] = _plain(trace)
+                        traces[key] = to_primitive(trace)
             elif record.event_type == "recommendation_response":
                 response = payload.get("response")
                 if isinstance(response, Mapping):
                     key = str(response.get("recommendation_id"))
-                    responses[key] = _plain(response)
+                    responses[key] = to_primitive(response)
                     try:
                         occurred = datetime.fromisoformat(
                             str(record.occurred_at)
@@ -663,15 +710,19 @@ class SiteAgentService:
 
     def evaluations_snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            journal_records = self._journal_records()
             traces, _, _, _ = self._ledger_index()
-            return [
-                evaluation_projection(
-                    record,
-                    ledger_trace=traces.get(record.recommendation_id or ""),
-                )
-                for record in journal_records
-            ]
+            return self._project_evaluations(self._journal_records(), traces)
+
+    def _project_evaluations(
+        self, journal_records, traces: Mapping[str, dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        return [
+            evaluation_projection(
+                record,
+                ledger_trace=traces.get(record.recommendation_id or ""),
+            )
+            for record in journal_records
+        ]
 
     def _journal_records(self):
         journal = EvaluationJournal(
@@ -685,41 +736,60 @@ class SiteAgentService:
                 f"cannot read the evaluation journal: {exc}",
             ) from exc
 
+    def _queue_entries(self):
+        try:
+            return self._composed.runtime.queue.entries()
+        except (ValueError, RuntimeError) as exc:
+            raise SiteAgentError(
+                "queue_unreadable",
+                f"cannot read the manager decision queue: {exc}",
+            ) from exc
+
     def recommendations_snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            try:
-                entries = self._composed.runtime.queue.entries()
-            except (ValueError, RuntimeError) as exc:
-                raise SiteAgentError(
-                    "queue_unreadable",
-                    f"cannot read the manager decision queue: {exc}",
-                ) from exc
             traces, recommendations, responses, _ = self._ledger_index()
-            return [
-                recommendation_projection(
-                    entry,
-                    trace=traces.get(entry.recommendation_id),
-                    recommendation=recommendations.get(
-                        entry.recommendation_id
-                    ),
-                    response=responses.get(entry.recommendation_id),
-                )
-                for entry in entries
-            ]
+            return self._project_recommendations(
+                self._queue_entries(), traces, recommendations, responses
+            )
+
+    def _project_recommendations(
+        self,
+        entries,
+        traces: Mapping[str, dict[str, Any]],
+        recommendations: Mapping[str, dict[str, Any]],
+        responses: Mapping[str, dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            recommendation_projection(
+                entry,
+                trace=traces.get(entry.recommendation_id),
+                recommendation=recommendations.get(entry.recommendation_id),
+                response=responses.get(entry.recommendation_id),
+            )
+            for entry in entries
+        ]
 
     def briefing_snapshot(self) -> dict[str, Any]:
         with self._lock:
             state = self.state_snapshot()
             health = self.health_snapshot()
+            # One ledger read for the whole briefing, not three.
+            traces, recs, responses, response_seconds = self._ledger_index()
+            read_errors: list[str] = []
             try:
-                evaluations = self.evaluations_snapshot()
-            except SiteAgentError:
+                evaluations = self._project_evaluations(
+                    self._journal_records(), traces
+                )
+            except SiteAgentError as exc:
                 evaluations = []
+                read_errors.append(exc.detail)
             try:
-                recommendations = self.recommendations_snapshot()
-            except SiteAgentError:
+                recommendations = self._project_recommendations(
+                    self._queue_entries(), traces, recs, responses
+                )
+            except SiteAgentError as exc:
                 recommendations = []
-            _, _, _, response_seconds = self._ledger_index()
+                read_errors.append(exc.detail)
             return briefing_projection(
                 identity={
                     "site_id": self._plan.site_id,
@@ -734,6 +804,7 @@ class SiteAgentService:
                 recommendations=recommendations,
                 service_events=self._storage.read_events(),
                 response_scenario_seconds=response_seconds,
+                read_errors=read_errors,
                 disclaimer=DISCLAIMER,
             )
 
@@ -770,7 +841,16 @@ class SiteAgentService:
         status = self._composed.runtime.status()
         if status.source_exhausted:
             return False, "the fixture source is exhausted"
-        if status.cycles_completed >= self._plan.max_cycles:
+        # Bound the run on the persisted cursor's resolved-cycle count,
+        # not the runtime's in-memory counter: the cursor survives a
+        # restart (so the bound is not silently refreshed) and only
+        # advances on a resolved cycle (so a retryable deferral, which
+        # makes no progress by design, does not consume the bound).
+        try:
+            consumed = self._composed.cursor().consumed_cycles
+        except Exception:  # noqa: BLE001 - gate must not raise
+            consumed = status.cycles_completed
+        if consumed >= self._plan.max_cycles:
             return False, (
                 "the declared bounded run is complete "
                 f"(max_cycles={self._plan.max_cycles})"
@@ -806,13 +886,36 @@ class SiteAgentService:
                     }
                 )
                 raise SiteAgentError(exc.incident_code, exc.detail) from exc
-            payload = self._record_cycle(outcome, cycle_label)
+            payload = self._record_cycle(
+                outcome, cycle_label, cursor_before.consumed_cycles
+            )
             cursor_after = self._composed.cursor()
-            self._storage.write_cursor(cursor_after)
+            try:
+                self._storage.write_cursor(cursor_after)
+            except SiteAgentError as exc:
+                # An unwritable cursor makes a future restart unsafe
+                # (a resume more than one cycle behind deadlocks against
+                # the retained invalid-sequence incident), so the
+                # service fails closed instead of advancing further.
+                self._fail(exc.code, exc.detail)
+                self._append_event(
+                    {
+                        "event": "failure",
+                        "code": exc.code,
+                        "detail": exc.detail,
+                        "observation_timestamp_s": (
+                            self._last_delivered_observation_ts
+                        ),
+                    }
+                )
+                raise
             return payload
 
     def _record_cycle(
-        self, outcome: CycleOutcome, cycle_label: str | None
+        self,
+        outcome: CycleOutcome,
+        cycle_label: str | None,
+        delivered_cycle_index: int,
     ) -> dict[str, Any]:
         rejection = self._sink.rejections[-1] if self._sink.rejections else None
         observation_ts: float | None = None
@@ -827,16 +930,34 @@ class SiteAgentService:
                 if previous is None
                 else max(previous, observation_ts)
             )
+        # Key the adapter diagnostics off the cycle actually delivered
+        # this advance, not max(reports): a source-exhausted cycle adds
+        # no report, and one storyline index can span several outcomes,
+        # so max() would stamp the wrong cycle's rejections.
         adapter_summary = None
         reports = dict(self._composed.adapter_reports())
-        if reports:
-            latest_cycle = max(reports)
-            report = reports[latest_cycle]
+        report = reports.get(delivered_cycle_index)
+        if report is not None:
             adapter_summary = {
-                "cycle_index": latest_cycle,
+                "cycle_index": delivered_cycle_index,
                 "rejected": list(report.get("rejected", [])),
                 "unmapped_count": len(report.get("unmapped", [])),
             }
+        # EVALUATION_DEFERRED carries no CycleOutcome.failure, but the
+        # retryable incident that caused it is the only useful forensic
+        # detail, so recover it from the runtime status.
+        failure_code = (
+            None
+            if outcome.failure is None
+            else getattr(outcome.failure.code, "value", None)
+        )
+        failure_detail = (
+            None if outcome.failure is None else outcome.failure.detail
+        )
+        if outcome.kind is CycleKind.EVALUATION_DEFERRED:
+            status = self._composed.runtime.status()
+            failure_code = status.last_failure_code
+            failure_detail = status.last_failure_detail
         event = {
             "event": "cycle",
             "outcome": outcome.kind.value,
@@ -855,14 +976,8 @@ class SiteAgentService:
                 or outcome.record.recommendation_action is None
                 else outcome.record.recommendation_action.value
             ),
-            "failure_code": (
-                None
-                if outcome.failure is None
-                else getattr(outcome.failure.code, "value", None)
-            ),
-            "failure_detail": (
-                None if outcome.failure is None else outcome.failure.detail
-            ),
+            "failure_code": failure_code,
+            "failure_detail": failure_detail,
             "observation_timestamp_s": observation_ts,
             "cycle_label": cycle_label,
             "adapter": adapter_summary,
@@ -871,28 +986,44 @@ class SiteAgentService:
         return {key: value for key, value in event.items() if key != "event"}
 
     def restart_runtime(self) -> dict[str, Any]:
-        """Recompose the runtime from persisted evidence and cursor."""
+        """Recompose the runtime from persisted evidence and cursor.
+
+        Build the replacement runtime *before* stopping the current one,
+        so a read/compose failure leaves the existing runtime intact and
+        the service SERVING rather than pointing at a stopped runtime it
+        already tore down.
+        """
         with self._lock:
             if self._state is ServiceState.STOPPED:
                 raise SiteAgentError(
                     "restart_refused", "the service is stopped"
                 )
             try:
+                cursor = self._storage.read_cursor()
+                sink = _ServiceRuntimeSink()
+                composed = self._seam.composer(
+                    self._plan,
+                    self._storage.workflow_evidence_root,
+                    cursor,
+                    sink,
+                )
+            except SiteAgentError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - refuse, keep serving
+                raise SiteAgentError(
+                    "restart_refused",
+                    f"could not recompose the runtime: "
+                    f"{type(exc).__name__}: {exc}",
+                ) from exc
+            try:
                 self._composed.runtime.request_stop()
             except Exception:  # noqa: BLE001 - old runtime teardown only
                 pass
-            cursor = self._storage.read_cursor()
-            sink = _ServiceRuntimeSink()
-            composed = self._seam.composer(
-                self._plan,
-                self._storage.workflow_evidence_root,
-                cursor,
-                sink,
-            )
             self._composed = composed
             self._sink = sink
             self._state = ServiceState.SERVING
             self._failure = None
+            self._event_append_failures = 0
             self._append_event(
                 {
                     "event": "restarted",
@@ -948,6 +1079,7 @@ class SiteAgentService:
             self._run_number = replacement._run_number
             self._state = replacement._state
             self._failure = replacement._failure
+            self._event_append_failures = 0
             self._last_delivered_observation_ts = (
                 replacement._last_delivered_observation_ts
             )
@@ -1041,9 +1173,17 @@ class SiteAgentService:
                 ) from exc
             except (TypeError, ValueError) as exc:
                 raise SiteAgentError("invalid_request", str(exc)) from exc
-            for item in self.recommendations_snapshot():
-                if item["recommendation_id"] == recommendation_id:
-                    return item
+            # Project only the entry that was just answered rather than
+            # rebuilding the entire queue.
+            traces, recs, responses, _ = self._ledger_index()
+            for entry in self._queue_entries():
+                if entry.recommendation_id == recommendation_id:
+                    return recommendation_projection(
+                        entry,
+                        trace=traces.get(recommendation_id),
+                        recommendation=recs.get(recommendation_id),
+                        response=responses.get(recommendation_id),
+                    )
             raise SiteAgentError(
                 "unknown_recommendation",
                 f"recommendation {recommendation_id!r} disappeared after "

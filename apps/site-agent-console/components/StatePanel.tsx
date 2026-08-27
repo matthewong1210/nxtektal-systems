@@ -27,7 +27,11 @@ export function StatePanel({ state }: { state: StateProjection }) {
     );
   }
   const dispenser = state.dispenser;
-  const reading = readingTone(dispenser.count_source?.status);
+  // The service reports the worst of the count/sensed channel statuses,
+  // so a stale sensed reading is never masked by a fresh count.
+  const reading = readingTone(
+    dispenser.reading_status ?? dispenser.count_source?.status,
+  );
   const report = state.quality?.assembly_report ?? null;
   const quality = state.quality?.runtime_quality ?? null;
   return (

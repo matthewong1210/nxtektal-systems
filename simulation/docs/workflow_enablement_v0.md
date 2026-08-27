@@ -51,7 +51,10 @@ contracts: workflow IDs safe for checkpoint/report identity, requirement-set
 versions, the report schema (`nxt-workflow-enablement/report/v0`), and the
 launch-plan shape. It is a *leaf*: its only first-party import is
 `nxt_commissioning`'s public surface (the same consumption tier as the Site
-Runtime's setup-only seam), and no existing package may import it. Adapter
+Runtime's setup-only seam). The Site Agent service shell
+(`nxt_site_agent`) is its only designated in-package consumer, using the
+public surface to verify enablement reports and launch plans at service
+launch; no other package may import it. Adapter
 and runtime facts arrive as declared, typed plain data
 (`AdapterCompositionEvidence`, `RangeOpsEvidence`), gathered by composition
 roots from the canonical owners' public APIs — the same pattern the edge

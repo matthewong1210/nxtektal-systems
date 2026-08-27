@@ -5,7 +5,6 @@ import {
   createClient,
   DISCLAIMER,
   type Briefing,
-  type Evaluation,
   type FixtureInfo,
   type Health,
   type Recommendation,
@@ -23,7 +22,6 @@ import { Badge, Section } from "../components/ui";
 interface ConsoleData {
   health: Health;
   state: StateProjection;
-  evaluations: Evaluation[];
   recommendations: Recommendation[];
   briefing: Briefing;
   fixture: FixtureInfo;
@@ -32,16 +30,15 @@ interface ConsoleData {
 const client = createClient((input, init) => fetch(input, init));
 
 async function fetchAll(): Promise<ConsoleData> {
-  const [health, state, evaluations, recommendations, briefing, fixture] =
+  const [health, state, recommendations, briefing, fixture] =
     await Promise.all([
       client.health(),
       client.state(),
-      client.evaluations(),
       client.recommendations(),
       client.briefing(),
       client.fixture(),
     ]);
-  return { health, state, evaluations, recommendations, briefing, fixture };
+  return { health, state, recommendations, briefing, fixture };
 }
 
 export default function ConsolePage() {
@@ -52,6 +49,8 @@ export default function ConsolePage() {
 
   const load = useCallback(async () => {
     try {
+      // Keep the last good view on a partial failure: a single failing
+      // endpoint must not blank a console that is otherwise healthy.
       setData(await fetchAll());
       setLoadError(null);
     } catch (cause) {
@@ -123,7 +122,7 @@ export default function ConsolePage() {
           {loading ? "Loading…" : "Refresh"}
         </button>
       </header>
-      {loadError !== null ? (
+      {data === null && loadError !== null ? (
         <div className="status-screen">
           <Section
             title="Service Unreachable"
@@ -155,6 +154,12 @@ export default function ConsolePage() {
         </div>
       ) : (
         <main className="console-main">
+          {loadError !== null ? (
+            <div className="load-warning" role="status">
+              <Badge tone="warn">STALE</Badge> A refresh failed ({loadError}).
+              Showing the last successful view.
+            </div>
+          ) : null}
           <div className="console-column">
             <StatusBar health={data.health} />
             <StatePanel state={data.state} />

@@ -47,7 +47,6 @@ class ServiceState(StrEnum):
     while the composed runtime is stopped between fixture advances.
     """
 
-    CREATED = "created"
     SERVING = "serving"
     STOPPED = "stopped"
     FAILED = "failed"

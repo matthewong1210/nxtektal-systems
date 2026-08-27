@@ -355,6 +355,101 @@ def test_api_without_console_reports_api_only(served):
     assert "Manager API" in payload["error"]["detail"]
 
 
+def test_cross_origin_and_foreign_host_requests_are_refused(served):
+    """A page the operator merely visits must not drive the service."""
+    service, server, _ = served
+    attack = http.client.HTTPConnection(server.host, server.port, timeout=10)
+    try:
+        ledger_path = service.storage.workflow_evidence_root / "ledger.jsonl"
+        before = (
+            ledger_path.read_bytes() if ledger_path.is_file() else b""
+        )
+        attack.request(
+            "POST",
+            "/api/v0/demo/advance",
+            body="{}",
+            headers={
+                "Content-Type": "application/json",
+                "Origin": "https://evil.example",
+            },
+        )
+        response = attack.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 403
+        assert payload["error"]["code"] == "forbidden_origin"
+
+        rebind = http.client.HTTPConnection(
+            server.host, server.port, timeout=10
+        )
+        rebind.request(
+            "GET",
+            "/api/v0/state",
+            headers={"Host": "evil.example"},
+        )
+        response = rebind.getresponse()
+        payload = json.loads(response.read())
+        rebind.close()
+        assert response.status == 403
+        assert payload["error"]["code"] == "forbidden_origin"
+
+        # same-origin console requests still work
+        ok = http.client.HTTPConnection(server.host, server.port, timeout=10)
+        ok.request(
+            "GET",
+            "/api/v0/health",
+            headers={"Origin": f"http://{server.host}:{server.port}"},
+        )
+        response = ok.getresponse()
+        response.read()
+        ok.close()
+        assert response.status == 200
+
+        after = ledger_path.read_bytes() if ledger_path.is_file() else b""
+        assert after == before
+    finally:
+        attack.close()
+
+
+def test_oversized_body_closes_the_connection_against_desync(served):
+    _, server, _ = served
+    connection = http.client.HTTPConnection(
+        server.host, server.port, timeout=10
+    )
+    try:
+        connection.request(
+            "POST",
+            "/api/v0/demo/advance",
+            body="x" * 70000,
+            headers={"Content-Type": "application/json"},
+        )
+        response = connection.getresponse()
+        response.read()
+        assert response.status == 413
+        # the server must have closed the connection so the unread body
+        # bytes can never be parsed as a smuggled second request
+        assert response.getheader("Connection", "").lower() == "close"
+    finally:
+        connection.close()
+
+
+def test_chunked_bodies_are_refused(served):
+    _, server, _ = served
+    connection = http.client.HTTPConnection(
+        server.host, server.port, timeout=10
+    )
+    try:
+        connection.putrequest("POST", "/api/v0/demo/advance")
+        connection.putheader("Transfer-Encoding", "chunked")
+        connection.endheaders()
+        connection.send(b"0\r\n\r\n")
+        response = connection.getresponse()
+        payload = json.loads(response.read())
+        assert response.status == 400
+        assert payload["error"]["code"] == "invalid_request"
+    finally:
+        connection.close()
+
+
 def test_nonlocal_bind_is_refused(tmp_path, launch):
     service = launch(tmp_path)
     with pytest.raises(SiteAgentError) as excinfo:

@@ -548,6 +548,20 @@ body {
   color: var(--text-dim);
 }
 
+.load-warning {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid #55471f;
+  border-radius: 5px;
+  background: #241f10;
+  color: var(--amber);
+  font-size: 13px;
+}
+
 .status-screen {
   max-width: 640px;
   margin: 48px auto;

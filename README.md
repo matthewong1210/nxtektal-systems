@@ -97,9 +97,9 @@ simulation artifacts locally and does not replace the canonical exporter.
 
 ## Repository map
 
-This standalone repository retains three independent implementation surfaces:
-the Python simulation/Site OS stack, the TypeScript ROI engine, and the
-read-only Operational Replay web app. Repository governance and documentation
+This standalone repository retains four independent implementation surfaces:
+the Python simulation/Site OS stack, the TypeScript ROI engine, the read-only
+Operational Replay web app, and the Site Agent Manager Console static app. Repository governance and documentation
 apply across them without creating runtime dependencies.
 
 The table below inventories every implementation surface in the repository,

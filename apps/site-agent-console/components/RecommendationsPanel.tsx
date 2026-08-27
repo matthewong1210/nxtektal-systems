@@ -45,6 +45,12 @@ function ResponseForm({
     if (kind === "modify") {
       input.replacement_action = recommendation.action;
       input.replacement_execute_before = replacementDeadline.trim();
+      // dispatch_collector requires a target robot; carry the original
+      // one so the workflow contract is satisfied. (V0's storyline only
+      // emits operator_intervention, where this stays absent.)
+      if (recommendation.target_robot_id) {
+        input.replacement_robot_id = recommendation.target_robot_id;
+      }
     }
     try {
       await onRespond(recommendation.recommendation_id, kind, input);

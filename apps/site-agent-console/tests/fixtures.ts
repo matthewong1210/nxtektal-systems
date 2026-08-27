@@ -75,6 +75,8 @@ export function sampleState(
       },
       sensed_source: null,
       reading_age_s: 5,
+      sensed_reading_age_s: 5,
+      reading_status: "ok",
     },
     quality: {
       assembly_report: {
@@ -150,8 +152,8 @@ export function sampleBriefing(overrides: Partial<Briefing> = {}): Briefing {
       mode_label: "fixture-backed Shadow Mode",
       run_directory: "run-001",
     },
-    current_state: sampleState(),
     cycles: { admitted: 2, rejected: 1 },
+    counts: { no_action: 1, pending_review: 0, manager_decisions: 0 },
     timeline: [
       {
         tag: "OBSERVED",
@@ -168,9 +170,6 @@ export function sampleBriefing(overrides: Partial<Briefing> = {}): Briefing {
         references: {},
       },
     ],
-    no_action_records: [],
-    pending_review: [],
-    manager_decisions: [],
     exceptions: [
       {
         kind: "rejected_cycle",
