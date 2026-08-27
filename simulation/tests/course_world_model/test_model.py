@@ -342,19 +342,13 @@ class TestSiteBinding:
             validate_model_against_site(shifted, enablement_site())
 
     def test_unknown_commissioned_zone_reference_is_rejected(self, model):
-        zones = tuple(
-            zone
-            if zone.commissioned_zone_id is None
-            else zone
-            for zone in model.restricted_zones
-        )
         import dataclasses
 
         zones = tuple(
             dataclasses.replace(zone, commissioned_zone_id="Z99")
             if zone.commissioned_zone_id is not None
             else zone
-            for zone in zones
+            for zone in model.restricted_zones
         )
         stray = build_fixture_model(restricted_zones=zones)
         with pytest.raises(CourseWorldModelError):

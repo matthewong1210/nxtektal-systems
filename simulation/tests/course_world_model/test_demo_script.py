@@ -136,14 +136,23 @@ class TestLabelingAndArtifacts:
         ]
         assert unexpected == []
 
-    def test_no_generated_artifacts_appear_in_the_repository(self, first_run):
-        result = subprocess.run(
-            ["git", "status", "--porcelain", "--", "reports"],
-            capture_output=True,
-            text=True,
-            cwd=SIMULATION_ROOT,
-        )
-        assert result.stdout.strip() == ""
+    def test_no_generated_artifacts_appear_in_the_repository(
+        self, tmp_path
+    ):
+        # Pre-existing worktree state is preserved, never blamed on the
+        # demo: only a repository change introduced by this run fails.
+        def repository_status() -> str:
+            return subprocess.run(
+                ["git", "status", "--porcelain", "--", "."],
+                capture_output=True,
+                text=True,
+                cwd=SIMULATION_ROOT,
+            ).stdout
+
+        before = repository_status()
+        result = run_demo(tmp_path / "hygiene-probe")
+        assert result.returncode == 0, result.stderr
+        assert repository_status() == before
 
 
 class TestReadinessIsolation:

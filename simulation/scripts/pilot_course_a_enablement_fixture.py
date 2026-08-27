@@ -52,6 +52,7 @@ from nxt_site_runtime.checkpoints import JsonCheckpointStore  # noqa: E402
 
 from nxt_workflow_enablement import (  # noqa: E402
     AdapterCompositionEvidence,
+    CourseModelEvidence,
     EnablementContext,
     EnablementReport,
     OutputLocationPlan,
@@ -302,7 +303,10 @@ def range_ops_evidence(payload: dict) -> RangeOpsEvidence:
 
 
 def evaluate_enablement(
-    payload: dict, *, root_is_empty: bool = True, course_model_evidence=None
+    payload: dict,
+    *,
+    root_is_empty: bool = True,
+    course_model_evidence: CourseModelEvidence | None = None,
 ) -> tuple[PilotSiteEvaluation, EnablementReport]:
     """Evaluate the shared site and all three workflows, then report.
 

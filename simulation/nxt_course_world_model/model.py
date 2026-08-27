@@ -875,8 +875,10 @@ def validate_model_against_site(
     for zone in model.restricted_zones:
         if zone.commissioned_zone_id is None:
             continue
-        commissioned = commissioned_zones.get(zone.commissioned_zone_id)
-        if commissioned is None:
+        commissioned_zone = commissioned_zones.get(
+            zone.commissioned_zone_id
+        )
+        if commissioned_zone is None:
             raise CourseWorldModelError(
                 f"restricted zone {zone.feature_id!r} references "
                 f"commissioned zone {zone.commissioned_zone_id!r}, which "
@@ -890,19 +892,19 @@ def validate_model_against_site(
         # geometry is somewhere else entirely is a mislabel, not a
         # reference.
         geometry = commissioned_geometries.get(
-            commissioned.geometry_reference
+            commissioned_zone.geometry_reference
         )
         if geometry is None:
             raise CourseWorldModelError(
                 f"commissioned zone {zone.commissioned_zone_id!r} names "
-                f"geometry {commissioned.geometry_reference!r}, which "
+                f"geometry {commissioned_zone.geometry_reference!r}, which "
                 "this site does not declare"
             )
         if geometry.geometry_type is not GeometryType.POLYGON:
             raise CourseWorldModelError(
                 f"restricted zone {zone.feature_id!r} references "
                 f"commissioned zone {zone.commissioned_zone_id!r}, whose "
-                f"geometry {commissioned.geometry_reference!r} is not a "
+                f"geometry {commissioned_zone.geometry_reference!r} is not a "
                 "polygon and cannot be spatially reconciled in V0"
             )
         local_vertices = [

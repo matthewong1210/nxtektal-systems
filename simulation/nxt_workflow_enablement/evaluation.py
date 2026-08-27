@@ -788,6 +788,12 @@ def evaluate_grounds(
                 ),
             ),
         }
+    if set(overrides) != set(GROUNDS_MAP_PREREQUISITE_IDS):
+        raise WorkflowEnablementError(
+            "the Grounds map-prerequisite overrides drifted from "
+            "GROUNDS_MAP_PREREQUISITE_IDS; every evidence-evaluable "
+            "prerequisite must be covered by both evaluation branches"
+        )
     prerequisites = tuple(
         overrides.get(item.requirement_id, item) for item in baseline
     )

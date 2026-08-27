@@ -1,11 +1,13 @@
 """Deterministic 2D geometry primitives in the course-local frame.
 
-Validation predicates (orientation, segment intersection, area) use
-exact ``Decimal`` arithmetic over the string form of each coordinate so
-large-magnitude inputs cannot produce sign errors through float
-cancellation.  Query arithmetic (containment ray casts, distances)
-uses plain float math over the already-validated, bounded course-local
-coordinates; identical inputs always produce identical results.
+Validation predicates (orientation, segment intersection, area, and
+the interior-overlap decision) use exact rational arithmetic
+(``Fraction`` over the string form of each coordinate) so
+large-magnitude inputs can produce neither sign errors through float
+cancellation nor false zeroes through fixed-precision rounding.  Query
+arithmetic (containment ray casts, distances) uses plain float math
+over the already-validated, bounded course-local coordinates;
+identical inputs always produce identical results.
 
 Convention (versioned with the model schema):
 
@@ -21,7 +23,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from decimal import Decimal
 from fractions import Fraction
 
 from .errors import CourseWorldModelError
@@ -89,10 +90,12 @@ def _validated_vertices(
     return tuple(cleaned)
 
 
-def _dec(value: float) -> Decimal:
-    # str() preserves the shortest exact decimal form, so the exact
-    # predicates below cannot suffer float cancellation.
-    return Decimal(str(value))
+def _dec(value: float) -> Fraction:
+    # str() preserves the shortest exact decimal form, and Fraction
+    # arithmetic is exact with no precision context, so the predicates
+    # below can neither cancel nor round a true nonzero cross product
+    # to zero.
+    return Fraction(str(value))
 
 
 def _orientation(
@@ -216,8 +219,8 @@ class PolygonRing:
             for index in range(count)
         )
 
-    def _twice_signed_area(self) -> Decimal:
-        total = Decimal(0)
+    def _twice_signed_area(self) -> Fraction:
+        total = Fraction(0)
         count = len(self.vertices)
         origin_x = _dec(self.vertices[0][0])
         origin_y = _dec(self.vertices[0][1])

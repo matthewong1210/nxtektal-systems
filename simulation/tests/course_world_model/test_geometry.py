@@ -251,13 +251,15 @@ class TestInteriorOverlapCompleteness:
         second = PolygonRing(vertices=rectangle(0.0, 2.0, 10.0, 6.0))
         assert rings_interiors_overlap(first, second)
 
-    def test_edge_through_vertex_overlap_is_detected(self):
-        # A square and a diamond whose boundaries meet only at the
-        # square's edge midpoints (the diamond's vertices): every
-        # boundary intersection is a touch, yet the interiors overlap.
+    def test_touch_only_inscribed_overlap_is_detected(self):
+        # A diamond inscribed in a square: the boundaries meet only at
+        # the square's edge midpoints (the diamond's vertices), so
+        # every boundary intersection is a touch with no proper
+        # crossing and no strictly-contained vertex, yet the diamond's
+        # interior lies inside the square.
         square = PolygonRing(vertices=rectangle(0.0, 0.0, 4.0, 4.0))
         diamond = PolygonRing(
-            vertices=((2.0, -1.0), (5.0, 2.0), (2.0, 5.0), (-1.0, 2.0))
+            vertices=((2.0, 0.0), (4.0, 2.0), (2.0, 4.0), (0.0, 2.0))
         )
         assert rings_interiors_overlap(square, diamond)
         assert rings_interiors_overlap(diamond, square)
@@ -291,3 +293,18 @@ class TestNumericContractBounds:
             )
         with pytest.raises(CourseWorldModelError):
             PolygonRing(vertices=((0.0, 0.0), (1e10, 0.0), (1.0, 1.0)))
+
+
+class TestExactPredicateArithmetic:
+    def test_orientation_is_exact_for_adversarial_near_collinear_floats(
+        self,
+    ):
+        # The exact cross product of these three accepted floats is a
+        # tiny nonzero value that a fixed-precision decimal context
+        # rounds to zero; the predicates must use exact rational
+        # arithmetic, so this razor-thin triangle is a valid ring.
+        x0 = 1e9
+        x1 = math.nextafter(x0, 0.0)
+        x2 = math.nextafter(x1, 0.0)
+        ring = PolygonRing(vertices=((0.0, 0.0), (x0, x1), (x1, x2)))
+        assert ring.area_m2 > 0.0

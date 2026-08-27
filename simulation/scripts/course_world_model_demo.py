@@ -104,7 +104,7 @@ def _refuse_unsafe_root(root: Path) -> None:
         raise SystemExit(
             f"refusing to write: cannot prove the evidence root is safe: "
             f"{root} ({exc})"
-        )
+        ) from exc
 
 
 def _readiness_lines(report_payload: dict) -> list[str]:
@@ -127,7 +127,7 @@ def run_demo(out_dir: Path) -> str:
         raise SystemExit(
             f"refusing to write: cannot create the evidence root: {root} "
             f"({exc})"
-        )
+        ) from exc
 
     lines = [DISCLAIMER, ""]
     lines.append(
