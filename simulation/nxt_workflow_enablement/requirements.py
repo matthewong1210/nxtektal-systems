@@ -11,6 +11,20 @@ This module owns *requirement declarations*, not the facts themselves:
 * the Grounds and Player Caddy prerequisite scaffolds declare what is
   absent.  They create no placeholder domain objects: registering a
   prerequisite never implies the capability exists.
+
+The course-workflow requirement sets are at version 2.  Version 1
+declared the map prerequisites as definitionally missing because no
+Course World Model owner existed anywhere in the repository; a
+canonical owner now exists, so version 2 makes exactly those
+prerequisites evidence-evaluable (declared, identity-cross-checked
+Course Model evidence from a composition root).  The evaluation
+meaning of version 1 was never mutated in place -- evaluators pin the
+version they implement and fail closed on any other, so a stale
+version-1 registry can never be silently evaluated under version-2
+semantics.  The baseline functions below remain the no-evidence
+result: without declared evidence every prerequisite is still
+unsatisfied, and the Range Operations requirement set is unchanged at
+version 1.
 """
 
 from __future__ import annotations
@@ -30,9 +44,33 @@ from .identity import (
 )
 
 RANGE_OPS_REQUIREMENTS_VERSION = f"{RANGE_OPS_WORKFLOW_ID}/requirements/v1"
-GROUNDS_REQUIREMENTS_VERSION = f"{GROUNDS_WORKFLOW_ID}/requirements/v1"
+GROUNDS_REQUIREMENTS_VERSION = f"{GROUNDS_WORKFLOW_ID}/requirements/v2"
 PLAYER_CADDY_REQUIREMENTS_VERSION = (
-    f"{PLAYER_CADDY_WORKFLOW_ID}/requirements/v1"
+    f"{PLAYER_CADDY_WORKFLOW_ID}/requirements/v2"
+)
+
+# The map-query kinds the Player Caddy workflow requires from a
+# declared Course World Model map-query surface.  This declaration is
+# this layer's own fact; a two-directional parity test pins it against
+# the real query-service surface so drift in either direction fails
+# the suite.
+REQUIRED_MAP_QUERY_KINDS = (
+    "elevation",
+    "hole_context",
+    "nearby_hazards",
+    "restricted_area",
+    "slope",
+    "surface",
+    "trajectory_terrain_intersection",
+)
+
+# The Grounds prerequisites that valid, identity-matched Course Model
+# evidence can satisfy in requirements v2.  Everything else in the
+# scaffold stays independently unsatisfied.
+GROUNDS_MAP_PREREQUISITE_IDS = (
+    "course_coordinate_reference",
+    "course_model_version",
+    "map_version",
 )
 
 _REQUIREMENT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -183,31 +221,35 @@ def required_range_ops_channels(
 
 
 # ---------------------------------------------------------------------------
-# Grounds Condition Intelligence prerequisite scaffold (requirements v1)
+# Grounds Condition Intelligence prerequisite scaffold (requirements v2)
 #
 # Registration is not implementation: every entry below reports why the
-# prerequisite is absent.  Nothing here creates a course model, a camera,
-# an inspection record, or any other placeholder domain object.
+# prerequisite is unsatisfied without evidence.  Nothing here creates a
+# course model, a camera, an inspection record, or any other
+# placeholder domain object.  The three map prerequisites are the
+# no-evidence baseline: declared, identity-matched Course Model
+# evidence can flip exactly them to SATISFIED during evaluation.
 # ---------------------------------------------------------------------------
 
 _GROUNDS_PREREQUISITES: tuple[tuple[str, RequirementStatus, str], ...] = (
     (
         "course_model_version",
         RequirementStatus.MISSING,
-        "no versioned Course World Model contract exists anywhere in this "
-        "repository; a dedicated course-model owner is the next seam",
+        "a canonical versioned Course World Model owner exists, but no "
+        "identity-matched Course Model evidence was declared for this "
+        "site",
     ),
     (
         "course_coordinate_reference",
         RequirementStatus.MISSING,
         "the shared site declares a surveyed coordinate reference system, "
-        "but no course-model-aligned coordinate contract exists",
+        "but no declared Course Model evidence binds a course frame to it",
     ),
     (
         "map_version",
         RequirementStatus.MISSING,
-        "no map versioning contract exists; map identity must be owned by "
-        "the future course-model owner",
+        "map identity is owned by the Course World Model owner; no "
+        "identity-matched map-version evidence was declared for this site",
     ),
     (
         "cart_node_identity",
@@ -298,7 +340,7 @@ _GROUNDS_PREREQUISITES: tuple[tuple[str, RequirementStatus, str], ...] = (
 
 
 def grounds_prerequisites() -> tuple[RequirementResult, ...]:
-    """Grounds Condition Intelligence prerequisites, none satisfied in v0."""
+    """The Grounds no-evidence baseline: nothing satisfied without it."""
     return tuple(
         RequirementResult(
             requirement_id=requirement_id, status=status, detail=detail
@@ -308,7 +350,7 @@ def grounds_prerequisites() -> tuple[RequirementResult, ...]:
 
 
 # ---------------------------------------------------------------------------
-# Player Caddy Experience prerequisite scaffold (requirements v1)
+# Player Caddy Experience prerequisite scaffold (requirements v2)
 # ---------------------------------------------------------------------------
 
 _PLAYER_CADDY_PREREQUISITES: tuple[
@@ -317,8 +359,9 @@ _PLAYER_CADDY_PREREQUISITES: tuple[
     (
         "course_world_model_map_query",
         RequirementStatus.MISSING,
-        "no Course World Model or map-query capability exists anywhere in "
-        "this repository",
+        "a deterministic Course World Model map-query capability exists, "
+        "but no identity-matched Course Model evidence was declared for "
+        "this site",
     ),
     (
         "cart_pose",
@@ -382,7 +425,7 @@ _PLAYER_CADDY_PREREQUISITES: tuple[
 
 
 def player_caddy_prerequisites() -> tuple[RequirementResult, ...]:
-    """Player Caddy Experience prerequisites, none satisfied in v0."""
+    """The Player Caddy no-evidence baseline: nothing satisfied without it."""
     return tuple(
         RequirementResult(
             requirement_id=requirement_id, status=status, detail=detail

@@ -25,14 +25,19 @@ from nxt_workflow_enablement import (
 
 class TestRequirementVersions:
     def test_requirement_versions_are_workflow_scoped_and_versioned(self):
+        # Range Operations is unchanged at v1.  The two course workflows
+        # moved to v2 when their map prerequisites became evidence-
+        # evaluable: the meaning of v1 (definitionally missing, because
+        # no Course World Model owner existed) was never mutated in
+        # place.
         assert RANGE_OPS_REQUIREMENTS_VERSION == (
             "range.closed_loop_collection_handoff/requirements/v1"
         )
         assert GROUNDS_REQUIREMENTS_VERSION == (
-            "course.grounds_condition_intelligence/requirements/v1"
+            "course.grounds_condition_intelligence/requirements/v2"
         )
         assert PLAYER_CADDY_REQUIREMENTS_VERSION == (
-            "course.player_caddy_experience/requirements/v1"
+            "course.player_caddy_experience/requirements/v2"
         )
 
     def test_registry_definitions_carry_their_requirement_versions(self):
@@ -156,7 +161,9 @@ class TestGroundsPrerequisiteScaffold:
         by_id = {
             item.requirement_id: item.status for item in grounds_prerequisites()
         }
-        # No canonical owner exists anywhere in the repository yet.
+        # The canonical Course World Model owner exists, but this is the
+        # no-evidence baseline: without declared evidence the map
+        # prerequisites stay missing.
         assert by_id["course_model_version"] is RequirementStatus.MISSING
         # A commissioning vocabulary exists but cannot express this today.
         assert (
