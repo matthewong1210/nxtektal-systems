@@ -35,8 +35,12 @@ fixture dispenser reading (already-read raw samples)
   `nxt_pilot_ops`; readiness keeps `nxt_workflow_enablement`. The
   service invokes their public surfaces and re-models none of them.
 - **Not a sensor integration.** No physical device is connected. The
-  fixture source stands exactly where a future transport reader will
-  stand; see
+  fixture source occupies the application-boundary seam where a future
+  physical source composition will stand, but the fixture itself is
+  load-cell-shaped, while the actual CTO prototype is a VL53L4CX
+  Time-of-Flight ranging sensor whose distance output is not directly
+  compatible with the load-cell contracts — integrating it needs a
+  separately reviewed ranging adapter and transport reader; see
   [`cto_hopper_sensor_integration.md`](cto_hopper_sensor_integration.md).
 - **Not a production service.** Loopback-only, no authentication, no
   deployment path, no cloud, no multi-site operation.
@@ -282,15 +286,21 @@ canonical evidence remains read-only telemetry.
   stores are lock- and hash-protected and divergence fails closed, but
   the noncanonical cursor file is last-writer-wins, so running two
   service processes over the same runs directory is unsupported.
-- The exact next seam for real input is the source composition in
-  `scripts/site_agent_fixture.py`: replace the fixture feed with a
-  transport reader that emits the same raw-sample shapes and the same
+- The application-boundary seam for real input is the source
+  composition in `scripts/site_agent_fixture.py`
+  (`assemble_range_ops_runtime(..., source=...)` behind the same
   peek/acknowledge/reject-with-sequence-reuse cursor with a resume
-  hook, then compose it through the same
-  `assemble_range_ops_runtime(..., source=...)` call. The service,
-  API, console, workflow gating, and recovery do not change. See
+  hook). The service, API, console, workflow gating, and recovery are
+  reusable across that seam. The actual CTO prototype, however, is a
+  VL53L4CX Time-of-Flight ranging sensor (distance in millimeters,
+  `RangeStatus`, object count) — not a load cell — so reaching that
+  seam additionally requires a new, separately architecture-reviewed
+  ranging adapter family in the edge adapter kit plus a transport
+  reader; the existing conversion layer is not yet reusable for it,
+  and the fixture's load-cell shape is not a template for it. See
   [`cto_hopper_sensor_integration.md`](cto_hopper_sensor_integration.md);
-  that transport remains a separately reviewed high-risk boundary.
+  transport and adapter both remain separately reviewed high-risk
+  boundaries.
 
 ## Verification
 
