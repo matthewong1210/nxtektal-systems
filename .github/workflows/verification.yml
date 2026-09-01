@@ -266,6 +266,222 @@ jobs:
           untracked="$(git ls-files --others --exclude-standard)"
           test -z "$untracked"
 
+  edge-gateway-compose-smoke:
+    name: edge-gateway-compose-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository without persisted credentials
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13.14"
+      - name: Build the Compose stack and require publisher success
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 30s docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            config
+          timeout --signal=TERM --kill-after=30s 10m docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            up --build -d
+
+          publisher_ids_output="$(
+            timeout 30s docker compose \
+              -f deploy/edge-gateway-v0/compose.yaml \
+              ps --all --quiet publisher
+          )"
+          test -n "$publisher_ids_output"
+          mapfile -t publisher_ids <<< "$publisher_ids_output"
+          test "${#publisher_ids[@]}" -eq 1
+          publisher_id="${publisher_ids[0]}"
+
+          set +e
+          timeout --signal=TERM --kill-after=10s 120s docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            wait publisher
+          publisher_wait_status=$?
+          set -e
+
+          publisher_state="$(
+            timeout 10s docker inspect \
+              --format '{{.State.Status}}' "$publisher_id"
+          )"
+          publisher_exit="$(
+            timeout 10s docker inspect \
+              --format '{{.State.ExitCode}}' "$publisher_id"
+          )"
+          echo "publisher state: $publisher_state"
+          echo "publisher exit code: $publisher_exit"
+          test "$publisher_wait_status" -eq 0
+          test "$publisher_state" = "exited"
+          test "$publisher_exit" -eq 0
+      - name: Poll and verify all read-only Gateway status endpoints
+        working-directory: simulation
+        run: |
+          python3 -B - <<'PY'
+          import json
+          import sys
+          import time
+          from urllib.request import urlopen
+
+          endpoints = {
+              "health": "http://127.0.0.1:8080/healthz",
+              "readiness": "http://127.0.0.1:8080/readyz",
+              "status": "http://127.0.0.1:8080/api/v0/status",
+          }
+          expected_schemas = {
+              "health": "nxt-edge-gateway/health/v0",
+              "readiness": "nxt-edge-gateway/status/v0",
+              "status": "nxt-edge-gateway/status/v0",
+          }
+          required_true = (
+              "broker_connected",
+              "sensor_seen",
+              "adapter_healthy",
+              "runtime_ready",
+              "ready",
+          )
+          deadline = time.monotonic() + 120.0
+          last_error = "no request attempted"
+
+          while time.monotonic() < deadline:
+              try:
+                  payloads = {}
+                  for name, url in endpoints.items():
+                      with urlopen(url, timeout=2.0) as response:
+                          if response.status != 200:
+                              raise AssertionError(
+                                  f"{name} returned HTTP {response.status}"
+                              )
+                          payload = json.loads(response.read().decode("utf-8"))
+                      if not isinstance(payload, dict):
+                          raise AssertionError(f"{name} JSON must be an object")
+                      payloads[name] = payload
+
+                  for name, payload in payloads.items():
+                      assert payload.get("schema") == expected_schemas[name]
+                      assert payload.get("mode") == "HYBRID_RUNTIME_REHEARSAL"
+                      assert payload.get("site_id") == "pilot-course-a"
+                      assert payload.get("deployment_id") == "pilot-a-edge-v0"
+                      for field in required_true:
+                          assert payload.get(field) is True, (name, field, payload)
+                      assert isinstance(payload.get("current"), dict)
+                      assert payload.get("last_failure") is None
+                      disclaimer = payload.get("disclaimer")
+                      assert isinstance(disclaimer, str)
+                      upper_disclaimer = disclaimer.upper()
+                      assert "HYBRID" in upper_disclaimer
+                      assert "SIMULATION" in upper_disclaimer
+                      assert "NOT LIVE CUSTOMER DATA" in upper_disclaimer
+
+                  print(json.dumps(payloads, sort_keys=True))
+                  break
+              except Exception as exc:
+                  last_error = f"{type(exc).__name__}: {exc}"
+                  time.sleep(2.0)
+          else:
+              print(
+                  f"Gateway endpoints did not become ready: {last_error}",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          PY
+      - name: Require an accepted message result in Gateway logs
+        working-directory: simulation
+        shell: bash
+        run: |
+          set -euo pipefail
+          gateway_log="$RUNNER_TEMP/edge-gateway-compose-gateway.log"
+          timeout 30s docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            logs --no-color --no-log-prefix gateway > "$gateway_log"
+          python3 -B - "$gateway_log" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          accepted = []
+          for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+              try:
+                  payload = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if (
+                  isinstance(payload, dict)
+                  and payload.get("event") == "message_result"
+                  and payload.get("kind") == "accepted"
+                  and payload.get("mode") == "HYBRID_RUNTIME_REHEARSAL"
+              ):
+                  accepted.append(payload)
+
+          assert accepted, "Gateway logs contain no accepted message_result"
+          assert len(accepted) == 1
+          result = accepted[0]
+          assert result.get("complete_facility_state") is True
+          runtime_outcome = result.get("runtime_outcome")
+          assert isinstance(runtime_outcome, dict)
+          assert runtime_outcome.get("kind") == "evaluated"
+          assert runtime_outcome.get("acknowledged") is True
+
+          observations = result.get("observations")
+          assert isinstance(observations, list)
+          assert len(observations) == 30
+          live = [
+              item
+              for item in observations
+              if item.get("source_type") == "sensor"
+          ]
+          simulated = [
+              item
+              for item in observations
+              if item.get("source_type") == "simulation"
+          ]
+          assert len(live) == 1
+          assert live[0].get("channel") == "inventory.dispenser.count"
+          assert len(simulated) == 29
+          assert len(live) + len(simulated) == len(observations)
+          print("accepted Gateway message_result count:", len(accepted))
+          PY
+      - name: Verify the checkout was not mutated
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD --
+          git diff --exit-code HEAD --
+          untracked="$(git ls-files --others --exclude-standard)"
+          test -z "$untracked"
+      - name: Collect Compose status and logs
+        if: always()
+        working-directory: simulation
+        shell: bash
+        run: |
+          set +e
+          timeout 30s docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            ps -a
+          ps_status=$?
+          timeout 60s docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            logs --no-color
+          logs_status=$?
+          if (( ps_status != 0 || logs_status != 0 )); then
+            exit 1
+          fi
+      - name: Tear down the Compose stack
+        if: always()
+        working-directory: simulation
+        run: |
+          timeout --signal=TERM --kill-after=10s 60s docker compose \
+            -f deploy/edge-gateway-v0/compose.yaml \
+            down --volumes --remove-orphans
+
   roi-verification:
     name: roi-verification
     runs-on: ubuntu-latest
