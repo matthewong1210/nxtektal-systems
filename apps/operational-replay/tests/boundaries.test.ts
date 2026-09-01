@@ -88,6 +88,9 @@ describe("package and safety boundaries", () => {
     expect(combined).not.toMatch(
       /No intervention required|Fully autonomous|Autonomous mission completed/i,
     );
+    expect(combined).not.toMatch(
+      /Report saved to facility operations log|Scripted presentation copy|Update after field run|Placeholder|\bTBD\b|Replace this value|Mock value/i,
+    );
 
     const configPath = join(
       YC_DISPATCH_REPORT_ROOT,
@@ -102,7 +105,6 @@ describe("package and safety boundaries", () => {
       "Picker-01",
       "Collect range balls",
       "Zone A",
-      "Update after field run",
       "Supervised prototype",
     ]) {
       expect(nonConfigSource, `${configuredValue} is outside the filming config`).not.toContain(

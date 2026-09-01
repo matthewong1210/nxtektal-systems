@@ -143,8 +143,7 @@ function ReportPanel({ phase }: Omit<PanelProps, "state" | "onAdvance">) {
         <div className={styles.confirmation}>
           <div>
             <span>Demo confirmation</span>
-            <strong>Report saved to facility operations log</strong>
-            <small>Scripted presentation copy · no live log write</small>
+            <strong>Mission report generated</strong>
           </div>
           <dl>
             <dt>Execution mode</dt>

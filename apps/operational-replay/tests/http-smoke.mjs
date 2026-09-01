@@ -586,8 +586,20 @@ export async function runHttpSmoke({
     assert.match(report.html, /data-demo-state="report"/i);
     assert.match(report.html, /<strong[^>]*>Complete<\/strong>/i);
     assert.doesNotMatch(report.html, /data-demo-state="dispatch"/i);
+    assert.match(report.html, /Mission report generated/i);
     assert.match(report.html, /Supervised prototype/i);
-    assert.match(report.html, /Scripted presentation copy · no live log write/i);
+    assert.match(
+      report.html,
+      /Prototype orchestration demo · supervised hardware execution/i,
+    );
+    assert.doesNotMatch(
+      report.html,
+      /Report saved to facility operations log|Scripted presentation copy|Fully autonomous|No intervention required|Autonomous mission completed/i,
+    );
+    assert.doesNotMatch(
+      report.html,
+      /Update after field run|Placeholder|\bTBD\b|Replace this value|Mock value/i,
+    );
     if (interruptions.signalName) {
       throw interruptionError(interruptions.signalName);
     }

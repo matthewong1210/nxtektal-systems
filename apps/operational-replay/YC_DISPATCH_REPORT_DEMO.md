@@ -63,11 +63,10 @@ Edit the single configuration object in:
 app/yc-dispatch-report/yc-dispatch-report.config.ts
 ```
 
-Update the mission identifiers and confirmed report values there before
-filming. Keep unconfirmed `runtime`, `ballsCollected`, and `collectionPasses`
-values as `"Update after field run"`. Do not estimate or fabricate field-test
-measurements. The optional facility name should remain unset until the filming
-facility is confirmed.
+Enter only measured field-test values before recording. If `runtime`,
+`ballsCollected`, or `collectionPasses` has not been measured and confirmed,
+leave its value as `"—"`. Do not estimate or fabricate a value. The optional
+facility name should remain unset until the filming facility is confirmed.
 
 Restart the development server after editing if the change is not picked up
 automatically, then check both states before recording.
@@ -96,7 +95,6 @@ no live dispatch occurs; it does not issue a hardware command, admit a mission,
 or claim autonomous execution. The route receives no live telemetry and does
 not automatically measure or infer a physical outcome.
 
-The Report confirmation is scripted presentation copy. No live log write
-occurs: the route performs no facility-operations-log write, database write,
-upload, or other persistence. Do not narrate the demo as proof of autonomous
-motion, live telemetry, or a saved operational record.
+The Report state generates presentation content only. It performs no database
+write, upload, or other persistence. Do not narrate the demo as proof of
+autonomous motion, live telemetry, or a saved operational record.

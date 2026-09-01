@@ -29,7 +29,9 @@ function smokeHtmlForUrl(url) {
       "<title>YC Dispatch / Report | NXTektal Systems</title>" +
       '<main data-active-state="report"><section data-demo-state="report">' +
       "<strong>Complete</strong> Supervised prototype " +
-      "Scripted presentation copy · no live log write</section></main>"
+      "Mission report generated " +
+      "Prototype orchestration demo · supervised hardware execution" +
+      "</section></main>"
     );
   }
   return (

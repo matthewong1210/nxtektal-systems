@@ -41,6 +41,9 @@ function expectPresentationOnly(markup: string): void {
   );
   expect(text).not.toMatch(/\bautonom(?:ous|y)\b/i);
   expect(text).not.toMatch(/\b(?:loading|planning|countdown|ready to dispatch)\b/i);
+  expect(text).not.toMatch(
+    /Update after field run|Placeholder|\bTBD\b|Replace this value|Mock value/i,
+  );
   expect(text).toContain(
     "Prototype orchestration demo · supervised hardware execution",
   );
@@ -68,9 +71,9 @@ describe("YC Dispatch / Report configuration and query contract", () => {
       robotName: "Picker-01",
       taskName: "Collect range balls",
       zoneName: "Zone A",
-      runtime: "Update after field run",
-      ballsCollected: "Update after field run",
-      collectionPasses: "Update after field run",
+      runtime: "—",
+      ballsCollected: "—",
+      collectionPasses: "—",
       completionPercentage: 100,
       executionMode: "Supervised prototype",
       autoplayDelayMs: 12_000,
@@ -168,14 +171,21 @@ describe("YC Dispatch / Report server presentation", () => {
     expect(markup.match(/data-demo-state=/g)).toHaveLength(1);
     expect(text).toContain("Mission Complete");
     expect(text).toContain("Picker-01 / Zone A / RGO-0828-01");
-    expect(text).toContain("Runtime Update after field run");
-    expect(text).toContain("Balls collected Update after field run");
-    expect(text).toContain("Collection passes Update after field run");
+    expect(text).toContain("Runtime —");
+    expect(text).toContain("Balls collected —");
+    expect(text).toContain("Collection passes —");
     expect(text).toMatch(/Completion 100\s*%/);
     expect(text).toContain("Mission execution recorded");
-    expect(text).toContain("Report saved to facility operations log");
-    expect(text).toContain("Scripted presentation copy · no live log write");
+    expect(text).toContain("Mission report generated");
     expect(text).toContain("Execution mode Supervised prototype");
+    expect(text).toContain(
+      "Prototype orchestration demo · supervised hardware execution",
+    );
+    expect(text).not.toContain("Report saved to facility operations log");
+    expect(text).not.toContain("Scripted presentation copy");
+    expect(text).not.toContain("Fully autonomous");
+    expect(text).not.toContain("No intervention required");
+    expect(text).not.toContain("Autonomous mission completed");
     expect(text).not.toContain("Mission Dispatched");
     expectPresentationOnly(markup);
   });
