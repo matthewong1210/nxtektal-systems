@@ -14,7 +14,7 @@ The baseline for this operating layer is `main` at
 | Shadow Ops | Merged by PR #19 (`e84c5016a19d1d4aec0b4b183164c08bba5b164e`) | FacilityState adaptation, named-policy evaluation, trace, human workflow, and ledger; no live runner or command bridge |
 | Commissioning | Merged by PR #20 (`89e93f6a8ea0cd469d6da907321eafe30318fa49`) | Immutable `CommissionedSite`, strict validation/storage, one-way static projections, and setup-only Site Runtime binding |
 | Site Runtime | Merged by PR #22 (`b055c9472737feb923c6ac48fad44a5b7e43333c`) | Orchestration library, envelope schema, input/quality gates, source/publisher ports, checkpoints, recovery, and idempotent publication coordination |
-| Physical telemetry adapters and transport | Not implemented | No hardware, POS, weather, fleet, Modbus, serial, MQTT, Kafka, OPC-UA, ROS 2, or vendor source/transport implementation; the edge adapter kit converts already-read synthetic samples and opens no connection |
+| Physical telemetry adapters and transport | Not implemented | No customer/physical hardware, POS, weather, fleet, Modbus, serial, production MQTT, Kafka, OPC-UA, ROS 2, or vendor source/transport implementation; the separate script-level rehearsal uses local mock MQTT, while the edge adapter kit converts already-read samples and opens no connection |
 | Physical state publisher or consumer delivery | Not implemented | `StatePublisher` and `RuntimeSink` are protocols/test seams; there is no live decision, memory, twin, or external-system delivery service |
 | Physical robot execution | Not implemented | Mock adapter works; Isaac Sim and ROS 2 adapters raise unavailable errors; no site-level physical command admission exists |
 | Live twin delivery and real-site deployment | Not implemented | No live Omniverse/Nucleus delivery, production site service, or real-site performance evidence |
@@ -27,9 +27,9 @@ Added after that baseline (verify merge status against the current branch):
 `nxt_agent_runtime`, the deterministic composition/lifecycle library over Site
 Runtime and Shadow Ops — deferred-acknowledgement cycles, a separate evaluation
 checkpoint, an append-only evaluation journal, a pending manager-decision view,
-a local JSONL snapshot publisher, and read-only status. It runs against
-synthetic/fixture sources only; it is not a service scheduler, a production
-publisher, or live delivery.
+a local JSONL snapshot publisher, and read-only status. It is fixture-backed
+today, including the explicitly hybrid mock-MQTT rehearsal; it is not a service
+scheduler, a production publisher, or live delivery.
 
 Also added after that baseline (verify merge status against the current
 branch): `nxt_edge_observation`, the Edge Observation Adapter Kit V0 — a
@@ -53,6 +53,19 @@ registered but unimplemented and always NOT_READY; registration never
 implies a camera, inspection, or player capability exists. It
 is evaluation-only: no transport, no device, no runtime construction, and no
 change to the "Not implemented" row above.
+
+Also added after that baseline (verify merge status against the current
+branch): Edge Gateway Live Input V0 under `simulation/scripts/` — a local
+deployment composition with strict `nxt.edge.load-cell.raw/v1` decoding, a
+loopback-bound nonpersistent Mosquitto stack, a deterministic mock publisher,
+commissioned identity/time validation, process-local replay tracking, and
+read-only status. Diagnostic mode stops at existing canonical Observation plus
+`EdgeAdapterReport`; hybrid mode overlays only the matching MQTT load-cell
+channel on explicitly simulation-labelled Pilot Course A inputs before using
+the existing Site/Agent Runtime path. This is not a shipped package, physical
+device adapter, customer telemetry integration, production MQTT service, or
+durable source. It does not change the physical-telemetry, production-delivery,
+or real-site rows above.
 
 Also added after that baseline (verify merge status against the current
 branch): `nxt_course_world_model`, Course World Model V0 — the immutable,
@@ -135,6 +148,23 @@ abstract ObservationSource
     -> source acknowledgement
 ```
 
+The local Edge Gateway rehearsal composes into that unchanged flow:
+
+```text
+deterministic mock publisher -> local Mosquitto
+    -> scripts/edge_gateway_live_input_v0.py
+       -> strict wire/topic/time/replay validation
+       -> existing nxt_edge_observation conversion
+       -> diagnostic Observation + EdgeAdapterReport (no FacilityState), or
+       -> one SENSOR channel + explicitly SIMULATION-labelled fixture channels
+          -> existing ObservationSource -> Site Runtime -> Agent Runtime
+```
+
+MQTT, the civil-time mapper, boot/device sequencing, and HTTP status remain in
+the script composition. They are not imported by Edge Observation, Site
+Runtime, Agent Runtime, or another shipped package. The raw-message cursor and
+deduplication state are in memory and do not survive restart.
+
 Runtime v0 deliberately does not pass a previous `FacilityState` to the
 assembler. It rejects missing or stale required input before publication rather
 than presenting prior/default backfill as current physical truth. Its quality
@@ -189,6 +219,7 @@ give Site Runtime ownership of simulation truth.
 | Surveyed/static physical site fact or calibration | `nxt_commissioning` |
 | Observation value, source metadata, or assembly quality | `nxt_telemetry` |
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
+| Local mock-MQTT wire/topic/time/replay handling and hybrid source composition | `simulation/scripts/edge_gateway_live_input_v0.py` (deployment composition only; no physical-device or production-service claim) |
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |

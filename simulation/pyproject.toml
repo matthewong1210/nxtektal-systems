@@ -29,6 +29,9 @@ demo = [
 # USD digital twin (nxt_range_twin) — optional gated by byte-determinism
 # release-blocker spike (design §4.3).
 twin = ["usd-core==26.8"]
+# Edge Gateway deployment composition scripts only. MQTT remains outside every
+# shipped nxt_* package and out of the core dependency set.
+edge-gateway = ["paho-mqtt>=2.1,<3"]
 
 [dependency-groups]
 dev = [
