@@ -595,8 +595,8 @@ including `nxt_course_world_model`. The gateway scripts were present in the
 their non-shipped composition-root status; the isolated wheel imported all 13
 packages and excluded repository-only packages and `scripts`.
 
-At repository root, the CI-policy helper suite passed all 95 tests and the
-repository verifier passed 507 tracked/nonignored paths and 64 Markdown files,
+At repository root, the CI-policy helper suite passed all 96 tests and the
+repository verifier passed 508 tracked/nonignored paths and 64 Markdown files,
 including links, anchors, fences, secrets, generated artifacts, and dependency
 boundaries.
 
@@ -619,8 +619,33 @@ runtime result. Deferred same-process redelivery and retained-message rejection
 remain covered by the focused transport regressions; no restart-durability claim
 is made.
 
-The host had no Docker Engine CLI/daemon, so the three-container `up --build`
-flow was not run and is not claimed as a pass. Standalone Compose rendering plus
-the native real-broker smoke are the observed deployment evidence; the exact
-container commands remain in the preceding Docker Compose section for a
-Docker-capable host.
+The local host still had no Docker Engine CLI/daemon, so it did not run the
+three-container flow. The dedicated
+[`edge-gateway-compose-smoke` job](https://github.com/matthewong1210/nxtektal-systems/actions/runs/33542983779/job/99973552967)
+then closed that execution-evidence gap for implementation commit
+[`48e839b5d1f89704d2dfa5e8fe6873dc31e26fbe`](https://github.com/matthewong1210/nxtektal-systems/commit/48e839b5d1f89704d2dfa5e8fe6873dc31e26fbe).
+GitHub reported the job passed in 57 seconds on an ephemeral Ubuntu 24.04
+runner. It rendered the committed Compose model, built and started Mosquitto,
+Gateway, and Publisher, and observed the one-shot Publisher in `exited` state
+with exit code `0`.
+
+The same job parsed `/healthz`, `/readyz`, and `/api/v0/status`. All three
+reported `pilot-course-a` / `pilot-a-edge-v0`,
+`HYBRID_RUNTIME_REHEARSAL`, `broker_connected=true`, `sensor_seen=true`,
+`adapter_healthy=true`, `runtime_ready=true`, `ready=true`, no last failure,
+and the explicit HYBRID/SIMULATION/NOT LIVE CUSTOMER DATA disclaimer. Parsed
+Gateway JSONL contained exactly one accepted result: one mock-MQTT-derived
+`inventory.dispenser.count` channel labelled `SourceType.SENSOR`, 29
+`SourceType.SIMULATION` channels,
+`complete_facility_state=true`, and an acknowledged `evaluated` runtime
+outcome. `complete_facility_state=true` means complete assembly of this
+explicitly hybrid fixture, not a fully sensed physical state. The always-run
+evidence step showed Gateway and Mosquitto healthy and Publisher `Exited (0)`;
+teardown then removed all three containers and the Compose network.
+
+This CI result exercises only the committed anonymous, nonpersistent local
+Mosquitto stack and deterministic mock publisher. It is not customer-broker,
+physical-load-cell, sensor-accuracy, persistence, production-deployment,
+availability, or uptime evidence. The Compose configuration is hybrid-only;
+the separate native broker smoke above remains the diagnostic-mode execution
+evidence.

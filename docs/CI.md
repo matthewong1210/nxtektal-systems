@@ -4,11 +4,12 @@ The repository CI workflow is
 [`verification.yml`](../.github/workflows/verification.yml). It runs for pull
 requests targeting `main`, pushes to `main`, and manual dispatches. The workflow
 has only `contents: read` permission, does not persist checkout credentials,
-uses no repository secrets, deployment steps, publishing steps, dependency
-caches, or repository/package/release writes, and cancels superseded runs for
-the same pull request or ref. It uploads only the npm audit evidence described
-below as a retained GitHub Actions artifact. Every action is pinned to an
-immutable commit SHA.
+uses no repository secrets, external-environment deployment steps, publishing
+steps, dependency caches, or repository/package/release writes, and cancels
+superseded runs for the same pull request or ref. The Edge Gateway check creates
+only a disposable local Compose rehearsal on its GitHub-hosted runner. The
+workflow uploads only the npm audit evidence described below as a retained
+GitHub Actions artifact. Every action is pinned to an immutable commit SHA.
 
 CI pins Python 3.13.14, uv 0.11.29, Node.js 24.14.1 with its bundled npm
 11.11.0 for the ROI engine, and Node.js 22.23.2 for Operational Replay. These
@@ -21,6 +22,7 @@ they do not change any dependency manifest or lockfile.
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
 | `python-verification` | Installs every Python extra from the current lock; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Edge Gateway composition, Workflow Enablement, Course World Model, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `edge-gateway-compose-smoke` | On an ephemeral Ubuntu runner, renders and builds the committed three-service Compose stack, requires the one-shot mock publisher to exit 0, and validates the three read-only Gateway JSON endpoints plus an accepted hybrid result. Bounded `if: always()` steps attempt Compose status/log capture and teardown, and fail if either operation reports an error. This is local mock-MQTT rehearsal evidence, not physical or production deployment. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
@@ -185,6 +187,78 @@ git diff --check HEAD --
 git diff --exit-code HEAD --
 test -z "$(git ls-files --others --exclude-standard)"
 ```
+
+### Edge Gateway Compose smoke
+
+This check requires Docker Engine and Docker Compose V2. The exact automated
+assertions remain in the named workflow job and its policy test. From
+`simulation/`, this core manual lifecycle exercises the same stack but is not a
+substitute for the job's parsed endpoint and result assertions:
+
+```bash
+set -Eeuo pipefail
+compose_file="deploy/edge-gateway-v0/compose.yaml"
+
+cleanup() {
+  result=$?
+  trap - EXIT
+  set +e
+  ps_result=0
+  timeout 30s docker compose -f "$compose_file" ps -a || ps_result=$?
+  logs_result=0
+  timeout 60s docker compose -f "$compose_file" \
+    logs --no-color || logs_result=$?
+  down_result=0
+  timeout --signal=TERM --kill-after=10s 60s \
+    docker compose -f "$compose_file" \
+    down --volumes --remove-orphans || down_result=$?
+  if (( result == 0 )); then
+    for cleanup_result in "$ps_result" "$logs_result" "$down_result"; do
+      if (( cleanup_result != 0 )); then
+        result=$cleanup_result
+        break
+      fi
+    done
+  fi
+  exit "$result"
+}
+trap cleanup EXIT
+
+timeout 30s docker compose -f "$compose_file" config
+timeout --signal=TERM --kill-after=30s 10m \
+  docker compose -f "$compose_file" up --build -d
+timeout --signal=TERM --kill-after=10s 120s \
+  docker compose -f "$compose_file" wait publisher
+
+publisher_id="$(
+  timeout 30s docker compose -f "$compose_file" \
+    ps --all --quiet publisher
+)"
+test -n "$publisher_id"
+test "$(timeout 10s docker inspect \
+  --format '{{.State.Status}}' "$publisher_id")" = "exited"
+test "$(timeout 10s docker inspect \
+  --format '{{.State.ExitCode}}' "$publisher_id")" -eq 0
+
+curl --fail --silent --show-error --max-time 2 \
+  http://127.0.0.1:8080/healthz
+curl --fail --silent --show-error --max-time 2 \
+  http://127.0.0.1:8080/readyz
+curl --fail --silent --show-error --max-time 2 \
+  http://127.0.0.1:8080/api/v0/status
+docker compose -f "$compose_file" \
+  logs --no-color --no-log-prefix gateway
+```
+
+The committed job applies a bounded retry around all three endpoint reads and
+parses their JSON rather than accepting HTTP success alone. It requires the
+Pilot Course A identities, `HYBRID_RUNTIME_REHEARSAL`, all five readiness
+dimensions, the explicit hybrid/simulation/non-customer disclaimer, and no
+last failure. It also parses Gateway JSONL for exactly one accepted result with
+one dispenser SENSOR observation, 29 SIMULATION observations, complete hybrid
+assembly, and an acknowledged `evaluated` runtime outcome. The corresponding
+workflow policy is mechanically pinned by
+[`test_verification_workflow.py`](../.github/scripts/test_verification_workflow.py).
 
 ### ROI
 
@@ -362,6 +436,10 @@ separate policy step decides whether it is acceptable. Operational Replay's
 typecheck, lint, tests, build, HTTP smoke, and production audit fail directly.
 A missing optional USD or Streamlit dependency fails through explicit imports,
 CLI execution, and live HTTP smoke instead of being hidden by a skipped test.
+The Edge Gateway Compose job bounds Docker build, wait, inspection, endpoint,
+log, and teardown operations. Publisher exit, endpoint JSON, and accepted-result
+log checks fail closed; `if: always()` steps attempt `compose ps -a`, complete
+logs, and `down --volumes --remove-orphans` after both success and failure.
 
 The Python job runs every existing architecture and safety guard, including the
 package-specific Course World Model and script-level Edge Gateway boundaries. A
@@ -373,7 +451,10 @@ contract, then test that contract mechanically.
 
 The workflow creates check results and the explicitly retained npm audit
 artifact; it does not write repository contents, packages, releases,
-deployments, or Site state. Branch protection and repository rules are GitHub
-settings outside this repository, and have not been mechanically configured or
-verified by this change. Do not claim `main` is protected until those settings
-require the stable checks above.
+external deployments, or persistent/external Site state. The Compose check
+creates only disposable local containers and ephemeral hybrid rehearsal
+evidence on its runner; bounded always-run teardown attempts to remove them and
+fails the check if Compose reports an error. Branch protection and repository
+rules are GitHub settings outside this repository, and have not been
+mechanically configured or verified by this change. Do not claim `main` is
+protected until those settings require the stable checks above.
