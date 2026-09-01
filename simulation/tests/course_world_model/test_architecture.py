@@ -176,6 +176,10 @@ OTHER_PACKAGES = (
     "nxt_agent_runtime",
     "nxt_edge_observation",
     "nxt_workflow_enablement",
+    # The Site Agent service shell is a noncanonical projection boundary;
+    # course spatial truth reaches consumers only through composition
+    # roots, never through the service package.
+    "nxt_site_agent",
 )
 
 # Package names this package's *source* may never mention, even in
@@ -186,6 +190,7 @@ FOREIGN_PACKAGE_LITERALS = (
     "nxt_agent_runtime",
     "nxt_edge_observation",
     "nxt_workflow_enablement",
+    "nxt_site_agent",
 )
 
 

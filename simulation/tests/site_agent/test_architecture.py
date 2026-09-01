@@ -92,6 +92,9 @@ BANNED_FIRST_PARTY_MENTIONS = (
     "nxt_commissioning",
     "nxt_site_runtime",
     "nxt_edge_observation",
+    # Course spatial truth is an independent sibling; the service shows
+    # only Range Operations projections and never touches the map layer.
+    "nxt_course_world_model",
 )
 
 OTHER_PACKAGES = (
@@ -110,6 +113,7 @@ OTHER_PACKAGES = (
     "nxt_agent_runtime",
     "nxt_edge_observation",
     "nxt_workflow_enablement",
+    "nxt_course_world_model",
 )
 
 BANNED_CALL_NAMES = {
