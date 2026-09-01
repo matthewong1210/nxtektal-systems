@@ -377,6 +377,123 @@ publisher. Gateway health intentionally checks `/healthz` plus
 `broker_connected=true`; it does not wait on `/readyz`, because the publisher's
 first message is what makes a valid hybrid runtime ready.
 
+### Native broker smoke used for synchronized verification
+
+The synchronized diagnostic and hybrid results below were observed with native
+Mosquitto 2.1.2, Paho 2.1.0, the committed broker configuration, the actual
+gateway and publisher CLIs, and temporary config/evidence paths. This is the
+exact command run from `simulation/`; it leaves the temporary evidence outside
+the repository and proves port 1883 is released at the end:
+
+```bash
+set -euo pipefail
+native_smoke_tmp=$(mktemp -d)
+mosquitto -c deploy/edge-gateway-v0/mosquitto.conf \
+  >"$native_smoke_tmp/mosquitto.log" 2>&1 &
+broker_pid=$!
+gateway_pid=
+cleanup_native_smoke() {
+  if test -n "$gateway_pid" && kill -0 "$gateway_pid" 2>/dev/null; then
+    kill "$gateway_pid" 2>/dev/null || true
+    wait "$gateway_pid" 2>/dev/null || true
+  fi
+  if kill -0 "$broker_pid" 2>/dev/null; then
+    kill "$broker_pid" 2>/dev/null || true
+    wait "$broker_pid" 2>/dev/null || true
+  fi
+}
+trap cleanup_native_smoke EXIT
+for attempt in $(seq 1 100); do
+  if nc -z 127.0.0.1 1883; then break; fi
+  kill -0 "$broker_pid"
+  sleep 0.05
+done
+nc -z 127.0.0.1 1883
+
+run_native_mode() {
+  mode=$1
+  config_path="$native_smoke_tmp/$mode.yaml"
+  gateway_log="$native_smoke_tmp/$mode.gateway.jsonl"
+  cp configs/edge_gateway/pilot-course-a.example.yaml "$config_path"
+  sed -i.bak \
+    -e "s/mode: HYBRID_RUNTIME_REHEARSAL/mode: $mode/" \
+    -e 's/host: mosquitto/host: 127.0.0.1/' \
+    -e 's/host: 0.0.0.0/host: 127.0.0.1/' \
+    -e 's/port: 8080/port: 0/' \
+    -e "s#evidence_dir: .*#evidence_dir: $native_smoke_tmp/$mode-evidence#" \
+    "$config_path"
+  uv run --no-sync python -B scripts/edge_gateway_live_input_v0.py \
+    --config "$config_path" --max-messages 1 >"$gateway_log" 2>&1 &
+  gateway_pid=$!
+  for attempt in $(seq 1 200); do
+    if rg -q '"event":"mqtt_connected"' "$gateway_log"; then break; fi
+    kill -0 "$gateway_pid"
+    sleep 0.05
+  done
+  rg -q '"event":"mqtt_connected"' "$gateway_log"
+  uv run --no-sync python -B scripts/mock_edge_load_cell_publisher.py \
+    --config "$config_path" --timeout-s 5
+  wait "$gateway_pid"
+  gateway_pid=
+  uv run --no-sync python -B - "$mode" "$gateway_log" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+mode, path = sys.argv[1], Path(sys.argv[2])
+records = [json.loads(line) for line in path.read_text().splitlines() if line]
+result = next(item for item in records if item.get("event") == "message_result")
+assert result["kind"] == "accepted"
+if mode == "LOAD_CELL_DIAGNOSTIC":
+    assert result["complete_facility_state"] is False
+    assert len(result["observations"]) == 1
+    assert result["observations"][0]["channel"] == "inventory.dispenser.count"
+    assert result["adapter_report"]["rejected"] == []
+    summary = {
+        "mode": mode,
+        "channel": result["observations"][0]["channel"],
+        "adapter_rejections": 0,
+        "complete_facility_state": False,
+    }
+else:
+    live = [
+        item for item in result["observations"]
+        if item["source_type"] == "sensor"
+    ]
+    simulated = [
+        item for item in result["observations"]
+        if item["source_type"] == "simulation"
+    ]
+    assert len(live) == 1 and len(simulated) == 29
+    assert result["complete_facility_state"] is True
+    assert result["runtime_outcome"]["acknowledged"] is True
+    summary = {
+        "mode": mode,
+        "live_channels": [item["channel"] for item in live],
+        "simulation_channels": len(simulated),
+        "runtime_kind": result["runtime_outcome"]["kind"],
+        "runtime_acknowledged": True,
+        "complete_facility_state": True,
+    }
+print(json.dumps(summary, sort_keys=True))
+PY
+}
+
+run_native_mode LOAD_CELL_DIAGNOSTIC
+run_native_mode HYBRID_RUNTIME_REHEARSAL
+cleanup_native_smoke
+trap - EXIT
+! nc -z 127.0.0.1 1883
+printf '%s\n' "$native_smoke_tmp"
+```
+
+The terminal summaries were:
+
+```text
+{"adapter_rejections": 0, "channel": "inventory.dispenser.count", "complete_facility_state": false, "mode": "LOAD_CELL_DIAGNOSTIC"}
+{"complete_facility_state": true, "live_channels": ["inventory.dispenser.count"], "mode": "HYBRID_RUNTIME_REHEARSAL", "runtime_acknowledged": true, "runtime_kind": "evaluated", "simulation_channels": 29}
+```
+
 ## Acceptance contract
 
 Acceptance evidence must cover:
@@ -435,27 +552,30 @@ V0 deliberately does not add:
 
 ## Verification commands and results
 
-The final post-review run used the lock-consistent all-extras environment and
-observed these exact results from `simulation/`:
+The post-synchronization run against the current Course World Model mainline
+used the lock-consistent all-extras environment and observed these exact results
+from `simulation/`:
 
 ```text
 uv sync --locked --all-extras
-Resolved 61 packages; checked 57 packages
+Resolved 61 packages; rebuilt and installed the local nxt-sim project
 
 uv run --no-sync python -B -m pytest -o addopts='' -q \
-  -p no:cacheprovider tests/edge_gateway_live_input
-179 passed in 14.03s
+  -p no:cacheprovider tests/course_world_model \
+  tests/workflow_enablement tests/edge_gateway_live_input
+570 passed in 18.08s
 
 uv run --no-sync python -B -m pytest -o addopts='' -q \
   -p no:cacheprovider tests/commissioning tests/site_runtime \
-  tests/agent_runtime tests/edge_observation tests/workflow_enablement
-682 passed in 6.18s
+  tests/agent_runtime tests/edge_observation tests/course_world_model \
+  tests/workflow_enablement tests/edge_gateway_live_input
+1082 passed in 22.91s
 
 # Exact architecture/safety selection from .agent/workflows/testing.md
-171 passed in 5.85s
+185 passed in 7.26s
 
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider
-1429 passed in 36.49s
+1650 passed in 43.08s
 
 uv run --no-sync python -B scripts/validate_configs.py
 0 errors, 0 warnings; all eight listed config files passed
@@ -469,12 +589,14 @@ Checked 57 packages; all compatible
 
 The CI-equivalent compile command completed with no output. `uv build` produced
 one wheel and one source distribution in an isolated temporary directory, and
-the repository distribution verifier passed every declared shipped package.
-The gateway scripts were present in the source distribution and absent from the
-wheel, preserving their non-shipped composition-root status.
+the repository distribution verifier passed all 13 declared shipped packages,
+including `nxt_course_world_model`. The gateway scripts were present in the
+388-member source distribution and absent from the 132-member wheel, preserving
+their non-shipped composition-root status; the isolated wheel imported all 13
+packages and excluded repository-only packages and `scripts`.
 
 At repository root, the CI-policy helper suite passed all 95 tests and the
-repository verifier passed 484 tracked/nonignored paths and 63 Markdown files,
+repository verifier passed 507 tracked/nonignored paths and 64 Markdown files,
 including links, anchors, fences, secrets, generated artifacts, and dependency
 boundaries.
 
@@ -490,12 +612,12 @@ exercised with real Paho 2.1.0 connections and the actual mock publisher. The
 diagnostic smoke observed one non-retained QoS 1 message and PUBACK, one
 `inventory.dispenser.count` observation with `status=ok`, one accepted
 `nxt-edge-observation/adapter-report/v0` report with zero rejections, and
-`complete_facility_state=false`. A separate hybrid retry probe forced
-`EVALUATION_DEFERRED`: the persistent session redelivered the exact message to
-the same processor, the immutable source frame was observed twice at site
-sequence `0`, one final PUBACK followed `REPLAY_SKIPPED`, and the source then
-advanced to sequence `1` with no pending frame. A real retained message was
-also rejected at the callback boundary.
+`complete_facility_state=false`. The hybrid smoke independently observed one
+live `inventory.dispenser.count` SENSOR channel, 29 explicitly SIMULATION
+channels, `complete_facility_state=true`, and an acknowledged `evaluated`
+runtime result. Deferred same-process redelivery and retained-message rejection
+remain covered by the focused transport regressions; no restart-durability claim
+is made.
 
 The host had no Docker Engine CLI/daemon, so the three-container `up --build`
 flow was not run and is not claimed as a pass. Standalone Compose rendering plus

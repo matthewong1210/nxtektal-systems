@@ -20,7 +20,7 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra from the current lock; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Edge Gateway composition, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs every Python extra from the current lock; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Edge Gateway composition, Workflow Enablement, Course World Model, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
@@ -102,6 +102,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_observation
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_gateway_live_input
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/workflow_enablement
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/course_world_model
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \
@@ -121,6 +122,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_observation/test_architecture.py \
   tests/edge_gateway_live_input/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
+  tests/course_world_model/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -138,7 +140,7 @@ uv run --no-sync python -m compileall -q -f \
   nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
-  nxt_edge_observation nxt_workflow_enablement \
+  nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
   scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
@@ -167,6 +169,7 @@ shipped = (
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
     "nxt_edge_observation", "nxt_workflow_enablement",
+    "nxt_course_world_model",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:
@@ -360,13 +363,13 @@ typecheck, lint, tests, build, HTTP smoke, and production audit fail directly.
 A missing optional USD or Streamlit dependency fails through explicit imports,
 CLI execution, and live HTTP smoke instead of being hidden by a skipped test.
 
-The Python job runs every existing architecture and safety guard. A robust
-generic reachability guard from future LLM/agent code to execution surfaces, or
-a machine-readable registry for duplicate advisory ownership and silent
-aggregation, does not exist today. Adding broad text searches would be brittle,
-so this PR adds no such guard and changes no production code. A future guard
-should first define an explicit dependency/ownership contract, then test that
-contract mechanically.
+The Python job runs every existing architecture and safety guard, including the
+package-specific Course World Model and script-level Edge Gateway boundaries. A
+robust generic reachability guard from future LLM/agent code to execution
+surfaces, or a machine-readable registry for duplicate advisory ownership and
+silent aggregation, does not exist today. Broad text searches would be brittle;
+a future generic guard should first define an explicit dependency/ownership
+contract, then test that contract mechanically.
 
 The workflow creates check results and the explicitly retained npm audit
 artifact; it does not write repository contents, packages, releases,

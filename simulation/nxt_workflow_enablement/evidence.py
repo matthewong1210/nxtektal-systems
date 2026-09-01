@@ -12,11 +12,14 @@ commissioned site does not support.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
 from .identity import WorkflowEnablementError, _require_non_blank
+
+_CONTENT_DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class TransportMode(StrEnum):
@@ -237,6 +240,106 @@ class RangeOpsRuntimeDeclaration:
         ):
             raise WorkflowEnablementError(
                 "max_cycles must be a positive integer"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class CourseModelEvidence:
+    """Declared Course World Model facts for the course workflows.
+
+    Shared spatial evidence, not a workflow gate of its own: only the
+    workflows whose requirement sets reference it consume it, and Range
+    Operations never receives it.  A composition root derives every
+    field from a validated Course World Model through its public
+    surface -- the model package and this package never import each
+    other.  Evaluation cross-checks the declared site, deployment,
+    coordinate-reference identity, and frame origin against the
+    validated commissioned site, so evidence for another site, another
+    deployment, or a drifted coordinate reference fails closed.  The
+    ``content_digest`` is the model's content address: it proves the
+    declared content identity, never authorship or surveying accuracy.
+    """
+
+    course_model_id: str
+    model_version: str
+    content_digest: str
+    site_id: str
+    deployment_id: str
+    frame_id: str
+    crs_kind: str
+    crs_identifier: str
+    crs_horizontal_unit: str
+    crs_vertical_unit: str
+    crs_axes: tuple[str, ...]
+    origin_crs_x: float
+    origin_crs_y: float
+    origin_crs_z: float
+    supported_queries: tuple[str, ...]
+    resolution_m: float
+
+    def __post_init__(self) -> None:
+        for field_name, value in (
+            ("course_model_id", self.course_model_id),
+            ("model_version", self.model_version),
+            ("site_id", self.site_id),
+            ("deployment_id", self.deployment_id),
+            ("frame_id", self.frame_id),
+            ("crs_kind", self.crs_kind),
+            ("crs_identifier", self.crs_identifier),
+            ("crs_horizontal_unit", self.crs_horizontal_unit),
+            ("crs_vertical_unit", self.crs_vertical_unit),
+        ):
+            _require_non_blank(field_name, value)
+        if type(
+            self.content_digest
+        ) is not str or not _CONTENT_DIGEST_PATTERN.fullmatch(
+            self.content_digest
+        ):
+            raise WorkflowEnablementError(
+                "content_digest must match 'sha256:<64 lowercase hex>'"
+            )
+        if not isinstance(self.crs_axes, tuple) or not self.crs_axes:
+            raise WorkflowEnablementError(
+                "crs_axes must be a non-empty tuple"
+            )
+        for index, axis in enumerate(self.crs_axes):
+            _require_non_blank(f"crs_axes[{index}]", axis)
+        for field_name, value in (
+            ("origin_crs_x", self.origin_crs_x),
+            ("origin_crs_y", self.origin_crs_y),
+            ("origin_crs_z", self.origin_crs_z),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise WorkflowEnablementError(
+                    f"{field_name} must be a finite number"
+                )
+        if not isinstance(self.supported_queries, tuple):
+            raise WorkflowEnablementError(
+                "supported_queries must be a tuple"
+            )
+        for index, kind in enumerate(self.supported_queries):
+            _require_non_blank(f"supported_queries[{index}]", kind)
+        if len(set(self.supported_queries)) != len(self.supported_queries):
+            raise WorkflowEnablementError(
+                "supported_queries must not contain duplicates"
+            )
+        if list(self.supported_queries) != sorted(self.supported_queries):
+            raise WorkflowEnablementError(
+                "supported_queries must be sorted for deterministic "
+                "evidence bytes"
+            )
+        if (
+            isinstance(self.resolution_m, bool)
+            or not isinstance(self.resolution_m, (int, float))
+            or not math.isfinite(self.resolution_m)
+            or self.resolution_m <= 0
+        ):
+            raise WorkflowEnablementError(
+                "resolution_m must be a finite positive number"
             )
 
 

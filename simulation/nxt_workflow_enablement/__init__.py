@@ -52,6 +52,7 @@ from .evaluation import (
 )
 from .evidence import (
     AdapterCompositionEvidence,
+    CourseModelEvidence,
     EnablementContext,
     OutputLocationPlan,
     RangeOpsEvidence,
@@ -79,6 +80,7 @@ from .report import (
     verify_report_payload,
 )
 from .requirements import (
+    GROUNDS_MAP_PREREQUISITE_IDS,
     GROUNDS_REQUIREMENTS_VERSION,
     PLAYER_CADDY_REQUIREMENTS_VERSION,
     RANGE_OPS_REQUIREMENTS_VERSION,
@@ -86,6 +88,7 @@ from .requirements import (
     RANGE_OPS_SITE_CHANNELS,
     RANGE_OPS_STATION_CHANNEL_TEMPLATES,
     RANGE_OPS_ZONE_CHANNEL_TEMPLATES,
+    REQUIRED_MAP_QUERY_KINDS,
     RequirementResult,
     RequirementStatus,
     grounds_prerequisites,
@@ -96,6 +99,7 @@ from .requirements import (
 
 __all__ = [
     "ENABLEMENT_REPORT_SCHEMA",
+    "GROUNDS_MAP_PREREQUISITE_IDS",
     "GROUNDS_REQUIREMENTS_VERSION",
     "GROUNDS_WORKFLOW_ID",
     "PILOT_WORKFLOW_IDS",
@@ -107,10 +111,12 @@ __all__ = [
     "RANGE_OPS_STATION_CHANNEL_TEMPLATES",
     "RANGE_OPS_WORKFLOW_ID",
     "RANGE_OPS_ZONE_CHANNEL_TEMPLATES",
+    "REQUIRED_MAP_QUERY_KINDS",
     "SHARED_SITE_INVALID",
     "SIMULATED_SCENARIO_DISCLAIMER",
     "WORKFLOW_REGISTRY_SCHEMA",
     "AdapterCompositionEvidence",
+    "CourseModelEvidence",
     "EnablementContext",
     "EnablementReport",
     "GateResult",

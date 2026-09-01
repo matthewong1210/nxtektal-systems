@@ -87,8 +87,9 @@ architectural responsibility, not an inferred person or team.
     handoff cycle; it is not a site-level collector-dispatch API or physical
    command gateway. The Isaac Sim simulation adapter and ROS 2 physical adapter
    are currently stubs; do not claim deployed robot execution. The Edge
-    Observation Adapter Kit V0 converts already-read synthetic samples only; it
-    has no live transport, physical device, register write, or command surface.
+    Observation Adapter Kit V0 converts already-read raw samples; repository-
+    backed inputs remain fixture/mock-derived, and the package itself has no
+    live transport, physical device, register write, or command surface.
 11. The AI operating layer—the trusted state, advisory, trace, and evaluation
    system—is the strategic moat. Preserve its boundaries instead of collapsing
    it into the simulator, twin, or robot adapter.
@@ -129,8 +130,10 @@ Use, in order:
    `simulation/docs/shadow_ops_v0.md`, `simulation/docs/commissioning_v0.md`,
    `simulation/docs/site_runtime_design.md`,
    `simulation/docs/agent_runtime_v1.md`,
-   `simulation/docs/edge_observation_v0.md`, and
-   `simulation/docs/workflow_enablement_v0.md`.
+   `simulation/docs/edge_observation_v0.md`,
+   `simulation/docs/edge_gateway_live_input_v0.md`,
+   `simulation/docs/workflow_enablement_v0.md`, and
+   `simulation/docs/course_world_model_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -202,6 +205,26 @@ An untracked document is never repository authority by itself.
   or randomness modules, and no existing package may import it. Turning a
   READY launch plan into the existing runtime composition belongs to
   composition roots.
+- Keep `nxt_course_world_model` an immutable spatial-truth leaf. It may
+  import only `nxt_commissioning`'s public contract surface (identity,
+  spatial reference, provenance, canonical JSON); every other layer receives
+  serialized models or plain-data evidence through composition roots. It
+  owns the versioned Course World Model (course-local ENU frame bound to
+  the commissioned coordinate reference, elevation surface, semantic course
+  features, controlled content-addressed revisions) and the pure read-only
+  Map Query Service, including the narrow trajectory/terrain intersection
+  over an already-computed trajectory. It owns no commissioning, telemetry,
+  state, readiness, policy, projection, memory, or execution semantics; it
+  ingests no raw LAS/LAZ or point-cloud data; it is not a route planner,
+  navigation stack, geofence enforcer, landing model, or command surface —
+  a restricted-area answer is information only. It must not import the
+  simulator, telemetry, edge adapters, Site Runtime, Agent Runtime, Shadow
+  Ops, memory, twin, viewer, robot, ROS, actuator, transport/field-bus,
+  network, filesystem, subprocess, threading, wall-clock, or randomness
+  modules, and no existing package may import it. Deriving Course Model
+  evidence for readiness evaluation belongs to composition roots, and a
+  model identity or coordinate-reference mismatch fails closed rather than
+  answering.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula

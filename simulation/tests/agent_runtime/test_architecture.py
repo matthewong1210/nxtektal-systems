@@ -100,6 +100,7 @@ OTHER_PACKAGES = (
     "nxt_site_runtime",
     "nxt_edge_observation",
     "nxt_workflow_enablement",
+    "nxt_course_world_model",
 )
 
 

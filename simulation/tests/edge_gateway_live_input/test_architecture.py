@@ -19,6 +19,15 @@ PUBLISHER_SCRIPT = (
 )
 COMPOSITION_SCRIPTS = {GATEWAY_SCRIPT, PUBLISHER_SCRIPT}
 
+ALLOWED_COMPOSITION_IMPORT_ROOTS = {
+    "nxt_agent_runtime",
+    "nxt_commissioning",
+    "nxt_edge_observation",
+    "nxt_pilot_ops",
+    "nxt_site_runtime",
+    "nxt_telemetry",
+}
+
 SHIPPED_PACKAGES = {
     "nxt_sim",
     "nxt_range_ops",
@@ -32,6 +41,7 @@ SHIPPED_PACKAGES = {
     "nxt_agent_runtime",
     "nxt_edge_observation",
     "nxt_workflow_enablement",
+    "nxt_course_world_model",
 }
 
 FORBIDDEN_CLASS_DEFINITIONS = {
@@ -102,8 +112,8 @@ def _toml(path: Path) -> dict:
         return tomllib.load(stream)
 
 
-def _imports(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"))
+def _imports_from_source(source: str) -> set[str]:
+    tree = ast.parse(source)
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -111,6 +121,14 @@ def _imports(path: Path) -> set[str]:
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
     return modules
+
+
+def _imports(path: Path) -> set[str]:
+    return _imports_from_source(path.read_text(encoding="utf-8"))
+
+
+def _first_party_import_roots(modules: set[str]) -> set[str]:
+    return {module.split(".")[0] for module in modules if module.startswith("nxt_")}
 
 
 def _defined_classes(path: Path) -> set[str]:
@@ -215,6 +233,27 @@ def test_gateway_has_no_execution_llm_sqlite_cloud_or_ota_surface():
             assert module.split(".")[0] not in FORBIDDEN_IMPORT_ROOTS
         collisions = _executable_symbols(path) & FORBIDDEN_EXECUTION_SYMBOLS
         assert collisions == set(), f"{path.name}: {sorted(collisions)}"
+
+
+def test_gateway_first_party_imports_stay_within_the_approved_composition_path():
+    for path in COMPOSITION_SCRIPTS:
+        roots = _first_party_import_roots(_imports(path))
+        assert roots <= ALLOWED_COMPOSITION_IMPORT_ROOTS, (
+            f"{path.name}: {sorted(roots - ALLOWED_COMPOSITION_IMPORT_ROOTS)}"
+        )
+
+
+def test_gateway_first_party_import_allowlist_has_a_working_negative_control():
+    roots = _first_party_import_roots(
+        _imports_from_source(
+            "import nxt_course_world_model.query\n"
+            "from nxt_workflow_enablement import evaluate_pilot_site\n"
+        )
+    )
+    assert roots - ALLOWED_COMPOSITION_IMPORT_ROOTS == {
+        "nxt_course_world_model",
+        "nxt_workflow_enablement",
+    }
 
 
 def test_no_existing_package_imports_the_gateway_composition_root():
