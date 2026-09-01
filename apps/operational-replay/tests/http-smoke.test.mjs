@@ -37,7 +37,10 @@ function smokeHtmlForUrl(url) {
   return (
     "<title>YC Dispatch / Report | NXTektal Systems</title>" +
     '<main data-active-state="dispatch"><section data-demo-state="dispatch">' +
-    "<strong>Dispatched</strong> " +
+    '<strong>Dispatched</strong> <img src="/yc-site-schematic/range-scanned-demo.webp"> ' +
+    "Site presentation schematic Scan-style range scene " +
+    "Presentation-only route animation Picker-01 Collect range balls Zone A " +
+    "RGO-0828-01 Tee line Return station Picker-01 start " +
     "Prototype orchestration demo · supervised hardware execution</section></main>"
   );
 }

@@ -92,6 +92,27 @@ SVG is the reviewable artwork authority and the PNG hash above is the active
 byte identity. The PNG is self-contained and requires no runtime or external
 request to render.
 
+## YC scan-style presentation asset
+
+- Output: `public/yc-site-schematic/range-scanned-demo.webp`
+- Dimensions: `1448 × 1086` (4:3)
+- MIME: `image/webp`
+- Size: `214,174` bytes
+- SHA-256: `b70cbdc6e93502eead3d150162f86c9d2836a504fea6c07daf806d9ce27e6e05`
+- Source: one user-supplied driving-range photograph used as the edit target;
+  the untouched source photograph is not committed
+- Transformation: project-directed generative style transfer into a dark,
+  lightly abstracted scan-style range scene
+- Metadata: the WebP was encoded with metadata disabled; ICCP, EXIF, XMP, GPS,
+  camera-make, and camera-model fields are absent
+- External runtime dependencies: none
+
+This image is a fixed presentation derivative, not actual scan output, surveyed
+geometry, SLAM output, a live digital twin, live tracking, or autonomous
+navigation data. The route overlay and marker motion are separately authored
+browser presentation elements and do not establish physical robot position or
+execution evidence.
+
 ## Architecture status
 
 This app owns presentation and deterministic parsing only. Its inputs are
