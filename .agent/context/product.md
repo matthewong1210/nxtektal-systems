@@ -43,6 +43,12 @@ runtime dependency.
 - **Shadow Ops:** `nxt_pilot_ops` decision trust, trace, evaluation, human
   workflow, and tamper-evident ledger around named policies. It is advisory and
   downstream, not a duplicate general decision engine.
+- **Course World Model:** immutable, versioned spatial truth in
+  `nxt_course_world_model` — the course-local frame bound to the
+  commissioned coordinate reference, the elevation surface, semantic course
+  features, controlled map revisions, and the deterministic read-only Map
+  Query Service. Derived from synthetic processed-scan fixtures; it answers
+  where things are, never what is happening now, and commands nothing.
 - **Site Runtime:** merged `nxt_site_runtime` orchestration around commissioned
   identity/configuration, sequenced observations, the existing telemetry
   assembler, publication-quality admission, exact FacilityState/AssemblyReport
@@ -92,6 +98,7 @@ runtime dependency.
 - `simulation/docs/agent_runtime_v1.md`
 - `simulation/docs/edge_observation_v0.md`
 - `simulation/docs/workflow_enablement_v0.md`
+- `simulation/docs/course_world_model_v0.md`
 - `simulation/docs/site_agent_v0.md`
 - `nxtektal-roi-engine/README.md`
 - `nxtektal-roi-engine/docs/api-contract.md`

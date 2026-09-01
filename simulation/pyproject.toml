@@ -62,12 +62,17 @@ build-backend = "hatchling.build"
 # readiness layer: workflow identity registration, per-workflow requirement
 # evaluation, the enablement report, and fixture-only launch-plan data. It
 # owns no observation, state, policy, runtime, or execution semantics.
+# nxt_course_world_model is the immutable, versioned spatial-truth layer:
+# the course-local coordinate frame, elevation surface, semantic course
+# features, controlled map revisions, and the deterministic read-only Map
+# Query Service. It owns no commissioning, state, readiness, projection,
+# navigation, or execution semantics.
 # nxt_site_agent is the local, fixture-backed Pilot Site Agent application
 # boundary: readiness-gated service lifecycle around the existing Agent
 # Runtime, the versioned loopback-only Manager API, and noncanonical
 # projections. It owns no observation, state, policy, recommendation,
 # trace, workflow, ledger, checkpoint, or physical command semantics.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement", "nxt_site_agent"]
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement", "nxt_course_world_model", "nxt_site_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

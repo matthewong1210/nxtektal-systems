@@ -53,6 +53,7 @@ from nxt_site_runtime.ports import ObservationSource  # noqa: E402
 
 from nxt_workflow_enablement import (  # noqa: E402
     AdapterCompositionEvidence,
+    CourseModelEvidence,
     EnablementContext,
     EnablementReport,
     OutputLocationPlan,
@@ -303,9 +304,18 @@ def range_ops_evidence(payload: dict) -> RangeOpsEvidence:
 
 
 def evaluate_enablement(
-    payload: dict, *, root_is_empty: bool = True
+    payload: dict,
+    *,
+    root_is_empty: bool = True,
+    course_model_evidence: CourseModelEvidence | None = None,
 ) -> tuple[PilotSiteEvaluation, EnablementReport]:
-    """Evaluate the shared site and all three workflows, then report."""
+    """Evaluate the shared site and all three workflows, then report.
+
+    ``course_model_evidence`` is optional declared Course Model
+    evidence (plain data derived by a composition root from a
+    validated Course World Model); only the two course workflows
+    consume it.
+    """
     context = enablement_context(root_is_empty=root_is_empty)
     registry = pilot_workflow_registry()
     evaluation = evaluate_pilot_site(
@@ -314,6 +324,7 @@ def evaluate_enablement(
         context=context,
         range_ops_evidence=range_ops_evidence(payload),
         registry=registry,
+        course_model_evidence=course_model_evidence,
     )
     report = EnablementReport.create(
         shared=evaluation.shared,

@@ -20,7 +20,7 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Site Agent, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, Site Agent, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `site-agent-console-verification` | Installs the independent locked Site Agent Console graph under Node.js 22.23.2, then typechecks, lints, tests, builds the static export, smokes the exported page over loopback, and requires zero production dependency vulnerabilities. |
@@ -94,6 +94,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/commissioning
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_observation
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/workflow_enablement
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/course_world_model
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
@@ -113,6 +114,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/agent_runtime/test_architecture.py \
   tests/edge_observation/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
+  tests/course_world_model/test_architecture.py \
   tests/site_agent/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
@@ -131,7 +133,8 @@ uv run --no-sync python -m compileall -q -f \
   nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
-  nxt_edge_observation nxt_workflow_enablement nxt_site_agent \
+  nxt_edge_observation nxt_workflow_enablement \
+  nxt_course_world_model nxt_site_agent \
   scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
@@ -160,7 +163,7 @@ shipped = (
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
     "nxt_edge_observation", "nxt_workflow_enablement",
-    "nxt_site_agent",
+    "nxt_course_world_model", "nxt_site_agent",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:

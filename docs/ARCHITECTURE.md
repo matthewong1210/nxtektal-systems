@@ -102,6 +102,7 @@ physical observation source or production publisher/sink is implemented.
 | Observation provenance and assembly quality | `ObservationFrame` and `AssemblyReport` | Must accompany deployment-path state |
 | Raw-device-to-canonical conversion and its diagnostics | `nxt_edge_observation` adapters and `EdgeAdapterReport` | Adapter evidence only; never facility truth, a second telemetry envelope, or a channel registry |
 | Multi-workflow commissioning readiness | `nxt_workflow_enablement` registry, requirement matrices, verdicts, and content-addressed enablement report | Readiness evidence only; never commissioning truth, state, policy output, or proof a registered capability exists |
+| Versioned course spatial truth and map queries | Immutable `nxt_course_world_model.CourseWorldModel` revisions plus the read-only `MapQueryService` | Spatial information only; never commissioned truth, facility state, a live map, twin output, readiness, navigation, a landing model, or a command surface |
 | Shadow policy evaluation and workflow evidence | `nxt_pilot_ops` recommendation, trace, workflow, and ledger contracts | Advisory records; never actuator acknowledgement by themselves |
 | Viewer replay/output | Independent deterministic `RangeOpsEnv` replay through public APIs | Viewer artifacts; never FacilityState input or upstream truth |
 | Dynamic twin projection | Declared layout plus FacilityState stream | USD artifacts; never upstream truth |
@@ -168,6 +169,7 @@ orienting a reviewer:
 | `nxt_agent_runtime` | Agent Runtime | Deterministic, restart-safe composition of Site Runtime output through Shadow Ops evaluation, with an evaluation checkpoint, evidence journal, pending manager-decision view, and health/status; synthetic sources only, advisory only |
 | `nxt_edge_observation` | Edge Observation Adapter Kit V0 | Converts already-read load-cell, digital-I/O, and robot-status samples into canonical `Observation` objects using commissioned bindings, with explicit conversion diagnostics; fixture-backed, no transport, device, or command surface |
 | `nxt_workflow_enablement` | Pilot Site Workflow Enablement V0 | Registers the three pilot workflow identities, evaluates the shared commissioned site and each workflow's requirements independently, and emits a deterministic enablement report plus fixture-only launch-plan data; readiness gating only, no runtime construction |
+| `nxt_course_world_model` | Course World Model V0 | Immutable, versioned course spatial truth — the course-local ENU frame bound to the commissioned coordinate reference, a finite elevation surface, semantic course features, controlled content-addressed map revisions, and the pure read-only Map Query Service; synthetic processed-scan fixtures only, no scan ingestion, navigation, or execution |
 | `nxt_site_agent` | Pilot Site Agent Service V0 | Local readiness-gated application shell around the Agent Runtime: loopback-only versioned Manager API, noncanonical projections and shift briefing, fixture source-cursor persistence; fixture-backed Shadow Mode only, no authentication, no physical device or command path |
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
@@ -217,6 +219,10 @@ runtime dependency between them.
 - [`simulation/docs/workflow_enablement_v0.md`](../simulation/docs/workflow_enablement_v0.md):
   shared-site gates, independent per-workflow readiness, the deterministic
   enablement report, and the fixture-only launch boundary.
+- [`simulation/docs/course_world_model_v0.md`](../simulation/docs/course_world_model_v0.md):
+  immutable versioned course spatial truth, the course-local coordinate
+  frame, elevation and semantic geometry, map revisions, and the read-only
+  Map Query Service boundary.
 - [`simulation/docs/site_agent_v0.md`](../simulation/docs/site_agent_v0.md):
   the local fixture-backed Site Agent service, the versioned loopback
   Manager API, the Manager Console, and the recorded no-execution boundary.

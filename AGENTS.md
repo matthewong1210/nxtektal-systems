@@ -134,7 +134,8 @@ Use, in order:
    `simulation/docs/site_runtime_design.md`,
    `simulation/docs/agent_runtime_v1.md`,
    `simulation/docs/edge_observation_v0.md`,
-   `simulation/docs/workflow_enablement_v0.md`, and
+   `simulation/docs/workflow_enablement_v0.md`,
+   `simulation/docs/course_world_model_v0.md`, and
    `simulation/docs/site_agent_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
@@ -210,6 +211,26 @@ An untracked document is never repository authority by itself.
   package may import it. Turning a
   READY launch plan into the existing runtime composition belongs to
   composition roots.
+- Keep `nxt_course_world_model` an immutable spatial-truth leaf. It may
+  import only `nxt_commissioning`'s public contract surface (identity,
+  spatial reference, provenance, canonical JSON); every other layer receives
+  serialized models or plain-data evidence through composition roots. It
+  owns the versioned Course World Model (course-local ENU frame bound to
+  the commissioned coordinate reference, elevation surface, semantic course
+  features, controlled content-addressed revisions) and the pure read-only
+  Map Query Service, including the narrow trajectory/terrain intersection
+  over an already-computed trajectory. It owns no commissioning, telemetry,
+  state, readiness, policy, projection, memory, or execution semantics; it
+  ingests no raw LAS/LAZ or point-cloud data; it is not a route planner,
+  navigation stack, geofence enforcer, landing model, or command surface —
+  a restricted-area answer is information only. It must not import the
+  simulator, telemetry, edge adapters, Site Runtime, Agent Runtime, Shadow
+  Ops, memory, twin, viewer, robot, ROS, actuator, transport/field-bus,
+  network, filesystem, subprocess, threading, wall-clock, or randomness
+  modules, and no existing package may import it. Deriving Course Model
+  evidence for readiness evaluation belongs to composition roots, and a
+  model identity or coordinate-reference mismatch fails closed rather than
+  answering.
 - Keep `nxt_site_agent` the local fixture-backed application boundary and
   nothing more. It may import only the public `nxt_agent_runtime`,
   `nxt_pilot_ops`, and `nxt_workflow_enablement` surfaces; fixture composition

@@ -26,7 +26,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
 `twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
-`edge_observation`, `workflow_enablement`, and `site_agent`.
+`edge_observation`, `workflow_enablement`, `course_world_model`, and
+`site_agent`.
 Root Phase 0 tests live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
@@ -50,6 +51,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/agent_runtime/test_architecture.py \
   tests/edge_observation/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
+  tests/course_world_model/test_architecture.py \
   tests/site_agent/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
@@ -58,8 +60,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 ```
 
 For changes to merged Commissioning, Site Runtime, Agent Runtime, the Edge
-Observation adapter kit, or Workflow Enablement, run the entire relevant
-package suites in addition to the architecture/safety subset:
+Observation adapter kit, Workflow Enablement, or the Course World Model, run
+the entire relevant package suites in addition to the architecture/safety
+subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
@@ -68,6 +71,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/agent_runtime \
   tests/edge_observation \
   tests/workflow_enablement \
+  tests/course_world_model
   tests/site_agent
 ```
 
@@ -105,6 +109,7 @@ safe. Do not build into the repository.
 | Agent Runtime composition | Rejected input never reaches policy; one evaluation outcome per admitted envelope; deterministic evaluation/trace/recommendation IDs; restart/replay idempotency and divergence fail-closed; workflow legality and recommendation immutability; byte-identical evidence; boundary guards including no execution/network/wall-clock surface |
 | AI/LLM integration | Proof outputs remain advisory; static/import tests prevent direct directive, robot-interface, adapter, ROS, actuator, or e-stop access |
 | Edge observation adapter | Calibration identity/unit/range/timestamp fail-closed behavior; explicit MISSING instead of an optimistic default; unmapped raw fields reported; deterministic observation identity; at-least-once feed semantics; boundary guards proving no transport, network, robot, actuator, or e-stop surface |
+| Course World Model contract/query | Immutable identity and content-digest verification; deterministic serialization across processes and hash seeds; coordinate/geometry/elevation fail-closed rules; pure read-only queries with explicit non-answer statuses and no fabricated intersection; site-binding cross-checks; Range Operations readiness byte-identical with and without Course Model evidence; boundary guards proving no runtime, transport, filesystem, or execution import |
 | Physical/config value | Provenance and placeholder census/validation |
 | Bug fix | A regression test that fails for the reproduced defect |
 

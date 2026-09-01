@@ -13,7 +13,7 @@ Robots solve tasks. NXTektal coordinates the facility.
 
 | Layer | Role | Repository evidence |
 |---|---|---|
-| **AI operations** | Maintains trusted facility state, orchestrates publication-quality state flow, evaluates operating conditions, produces auditable recommendations, and preserves decision evidence | `nxt_commissioning`, `nxt_telemetry`, `nxt_site_runtime`, `nxt_facility`, `nxt_pilot_ops`, `nxt_memory`, `nxt_workflow_enablement` |
+| **AI operations** | Maintains trusted facility state, orchestrates publication-quality state flow, evaluates operating conditions, produces auditable recommendations, and preserves decision evidence | `nxt_commissioning`, `nxt_telemetry`, `nxt_site_runtime`, `nxt_facility`, `nxt_pilot_ops`, `nxt_memory`, `nxt_workflow_enablement`, `nxt_course_world_model` |
 | **Digital twin** | Turns the same operational state into a time-indexed spatial representation | `nxt_range_twin` |
 | **Robots** | Execute bounded tasks behind deterministic safety and control interfaces | `nxt_sim`; mock execution is implemented, while the Isaac Sim and physical ROS 2 adapters are stubs |
 
@@ -119,6 +119,7 @@ row; the "What is working now" section above describes `main` only.
 | `simulation/nxt_agent_runtime/` | Deterministic composition of Site Runtime output through Shadow Ops evaluation, with evaluation checkpoints, journal, and pending manager decisions | Implemented composition layer; synthetic sources only, advisory only |
 | `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented conversion kit; fixture-backed only, no transport, device connection, or command path |
 | `simulation/nxt_workflow_enablement/` | Shared-site commissioning gates, independent per-workflow readiness verdicts, and the deterministic enablement report | Implemented readiness layer; fixture-only, evaluation only, no runtime construction or execution path |
+| `simulation/nxt_course_world_model/` | Immutable, versioned course spatial truth and the deterministic read-only Map Query Service | Implemented spatial-truth layer; synthetic processed-scan fixtures only, no scan ingestion, live map, navigation, or execution path |
 | `simulation/nxt_site_agent/` | Local readiness-gated service around the Agent Runtime, with a versioned loopback Manager API, projections, and shift briefing | Implemented application shell; fixture-backed Shadow Mode only, loopback-only, no authentication, no physical device or command path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |

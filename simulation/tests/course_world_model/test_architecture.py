@@ -1,4 +1,4 @@
-"""Mechanical dependency, transport, and safety guards for the adapter kit."""
+"""Mechanical dependency, purity, and safety guards for the course model."""
 
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ import textwrap
 from pathlib import Path
 
 SIMULATION_ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = SIMULATION_ROOT / "nxt_edge_observation"
+PACKAGE_ROOT = SIMULATION_ROOT / "nxt_course_world_model"
 
-# The kit converts raw payloads into the canonical Observation contract and
-# nothing else, so exactly one first-party module is reachable.
-ALLOWED_FIRST_PARTY_MODULES = {"nxt_telemetry.observations"}
+# The course model references commissioned identity, spatial-reference,
+# and provenance contracts; everything else reaches it as plain data.
+ALLOWED_FIRST_PARTY_ROOTS = {"nxt_commissioning"}
 
 BANNED_IMPORT_ROOTS = {
     # every other first-party package, upstream and downstream
@@ -26,10 +26,12 @@ BANNED_IMPORT_ROOTS = {
     "nxt_range_demo",
     "nxt_facility",
     "nxt_memory",
-    "nxt_commissioning",
+    "nxt_telemetry",
     "nxt_pilot_ops",
     "nxt_site_runtime",
     "nxt_agent_runtime",
+    "nxt_edge_observation",
+    "nxt_workflow_enablement",
     # simulation / USD / robotics stacks
     "simpy",
     "gymnasium",
@@ -65,20 +67,23 @@ BANNED_IMPORT_ROOTS = {
     "httpx",
     "aiohttp",
     "websockets",
-    # process and concurrency surfaces
+    # process, concurrency, filesystem, and watcher surfaces: pure model
     "subprocess",
     "multiprocessing",
     "threading",
     "asyncio",
     "selectors",
     "signal",
+    "os",
+    "pathlib",
+    "io",
+    "watchdog",
+    "inotify",
     # nondeterminism
     "time",
-    "datetime",
     "uuid",
     "random",
     "secrets",
-    "os",
 }
 
 EXECUTION_TOKENS = (
@@ -108,8 +113,6 @@ FOREIGN_SURFACE_TOKENS = (
     "nxtektal-roi",
 )
 
-# Word-boundary patterns: a bare substring such as "llm" also matches
-# ordinary identifiers like ``fullmatch``.
 LLM_PATTERNS = (
     r"\bopenai\b",
     r"\banthropic\b",
@@ -120,7 +123,7 @@ LLM_PATTERNS = (
     r"\bgenerative\b",
 )
 
-# Canonical contracts this package must consume, never redefine.
+# Canonical contracts this package must reference, never redefine.
 FORBIDDEN_CLASS_DEFINITIONS = {
     "Observation",
     "ObservationFrame",
@@ -137,6 +140,24 @@ FORBIDDEN_CLASS_DEFINITIONS = {
     "PolicyEvaluation",
     "Recommendation",
     "DecisionTrace",
+    "CommissionedSite",
+    "SensorBinding",
+    "CalibrationInfo",
+    "SpatialReference",
+    "SpatialPoint",
+    "CoordinateReferenceSystem",
+    "GeometryReference",
+    "ZoneDefinition",
+    "EdgeAdapterReport",
+    "EvaluationRecord",
+    "EvaluationCheckpoint",
+    "AgentRuntime",
+    "RangeSimulation",
+    "WorkflowDefinition",
+    "WorkflowRegistry",
+    "WorkflowReadiness",
+    "EnablementReport",
+    "RangeOpsLaunchPlan",
 }
 
 OTHER_PACKAGES = (
@@ -153,11 +174,18 @@ OTHER_PACKAGES = (
     "nxt_commissioning",
     "nxt_site_runtime",
     "nxt_agent_runtime",
+    "nxt_edge_observation",
     "nxt_workflow_enablement",
-    "nxt_course_world_model",
-    # The Site Agent service shell receives adapter diagnostics as plain
-    # data from composition roots and must not import the adapter kit.
-    "nxt_site_agent",
+)
+
+# Package names this package's *source* may never mention, even in
+# prose: their reverse guards scan raw text, and readiness composition
+# happens outside this package entirely.
+FOREIGN_PACKAGE_LITERALS = (
+    "nxt_site_runtime",
+    "nxt_agent_runtime",
+    "nxt_edge_observation",
+    "nxt_workflow_enablement",
 )
 
 
@@ -167,22 +195,23 @@ def _package_files() -> list[Path]:
         for path in PACKAGE_ROOT.rglob("*.py")
         if "__pycache__" not in path.parts
     ]
-    assert files, "nxt_edge_observation sources not found"
+    assert files, "nxt_course_world_model sources not found"
     return files
 
 
 def _code_text(path: Path) -> str:
-    """Return executable source with docstrings and comments removed.
+    """Return executable source with docstrings removed.
 
-    Documentation is allowed -- and required -- to *name* the transports,
-    robot interfaces, and safety systems this package deliberately does
-    not touch.  The token guards below must therefore inspect real code,
-    not prose that declares an absence.
+    Documentation is allowed -- and required -- to name the transports
+    and safety systems this package deliberately does not touch; the
+    token guards below must inspect real code, not prose declaring an
+    absence.
     """
     tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if not isinstance(
-            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+            node,
+            (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
         ):
             continue
         body = node.body
@@ -198,13 +227,13 @@ def _code_text(path: Path) -> str:
 
 
 def test_code_text_strips_prose_but_keeps_code():
-    """Negative control for the docstring/comment stripper itself."""
-    probe = PACKAGE_ROOT / "feed.py"
+    """Negative control for the docstring stripper itself."""
+    probe = PACKAGE_ROOT / "query.py"
     raw = probe.read_text(encoding="utf-8")
     code = _code_text(probe)
-    assert "at-least-once" in raw
-    assert "at-least-once" not in code
-    assert "class FixtureRawSampleFeed" in code
+    assert "route planner" in raw
+    assert "route planner" not in code
+    assert "class MapQueryService" in code
 
 
 def _imports_of(path: Path) -> set[str]:
@@ -221,7 +250,7 @@ def _imports_of(path: Path) -> set[str]:
     return modules
 
 
-def test_adapters_import_only_the_canonical_observation_contract():
+def test_the_package_imports_only_commissioned_truth_first_party():
     for path in _package_files():
         for module in _imports_of(path):
             root = module.split(".")[0]
@@ -229,12 +258,23 @@ def test_adapters_import_only_the_canonical_observation_contract():
                 f"{path.name} imports banned module {module}"
             )
             if root.startswith("nxt_"):
-                assert module in ALLOWED_FIRST_PARTY_MODULES, (
-                    f"{path.name} imports unapproved first-party module {module}"
+                assert root in ALLOWED_FIRST_PARTY_ROOTS, (
+                    f"{path.name} imports unapproved first-party module "
+                    f"{module}"
                 )
 
 
-def test_adapters_have_no_execution_foreign_or_llm_surface():
+def test_the_package_never_mentions_a_foreign_package_by_name():
+    for path in _package_files():
+        text = path.read_text(encoding="utf-8")
+        for literal in FOREIGN_PACKAGE_LITERALS:
+            assert literal not in text, (
+                f"{path.name} mentions {literal!r}; spatial truth is "
+                "consumed by other layers as plain data only"
+            )
+
+
+def test_the_package_has_no_execution_foreign_or_llm_surface():
     for path in _package_files():
         code = _code_text(path)
         for token in EXECUTION_TOKENS + FOREIGN_SURFACE_TOKENS:
@@ -242,22 +282,24 @@ def test_adapters_have_no_execution_foreign_or_llm_surface():
         lowered = code.lower()
         for pattern in LLM_PATTERNS:
             assert re.search(pattern, lowered) is None, (
-                f"{path.name} mentions {pattern!r}"
+                f"{path.name} matches {pattern!r}"
             )
 
 
-def test_adapters_redefine_no_canonical_contract():
+def test_the_package_redefines_no_canonical_contract():
     defined: set[str] = set()
     for path in _package_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         defined.update(
-            node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef)
         )
     collisions = defined & FORBIDDEN_CLASS_DEFINITIONS
     assert collisions == set(), collisions
 
 
-def test_no_wall_clock_uuid_or_randomness_in_the_adapter_package():
+def test_no_wall_clock_uuid_or_randomness_in_the_package():
     banned_calls = {
         "now",
         "utcnow",
@@ -286,7 +328,7 @@ def test_no_wall_clock_uuid_or_randomness_in_the_adapter_package():
             )
 
 
-def test_no_existing_package_depends_on_the_adapter_kit():
+def test_no_existing_package_depends_on_the_course_model():
     offenders = []
     for package in OTHER_PACKAGES:
         package_root = SIMULATION_ROOT / package
@@ -295,14 +337,14 @@ def test_no_existing_package_depends_on_the_adapter_kit():
         for path in package_root.rglob("*.py"):
             if "__pycache__" in path.parts:
                 continue
-            if "nxt_edge_observation" in path.read_text(encoding="utf-8"):
+            if "nxt_course_world_model" in path.read_text(encoding="utf-8"):
                 offenders.append(str(path.relative_to(SIMULATION_ROOT)))
     assert offenders == []
 
 
 def test_required_existing_packages_are_present():
-    for package in ("nxt_telemetry", "nxt_commissioning", "nxt_site_runtime"):
-        assert (SIMULATION_ROOT / package).is_dir(), package
+    assert (SIMULATION_ROOT / "nxt_commissioning").is_dir()
+    assert (SIMULATION_ROOT / "nxt_workflow_enablement").is_dir()
 
 
 def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess:
@@ -321,16 +363,17 @@ def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess
 
         sys.meta_path.insert(0, Blocker())
 
-        import nxt_edge_observation
+        import nxt_course_world_model
 
         surface = (
-            nxt_edge_observation.EdgeObservationAdapterKit,
-            nxt_edge_observation.LoadCellAdapter,
-            nxt_edge_observation.DigitalIOAdapter,
-            nxt_edge_observation.RobotStatusAdapter,
-            nxt_edge_observation.AdapterBindingSet,
-            nxt_edge_observation.FixtureRawSampleFeed,
-            nxt_edge_observation.EdgeAdapterReport,
+            nxt_course_world_model.CourseWorldModel,
+            nxt_course_world_model.CourseCoordinateFrame,
+            nxt_course_world_model.ElevationGrid,
+            nxt_course_world_model.MapQueryService,
+            nxt_course_world_model.build_course_world_model,
+            nxt_course_world_model.dumps_model,
+            nxt_course_world_model.verify_model_payload,
+            nxt_course_world_model.validate_model_against_site,
         )
         print("imported", len(surface))
         """
@@ -343,7 +386,7 @@ def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess
     )
 
 
-def test_the_kit_imports_without_any_runtime_simulation_or_transport_stack():
+def test_the_package_imports_without_any_runtime_simulation_or_transport_stack():
     result = _import_probe(
         (
             "simpy",
@@ -368,10 +411,12 @@ def test_the_kit_imports_without_any_runtime_simulation_or_transport_stack():
             "nxt_range_agent",
             "nxt_facility",
             "nxt_memory",
-            "nxt_commissioning",
+            "nxt_telemetry",
             "nxt_pilot_ops",
             "nxt_site_runtime",
             "nxt_agent_runtime",
+            "nxt_edge_observation",
+            "nxt_workflow_enablement",
         )
     )
     assert result.returncode == 0, result.stderr
@@ -379,17 +424,27 @@ def test_the_kit_imports_without_any_runtime_simulation_or_transport_stack():
 
 
 def test_import_blocker_negative_control():
-    result = _import_probe(("nxt_telemetry",))
+    result = _import_probe(("nxt_commissioning",))
     assert result.returncode != 0
     assert "blocked import" in result.stderr
 
 
-def test_the_kit_is_registered_as_a_distribution_package():
-    pyproject = (SIMULATION_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"nxt_edge_observation"' in pyproject
+def test_the_package_is_registered_as_a_distribution_package():
+    pyproject = (SIMULATION_ROOT / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    assert '"nxt_course_world_model"' in pyproject
 
 
 def test_the_package_documents_its_absent_physical_boundary():
     text = (PACKAGE_ROOT / "__init__.py").read_text(encoding="utf-8")
-    for claim in ("Modbus", "MQTT", "ROS 2", "emergency stop", "fixture-backed"):
+    for claim in (
+        "Modbus",
+        "MQTT",
+        "ROS 2",
+        "emergency stop",
+        "route planner",
+        "navigation",
+        "LAS/LAZ",
+    ):
         assert claim in text, claim
