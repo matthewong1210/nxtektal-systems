@@ -137,7 +137,7 @@ describe("package and safety boundaries", () => {
       .map((path) => readFileSync(path, "utf8"))
       .join("\n");
     expect(nonSceneConfigSource).not.toContain(
-      "/yc-site-schematic/range-scanned-demo.webp",
+      "/yc-site-schematic/range-grass-scan-demo.webp",
     );
     expect(combined.toLowerCase()).toContain("site presentation schematic");
     expect(combined.toLowerCase()).toContain("scan-style range scene");

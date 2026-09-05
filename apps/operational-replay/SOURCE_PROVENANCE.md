@@ -94,15 +94,17 @@ request to render.
 
 ## YC scan-style presentation asset
 
-- Output: `public/yc-site-schematic/range-scanned-demo.webp`
+- Output: `public/yc-site-schematic/range-grass-scan-demo.webp`
 - Dimensions: `1448 × 1086` (4:3)
 - MIME: `image/webp`
-- Size: `214,174` bytes
-- SHA-256: `b70cbdc6e93502eead3d150162f86c9d2836a504fea6c07daf806d9ce27e6e05`
+- Size: `150,504` bytes
+- SHA-256: `835991f86c0dbea09271f22aa167b97312365e79a53342cdce1e13aac9981f31`
 - Source: one user-supplied driving-range photograph used as the edit target;
   the untouched source photograph is not committed
 - Transformation: project-directed generative style transfer into a dark,
-  lightly abstracted scan-style range scene
+  lightly abstracted scan-style grass field; skyline buildings, transport
+  infrastructure, and foreground tee equipment were removed so the field is
+  the only prominent site surface
 - Metadata: the WebP was encoded with metadata disabled; ICCP, EXIF, XMP, GPS,
   camera-make, and camera-model fields are absent
 - External runtime dependencies: none

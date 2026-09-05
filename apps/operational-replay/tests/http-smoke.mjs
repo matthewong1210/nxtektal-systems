@@ -560,7 +560,7 @@ export async function runHttpSmoke({
     assert.match(dispatch.html, /data-demo-state="dispatch"/i);
     assert.match(dispatch.html, /<strong[^>]*>Dispatched<\/strong>/i);
     assert.doesNotMatch(dispatch.html, /data-demo-state="report"/i);
-    assert.match(dispatch.html, /range-scanned-demo\.webp/i);
+    assert.match(dispatch.html, /range-grass-scan-demo\.webp/i);
     assert.match(dispatch.html, /Site presentation schematic/i);
     assert.match(dispatch.html, /Scan-style range scene/i);
     assert.match(dispatch.html, /Presentation-only route animation/i);

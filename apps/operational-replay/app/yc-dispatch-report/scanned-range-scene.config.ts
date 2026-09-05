@@ -39,9 +39,9 @@ export const RANGE_SCENE_VIEWBOX = {
  * not surveyed coordinates, SLAM output, live tracking, or navigation input.
  */
 export const scannedRangeScene = {
-  backgroundImage: "/yc-site-schematic/range-scanned-demo.webp",
+  backgroundImage: "/yc-site-schematic/range-grass-scan-demo.webp",
   backgroundAlt:
-    "Dark scan-style presentation treatment of the supplied driving-range photo",
+    "Dark scan-style presentation treatment of an open driving-range grass field",
   objectPosition: { x: 0.5, y: 0.58 },
   facilityLabel: {
     text: "Demo range site",

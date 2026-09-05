@@ -108,7 +108,7 @@ describe("YC Dispatch / Report configuration and query contract", () => {
       ].sort(),
     );
     expect(scannedRangeScene.backgroundImage).toBe(
-      "/yc-site-schematic/range-scanned-demo.webp",
+      "/yc-site-schematic/range-grass-scan-demo.webp",
     );
     expect(scannedRangeScene.animationDurationMs).toBe(11_000);
 
@@ -141,7 +141,12 @@ describe("YC Dispatch / Report configuration and query contract", () => {
 
   test("ships only the sanitized WebP scene asset without embedded metadata chunks", () => {
     const asset = readFileSync(
-      join(process.cwd(), "public", "yc-site-schematic", "range-scanned-demo.webp"),
+      join(
+        process.cwd(),
+        "public",
+        "yc-site-schematic",
+        "range-grass-scan-demo.webp",
+      ),
     );
 
     expect(asset.subarray(0, 4).toString("ascii")).toBe("RIFF");
@@ -255,7 +260,7 @@ describe("YC Dispatch / Report server presentation", () => {
     expect(markup).toContain(
       'data-robot-marker="Picker-01-reduced-motion"',
     );
-    expect(markup).toContain("range-scanned-demo.webp");
+    expect(markup).toContain("range-grass-scan-demo.webp");
     expect(markup).toMatch(/<svg\b/i);
     expect(markup).toContain("<animateMotion");
     expect(markup).toContain('dur="11000ms"');
