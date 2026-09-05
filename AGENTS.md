@@ -33,6 +33,10 @@ architectural responsibility, not an inferred person or team.
   engine. It does not depend on the Python stack.
 - `apps/operational-replay/` is an independent read-only Next.js presentation
   over exported artifacts. It owns no operational truth, advice, or execution.
+- `apps/site-agent-console/` is the static Manager Console for the local
+  fixture-backed Site Agent service. It consumes only the versioned local
+  Manager API, imports no Python or ROI implementation, holds no authoritative
+  state, and owns no truth, advice, or execution.
 - Root documentation and `.agent/` provide repository-wide governance; they are
   not another runtime surface.
 - Cross implementation boundaries only through an already documented contract.
@@ -130,8 +134,9 @@ Use, in order:
    `simulation/docs/site_runtime_design.md`,
    `simulation/docs/agent_runtime_v1.md`,
    `simulation/docs/edge_observation_v0.md`,
-   `simulation/docs/workflow_enablement_v0.md`, and
-   `simulation/docs/course_world_model_v0.md`.
+   `simulation/docs/workflow_enablement_v0.md`,
+   `simulation/docs/course_world_model_v0.md`, and
+   `simulation/docs/site_agent_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -170,7 +175,8 @@ An untracked document is never repository authority by itself.
   `nxt_telemetry.observations` typing). It owns no observation, state, policy,
   recommendation, trace, workflow, memory, or execution semantics; it must not
   import simulator, commissioning, memory, twin, viewer, robot, ROS, or network
-  modules, and no existing package may import it.
+  modules. The designated `nxt_site_agent` application boundary is the only
+  package allowed to import it; no other consumer or upstream package may.
 - Keep `nxt_edge_observation` a conversion leaf (adapters plus the
   source-side at-least-once delivery cursor). It may import only
   `nxt_telemetry.observations`, and consumes commissioning's existing
@@ -200,7 +206,9 @@ An untracked document is never repository authority by itself.
   It must not import the simulator, telemetry, edge adapters, Site Runtime,
   Agent Runtime, Shadow Ops, memory, twin, viewer, robot, ROS, actuator,
   transport/field-bus, network, filesystem, subprocess, threading, wall-clock,
-  or randomness modules, and no existing package may import it. Turning a
+  or randomness modules; `nxt_site_agent` is its only designated in-package
+  consumer (report/plan verification through the public surface), and no other
+  package may import it. Turning a
   READY launch plan into the existing runtime composition belongs to
   composition roots.
 - Keep `nxt_course_world_model` an immutable spatial-truth leaf. It may
@@ -223,6 +231,23 @@ An untracked document is never repository authority by itself.
   evidence for readiness evaluation belongs to composition roots, and a
   model identity or coordinate-reference mismatch fails closed rather than
   answering.
+- Keep `nxt_site_agent` the local fixture-backed application boundary and
+  nothing more. It may import only the public `nxt_agent_runtime`,
+  `nxt_pilot_ops`, and `nxt_workflow_enablement` surfaces; fixture composition
+  (adapter kit, feed, enablement evaluation, runtime factory) reaches it as an
+  injected composition seam from `simulation/scripts/`. It owns service
+  lifecycle, the versioned loopback-only Manager API (`nxt-site-agent/api/v0`),
+  noncanonical projections/briefing, the fixture source-cursor persistence, and
+  noncanonical service diagnostics — and no observation, state, assembly,
+  policy, recommendation, trace, workflow, ledger, checkpoint, or physical
+  command semantics. It refuses to launch without a verified READY enablement
+  report and a fixture-only Shadow Mode plan; it binds loopback only; manager
+  acceptance stays human workflow evidence; no endpoint or browser control may
+  reach a robot, actuator, field-bus, ROS, or emergency-stop surface; and it
+  must not import the simulator, commissioning, telemetry, edge adapters, the
+  state orchestration layer directly, memory, twin, viewer, robot, ROS,
+  subprocess, os, wall-clock, or randomness modules. No existing package may
+  import it; only composition-root scripts may.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula

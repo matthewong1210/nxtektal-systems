@@ -1,0 +1,31 @@
+{
+  "name": "@nxtektal/site-agent-console",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint . --ignore-pattern .next",
+    "smoke": "node tests/http-smoke.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.3.0",
+    "typescript": "5.9.3",
+    "vitest": "3.2.7"
+  },
+  "type": "module"
+}

@@ -151,6 +151,9 @@ FORBIDDEN_CLASS_DEFINITIONS = {
     "RangeSimulation",
 }
 
+# nxt_site_agent is deliberately absent: the Site Agent service shell is
+# a designated consumer that verifies enablement reports and launch plans
+# through this package's public surface (see AGENTS.md).
 OTHER_PACKAGES = (
     "nxt_sim",
     "nxt_range_ops",

@@ -25,6 +25,7 @@ and robot adapters into one package.
 | `simulation/` | Virtual handoff lab, whole-range runtime, Site OS state/advisory/evidence/projection layers | Python project managed with `uv` |
 | `nxtektal-roi-engine/` | Deterministic, formula-locked driving-range ROI calculations | Independent TypeScript package |
 | `apps/operational-replay/` | Browser storytelling over exported simulation replay evidence | Independent read-only Next.js app |
+| `apps/site-agent-console/` | Manager Console for the local fixture-backed Site Agent service | Independent Next.js static export consuming only the local Manager API |
 
 These implementation surfaces share governance and documentation, not a
 runtime dependency.
@@ -98,6 +99,7 @@ runtime dependency.
 - `simulation/docs/edge_observation_v0.md`
 - `simulation/docs/workflow_enablement_v0.md`
 - `simulation/docs/course_world_model_v0.md`
+- `simulation/docs/site_agent_v0.md`
 - `nxtektal-roi-engine/README.md`
 - `nxtektal-roi-engine/docs/api-contract.md`
 

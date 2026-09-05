@@ -20,9 +20,10 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, Site Agent, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
+| `site-agent-console-verification` | Installs the independent locked Site Agent Console graph under Node.js 22.23.2, then typechecks, lints, tests, builds the static export, smokes the exported page over loopback, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
 
 Job names are intentionally explicit and stable. Renaming one changes the
@@ -94,6 +95,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_observation
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/workflow_enablement
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/course_world_model
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \
@@ -113,6 +115,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_observation/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
   tests/course_world_model/test_architecture.py \
+  tests/site_agent/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -130,7 +133,8 @@ uv run --no-sync python -m compileall -q -f \
   nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
-  nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
+  nxt_edge_observation nxt_workflow_enablement \
+  nxt_course_world_model nxt_site_agent \
   scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
@@ -159,7 +163,7 @@ shipped = (
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
     "nxt_edge_observation", "nxt_workflow_enablement",
-    "nxt_course_world_model",
+    "nxt_course_world_model", "nxt_site_agent",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:
@@ -283,6 +287,35 @@ address the asset blocker tracked in
 workflow validates the application; it neither grants rights to unrelated
 assets nor creates a public deployment.
 
+### Site Agent Console
+
+Same Node.js selection as Operational Replay; the app is an independent
+locked graph with no root workspace and no Python/ROI coupling. The build
+is a Next.js static export (`out/`), so the smoke serves that export on an
+ephemeral loopback port instead of starting a Node production server.
+
+```bash
+test "$(node --version)" = "v22.23.2"
+export NEXT_TELEMETRY_DISABLED=1
+cd apps/site-agent-console
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run smoke
+npm audit --omit=dev
+cd ../..
+git diff --check HEAD --
+git diff --exit-code HEAD --
+test -z "$(git ls-files --others --exclude-standard)"
+```
+
+The production audit must remain at zero vulnerabilities. The console is
+validated as a static presentation surface only: CI performs no hosting or
+deployment, and the local Python service that serves the export is covered
+by `python-verification` (`tests/site_agent`).
+
 ### Replay and demo
 
 Use the Python environment from the Python setup above, then run:
@@ -351,8 +384,9 @@ against `main`.
 
 Steps use normal fail-fast behavior; there is no `continue-on-error`. The ROI
 audit commands capture npm's expected nonzero development-audit status, then a
-separate policy step decides whether it is acceptable. Operational Replay's
-typecheck, lint, tests, build, HTTP smoke, and production audit fail directly.
+separate policy step decides whether it is acceptable. Operational Replay's and
+the Site Agent Console's typecheck, lint, tests, build, HTTP smoke, and
+production audit fail directly.
 A missing optional USD or Streamlit dependency fails through explicit imports,
 CLI execution, and live HTTP smoke instead of being hidden by a skipped test.
 
