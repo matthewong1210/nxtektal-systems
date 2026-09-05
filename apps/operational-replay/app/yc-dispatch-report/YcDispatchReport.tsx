@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ScannedRangeScene } from "./ScannedRangeScene";
 import { ycDemoMission } from "./yc-dispatch-report.config";
 import type { YcDemoQuery, YcDemoState } from "./yc-dispatch-report.query";
 import styles from "./YcDispatchReport.module.css";
@@ -28,57 +29,10 @@ function DispatchPanel({ phase, onAdvance }: Omit<PanelProps, "state">) {
     <section
       aria-hidden={phase === "outgoing"}
       aria-labelledby="dispatch-status"
-      className={`${styles.statePanel} ${styles[phase]}`}
+      className={`${styles.statePanel} ${styles.dispatchPanel} ${styles[phase]}`}
       data-demo-state="dispatch"
     >
-      <div className={styles.heroColumn}>
-        <p className={styles.eyebrow}>01 / Mission state</p>
-        <h1 className={styles.headline} id="dispatch-status">
-          <button
-            aria-describedby="operator-shortcuts"
-            aria-label="Mission dispatched — show mission report"
-            className={styles.statusTrigger}
-            onClick={onAdvance}
-            type="button"
-          >
-            <span>Mission</span>
-            <strong>Dispatched</strong>
-          </button>
-        </h1>
-
-        <div className={styles.statusLine}>
-          <span className={styles.statusBadge}>
-            <i aria-hidden="true" />
-            Dispatched
-          </span>
-          <p>Mission assigned to {mission.robotName}</p>
-        </div>
-      </div>
-
-      <div className={styles.informationBlock}>
-        <div className={styles.blockHeading}>
-          <span>Mission assignment</span>
-          <span>{mission.missionId}</span>
-        </div>
-        <dl className={styles.factList}>
-          <div>
-            <dt>Robot</dt>
-            <dd>{mission.robotName}</dd>
-          </div>
-          <div>
-            <dt>Task</dt>
-            <dd>{mission.taskName}</dd>
-          </div>
-          <div>
-            <dt>Zone</dt>
-            <dd>{mission.zoneName}</dd>
-          </div>
-          <div>
-            <dt>Mission ID</dt>
-            <dd>{mission.missionId}</dd>
-          </div>
-        </dl>
-      </div>
+      <ScannedRangeScene mission={mission} onAdvance={onAdvance} />
     </section>
   );
 }

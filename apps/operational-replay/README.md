@@ -27,9 +27,11 @@ metadata outside local development. It defaults to `http://localhost:3000`.
 
 The two-state presentation route is available at
 `http://localhost:3000/yc-dispatch-report`. It is a supervised-prototype filming
-surface only: its controls change browser presentation state and do not issue a
-live robot dispatch, consume live telemetry, or perform a live facility-log
-write.
+surface only. Dispatch uses a fixed scan-style range scene and a
+presentation-only route animation derived from a sanitized site-photo asset;
+its controls change browser presentation state and do not issue a live robot
+dispatch, consume live telemetry, navigate hardware, or perform a live
+facility-log write.
 See [YC_DISPATCH_REPORT_DEMO.md](YC_DISPATCH_REPORT_DEMO.md) for fullscreen and
 keyboard controls, URL options, filming-value updates, and the recording
 sequence.

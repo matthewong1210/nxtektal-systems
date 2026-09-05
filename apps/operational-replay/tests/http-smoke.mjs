@@ -560,9 +560,24 @@ export async function runHttpSmoke({
     assert.match(dispatch.html, /data-demo-state="dispatch"/i);
     assert.match(dispatch.html, /<strong[^>]*>Dispatched<\/strong>/i);
     assert.doesNotMatch(dispatch.html, /data-demo-state="report"/i);
+    assert.match(dispatch.html, /range-grass-scan-demo\.webp/i);
+    assert.match(dispatch.html, /Site presentation schematic/i);
+    assert.match(dispatch.html, /Scan-style range scene/i);
+    assert.match(dispatch.html, /Presentation-only route animation/i);
+    assert.match(dispatch.html, /Picker-01/i);
+    assert.match(dispatch.html, /Collect range balls/i);
+    assert.match(dispatch.html, /Zone A/i);
+    assert.match(dispatch.html, /RGO-0828-01/i);
+    assert.match(dispatch.html, /Tee line/i);
+    assert.match(dispatch.html, /Return station/i);
+    assert.match(dispatch.html, /Picker-01 start/i);
     assert.match(
       dispatch.html,
       /Prototype orchestration demo · supervised hardware execution/i,
+    );
+    assert.doesNotMatch(
+      dispatch.html,
+      /actual scan output|actual SLAM output|SLAM map|survey-grade map|surveyed site model|live digital twin|real-time robot tracking|autonomous navigation output|Fully autonomous|No intervention required|Autonomous mission completed/i,
     );
 
     const report = await fetchSmokePage({

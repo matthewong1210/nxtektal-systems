@@ -83,11 +83,18 @@ describe("package and safety boundaries", () => {
       /@react-three\/fiber|(?:from\s+|import\s*\()["']three["']|ReplayStory|edge-gateway/i,
     );
     expect(combined).not.toMatch(
-      /<(?:canvas|svg)\b|\brequestAnimationFrame\b|\b(?:map|route|telemetry|chart)\b/i,
+      /<canvas\b|\brequestAnimationFrame\b|\b(?:telemetry|chart)\b/i,
+    );
+    expect(combined).not.toMatch(
+      /mapbox|leaflet|google\.maps|navigator\.geolocation/i,
+    );
+    expect(combined).not.toMatch(
+      /<input\b[^>]*\btype=["']?file\b|\bFileReader\b|\bFormData\b|\b(?:URL\.)?createObjectURL\b/i,
     );
     expect(combined).not.toMatch(
       /No intervention required|Fully autonomous|Autonomous mission completed/i,
     );
+    expect(combined).not.toMatch(/actual scan output|SLAM map/i);
     expect(combined).not.toMatch(
       /Report saved to facility operations log|Scripted presentation copy|Update after field run|Placeholder|\bTBD\b|Replace this value|Mock value/i,
     );
@@ -96,8 +103,21 @@ describe("package and safety boundaries", () => {
       YC_DISPATCH_REPORT_ROOT,
       "yc-dispatch-report.config.ts",
     );
+    const sceneConfigPath = join(
+      YC_DISPATCH_REPORT_ROOT,
+      "scanned-range-scene.config.ts",
+    );
+    const sceneComponentPath = join(
+      YC_DISPATCH_REPORT_ROOT,
+      "ScannedRangeScene.tsx",
+    );
+    expect(readFileSync(sceneComponentPath, "utf8").match(/<svg\b/g)).toHaveLength(1);
+    for (const path of paths.filter((path) => path !== sceneComponentPath)) {
+      expect(readFileSync(path, "utf8"), relative(ROOT, path)).not.toMatch(/<svg\b/);
+    }
+
     const nonConfigSource = paths
-      .filter((path) => path !== configPath)
+      .filter((path) => path !== configPath && path !== sceneConfigPath)
       .map((path) => readFileSync(path, "utf8"))
       .join("\n");
     for (const configuredValue of [
@@ -111,6 +131,17 @@ describe("package and safety boundaries", () => {
         configuredValue,
       );
     }
+
+    const nonSceneConfigSource = paths
+      .filter((path) => path !== sceneConfigPath)
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
+    expect(nonSceneConfigSource).not.toContain(
+      "/yc-site-schematic/range-grass-scan-demo.webp",
+    );
+    expect(combined.toLowerCase()).toContain("site presentation schematic");
+    expect(combined.toLowerCase()).toContain("scan-style range scene");
+    expect(combined.toLowerCase()).toContain("presentation-only route animation");
   });
 
   test("states merged observation-adapter and runtime truth without browser coupling or execution claims", () => {
@@ -319,7 +350,7 @@ describe("package and safety boundaries", () => {
       (path) =>
         !path.includes("node_modules") &&
         !path.includes(".next") &&
-        !path.endsWith(".png") &&
+        !/\.(?:avif|gif|jpe?g|png|webp)$/i.test(path) &&
         !path.endsWith("package-lock.json"),
     );
     for (const path of textFiles) {

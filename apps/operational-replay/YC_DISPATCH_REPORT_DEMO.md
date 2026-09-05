@@ -4,6 +4,12 @@ The `/yc-dispatch-report` route is a presentation-only filming surface with two
 screen states: **Dispatch** and **Report**. It does not connect to the robot or
 to an operational system.
 
+Dispatch presents a fixed **scan-style range scene** built from a sanitized
+derivative of the supplied driving-range photo. Its field labels, route, and
+moving marker are an operator-authored **site presentation schematic** with a
+**presentation-only route animation**. They are not surveyed geometry, SLAM
+output, live tracking, a live digital twin, or autonomous navigation output.
+
 ## Start the app
 
 From the repository root:
@@ -75,13 +81,15 @@ automatically, then check both states before recording.
 
 1. Open the Dispatch screen at the default URL and request fullscreen.
 2. Begin recording with **MISSION DISPATCHED** visible.
-3. The operator controls the robot from outside the camera frame.
-4. Film the supervised physical robot collecting balls.
-5. Return the camera to the monitor.
-6. Press `Space` to display the Report screen.
-7. Show **MISSION COMPLETE**, the configured report values, and the supervised
+3. Let the presentation-only marker travel along its predefined on-screen
+   route; this animation does not represent a live robot position.
+4. The operator controls the physical robot from outside the camera frame.
+5. Film the supervised physical robot collecting balls.
+6. Return the camera to the monitor.
+7. Press `Space` to display the Report screen.
+8. Show **MISSION COMPLETE**, the configured report values, and the supervised
    prototype execution mode.
-8. End the recording.
+9. End the recording.
 
 ## Prototype disclosure and limits
 
@@ -94,6 +102,11 @@ content. Pressing a key or clicking the status changes only the browser view:
 no live dispatch occurs; it does not issue a hardware command, admit a mission,
 or claim autonomous execution. The route receives no live telemetry and does
 not automatically measure or infer a physical outcome.
+
+The fixed scene coordinates in
+`app/yc-dispatch-report/scanned-range-scene.config.ts` are normalized visual
+placement values for this filming composition only. Do not describe them as
+measured site coordinates, a surveyed map, or robot navigation input.
 
 The Report state generates presentation content only. It performs no database
 write, upload, or other persistence. Do not narrate the demo as proof of

@@ -92,6 +92,29 @@ SVG is the reviewable artwork authority and the PNG hash above is the active
 byte identity. The PNG is self-contained and requires no runtime or external
 request to render.
 
+## YC scan-style presentation asset
+
+- Output: `public/yc-site-schematic/range-grass-scan-demo.webp`
+- Dimensions: `1448 × 1086` (4:3)
+- MIME: `image/webp`
+- Size: `150,504` bytes
+- SHA-256: `835991f86c0dbea09271f22aa167b97312365e79a53342cdce1e13aac9981f31`
+- Source: one user-supplied driving-range photograph used as the edit target;
+  the untouched source photograph is not committed
+- Transformation: project-directed generative style transfer into a dark,
+  lightly abstracted scan-style grass field; skyline buildings, transport
+  infrastructure, and foreground tee equipment were removed so the field is
+  the only prominent site surface
+- Metadata: the WebP was encoded with metadata disabled; ICCP, EXIF, XMP, GPS,
+  camera-make, and camera-model fields are absent
+- External runtime dependencies: none
+
+This image is a fixed presentation derivative, not actual scan output, surveyed
+geometry, SLAM output, a live digital twin, live tracking, or autonomous
+navigation data. The route overlay and marker motion are separately authored
+browser presentation elements and do not establish physical robot position or
+execution evidence.
+
 ## Architecture status
 
 This app owns presentation and deterministic parsing only. Its inputs are

@@ -124,6 +124,12 @@
   gap: clamp(54px, 6.2vw, 118px);
 }
 
+.dispatchPanel {
+  padding-block: clamp(20px, 2.8vh, 30px);
+  display: flex;
+  align-items: center;
+}
+
 .settled {
   z-index: 0;
   opacity: 1;
@@ -458,6 +464,10 @@
     padding-block: 26px 22px;
   }
 
+  .dispatchPanel {
+    padding-block: 18px 16px;
+  }
+
   .eyebrow {
     margin-bottom: 18px;
   }
@@ -504,6 +514,10 @@
     grid-template-columns: 1fr;
     align-content: center;
     gap: 34px;
+  }
+
+  .dispatchPanel {
+    display: flex;
   }
 
   .statusTrigger span,
