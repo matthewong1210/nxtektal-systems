@@ -8,15 +8,19 @@ function toneFor(tag: string): Tone {
 }
 
 function describe(exception: BriefingException): string {
+  // Manager-facing text must never render a literal null/undefined when
+  // metadata is absent from the diagnostics stream.
+  const failureCode = exception.failure_code ?? "unknown failure";
+  const channel = exception.channel ?? "unknown channel";
   switch (exception.kind) {
     case "rejected_cycle":
-      return `Cycle rejected before publication (${exception.failure_code}) — ${
+      return `Cycle rejected before publication (${failureCode}) — ${
         exception.cycle_label ?? "fixture cycle"
       }${exception.scenario_time ? ` at ${exception.scenario_time}` : ""}`;
     case "missing_channel":
-      return `Channel missing from the latest admitted state: ${exception.channel}`;
+      return `Channel missing from the latest admitted state: ${channel}`;
     case "stale_channel":
-      return `Channel stale in the latest admitted state: ${exception.channel}`;
+      return `Channel stale in the latest admitted state: ${channel}`;
     case "service_degraded":
       return `Service degraded${exception.detail ? ` — ${exception.detail}` : ""}`;
     case "service_failed":

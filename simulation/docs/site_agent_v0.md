@@ -167,12 +167,20 @@ browser error can never mutate canonical evidence.
 Loopback-only (`127.0.0.1`/`localhost`; anything else is refused at
 construction). Every response carries the schema and the fixture
 disclaimer. No cross-origin headers exist: the console is served
-same-origin by the service, and requests carrying a foreign `Origin`
-or a non-loopback `Host` header are refused (drive-by CSRF and DNS
-rebinding defense — an unauthenticated local service must not be
-drivable by a page the operator merely visits). Request bodies are
-size-capped, chunked bodies are refused, and any framing error closes
-the connection so unread bytes are never parsed as a second request.
+same-origin by the service, and browser requests are gated by an
+exact-origin rule — a present `Origin` header must equal the
+service's own HTTP origin exactly (scheme + loopback host + bound
+port); `Origin: null` (sandboxed iframes, `file:`/`data:` documents),
+a mismatched scheme such as `https` against this plain-HTTP service,
+malformed values, and foreign origins are all refused with 403. A
+request without an `Origin` header is accepted: browsers always
+attach `Origin` to cross-site POSTs, so the absent header identifies
+non-browser local tooling (curl, tests), not a page. A non-loopback
+`Host` header is refused as well (DNS rebinding defense) — together
+these keep an unauthenticated local service undrivable by a page the
+operator merely visits. Request bodies are size-capped, chunked
+bodies are refused, and any framing error closes the connection so
+unread bytes are never parsed as a second request.
 
 | Endpoint | Meaning |
 |---|---|

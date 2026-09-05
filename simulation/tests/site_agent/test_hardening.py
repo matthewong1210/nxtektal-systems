@@ -124,6 +124,39 @@ def test_briefing_is_idempotent_under_crash_window_redelivery(
     assert briefing["cycles"] == {"admitted": 2, "rejected": 0}
 
 
+def test_unreadable_ledger_is_an_explicit_briefing_exception(
+    tmp_path, launch
+):
+    """An unreadable ledger must never render as a clean shift."""
+    service = launch(tmp_path)
+    for _ in range(2):  # calm NO_ACTION + spike RECOMMEND (ledger issuance)
+        service.advance()
+    ledger = service.storage.workflow_evidence_root / "ledger.jsonl"
+    text = ledger.read_text(encoding="utf-8")
+    ledger.write_text(text[: len(text) // 2], encoding="utf-8")
+
+    briefing = service.briefing_snapshot()
+    kinds = [item["kind"] for item in briefing["exceptions"]]
+    assert "evidence_unreadable" in kinds
+    details = " ".join(
+        str(item.get("detail"))
+        for item in briefing["exceptions"]
+        if item["kind"] == "evidence_unreadable"
+    )
+    assert "decision ledger" in details
+    assert any(
+        "could not be read" in item for item in briefing["unresolved"]
+    )
+    # the ledger-backed endpoints fail loudly instead of serving a
+    # silently trace-less projection
+    with pytest.raises(SiteAgentError) as excinfo:
+        service.evaluations_snapshot()
+    assert excinfo.value.code == "ledger_unreadable"
+    with pytest.raises(SiteAgentError) as refused:
+        service.recommendations_snapshot()
+    assert refused.value.code in ("ledger_unreadable", "queue_unreadable")
+
+
 def test_unreadable_journal_is_an_explicit_briefing_exception(
     tmp_path, launch
 ):

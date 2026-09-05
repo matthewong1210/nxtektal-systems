@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createClient,
   DISCLAIMER,
@@ -11,6 +11,7 @@ import {
   type RespondInput,
   type StateProjection,
 } from "../lib/api";
+import { createActionRunner } from "../lib/actions";
 import { BriefingPanel } from "../components/BriefingPanel";
 import { ExceptionsPanel } from "../components/ExceptionsPanel";
 import { FixtureControls } from "../components/FixtureControls";
@@ -80,18 +81,10 @@ export default function ConsolePage() {
     };
   }, []);
 
-  const act = useCallback(
-    async (action: () => Promise<unknown>) => {
-      setBusy(true);
-      try {
-        await action();
-      } finally {
-        setBusy(false);
-        await load();
-      }
-    },
-    [load],
-  );
+  // Busy covers the whole operation (action → refresh → state commit),
+  // so controls stay disabled until the refreshed view is in place and
+  // a repeated click during the refresh window cannot fire twice.
+  const act = useMemo(() => createActionRunner(setBusy, load), [load]);
 
   const respond = useCallback(
     (recommendationId: string, kind: string, input: RespondInput) =>

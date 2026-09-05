@@ -71,7 +71,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/agent_runtime \
   tests/edge_observation \
   tests/workflow_enablement \
-  tests/course_world_model
+  tests/course_world_model \
   tests/site_agent
 ```
 

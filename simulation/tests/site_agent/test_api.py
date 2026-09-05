@@ -410,6 +410,70 @@ def test_cross_origin_and_foreign_host_requests_are_refused(served):
         attack.close()
 
 
+def test_origin_matrix_for_mutating_endpoints(served):
+    """Exact-origin rule: scheme + loopback host + bound port, or absent."""
+    service, server, connection = served
+    exact_origin = f"http://{server.host}:{server.port}"
+
+    def post_with_origin(path, origin, payload=None):
+        probe = http.client.HTTPConnection(
+            server.host, server.port, timeout=10
+        )
+        try:
+            headers = {"Content-Type": "application/json"}
+            if origin is not None:
+                headers["Origin"] = origin
+            probe.request(
+                "POST",
+                path,
+                body=json.dumps(payload) if payload is not None else "{}",
+                headers=headers,
+            )
+            response = probe.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            probe.close()
+
+    # valid exact same-origin POST succeeds on a fixture-control endpoint
+    status, payload = post_with_origin("/api/v0/demo/advance", exact_origin)
+    assert status == 200
+    assert payload["data"]["outcome"] == "evaluated"
+
+    # Origin: null (sandboxed iframe, file:/data: documents) is refused
+    status, payload = post_with_origin("/api/v0/demo/advance", "null")
+    assert status == 403
+    assert payload["error"]["code"] == "forbidden_origin"
+
+    # right authority, wrong scheme: https against this plain-HTTP service
+    status, payload = post_with_origin(
+        "/api/v0/demo/advance", f"https://{server.host}:{server.port}"
+    )
+    assert status == 403
+    assert payload["error"]["code"] == "forbidden_origin"
+
+    # malformed origins
+    for malformed in ("garbage", "http://", f"{server.host}:{server.port}"):
+        status, payload = post_with_origin("/api/v0/demo/advance", malformed)
+        assert status == 403, malformed
+        assert payload["error"]["code"] == "forbidden_origin"
+
+    # foreign origin refused on a recommendation mutation endpoint too,
+    # and the refusal happens before any workflow dispatch (403, not 404)
+    status, payload = post_with_origin(
+        "/api/v0/recommendations/rec_does_not_exist/accept",
+        "https://evil.example",
+        {"operator_id": "mgr", "reason_code": "x"},
+    )
+    assert status == 403
+    assert payload["error"]["code"] == "forbidden_origin"
+
+    # absent Origin (non-browser local tooling) is accepted; the second
+    # cycle advances normally
+    status, payload = post_with_origin("/api/v0/demo/advance", None)
+    assert status == 200
+    assert payload["data"]["outcome"] == "evaluated"
+
+
 def test_oversized_body_closes_the_connection_against_desync(served):
     _, server, _ = served
     connection = http.client.HTTPConnection(

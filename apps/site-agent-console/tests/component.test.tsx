@@ -189,6 +189,49 @@ describe("ExceptionsPanel", () => {
     const html = renderToStaticMarkup(<ExceptionsPanel exceptions={[]} />);
     expect(html).toContain("NONE");
   });
+
+  it("never renders literal null when failure_code is absent", () => {
+    const html = renderToStaticMarkup(
+      <ExceptionsPanel
+        exceptions={[
+          {
+            kind: "rejected_cycle",
+            tag: "MISSING",
+            failure_code: null,
+            detail: null,
+            scenario_time: null,
+            cycle_label: null,
+          },
+        ]}
+      />,
+    );
+    expect(html).not.toContain("null");
+    expect(html).not.toContain("undefined");
+    expect(html).toContain("unknown failure");
+    expect(html).toContain("fixture cycle");
+  });
+
+  it("never renders literal undefined when channel is absent", () => {
+    const html = renderToStaticMarkup(
+      <ExceptionsPanel
+        exceptions={[
+          { kind: "missing_channel", tag: "MISSING" },
+          { kind: "stale_channel", tag: "STALE" },
+        ]}
+      />,
+    );
+    expect(html).not.toContain("null");
+    expect(html).not.toContain("undefined");
+    expect(html.match(/unknown channel/g)).toHaveLength(2);
+  });
+
+  it("preserves the existing text when metadata is present", () => {
+    const html = renderToStaticMarkup(
+      <ExceptionsPanel exceptions={sampleBriefing().exceptions} />,
+    );
+    expect(html).toContain("insufficient_data_quality");
+    expect(html).not.toContain("unknown failure");
+  });
 });
 
 describe("FixtureControls", () => {
@@ -220,6 +263,22 @@ describe("FixtureControls", () => {
       />,
     );
     expect(html).toBe("");
+  });
+
+  it("disables every fixture control while an operation is busy", () => {
+    // With createActionRunner keeping busy=true until the refresh
+    // settles, disabled buttons make a repeated click inert for the
+    // whole action→refresh window.
+    const html = renderToStaticMarkup(
+      <FixtureControls
+        fixture={sampleFixture()}
+        onAdvance={noop}
+        onRestart={noop}
+        onReset={noop}
+        busy={true}
+      />,
+    );
+    expect(html.match(/disabled=""/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
   });
 
   it("disables controls the service refuses", () => {

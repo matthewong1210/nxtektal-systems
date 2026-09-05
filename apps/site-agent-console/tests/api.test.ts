@@ -88,6 +88,35 @@ describe("manager API client", () => {
       status: 502,
     });
   });
+
+  it("maps a null JSON payload to the typed error, not a TypeError", async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse(200, null);
+    const client = createClient(fetchImpl);
+    await expect(client.health()).rejects.toBeInstanceOf(ManagerApiError);
+    await expect(client.health()).rejects.toMatchObject({
+      code: "unreadable_response",
+      status: 200,
+    });
+  });
+
+  it("maps null payloads on error statuses to the typed error too", async () => {
+    const fetchImpl: FetchLike = async () => jsonResponse(500, null);
+    const client = createClient(fetchImpl);
+    await expect(client.advance()).rejects.toMatchObject({
+      code: "unreadable_response",
+      status: 500,
+    });
+  });
+
+  it("maps primitive and array payloads to the typed error", async () => {
+    for (const payload of [42, "ok", true, []]) {
+      const fetchImpl: FetchLike = async () => jsonResponse(200, payload);
+      const client = createClient(fetchImpl);
+      await expect(client.state()).rejects.toMatchObject({
+        code: "unreadable_response",
+      });
+    }
+  });
 });
 
 describe("formatting helpers", () => {

@@ -133,37 +133,46 @@ class _Handler(BaseHTTPRequestHandler):
         status = _STATUS_BY_CODE.get(code, 500)
         self._send_json(status, _error_payload(code, detail))
 
-    def _allowed_authorities(self) -> set[str]:
+    def _allowed_hosts_and_origins(self) -> tuple[set[str], set[str]]:
         host, port = self.server.server_address[:2]  # type: ignore[attr-defined]
-        hosts = {"127.0.0.1", "localhost"}
-        if host in hosts:
-            names = hosts
-        else:
-            names = {str(host)}
-        authorities: set[str] = set()
+        loopback = {"127.0.0.1", "localhost"}
+        names = loopback if host in loopback else {str(host)}
+        hosts: set[str] = set()
+        origins: set[str] = set()
         for name in names:
-            authorities.add(name)
-            authorities.add(f"{name}:{port}")
-        return authorities
+            hosts.add(name)
+            hosts.add(f"{name}:{port}")
+            # The service is plain HTTP: the only acceptable browser
+            # origin is its own exact scheme + loopback host + bound
+            # port. Browsers omit the default port in Origin, so the
+            # bare form is acceptable only when bound to port 80.
+            origins.add(f"http://{name}:{port}")
+            if port == 80:
+                origins.add(f"http://{name}")
+        return hosts, origins
 
     def _request_allowed(self) -> tuple[bool, str | None]:
         """Reject cross-origin and rebound-host requests.
 
         The service is loopback-only with no authentication, so a page
-        the operator merely visits must not be able to drive it. A
-        cross-origin ``Origin`` (CSRF) and a foreign ``Host`` (DNS
-        rebinding) are both refused; same-origin console requests carry
-        a matching ``Origin``/``Host`` or omit ``Origin`` entirely.
+        the operator merely visits must not be able to drive it.  A
+        present ``Origin`` header must exactly equal the service's own
+        HTTP origin (scheme, loopback host, and bound port): ``null``
+        origins (sandboxed iframes, ``file:``/``data:`` documents), a
+        mismatched scheme such as ``https`` against this plain-HTTP
+        service, malformed values, and foreign origins are all refused.
+        A request without an ``Origin`` header is accepted — browsers
+        always attach ``Origin`` to cross-site POSTs, so the absent
+        header identifies non-browser local tooling, not a page.  A
+        foreign ``Host`` header (DNS rebinding) is refused as well.
         """
-        allowed = self._allowed_authorities()
+        hosts, origins = self._allowed_hosts_and_origins()
         host_header = self.headers.get("Host")
-        if host_header is not None and host_header not in allowed:
+        if host_header is not None and host_header not in hosts:
             return False, f"request Host {host_header!r} is not loopback"
         origin = self.headers.get("Origin")
-        if origin is not None and origin != "null":
-            authority = origin.split("://", 1)[-1]
-            if authority not in allowed:
-                return False, f"cross-origin request from {origin!r} refused"
+        if origin is not None and origin not in origins:
+            return False, f"cross-origin request from {origin!r} refused"
         return True, None
 
     def _read_body(self) -> dict[str, Any]:

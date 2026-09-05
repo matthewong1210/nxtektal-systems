@@ -600,16 +600,29 @@ class SiteAgentService:
         dict[str, dict[str, Any]],
         dict[str, dict[str, Any]],
         dict[str, float],
+        str | None,
     ]:
-        """Index issuance traces, recommendations, and responses by ID."""
+        """Index issuance traces, recommendations, and responses by ID.
+
+        The fifth element is the read-failure detail when the ledger
+        could not be read.  An unreadable ledger must never masquerade
+        as an empty, clean one: callers either raise a coded error or
+        surface the detail as an explicit read error in the briefing.
+        """
         traces: dict[str, dict[str, Any]] = {}
         recommendations: dict[str, dict[str, Any]] = {}
         responses: dict[str, dict[str, Any]] = {}
         response_scenario_seconds: dict[str, float] = {}
         try:
             records = self._ledger_reader().records()
-        except (OSError, ValueError, RuntimeError):
-            return traces, recommendations, responses, response_scenario_seconds
+        except (OSError, ValueError, RuntimeError) as exc:
+            return (
+                traces,
+                recommendations,
+                responses,
+                response_scenario_seconds,
+                f"cannot read the decision ledger: {exc}",
+            )
         for record in records:
             payload = record.payload
             if record.event_type == "recommendation_issued":
@@ -634,7 +647,13 @@ class SiteAgentService:
                         ).total_seconds()
                     except ValueError:
                         pass
-        return traces, recommendations, responses, response_scenario_seconds
+        return (
+            traces,
+            recommendations,
+            responses,
+            response_scenario_seconds,
+            None,
+        )
 
     # -- read-only projections -------------------------------------------
 
@@ -710,7 +729,9 @@ class SiteAgentService:
 
     def evaluations_snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            traces, _, _, _ = self._ledger_index()
+            traces, _, _, _, read_error = self._ledger_index()
+            if read_error is not None:
+                raise SiteAgentError("ledger_unreadable", read_error)
             return self._project_evaluations(self._journal_records(), traces)
 
     def _project_evaluations(
@@ -747,7 +768,11 @@ class SiteAgentService:
 
     def recommendations_snapshot(self) -> list[dict[str, Any]]:
         with self._lock:
-            traces, recommendations, responses, _ = self._ledger_index()
+            traces, recommendations, responses, _, read_error = (
+                self._ledger_index()
+            )
+            if read_error is not None:
+                raise SiteAgentError("ledger_unreadable", read_error)
             return self._project_recommendations(
                 self._queue_entries(), traces, recommendations, responses
             )
@@ -774,8 +799,14 @@ class SiteAgentService:
             state = self.state_snapshot()
             health = self.health_snapshot()
             # One ledger read for the whole briefing, not three.
-            traces, recs, responses, response_seconds = self._ledger_index()
+            traces, recs, responses, response_seconds, ledger_error = (
+                self._ledger_index()
+            )
             read_errors: list[str] = []
+            if ledger_error is not None:
+                # An unreadable ledger must surface as an explicit read
+                # error, never as an empty, clean-looking shift.
+                read_errors.append(ledger_error)
             try:
                 evaluations = self._project_evaluations(
                     self._journal_records(), traces
@@ -1174,8 +1205,11 @@ class SiteAgentService:
             except (TypeError, ValueError) as exc:
                 raise SiteAgentError("invalid_request", str(exc)) from exc
             # Project only the entry that was just answered rather than
-            # rebuilding the entire queue.
-            traces, recs, responses, _ = self._ledger_index()
+            # rebuilding the entire queue.  The response was already
+            # recorded, so a read failure here degrades enrichment only
+            # (trace/response fields absent); it must not be reported
+            # as a failed response.
+            traces, recs, responses, _, _ledger_error = self._ledger_index()
             for entry in self._queue_entries():
                 if entry.recommendation_id == recommendation_id:
                     return recommendation_projection(

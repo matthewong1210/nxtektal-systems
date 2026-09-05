@@ -264,6 +264,15 @@ async function decode<T>(response: Response): Promise<T> {
       detail: `the service returned a non-JSON response (${response.status})`,
     });
   }
+  // A null, primitive, or array payload has no envelope fields to read;
+  // it must surface as the typed error, not an uncaught TypeError.
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new ManagerApiError(response.status, {
+      code: "unreadable_response",
+      detail:
+        `the service returned a non-object JSON payload (${response.status})`,
+    });
+  }
   if (!response.ok) {
     const error = (payload as ErrorEnvelope).error ?? {
       code: "unknown_error",
