@@ -26,9 +26,15 @@ def _request(
     path: str,
     *,
     method: str = "GET",
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, HTTPMessage, bytes]:
     data = b"{}" if method in {"POST", "PUT", "PATCH"} else None
-    request = Request(base_url + path, data=data, method=method)
+    request = Request(
+        base_url + path,
+        data=data,
+        headers={} if headers is None else headers,
+        method=method,
+    )
     try:
         with urlopen(request, timeout=5) as response:
             return response.status, response.headers, response.read()
@@ -175,6 +181,52 @@ def test_get_and_head_are_side_effect_free_and_expose_all_dimensions():
             assert head_body == b""
 
     assert status.snapshot() == before
+
+
+def test_status_http_refuses_a_forged_host_without_disclosing_status():
+    status = _status("HYBRID_RUNTIME_REHEARSAL")
+    status.set_broker_connected(True)
+    status.record_sensor_result(adapter_healthy=True, runtime_ready=True)
+    before = status.snapshot()
+
+    with GatewayStatusServer(status, host="127.0.0.1", port=0) as server:
+        base_url = _base_url(server)
+        port = server.address[1]
+        for host in (f"127.0.0.1:{port}", f"localhost:{port}"):
+            code, _, body = _request(
+                base_url,
+                "/api/v0/status",
+                headers={"Host": host},
+            )
+            assert code == 200
+            assert _json(body)["site_id"] == SITE_ID
+
+        code, _, body = _request(
+            base_url,
+            "/api/v0/status",
+            headers={"Host": "attacker.example"},
+        )
+        assert code == 403
+        assert SITE_ID.encode("utf-8") not in body
+        assert DEPLOYMENT_ID.encode("utf-8") not in body
+
+    assert status.snapshot() == before
+
+
+def test_status_http_allows_the_configured_nonwildcard_bind_host():
+    status = _status("LOAD_CELL_DIAGNOSTIC")
+
+    with GatewayStatusServer(status, host="127.1", port=0) as server:
+        base_url = _base_url(server)
+        port = server.address[1]
+        code, _, body = _request(
+            base_url,
+            "/healthz",
+            headers={"Host": f"127.1:{port}"},
+        )
+
+    assert code == 200
+    assert _json(body)["mode"] == "LOAD_CELL_DIAGNOSTIC"
 
 
 @pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE"])

@@ -61,11 +61,11 @@ contract, work stops after design for a separate architecture decision.
 | Allowed imports | Composition scripts may use stdlib JSON/timezone/HTTP/concurrency modules, the optional Paho MQTT client, and public Commissioning, Edge Observation, telemetry, Site Runtime, Agent Runtime, Shadow Ops, and Pilot Course A fixture APIs. Core packages remain unaware of the scripts and MQTT dependency. |
 | Forbidden reverse path | No `nxt_*` package may import the gateway scripts; transport cannot enter Edge Observation, Site Runtime, or Agent Runtime; no observation, report, state, recommendation, HTTP request, or LLM output can reach directives, robots, ROS, Nav2, actuators, register/coil writes, or e-stop mutation. |
 | Version/drift | The wire schema is exactly `nxt.edge.load-cell.raw/v1`; unknown schema versions, missing or unknown fields, duplicate JSON keys, and identity disagreement fail closed. V0 has no migration or compatibility fallback. Existing canonical schemas and bytes are unchanged. |
-| Replay/order | `(device_id, boot_id, device_sequence)` identifies a wire delivery. In hybrid mode, an identical redelivery matching the current unacknowledged delivery re-drives the existing immutable pending frame at the same site sequence; it does not create a second frame. After acknowledgement or terminal rejection, an identical replay is ignored as a duplicate. Conflicting reuse and unseen lower sequence values fail closed. A new boot opens a new device epoch. The independent contiguous Site Runtime sequence drives `RawSampleBatch.cycle_index` and canonical observation IDs; device sequence never does. |
-| Time | Wire timestamps must be UTC and remain visible in diagnostics. `SiteClock` uses the commissioned IANA timezone to return local `operating_day_id` and civil seconds since calendar midnight; the host timezone is irrelevant. Mixed-day samples fail closed. UTC input cannot denote a nonexistent local instant; spring-forward skips that wall interval. Ambiguous fall-back folds are refused in V0 because the downstream scalar `t_s` cannot disambiguate them without hiding ordering or staleness. A hybrid runtime is bound to one operating day and refuses rollover rather than applying a new day to the old Agent Runtime midnight. |
+| Replay/order | `(device_id, boot_id, device_sequence)` identifies a wire delivery, with the sequence limited to signed 64-bit range. In hybrid mode, an identical redelivery matching the current unacknowledged delivery re-drives the existing immutable pending frame at the same site sequence; it does not create a second frame. An older acknowledged active-boot replay remains a terminal duplicate even while another frame is pending. After acknowledgement or terminal rejection, an identical replay is ignored as a duplicate. Conflicting reuse and unseen lower sequence values fail closed. A new boot opens a new device epoch. Capacity exhaustion, a deferred-frame overtake, and operating-day rollover stop the process without PUBACK rather than discarding the triggering delivery. The independent contiguous Site Runtime sequence drives `RawSampleBatch.cycle_index` and canonical observation IDs; device sequence never does. |
+| Time | Wire timestamps must be UTC and remain visible in diagnostics. `SiteClock` uses the commissioned IANA timezone to return local `operating_day_id` and civil seconds since calendar midnight; the host timezone is irrelevant. Mixed-day samples fail closed. UTC input cannot denote a nonexistent local instant; spring-forward skips that wall interval, so civil age can exceed elapsed UTC time and conservatively reject a transition-straddling sample as stale. Ambiguous fall-back folds are refused in V0 because the downstream scalar `t_s` cannot disambiguate them without hiding ordering or staleness. The 2026 Pilot Course A fixture interval has no offset transition; V0 makes no general DST-transition-readiness claim. A hybrid runtime is bound to one operating day and refuses rollover rather than applying a new day to the old Agent Runtime midnight. |
 | Missing/stale/default | `null`, device fault, calibration mismatch, and unit mismatch flow through the existing adapter as explicit `MISSING` with `value=None`; they never become zero. Stale values remain `STALE` with their value and are rejected by Site Runtime before policy evaluation. The composition never adjusts simulated inventory to force conservation. |
 | Determinism | Canonical IDs depend on validated message content, explicit mapped site time, commissioned bindings, and the independent site sequence. Wall-clock calls, broker timing, HTTP requests, UUIDs, randomness, host timezone, and dictionary order do not participate. A pending frame is immutable and repeated `observe()` calls return identical content until acknowledge or reject. |
-| Failure semantics | Malformed wire input fails before raw contracts; adapter failures remain named report evidence; Site Runtime rejection creates no evaluation. MQTT/process failures degrade gateway health without inventing data. A rejected runtime delivery reuses its site sequence. |
+| Failure semantics | Malformed wire input fails before raw contracts; adapter failures remain named report evidence; Site Runtime rejection creates no evaluation. Deterministic per-delivery poison is PUBACKed after rejection, while process-state incompatibilities (`operating_day_rollover`, `source_protocol`, and `replay_capacity_exceeded`) remain unacknowledged and fail-stop. A lost persistent broker session while any delivery remains unfinished in the process also fail-stops. Same-delivery runtime/PUBACK retry is limited to eight consecutive failed attempts before unacknowledged fail-stop. These outcomes degrade gateway health without inventing data or claiming restart recovery. A rejected runtime delivery reuses its site sequence. |
 | Human/safety authority | Endpoints are GET/HEAD only and cannot mutate state, policy, calibration, workflow, robots, or e-stop. Recommendations remain advisory human-workflow evidence. No command, actuator, autonomous execution, or LLM surface exists. |
 
 ## Implemented local composition
@@ -203,15 +203,20 @@ rejected. The payload schema is exactly `nxt.edge.load-cell.raw/v1`:
 ```
 
 All 15 fields are required; unknown or duplicate JSON keys are rejected. JSON
-must be UTF-8, have an object root, and fit within the V0 65,536-byte payload
-limit enforced both before JSON decoding and by the local broker packet limit.
+must be UTF-8, have an object root, and fit within the Gateway's V0 65,536-byte
+payload limit before JSON decoding. Mosquitto's `max_packet_size 65536` limit
+covers the entire MQTT control packet—not only its payload—so topic, fixed-
+header, and QoS 1 packet-identifier overhead make the local broker deliberately
+slightly stricter; a payload near the Gateway limit may be refused before it is
+delivered.
 Deeply recursive JSON and attacker-controlled diagnostic text fail within a
-bounded error detail. `device_sequence` is a non-negative integer, never a
-boolean or float. `raw_value` is a finite JSON number or `null`; booleans, NaN,
-and infinities are rejected. `calibration_id` and `diagnostic_code` may be
-`null` so the existing adapter can report explicit missing/calibration
-evidence. Unknown device-status vocabulary reaches that adapter and fails
-closed there rather than being normalized optimistically.
+bounded error detail. `device_sequence` is an integer from zero through
+`9223372036854775807` (`2^63 - 1`), never a boolean or float. `raw_value` is a
+finite JSON number or `null`; booleans, NaN, and infinities are rejected.
+`calibration_id` and `diagnostic_code` may be `null` so the existing adapter can
+report explicit missing/calibration evidence. Unknown device-status vocabulary
+reaches that adapter and fails closed there rather than being normalized
+optimistically.
 
 The mock publisher sends with configured QoS 1, retain disabled, and a distinct
 deterministic MQTT client ID. Its default `288.5 kg` is the Pilot Course A
@@ -225,19 +230,36 @@ withheld application PUBACK.
 
 The gateway uses its stable configured client ID, an MQTT 3.1.1 persistent
 session (`clean_session=false`), and application-managed QoS 1 acknowledgement.
-It sends PUBACK only after the delivery reaches a terminal gateway outcome,
-including an accepted result, an already-completed duplicate, or a strict
-delivery rejection. If Agent Runtime retains a hybrid frame for retry or PUBACK
-itself fails, the gateway leaves the delivery unacknowledged and reconnects the
-same persistent session in the same process after a fixed one-second process
-retry backoff. That preserves the in-memory source/site cursor while asking the
-broker to redeliver the exact QoS 1 packet; the backoff never enters canonical
-time or identity. A bounded smoke that reaches its message limit before
-readiness instead exits nonzero. A fail-closed runtime incident also remains
-unacknowledged and stops the gateway for repair. These behaviors permit the
-running broker session to retain a delivery; they are not a durable replay
-guarantee. The process-local source cursor and pending frame reset on process
-restart, and the local Compose broker is itself nonpersistent.
+It sends PUBACK after an accepted result, an already-completed duplicate, or a
+deterministic per-delivery rejection such as malformed wire content,
+conflicting replay, retired boot, mixed operating day, or out-of-order sequence.
+It does not PUBACK an operating-day rollover, deferred-frame overtake/source
+protocol failure, or replay-capacity exhaustion: those errors mean this process
+can no longer safely admit deliveries, so it emits the typed rejection and
+stops.
+
+If Agent Runtime retains a hybrid frame for retry or PUBACK itself fails, the
+gateway leaves the delivery unacknowledged and reconnects the same persistent
+session in the same process after a fixed one-second process retry backoff. A
+valid delivery's topic plus canonical wire content identifies one retry budget,
+so JSON whitespace or key order cannot manufacture a fresh budget. Malformed
+poison falls back to its exact topic-plus-raw-payload identity. Each delivery
+receives at most eight failed processing/acknowledgement attempts; the eighth
+failure raises `redelivery_exhausted` and stops without PUBACK. A successful
+PUBACK resets only that delivery's budget, so an unrelated older duplicate
+cannot reset the budget of a still-pending frame. If a reconnect reports that
+the persistent broker session was lost while either a hybrid frame or a failed
+PUBACK remains unfinished, the gateway raises `mqtt_session_lost` and stops
+before resubscribing or accepting later messages. The backoff and retry count
+never enter canonical time or identity.
+
+A bounded smoke that reaches its message limit before readiness exits nonzero.
+A fail-closed runtime incident also remains unacknowledged and stops the gateway
+for repair. These behaviors prevent the running process from intentionally
+discarding unfinished work; they are not durable retention or restart-recovery
+guarantees. The process-local source cursor, tracker, retry count, and pending
+frame reset on process restart, and the local Compose broker is itself
+nonpersistent.
 
 ## Clock and ordering contracts
 
@@ -253,31 +275,44 @@ sample_timestamp_s / available_timestamp_s = civil seconds since local midnight
 For the shipped mock message in `Asia/Shanghai`, the mapping is operating day
 `2026-08-08`, sample time `62995.0`, and available/frame time `63000.0`. Unix
 epoch seconds never enter the canonical frame. A delivery crossing local
-midnight is refused. Spring-forward follows the real IANA jump, while an
-ambiguous fall-back fold is refused because the downstream scalar time cannot
-represent its ambiguity. Hybrid V0 binds one Agent Runtime to one operating day
-and refuses rollover.
+midnight is refused. Spring-forward follows the real IANA jump: for example,
+one real UTC second across New York's 2026 jump maps from civil second `7199.5`
+to `10800.5`, a civil-age difference of 3,601 seconds. Existing staleness checks
+use that civil difference, so they conservatively reject an otherwise fresh
+transition-straddling sample. Ambiguous fall-back folds are refused because the
+downstream scalar time cannot represent their ambiguity. The 2026 Pilot Course
+A fixture interval in `Asia/Shanghai` has no offset transition; V0 is not
+claiming general DST-transition-ready operation. Hybrid V0 binds one Agent
+Runtime to one operating day and refuses rollover.
 
 Device delivery order and site publication order are separate:
 
-- `(device_id, boot_id, device_sequence)` identifies a device delivery;
+- `(device_id, boot_id, device_sequence)` identifies a device delivery, and
+  `device_sequence` is bounded to signed 64-bit range;
 - an identical redelivery matching the current unacknowledged hybrid delivery
   re-drives that existing immutable pending frame at the same site sequence;
 - after acknowledgement or terminal rejection, an identical replay is an
   idempotent duplicate and produces no new frame;
+- an older acknowledged active-boot duplicate stays terminal and may be
+  PUBACKed while a different hybrid frame remains pending;
 - conflicting reuse of a seen sequence fails closed;
 - an unseen lower sequence in the active boot fails closed;
 - a new boot begins a new device epoch, and an old retired boot is refused; and
 - this tracker is process-local V0 state and resets on restart. It retains at
   most 4,096 sequence digests per boot and 64 retired boot IDs per configured
   device. An evicted old sequence remains below the high-water mark and fails
-  closed as out of order; excess boot churn fails closed rather than silently
-  forgetting retired identities.
+  closed as out of order; excess boot churn raises a capacity incident and stops
+  without acknowledging the triggering delivery rather than silently forgetting
+  retired identities.
 
 The hybrid source independently assigns contiguous site sequences starting at
 zero. Only acknowledgement advances that sequence. A terminally rejected
-device delivery is discarded while the site sequence is reused. A device boot
-change never resets or chooses Site Runtime ordering.
+device delivery is discarded while the site sequence is reused. Once the first
+frame constructs the day-bound Agent Runtime, that day remains bound even if
+the frame is terminally rejected; silently rebinding that runtime would reuse
+the wrong local-midnight anchor. A later-day delivery therefore fail-stops
+without PUBACK. A device boot change never resets or chooses Site Runtime
+ordering.
 
 ## Read-only status endpoints
 
@@ -294,7 +329,10 @@ Every snapshot exposes `broker_connected`, `sensor_seen`, `adapter_healthy`,
 failure, identity, mode, and disclaimer. Diagnostic readiness requires a broker
 connection and a trustworthy target adapter result. Hybrid readiness also
 requires an admitted/evaluated runtime frame. POST, PUT, PATCH, and DELETE
-return 405; unknown paths return 404. Reads never mutate state, calibration,
+return 405; unknown paths return 404. A present HTTP `Host` must name
+`127.0.0.1`, `localhost`, or the configured non-wildcard bind host, with or
+without the actual bound port; duplicate or foreign Host values return 403
+before a status snapshot is generated. Reads never mutate state, calibration,
 policy, workflow, robot, or e-stop behavior.
 
 ## Evidence and restart limits
@@ -329,7 +367,10 @@ resumption are not implemented; V0 therefore makes no durable at-least-once
 claim across a gateway or broker process restart. The persistent MQTT session
 and withheld PUBACK above support bounded same-process retry and a fail-stop
 retention posture; they are not a replacement for the deferred durable
-cursor/spool.
+cursor/spool. Fail-stop does not prove that the broker retained the packet, and
+restarting cannot restore the source cursor or pending frame; existing durable
+Site/Agent checkpoints may instead disagree with the reset process-local site
+sequence. V0 deliberately provides no automatic recovery for that condition.
 
 ## Exact local commands
 
@@ -380,15 +421,22 @@ first message is what makes a valid hybrid runtime ready.
 ### Native broker smoke used for synchronized verification
 
 The synchronized diagnostic and hybrid results below were observed with native
-Mosquitto 2.1.2, Paho 2.1.0, the committed broker configuration, the actual
-gateway and publisher CLIs, and temporary config/evidence paths. This is the
-exact command run from `simulation/`; it leaves the temporary evidence outside
-the repository and proves port 1883 is released at the end:
+Mosquitto 2.1.2, Paho 2.1.0, a temporary loopback-bound derivative of the
+committed broker configuration, the actual gateway and publisher CLIs, and
+temporary config/evidence paths. This is the exact command run from
+`simulation/`; it leaves the temporary broker config and evidence outside the
+repository and proves port 1883 is released at the end:
 
 ```bash
 set -euo pipefail
 native_smoke_tmp=$(mktemp -d)
-mosquitto -c deploy/edge-gateway-v0/mosquitto.conf \
+native_broker_config="$native_smoke_tmp/mosquitto.loopback.conf"
+sed -e 's/^listener 1883 0\.0\.0\.0$/listener 1883 127.0.0.1/' \
+  deploy/edge-gateway-v0/mosquitto.conf >"$native_broker_config"
+test "$(rg -c '^listener 1883 127\.0\.0\.1$' "$native_broker_config")" = 1
+! rg -q '^listener 1883 0\.0\.0\.0$' "$native_broker_config"
+! nc -z 127.0.0.1 1883
+mosquitto -c "$native_broker_config" \
   >"$native_smoke_tmp/mosquitto.log" 2>&1 &
 broker_pid=$!
 gateway_pid=
@@ -500,19 +548,22 @@ Acceptance evidence must cover:
 
 1. exact wire/schema/identity/numeric/timestamp validation, including duplicate
    JSON keys and explicit unknown-field behavior;
-2. terminal QoS 1 acknowledgement versus withheld acknowledgement for a
-   retained retry-required frame, identical replay/redrive, conflicting replay,
-   lower sequence, boot epoch, and independent contiguous Site Runtime
-   sequencing;
-3. site-local midnight, host-timezone independence, mixed operating days, and
-   spring-forward/fall-back behavior;
+2. terminal QoS 1 acknowledgement versus withheld fail-stop acknowledgement for
+   rollover, pending-frame overtake, replay-capacity exhaustion, lost persistent
+   session, bounded same-delivery runtime/PUBACK retry, identical
+   replay/redrive, older acknowledged duplicate, conflicting replay, lower
+   sequence, boot epoch, and independent contiguous Site Runtime sequencing;
+3. signed-64-bit device-sequence bounds, site-local midnight, host-timezone
+   independence, mixed operating days, and the explicit conservative
+   spring-forward/fall-back civil-time contract;
 4. existing adapter calibration, unit, missing, fault, stale, non-finite, and
    duplicate-channel behavior, including proof that missing is never zero;
 5. one-channel live overlay, all-other-channel simulation labelling, visible
    hybrid disclaimer, exact state/report retention, stable IDs, and proof that
    rejected input creates no policy evidence;
 6. broker/sensor/adapter/runtime health dimensions, readiness before and after
-   valid evidence, and side-effect-free status endpoints;
+   valid evidence, side-effect-free status endpoints, Host-header refusal, and
+   loopback-only published Compose ports;
 7. architecture guards proving MQTT is optional and script-confined, no shipped
    package or canonical contract was added, core packages remain transport-free,
    and no execution/LLM/persistence/cloud/OTA surface appeared; and
@@ -552,30 +603,29 @@ V0 deliberately does not add:
 
 ## Verification commands and results
 
-The post-synchronization run against the current Course World Model mainline
-used the lock-consistent all-extras environment and observed these exact results
-from `simulation/`:
+The Fable-remediation candidate used uv 0.11.29, Python 3.13.14, and the
+lock-consistent all-extras environment. The final local run observed these exact
+results from `simulation/`:
 
 ```text
-uv sync --locked --all-extras
-Resolved 61 packages; rebuilt and installed the local nxt-sim project
+uv sync --python 3.13.14 --locked --all-extras
+Resolved 61 packages; checked 57 installed packages
 
 uv run --no-sync python -B -m pytest -o addopts='' -q \
-  -p no:cacheprovider tests/course_world_model \
-  tests/workflow_enablement tests/edge_gateway_live_input
-570 passed in 18.08s
+  -p no:cacheprovider tests/edge_gateway_live_input
+204 passed in 22.66s
 
 uv run --no-sync python -B -m pytest -o addopts='' -q \
   -p no:cacheprovider tests/commissioning tests/site_runtime \
-  tests/agent_runtime tests/edge_observation tests/course_world_model \
-  tests/workflow_enablement tests/edge_gateway_live_input
-1082 passed in 22.91s
+  tests/agent_runtime tests/edge_observation tests/edge_gateway_live_input \
+  tests/workflow_enablement tests/course_world_model
+1105 passed in 30.68s
 
 # Exact architecture/safety selection from .agent/workflows/testing.md
-185 passed in 7.26s
+185 passed in 6.21s
 
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider
-1650 passed in 43.08s
+1673 passed in 46.54s
 
 uv run --no-sync python -B scripts/validate_configs.py
 0 errors, 0 warnings; all eight listed config files passed
@@ -600,16 +650,23 @@ repository verifier passed 508 tracked/nonignored paths and 64 Markdown files,
 including links, anchors, fences, secrets, generated artifacts, and dependency
 boundaries.
 
-Standalone Compose 5.5.0 validated the deployment document:
+Docker was unavailable on the remediation host (`docker: command not found`),
+so no new local Compose render or stack result is claimed. The accepted Compose
+implementation had previously been rendered with standalone Compose 5.5.0:
 
 ```text
 docker-compose -f deploy/edge-gateway-v0/compose.yaml config --quiet
 exit 0, no output
 ```
 
-A native Mosquitto 2.1.2 process using the committed broker config was then
-exercised with real Paho 2.1.0 connections and the actual mock publisher. The
-diagnostic smoke observed one non-retained QoS 1 message and PUBACK, one
+That standalone render is historical implementation evidence, not a result of
+the current remediation run. Final-head Compose evidence comes only from the
+named GitHub Actions job reported for the exact commit.
+
+A native Mosquitto 2.1.2 process using a temporary loopback-bound derivative of
+the committed broker config was then exercised with real Paho 2.1.0 connections
+and the actual mock publisher. The diagnostic smoke observed one non-retained
+QoS 1 message and PUBACK, one
 `inventory.dispenser.count` observation with `status=ok`, one accepted
 `nxt-edge-observation/adapter-report/v0` report with zero rejections, and
 `complete_facility_state=false`. The hybrid smoke independently observed one
@@ -619,8 +676,7 @@ runtime result. Deferred same-process redelivery and retained-message rejection
 remain covered by the focused transport regressions; no restart-durability claim
 is made.
 
-The local host still had no Docker Engine CLI/daemon, so it did not run the
-three-container flow. The dedicated
+For the accepted Compose implementation, the dedicated
 [`edge-gateway-compose-smoke` job](https://github.com/matthewong1210/nxtektal-systems/actions/runs/33542983779/job/99973552967)
 then closed that execution-evidence gap for implementation commit
 [`48e839b5d1f89704d2dfa5e8fe6873dc31e26fbe`](https://github.com/matthewong1210/nxtektal-systems/commit/48e839b5d1f89704d2dfa5e8fe6873dc31e26fbe).

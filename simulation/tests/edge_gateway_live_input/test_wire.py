@@ -286,6 +286,31 @@ def test_boolean_nonintegral_negative_and_nonfinite_numbers_are_rejected(
     _assert_error_code(excinfo, GatewayErrorCode.INVALID_NUMBER)
 
 
+def test_device_sequence_accepts_the_signed_64_bit_upper_bound():
+    message = _decode(_wire_payload(device_sequence=2**63 - 1))
+
+    assert message.device_sequence == 2**63 - 1
+
+
+def test_device_sequence_rejects_the_first_value_above_signed_64_bit_range():
+    with pytest.raises(GatewayError) as excinfo:
+        _decode(_wire_payload(device_sequence=2**63))
+
+    _assert_error_code(excinfo, GatewayErrorCode.INVALID_NUMBER)
+
+
+def test_device_sequence_rejects_a_4001_digit_integer_before_it_poisons_epoch():
+    raw = json.dumps(_wire_payload(), separators=(",", ":"))
+    marker = '"device_sequence":1842'
+    assert marker in raw
+    raw = raw.replace(marker, f'"device_sequence":{"9" * 4_001}', 1)
+
+    with pytest.raises(GatewayError) as excinfo:
+        LoadCellWireMessage.from_json(raw)
+
+    _assert_error_code(excinfo, GatewayErrorCode.INVALID_NUMBER)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

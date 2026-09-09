@@ -80,6 +80,21 @@ def test_gateway_exposes_only_its_read_only_status_http_port():
     assert "/healthz" in health
 
 
+def test_every_published_service_port_is_bound_to_host_loopback():
+    services = _compose()["services"]
+    published = []
+    for service_name, service in services.items():
+        for port in service.get("ports", ()):
+            assert isinstance(port, str), service_name
+            assert port.startswith("127.0.0.1:"), (service_name, port)
+            published.append((service_name, port))
+
+    assert set(published) == {
+        ("mosquitto", "127.0.0.1:1883:1883"),
+        ("gateway", "127.0.0.1:8080:8080"),
+    }
+
+
 def test_services_invoke_the_gateway_and_deterministic_mock_publisher():
     services = _compose()["services"]
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")

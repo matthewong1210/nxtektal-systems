@@ -107,8 +107,10 @@ HYBRID_DISPENSER_SENSOR_IDS = frozenset(
 # replay-memory policy.
 MAX_WIRE_PAYLOAD_BYTES = 65_536
 MAX_ERROR_DETAIL_CHARS = 1_024
+MAX_DEVICE_SEQUENCE = (1 << 63) - 1
 MAX_SEQUENCE_REPLAY_WINDOW = 4_096
 MAX_RETIRED_BOOTS_PER_DEVICE = 64
+MAX_REDELIVERY_ATTEMPTS = 8
 REDELIVERY_BACKOFF_S = 1.0
 _TRUNCATION_MARKER = "...[detail truncated]"
 
@@ -202,9 +204,20 @@ class GatewayErrorCode(StrEnum):
     SOURCE_PROTOCOL = "source_protocol"
     REPLAY_CAPACITY_EXCEEDED = "replay_capacity_exceeded"
     RUNTIME_RETRY_REQUIRED = "runtime_retry_required"
+    REDELIVERY_EXHAUSTED = "redelivery_exhausted"
     INVALID_MQTT_DELIVERY = "invalid_mqtt_delivery"
     UNEXPECTED_PROCESSING_FAILURE = "unexpected_processing_failure"
     MQTT_UNAVAILABLE = "mqtt_unavailable"
+    MQTT_SESSION_LOST = "mqtt_session_lost"
+
+
+_FAIL_STOP_GATEWAY_CODES = frozenset(
+    {
+        GatewayErrorCode.OPERATING_DAY_ROLLOVER,
+        GatewayErrorCode.SOURCE_PROTOCOL,
+        GatewayErrorCode.REPLAY_CAPACITY_EXCEEDED,
+    }
+)
 
 
 class GatewayError(ValueError):
@@ -691,10 +704,16 @@ class LoadCellWireMessage:
                 f"unsupported schema {payload['schema']!r}",
             )
         sequence = payload["device_sequence"]
-        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+        if (
+            isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+            or sequence < 0
+            or sequence > MAX_DEVICE_SEQUENCE
+        ):
             raise GatewayError(
                 GatewayErrorCode.INVALID_NUMBER,
-                "device_sequence must be a non-negative integer",
+                "device_sequence must be an integer from 0 through "
+                f"{MAX_DEVICE_SEQUENCE}",
             )
         raw_value = payload["raw_value"]
         if raw_value is not None:
@@ -927,6 +946,39 @@ class DeviceSequenceTracker:
         self._retired_boots: dict[str, set[str]] = {}
         self._highest: dict[tuple[str, str], int] = {}
         self._seen: dict[tuple[str, str], dict[int, bytes]] = {}
+
+    def terminal_disposition_while_pending(
+        self, message: LoadCellWireMessage
+    ) -> SequenceDisposition | None:
+        """Classify already-terminal order state without mutating the tracker."""
+
+        active = self._active_boot.get(message.device_id)
+        retired = self._retired_boots.get(message.device_id, set())
+        if active != message.boot_id:
+            if message.boot_id in retired:
+                raise GatewayError(
+                    GatewayErrorCode.RETIRED_BOOT,
+                    f"boot {message.boot_id!r} for {message.device_id!r} is retired",
+                )
+            return None
+        epoch = (message.device_id, message.boot_id)
+        seen = self._seen.get(epoch, {})
+        previous = seen.get(message.device_sequence)
+        if previous is None:
+            highest = self._highest.get(epoch)
+            if highest is not None and message.device_sequence < highest:
+                raise GatewayError(
+                    GatewayErrorCode.OUT_OF_ORDER_SEQUENCE,
+                    f"device sequence {message.device_sequence} is below {highest}",
+                )
+            return None
+        digest = hashlib.sha256(message.canonical_bytes()).digest()
+        if previous != digest:
+            raise GatewayError(
+                GatewayErrorCode.CONFLICTING_REPLAY,
+                "the same device/boot/sequence was reused with different content",
+            )
+        return SequenceDisposition.DUPLICATE
 
     def accept(self, message: LoadCellWireMessage) -> SequenceDisposition:
         device_id = message.device_id
@@ -1356,10 +1408,30 @@ class GatewayStatusServer:
         if self._server is not None:
             return self
         status = self._status
+        configured_host = self._host
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):  # noqa: A002
                 return None
+
+            def _host_allowed(self) -> bool:
+                host_headers = self.headers.get_all("Host", failobj=[])
+                if not host_headers:
+                    # Preserve HTTP/1.0/local probe compatibility. Browser
+                    # requests that create the DNS-rebinding risk carry Host.
+                    return True
+                if len(host_headers) != 1:
+                    return False
+                bound_host, bound_port = self.server.server_address[:2]
+                names = {"127.0.0.1", "localhost"}
+                if str(bound_host) not in {"", "0.0.0.0", "::"}:
+                    names.add(str(bound_host).lower())
+                if configured_host not in {"", "0.0.0.0", "::"}:
+                    names.add(configured_host.lower())
+                allowed = names | {
+                    f"{name}:{int(bound_port)}" for name in names
+                }
+                return host_headers[0].lower() in allowed
 
             def _payload(self) -> tuple[int, dict[str, object]]:
                 path = urlsplit(self.path).path
@@ -1373,7 +1445,10 @@ class GatewayStatusServer:
                 return 404, {"error": "not_found", "path": path}
 
             def _read(self, *, body: bool) -> None:
-                code, payload = self._payload()
+                if self._host_allowed():
+                    code, payload = self._payload()
+                else:
+                    code, payload = 403, {"error": "forbidden_host"}
                 encoded = json.dumps(
                     payload,
                     sort_keys=True,
@@ -1603,6 +1678,9 @@ class GatewayProcessor:
                 message.device_sequence,
             )
             if message_key != pending_key:
+                replay = self.tracker.terminal_disposition_while_pending(message)
+                if replay is not None:
+                    return delivery, replay
                 raise GatewayError(
                     GatewayErrorCode.SOURCE_PROTOCOL,
                     "a deferred hybrid frame must be redelivered before a new "
@@ -1827,8 +1905,10 @@ def run_gateway(
     terminal_failure: Exception | None = None
     redelivery_requested = False
     redelivery_failure: GatewayError | None = None
+    redelivery_attempts: dict[bytes, int] = {}
     subscription_mid: int | None = None
     subscription_established = False
+    connection_observed = False
     subscriptions: list[tuple[str, int]] = []
 
     client = mqtt.Client(
@@ -1845,8 +1925,51 @@ def run_gateway(
             terminal_failure = error
         client.disconnect()
 
-    def request_redelivery(error: GatewayError) -> None:
+    def retry_key(message) -> bytes:
+        topic = getattr(message, "topic", "")
+        if type(topic) is not str:
+            topic = repr(topic)
+        payload = getattr(message, "payload", b"")
+        if type(payload) is str:
+            payload_bytes = payload.encode("utf-8")
+        elif isinstance(payload, (bytes, bytearray, memoryview)):
+            payload_bytes = bytes(payload)
+        else:
+            payload_bytes = repr(payload).encode("utf-8")
+        try:
+            wire = LoadCellWireMessage.from_json(payload_bytes)
+        except GatewayError:
+            retry_material = b"raw\x00" + payload_bytes
+        else:
+            # JSON whitespace and key order do not create a new logical
+            # delivery or a fresh retry budget.
+            retry_material = b"canonical\x00" + wire.canonical_bytes()
+        return hashlib.sha256(
+            topic.encode("utf-8") + b"\x00" + retry_material
+        ).digest()
+
+    def clear_redelivery_budget(message) -> None:
+        redelivery_attempts.pop(retry_key(message), None)
+
+    def request_redelivery(error: GatewayError, message) -> None:
         nonlocal redelivery_failure, redelivery_requested
+        current_key = retry_key(message)
+        attempts = redelivery_attempts.get(current_key, 0) + 1
+        redelivery_attempts[current_key] = attempts
+        if attempts >= MAX_REDELIVERY_ATTEMPTS:
+            exhausted = GatewayError(
+                GatewayErrorCode.REDELIVERY_EXHAUSTED,
+                "the same MQTT delivery reached the V0 limit of "
+                f"{MAX_REDELIVERY_ATTEMPTS} consecutive failed attempts; "
+                f"last failure was {error.code.value}",
+            )
+            processor.status.record_transport_failure(
+                exhausted.code.value, exhausted.detail
+            )
+            redelivery_requested = False
+            redelivery_failure = None
+            terminate(exhausted)
+            return
         redelivery_requested = True
         redelivery_failure = error
         client.disconnect()
@@ -1863,7 +1986,7 @@ def run_gateway(
             processor.status.record_transport_failure(
                 "mqtt_ack_failed", error.detail
             )
-            request_redelivery(error)
+            request_redelivery(error, message)
             return False
         if result != mqtt.MQTT_ERR_SUCCESS:
             error = GatewayError(
@@ -1873,8 +1996,9 @@ def run_gateway(
             processor.status.record_transport_failure(
                 "mqtt_ack_failed", error.detail
             )
-            request_redelivery(error)
+            request_redelivery(error, message)
             return False
+        clear_redelivery_budget(message)
         return True
 
     def emit_rejection(topic: str, code: str, detail: str) -> None:
@@ -1890,7 +2014,7 @@ def run_gateway(
         )
 
     def on_connect(client, userdata, flags, reason_code, properties):
-        nonlocal subscription_mid, subscriptions
+        nonlocal connection_observed, subscription_mid, subscriptions
         del userdata, properties
         if getattr(reason_code, "is_failure", reason_code != 0):
             error = GatewayError(
@@ -1903,6 +2027,26 @@ def run_gateway(
             terminate(error)
             return
         session_present = bool(getattr(flags, "session_present", False))
+        is_reconnect = connection_observed
+        connection_observed = True
+        if (
+            is_reconnect
+            and not session_present
+            and (
+                processor.has_pending_hybrid_delivery
+                or bool(redelivery_attempts)
+            )
+        ):
+            error = GatewayError(
+                GatewayErrorCode.MQTT_SESSION_LOST,
+                "the persistent broker session was lost while an MQTT "
+                "delivery remained unfinished in this process",
+            )
+            processor.status.record_transport_failure(
+                error.code.value, error.detail
+            )
+            terminate(error)
+            return
         if subscription_established and session_present:
             # A SUBACK was already observed by this process and the broker
             # confirms that exact persistent session resumed.  Queued QoS 1
@@ -2000,7 +2144,15 @@ def run_gateway(
                 )
             result = processor.process_message(message.topic, message.payload)
             _json_line({"event": "message_result", **result.to_dict()})
-            if processor.has_pending_hybrid_delivery:
+            if result.kind is ProcessingKind.DUPLICATE:
+                # A previously completed active-boot delivery remains
+                # terminal even while a different hybrid frame is pending.
+                # It must not masquerade as redelivery of that pending frame.
+                if acknowledge(message):
+                    bounded_success = (
+                        processor.status.snapshot()["ready"] is True
+                    )
+            elif processor.has_pending_hybrid_delivery:
                 error = GatewayError(
                     GatewayErrorCode.RUNTIME_RETRY_REQUIRED,
                     "hybrid runtime left the immutable source frame "
@@ -2013,21 +2165,27 @@ def run_gateway(
                 # Preserve the exact in-memory source/site cursor while a
                 # graceful persistent-session reconnect asks the broker to
                 # redeliver the unacknowledged QoS 1 packet.
-                request_redelivery(error)
+                request_redelivery(error, message)
             elif acknowledge(message):
                 bounded_success = processor.status.snapshot()["ready"] is True
         except AgentRuntimeError as exc:
             processor.status.record_runtime_failure(exc.incident_code, exc.detail)
             emit_rejection(message.topic, exc.incident_code, exc.detail)
-            # Do not PUBACK a fail-closed runtime incident.  The persistent
-            # broker session retains QoS 1 delivery for a repaired restart.
+            # Do not PUBACK a fail-closed runtime incident. This avoids
+            # declaring completion; V0 does not guarantee broker retention or
+            # restoration of the process-local cursor after restart.
             terminate(exc)
         except GatewayError as exc:
             processor.status.record_failure(exc.code.value, exc.detail)
             emit_rejection(message.topic, exc.code.value, exc.detail)
-            # Strict wire/identity/replay rejection is terminal for this
-            # delivery, so acknowledge it to avoid a poison-message loop.
-            if getattr(message, "qos", None) == config.broker.qos:
+            # Some errors describe a process/session state that cannot safely
+            # admit this or later deliveries. Keep that packet unacknowledged
+            # and stop instead of destroying valid evidence as poison.
+            if exc.code in _FAIL_STOP_GATEWAY_CODES:
+                terminate(exc)
+            elif getattr(message, "qos", None) == config.broker.qos:
+                # Deterministic per-delivery poison is terminal for that
+                # packet, so acknowledge it to prevent an infinite loop.
                 acknowledge(message)
         except Exception as exc:  # pragma: no cover - last-resort loop isolation
             detail = f"{type(exc).__name__}: {exc}"
@@ -2037,7 +2195,7 @@ def run_gateway(
             processor.status.record_failure(error.code.value, error.detail)
             emit_rejection(message.topic, error.code.value, error.detail)
             # Unknown processing failures are retryable by default.  Keep the
-            # delivery unacknowledged and stop for supervised restart.
+            # delivery unacknowledged and stop for supervised intervention.
             terminate(error)
         finally:
             if max_messages is not None and received_count >= max_messages:

@@ -264,6 +264,36 @@ def test_adapter_rejected_hybrid_input_creates_no_policy_evaluation(tmp_path):
     assert target.value != 0
 
 
+def test_terminally_rejected_first_frame_still_binds_the_hybrid_operating_day(
+    tmp_path,
+):
+    processor = _processor(tmp_path / "gateway")
+
+    rejected = processor.process_message(
+        TOPIC,
+        _wire_payload(calibration_id="CAL-WRONG-0001"),
+    )
+
+    assert rejected.runtime_outcome is not None
+    assert rejected.runtime_outcome.kind is CycleKind.REJECTED
+    source = processor._hybrid_source
+    assert source is not None
+    assert source.pending_delivery is None
+    assert source.operating_day_id == "2026-08-08"
+
+    with pytest.raises(GatewayError) as exc_info:
+        processor.process_message(
+            TOPIC,
+            _wire_payload(
+                device_sequence=1843,
+                sampled_at_utc="2026-08-09T09:29:55.000Z",
+                published_at_utc="2026-08-09T09:30:00.000Z",
+            ),
+        )
+
+    assert exc_info.value.code is GatewayErrorCode.OPERATING_DAY_ROLLOVER
+
+
 def test_hybrid_process_exposes_disclaimer_and_stable_content_ids(tmp_path):
     first = _processor(tmp_path / "first").process_message(TOPIC, _wire_payload())
     second = _processor(tmp_path / "second").process_message(TOPIC, _wire_payload())

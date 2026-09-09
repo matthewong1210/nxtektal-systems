@@ -87,7 +87,7 @@ def test_host_timezone_does_not_change_site_clock_output():
     assert _map_in_subprocess("UTC") == _map_in_subprocess("Pacific/Honolulu")
 
 
-def test_spring_forward_skips_the_nonexistent_civil_hour():
+def test_spring_forward_maps_one_real_second_to_3601_civil_seconds():
     mapped = SiteClock("America/New_York").map_pair(
         "2026-03-08T06:59:59.500Z",
         "2026-03-08T07:00:00.500Z",
@@ -96,6 +96,9 @@ def test_spring_forward_skips_the_nonexistent_civil_hour():
     assert mapped.operating_day_id == "2026-03-08"
     assert mapped.sample_timestamp_s == pytest.approx(7_199.5)
     assert mapped.available_timestamp_s == pytest.approx(10_800.5)
+    assert mapped.available_timestamp_s - mapped.sample_timestamp_s == pytest.approx(
+        3_601.0
+    )
 
 
 @pytest.mark.parametrize(
