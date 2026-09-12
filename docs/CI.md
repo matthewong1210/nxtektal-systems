@@ -67,12 +67,14 @@ test -z "$(git ls-files --others --exclude-standard)"
 
 ### Python
 
-The current `uv.lock` omits the declared `twin` extra. Preserve the lockfile:
+The `uv.lock` covers every declared extra, including `twin` and the
+script-confined `edge-gateway` MQTT client. Require the lock to be current and
+install the complete locked environment:
 
 ```bash
 cd simulation
-uv sync --python 3.13.14 --frozen --all-extras
-uv pip install --python .venv/bin/python "usd-core==26.8"
+uv lock --check
+uv sync --python 3.13.14 --locked --all-extras
 uv run --no-sync python -B - <<'PY'
 from importlib.metadata import version
 from pxr import Usd
@@ -176,8 +178,8 @@ git diff --exit-code HEAD --
 test -z "$(git ls-files --others --exclude-standard)"
 ```
 
-Do not substitute `uv lock --check`: it currently fails because of the known
-`twin`-extra gap. Repairing `uv.lock` is a separate dependency change.
+`uv lock --check` is part of the verified locked environment; a lock that
+drifts from `pyproject.toml` fails the Python job before any test runs.
 
 ### ROI
 

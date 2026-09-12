@@ -100,11 +100,11 @@ jobs:
         with:
           version: "0.11.29"
           enable-cache: false
-      - name: Install locked Python environment with USD workaround
+      - name: Install locked Python environment
         working-directory: simulation
         run: |
-          uv sync --frozen --all-extras
-          uv pip install --python .venv/bin/python "usd-core==26.8"
+          uv lock --check
+          uv sync --locked --all-extras
       - name: Prove optional coverage is installed
         working-directory: simulation
         run: |
@@ -406,11 +406,11 @@ jobs:
         with:
           version: "0.11.29"
           enable-cache: false
-      - name: Install locked replay environment with USD workaround
+      - name: Install locked replay environment
         working-directory: simulation
         run: |
-          uv sync --frozen --all-extras
-          uv pip install --python .venv/bin/python "usd-core==26.8"
+          uv lock --check
+          uv sync --locked --all-extras
       - name: Test benchmark, viewer, demo, capture, and USD paths
         working-directory: simulation
         run: |
