@@ -119,3 +119,91 @@ def test_non_finite_number_line_is_an_integrity_error(tmp_path: Path) -> None:
     path.write_text(text.replace('"n":1', '"n":NaN'), encoding="utf-8")
     with pytest.raises(JournalIntegrityError):
         JsonlJournal(path).read()
+
+
+# ---------------------------------------------------------------------------
+# High-water anchor: rollback to a valid prefix is state loss, not a crash
+# ---------------------------------------------------------------------------
+
+
+def _spec(kind: str = "edge_started", n: int = 0) -> RecordSpec:
+    return RecordSpec(record_kind=kind, origin="EDGE", recorded_at_utc="2026-09-12T08:00:00.000000Z", payload={"n": n})
+
+
+def test_anchor_advances_with_every_append_and_lags_never_leads(tmp_path: Path) -> None:
+    journal = JsonlJournal(tmp_path / "j.jsonl")
+    assert journal.read_anchor() is None
+    journal.append(_spec(n=1))
+    assert journal.read_anchor() == (1, journal.read()[0].record_id)
+    journal.append_via(lambda records: [_spec(n=2), _spec(n=3)])
+    records = journal.read()
+    assert journal.read_anchor() == (3, records[2].record_id)
+
+
+def test_rollback_to_a_valid_prefix_fails_loud_on_read_and_append(tmp_path: Path) -> None:
+    path = tmp_path / "j.jsonl"
+    journal = JsonlJournal(path)
+    for n in range(1, 4):
+        journal.append(_spec(n=n))
+    lines = path.read_bytes().split(b"\n")[:-1]
+    path.write_bytes(b"".join(line + b"\n" for line in lines[:2]))  # a perfectly valid two-record journal
+    with pytest.raises(JournalIntegrityError, match="rolled back"):
+        JsonlJournal(path).read()
+    with pytest.raises(JournalIntegrityError, match="rolled back"):
+        JsonlJournal(path).append(_spec(n=9))
+    assert path.read_bytes() == b"".join(line + b"\n" for line in lines[:2])  # nothing appended on the way out
+
+
+def test_rewritten_record_at_the_anchor_fails_loud(tmp_path: Path) -> None:
+    path = tmp_path / "j.jsonl"
+    journal = JsonlJournal(path)
+    journal.append(_spec(n=1))
+    journal.append(_spec(n=2))
+    lines = path.read_bytes().split(b"\n")[:-1]
+    other = JsonlJournal(tmp_path / "other.jsonl")
+    other.append(_spec(n=1))
+    other.append(_spec(n=7))  # a different, individually valid second record
+    replacement = (tmp_path / "other.jsonl").read_bytes().split(b"\n")[:-1][1]
+    path.write_bytes(lines[0] + b"\n" + replacement + b"\n")
+    with pytest.raises(JournalIntegrityError, match="differs from the anchored record"):
+        JsonlJournal(path).read()
+
+
+def test_missing_journal_with_an_anchor_and_journal_without_anchor_both_fail(tmp_path: Path) -> None:
+    path = tmp_path / "j.jsonl"
+    journal = JsonlJournal(path)
+    journal.append(_spec(n=1))
+    path.unlink()
+    with pytest.raises(JournalIntegrityError, match="rolled back"):
+        JsonlJournal(path).read()
+    journal.anchor_path.unlink()
+    assert JsonlJournal(path).read() == ()  # nothing ever existed: a genuine first boot
+    JsonlJournal(path).append(_spec(n=1))
+    JsonlJournal(path).anchor_path.unlink()
+    with pytest.raises(JournalIntegrityError, match="no anchor"):
+        JsonlJournal(path).read()
+
+
+def test_discard_anchor_only_for_a_missing_or_empty_journal(tmp_path: Path) -> None:
+    path = tmp_path / "j.jsonl"
+    journal = JsonlJournal(path)
+    journal.append(_spec(n=1))
+    with pytest.raises(JournalIntegrityError, match="non-empty"):
+        journal.discard_anchor()
+    path.unlink()
+    journal.discard_anchor()
+    assert not journal.anchor_path.exists() and JsonlJournal(path).read() == ()
+
+
+def test_torn_batch_is_not_a_rollback(tmp_path: Path) -> None:
+    """Records past the anchor are allowed: the anchor lags a crash between the two writes."""
+
+    path = tmp_path / "j.jsonl"
+    journal = JsonlJournal(path)
+    journal.append(_spec(n=1))
+    anchor_after_first = journal.anchor_path.read_bytes()
+    journal.append(_spec(n=2))
+    journal.anchor_path.write_bytes(anchor_after_first)  # the second anchor write "never happened"
+    assert len(JsonlJournal(path).read()) == 2
+    JsonlJournal(path).append(_spec(n=3))
+    assert JsonlJournal(path).read_anchor()[0] == 3

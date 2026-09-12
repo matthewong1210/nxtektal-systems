@@ -29,6 +29,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+from nxt_edge_task.contracts import assert_local_broker_endpoint
+
 
 @dataclass(frozen=True, slots=True)
 class Delivery:
@@ -314,7 +316,11 @@ class _PahoHandle:
 class PahoClient:
     """MQTT 3.1.1 adapter with a persistent session and manual PUBACK."""
 
-    def __init__(self, client_id: str, host: str, port: int, keepalive_s: int) -> None:
+    def __init__(self, client_id: str, host: str, port: int, keepalive_s: int, *, clean_session: bool = False) -> None:
+        # The local-broker boundary is enforced here as well as in the config
+        # parser: no caller can hand this adapter a non-loopback or
+        # conventional-port endpoint, whatever object it built the values from.
+        assert_local_broker_endpoint(host, port)
         mqtt = _paho()
         self.client_id = client_id
         self._host, self._port, self._keepalive = host, port, keepalive_s
@@ -322,7 +328,7 @@ class PahoClient:
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
             client_id=client_id,
             protocol=mqtt.MQTTv311,
-            clean_session=False,
+            clean_session=clean_session,
             reconnect_on_failure=True,
         )
         self._client.manual_ack_set(True)
@@ -345,7 +351,12 @@ class PahoClient:
         self._on_connect = on_connect
         self._on_disconnect = on_disconnect
 
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
     def connect(self) -> None:
+        assert_local_broker_endpoint(self._host, self._port)
         result = self._client.connect(self._host, self._port, keepalive=self._keepalive)
         if result != self._mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError(f"MQTT connect returned {result}")

@@ -41,6 +41,7 @@ except ImportError:  # pragma: no cover - non-POSIX hosts fail at construction
 from .contracts import canonical_json, stable_digest
 
 JOURNAL_SCHEMA = "nxt-edge-task/journal/v1"
+ANCHOR_SCHEMA = "nxt-edge-task/journal-anchor/v1"
 
 ORIGINS = frozenset({"EDGE", "ROBOT", "SIM_ENTRY", "OPERATOR", "CHANNEL", "DEVICE"})
 
@@ -142,7 +143,7 @@ class JsonlJournal:
         if _fcntl is None:
             raise RuntimeError("JsonlJournal requires POSIX fcntl advisory locking")
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # The directory is created on the first append, never by a reader.
         self._allowed_kinds = allowed_kinds
         self._allowed_origins = allowed_origins
         # Verified-prefix cache: (byte length, sha256 of those bytes, records).
@@ -150,18 +151,99 @@ class JsonlJournal:
         # this instance, so only the new suffix is parsed; any change inside
         # the prefix invalidates the cache and forces a full re-verification.
         self._cache: tuple[int, str, tuple[JournalRecord, ...]] | None = None
+        # High-water anchor: a sibling file recording how many records this
+        # journal has reached and the id of the last one.  A journal that is
+        # shorter than its anchor, or whose record at the anchor differs, was
+        # rolled back to an older (still valid-looking) prefix: that is state
+        # loss, not a crash, and it fails loud on every read and append.
+        self.anchor_path = self.path.with_name(self.path.name + ".hwm")
+
+    # ------------------------------------------------------------------
+    # High-water anchor
+    # ------------------------------------------------------------------
+
+    def read_anchor(self) -> tuple[int, str | None] | None:
+        """``(records, last_record_id)`` from the anchor file, or ``None`` when absent."""
+
+        if not self.anchor_path.exists():
+            return None
+        try:
+            raw = json.loads(self.anchor_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise JournalIntegrityError(f"{self.anchor_path.name}: unreadable anchor ({exc})") from exc
+        if (
+            type(raw) is not dict
+            or frozenset(raw) != frozenset({"schema", "records", "last_record_id"})
+            or raw["schema"] != ANCHOR_SCHEMA
+            or type(raw["records"]) is not int
+            or raw["records"] < 0
+            or (raw["last_record_id"] is not None and type(raw["last_record_id"]) is not str)
+            or (raw["records"] == 0) != (raw["last_record_id"] is None)
+        ):
+            raise JournalIntegrityError(f"{self.anchor_path.name}: malformed anchor")
+        return raw["records"], raw["last_record_id"]
+
+    def _check_anchor(self, records: tuple[JournalRecord, ...]) -> None:
+        anchor = self.read_anchor()
+        if anchor is None:
+            if records:
+                raise JournalIntegrityError(
+                    f"{self.path.name}: {len(records)} records but no anchor; state continuity cannot be established"
+                )
+            return
+        expected, last_id = anchor
+        if len(records) < expected:
+            raise JournalIntegrityError(
+                f"{self.path.name}: rolled back to {len(records)} records below the anchored {expected} (state loss)"
+            )
+        if expected and records[expected - 1].record_id != last_id:
+            raise JournalIntegrityError(f"{self.path.name}: record {expected} differs from the anchored record (state loss)")
+
+    def _write_anchor(self, records: int, last_id: str | None) -> None:
+        body = canonical_json({"schema": ANCHOR_SCHEMA, "records": records, "last_record_id": last_id}).encode("utf-8")
+        tmp = self.anchor_path.with_name(self.anchor_path.name + ".tmp")
+        with tmp.open("wb") as handle:
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, self.anchor_path)
+        _sync_directory(self.path.parent)
+
+    def discard_anchor(self) -> None:
+        """Explicitly forget the anchor of a missing or empty journal.
+
+        The only legitimate caller is an operator re-provisioning an identity
+        whose journal is gone; a non-empty journal keeps its anchor.
+        """
+
+        if self.path.exists() and self.path.stat().st_size:
+            raise JournalIntegrityError(f"{self.path.name}: refusing to discard the anchor of a non-empty journal")
+        if self.anchor_path.exists():
+            self.anchor_path.unlink()
+            _sync_directory(self.path.parent)
 
     # ------------------------------------------------------------------
     # Reading
     # ------------------------------------------------------------------
 
-    def read(self) -> tuple[JournalRecord, ...]:
+    def read(self, *, anchored: bool = True) -> tuple[JournalRecord, ...]:
+        """Verified records.  ``anchored=False`` skips the high-water check.
+
+        Every process reads anchored; only an out-of-process inspector (a
+        test asserting what survived a rollback) may read unanchored.
+        """
+
         if not self.path.exists():
+            if anchored:
+                self._check_anchor(())
             return ()
         with self.path.open("rb") as handle:
             _fcntl.flock(handle.fileno(), _fcntl.LOCK_SH)
             try:
-                return self._verify(handle.read())
+                records = self._verify(handle.read())
+                if anchored:
+                    self._check_anchor(records)
+                return records
             finally:
                 _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
 
@@ -260,11 +342,13 @@ class JsonlJournal:
         file and its directory are fsynced.
         """
 
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a+b") as handle:
             _fcntl.flock(handle.fileno(), _fcntl.LOCK_EX)
             try:
                 handle.seek(0)
                 records = self._verify(handle.read())
+                self._check_anchor(records)
                 specs = list(builder(records))
                 appended: list[JournalRecord] = []
                 if not specs:
@@ -307,6 +391,10 @@ class JsonlJournal:
                 handle.flush()
                 os.fsync(handle.fileno())
                 _sync_directory(self.path.parent)
+                # The anchor is written only after the records are durable, so
+                # it can lag the journal (a crash between the two) but never
+                # lead it.
+                self._write_anchor(appended[-1].sequence, appended[-1].record_id)
                 return tuple(appended)
             finally:
                 _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
@@ -318,6 +406,7 @@ class JsonlJournal:
 
 
 __all__ = [
+    "ANCHOR_SCHEMA",
     "JOURNAL_SCHEMA",
     "ORIGINS",
     "JournalIntegrityError",

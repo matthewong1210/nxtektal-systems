@@ -226,3 +226,96 @@ def test_config_rejects_unknown_keys_and_a_kind_switch() -> None:
     payload["robots"][0]["client_id"] = payload["edge"]["client_id"]
     with pytest.raises(EdgeTaskError):
         EdgeTaskConfig.from_dict(payload)
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 1: the local-broker boundary is enforced, not just exemplified
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "host, port",
+    [("192.0.2.10", 1883), ("192.0.2.10", 18830), ("localhost", 18830), ("broker.example.invalid", 18830), ("0.0.0.0", 18830), ("127.0.0.1", 1883), ("127.0.0.1", 8883), ("::1", 1883)],
+)
+def test_config_refuses_non_loopback_or_conventional_broker_endpoints(host: str, port: int) -> None:
+    payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    payload["broker"]["host"], payload["broker"]["port"] = host, port
+    with pytest.raises(EdgeTaskError) as raised:
+        EdgeTaskConfig.from_dict(payload)
+    assert raised.value.code is ErrorCode.INVALID_CONFIG
+    assert "loopback" in raised.value.detail or "port" in raised.value.detail
+
+
+@pytest.mark.parametrize("host, port", [("127.0.0.1", 18830), ("127.0.0.1", 1024), ("::1", 18830), ("127.1.2.3", 40000)])
+def test_config_accepts_loopback_task_specific_endpoints(host: str, port: int) -> None:
+    from nxt_edge_task.contracts import assert_local_broker_endpoint
+
+    payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    payload["broker"]["host"], payload["broker"]["port"] = host, port
+    config = EdgeTaskConfig.from_dict(payload)
+    assert (config.broker_host, config.broker_port) == (host, port)
+    assert_local_broker_endpoint(host, port)  # the same predicate the transport applies before connecting
+
+
+def test_boot_id_carries_an_incarnation_prefix_and_its_boot_sequence() -> None:
+    from nxt_edge_task.contracts import RobotStatusMessage, TaskEvent, incarnation_of
+
+    assert incarnation_of("boot-picker-01-0123456789ab-7", 7) == "boot-picker-01-0123456789ab"
+    for bad, boot in (("boot-picker-01-7", 8), ("-7", 7), ("7", 7), ("boot-picker-01-70", 7)):
+        with pytest.raises(EdgeTaskError) as raised:
+            incarnation_of(bad, boot)
+        assert raised.value.code is ErrorCode.INVALID_FIELD
+    payload = {
+        "schema": STATUS_SCHEMA,
+        "site_id": "pilot-course-a",
+        "deployment_id": "pilot-a-edge-task-sim-v0",
+        "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": "sim-local-01"},
+        "robot_id": "picker-01",
+        "boot_id": "boot-picker-01-abc-3",
+        "boot_sequence": 3,
+        "status_sequence": 1,
+        "reported_at_utc": "2026-09-12T08:00:00.000000Z",
+        "availability": "available",
+        "current_task": None,
+        "capabilities": {"task_types": []},
+        "energy": {"level_fraction": None, "can_continue": None, "needs_manual_recharge": None},
+        "safety": {"estop_latched": None, "awaiting_human": None, "safe_return_confirmed": None},
+        "fault_code": None,
+        "location": {"zone_id": None, "x_m": None, "y_m": None, "coordinate_frame": None},
+    }
+    assert RobotStatusMessage.from_dict(payload).incarnation == "boot-picker-01-abc"
+    payload["boot_sequence"] = 4  # suffix and counter disagree
+    with pytest.raises(EdgeTaskError) as raised:
+        RobotStatusMessage.from_dict(payload)
+    assert raised.value.code is ErrorCode.INVALID_FIELD
+    assert TaskEvent is not None
+
+
+def test_config_liveness_thresholds_must_be_ordered() -> None:
+    for field, value in (("offline_after_s", 6), ("restart_grace_s", 5)):
+        payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        payload["edge"][field] = value
+        with pytest.raises(EdgeTaskError) as raised:
+            EdgeTaskConfig.from_dict(payload)
+        assert raised.value.code is ErrorCode.INVALID_CONFIG
+
+
+def test_loopback_literal_rejects_non_ascii_digits() -> None:
+    from nxt_edge_task.contracts import assert_local_broker_endpoint
+
+    for host in ("127.\uff10.\uff10.\uff11", "127.\u0660.\u0660.\u0661", "127.1", "0:0:0:0:0:0:0:1", "::ffff:127.0.0.1"):
+        with pytest.raises(EdgeTaskError):
+            assert_local_broker_endpoint(host, 18830)
+
+
+def test_robot_id_is_bounded_so_every_boot_id_fits_the_identifier_ceiling() -> None:
+    from nxt_edge_task.contracts import MAX_ROBOT_ID_CHARS, MAX_SEQUENCE
+
+    assert len(f"boot-{'x' * MAX_ROBOT_ID_CHARS}-{'0' * 12}-{MAX_SEQUENCE}") == 128
+    payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    payload["robots"][0]["robot_id"] = "p" * (MAX_ROBOT_ID_CHARS + 1)
+    with pytest.raises(EdgeTaskError) as raised:
+        EdgeTaskConfig.from_dict(payload)
+    assert raised.value.code is ErrorCode.INVALID_CONFIG
+    payload["robots"][0]["robot_id"] = "p" * MAX_ROBOT_ID_CHARS
+    assert EdgeTaskConfig.from_dict(payload).robots[0].robot_id == "p" * MAX_ROBOT_ID_CHARS

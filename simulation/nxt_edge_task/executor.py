@@ -17,7 +17,20 @@ Invariants the mock robot honours (and a real device would have to):
   ``not_started_after_restart``; started-but-not-completed -> INCONCLUSIVE
   ``interrupted_execution_unknown_outcome`` and the robot stays
   ``awaiting_human``; completed-but-unpublished -> republish the original
-  event.  Nothing is ever re-executed after a restart;
+  event; completed-but-no-terminal-persisted -> report the persisted
+  outcome; a request persisted without its decision is decided at restart
+  exactly as if it had just arrived; a rejected decision without its event
+  publishes that rejection.  Nothing is ever re-executed after a restart;
+* the robot's protective condition (``awaiting_human``, availability,
+  energy and fault facts) is derived from the persisted task events and the
+  operator reset record, never from a separate trailing record, so a torn
+  batch can only leave the robot *more* protected, never less;
+* identity continuity -- an empty journal is not a first boot.  The first
+  boot is an explicit operator act (``robot_provisioned``); afterwards a
+  missing journal is state loss and the start is refused before any request
+  can be read.  Re-provisioning is a new incarnation whose ``boot_id``
+  carries a fresh provisioning token, so the Edge can tell it apart even
+  when the boot counter restarts at the number it already saw;
 * a duplicate identical request replays the task's full persisted history
   without executing; a request whose ``task_id`` does not match its
   content is rejected at ``event_sequence`` 0 and touches no task;
@@ -46,11 +59,13 @@ from .contracts import (
     TaskRequest,
     bounded_detail,
     parse_utc,
+    stable_digest,
     topic_parts,
     utc_text,
 )
 from .journal import JournalRecord, PreconditionFailed, RecordSpec
 
+ROBOT_PROVISIONED = "robot_provisioned"
 ROBOT_STARTED = "robot_started"
 REQUEST_RECEIVED = "request_received"
 REQUEST_REJECTED = "request_rejected"
@@ -60,11 +75,11 @@ EVENT_PUBLISH_CONFIRMED = "event_publish_confirmed"
 EXECUTION_STARTED = "execution_started"
 EXECUTION_PROGRESS = "execution_progress"
 EXECUTION_COMPLETED = "execution_completed"
-CONDITION_CHANGED = "condition_changed"
 SIMULATE_RESET = "simulate_reset"
 
 ROBOT_RECORD_KINDS = frozenset(
     {
+        ROBOT_PROVISIONED,
         ROBOT_STARTED,
         REQUEST_RECEIVED,
         REQUEST_REJECTED,
@@ -74,10 +89,12 @@ ROBOT_RECORD_KINDS = frozenset(
         EXECUTION_STARTED,
         EXECUTION_PROGRESS,
         EXECUTION_COMPLETED,
-        CONDITION_CHANGED,
         SIMULATE_RESET,
     }
 )
+
+_TERMINAL_EVENT_KINDS = frozenset(kind.value for kind in (EventKind.SUCCEEDED, EventKind.FAILED, EventKind.INCONCLUSIVE, EventKind.REJECTED))
+_RECHARGE_REASONS = frozenset({"energy_insufficient", "needs_manual_recharge"})
 
 BEHAVIORS = (
     "accept_and_succeed",
@@ -116,6 +133,7 @@ class RobotTaskView:
     confirmed: set[tuple[int, int]] = field(default_factory=set)
     execution_started: bool = False
     execution_completed: bool = False
+    completed_outcome: str | None = None
     terminal_kind: str | None = None
     step: int = 0
 
@@ -135,6 +153,8 @@ class RobotTaskView:
 @dataclass
 class RobotView:
     robot_id: str
+    provisioned: bool = False
+    provisioning_token: str | None = None
     boot_sequence: int = 0
     boot_id: str | None = None
     tasks: dict[str, RobotTaskView] = field(default_factory=dict)
@@ -162,7 +182,10 @@ class RobotView:
     def apply(self, record: JournalRecord) -> None:
         kind = record.record_kind
         payload = record.payload
-        if kind == ROBOT_STARTED:
+        if kind == ROBOT_PROVISIONED:
+            self.provisioned = True
+            self.provisioning_token = payload["provisioning_token"]
+        elif kind == ROBOT_STARTED:
             self.boot_sequence = payload["boot_sequence"]
             self.boot_id = payload["boot_id"]
             self.status_sequence = 0
@@ -187,10 +210,7 @@ class RobotView:
                 if task is None:
                     raise ValueError(f"robot journal event for unknown task {event['task_id']!r} at sequence {record.sequence}")
                 task.events.append(event)
-                if event["kind"] in {k.value for k in (EventKind.SUCCEEDED, EventKind.FAILED, EventKind.INCONCLUSIVE, EventKind.REJECTED)}:
-                    task.terminal_kind = event["kind"]
-                    if self.current_task_id == task.task_id:
-                        self.current_task_id = None
+                self._derive_condition(task, event)
         elif kind == EVENT_PUBLISH_CONFIRMED:
             if payload.get("record_sequence") is not None:
                 self.confirmed_rejections.add(payload["record_sequence"])
@@ -209,20 +229,65 @@ class RobotView:
         elif kind == EXECUTION_COMPLETED:
             task = self.tasks[payload["task_id"]]
             task.execution_completed = True
-        elif kind == CONDITION_CHANGED:
-            self.availability = Availability(payload["availability"])
-            self.awaiting_human = payload["awaiting_human"]
-            self.can_continue = payload["can_continue"]
-            self.needs_manual_recharge = payload["needs_manual_recharge"]
-            self.safe_return_confirmed = payload["safe_return_confirmed"]
-            self.fault_code = payload["fault_code"]
-            if payload.get("clear_current_task"):
-                self.current_task_id = None
+            task.completed_outcome = payload["outcome"]
         elif kind == SIMULATE_RESET:
-            pass
+            # The explicit operator act is the only record that clears protection.
+            self._clear_condition()
+            self.current_task_id = None
         if record.sequence > self.applied_count:
             self.applied_count = record.sequence
             self.last_record_id = record.record_id
+
+    # -- condition derivation (pure function of the persisted events) -------
+
+    def _derive_condition(self, task: RobotTaskView, event: Mapping[str, Any]) -> None:
+        kind = event["kind"]
+        reason = event.get("reason_code")
+        if kind == EventKind.ASSISTANCE_REQUIRED.value:
+            self._protect(reason)
+            return
+        if kind not in _TERMINAL_EVENT_KINDS:
+            return
+        task.terminal_kind = kind
+        if self.current_task_id == task.task_id:
+            self.current_task_id = None
+        if kind == EventKind.SUCCEEDED.value:
+            self._clear_condition()
+        elif kind in {EventKind.FAILED.value, EventKind.INCONCLUSIVE.value}:
+            self._protect(reason)
+        # REJECTED never changes the robot's condition.
+
+    def _protect(self, reason: str | None) -> None:
+        self.awaiting_human = True
+        self.safe_return_confirmed = None
+        if reason is not None and reason.startswith("unknown:"):
+            self.availability = Availability.FAULTED
+            self.fault_code = reason[len("unknown:"):]
+            self.can_continue = None
+            self.needs_manual_recharge = None
+        elif reason in _RECHARGE_REASONS:
+            self.availability = Availability.AWAITING_HUMAN
+            self.can_continue = False
+            self.needs_manual_recharge = True
+        elif reason == "cannot_continue":
+            if self.availability is not Availability.FAULTED:
+                self.availability = Availability.AWAITING_HUMAN
+            self.can_continue = False
+            # An earlier energy fact (needs_manual_recharge) is kept, never erased.
+        else:
+            # not_started_after_restart, interrupted_execution_unknown_outcome, ...:
+            # the energy and fault facts persisted before the interruption are
+            # kept and a faulted robot stays faulted.
+            if self.availability is not Availability.FAULTED:
+                self.availability = Availability.AWAITING_HUMAN
+
+    def _clear_condition(self) -> None:
+        self.availability = Availability.AVAILABLE
+        self.awaiting_human = False
+        self.can_continue = True
+        self.needs_manual_recharge = False
+        self.safe_return_confirmed = None
+        self.fault_code = None
 
     def pending_publications(self) -> list[tuple[dict[str, Any], int | None]]:
         """Persisted, not yet hop-1-confirmed publications as ``(event, rejection_record_sequence)``.
@@ -257,6 +322,7 @@ class RobotView:
     def summary(self) -> dict[str, Any]:
         return {
             "robot_id": self.robot_id,
+            "provisioned": self.provisioned,
             "boot_sequence": self.boot_sequence,
             "availability": self.availability.value,
             "awaiting_human": self.awaiting_human,
@@ -347,7 +413,7 @@ class RobotCore:
             simulation_env_id=self.config.simulation_env_id,
             task_id=task.task_id,
             robot_id=self.robot.robot_id,
-            boot_id=self.view.boot_id or f"boot-{self.robot.robot_id}-{self.view.boot_sequence}",
+            boot_id=self.view.boot_id or f"boot-{self.robot.robot_id}-unprovisioned-{max(self.view.boot_sequence, 1)}",
             boot_sequence=self.view.boot_sequence,
             event_sequence=self._next_sequence(task) if sequence is None else sequence,
             kind=kind,
@@ -358,30 +424,48 @@ class RobotCore:
         )
         return event.to_dict()
 
-    def _condition(self, now: datetime, *, availability: Availability, awaiting_human: bool, can_continue: bool | None, needs_manual_recharge: bool | None, safe_return_confirmed: bool | None, fault_code: str | None, reason: str, clear_current_task: bool = False) -> RecordSpec:
-        return self._spec(
-            CONDITION_CHANGED,
-            now,
-            {
-                "availability": availability.value,
-                "awaiting_human": awaiting_human,
-                "can_continue": can_continue,
-                "needs_manual_recharge": needs_manual_recharge,
-                "safe_return_confirmed": safe_return_confirmed,
-                "fault_code": fault_code,
-                "reason": reason,
-                "clear_current_task": clear_current_task,
-            },
-        )
-
     # ------------------------------------------------------------------
     # start / restart
     # ------------------------------------------------------------------
 
-    def on_start(self, view: RobotView, now: datetime) -> list[RecordSpec]:
+    @staticmethod
+    def assert_startable(view: RobotView, *, initialize: bool) -> None:
+        """Identity continuity check, run before the journal is touched and again in-lock.
+
+        An empty journal is provisioning only when the operator says so; an
+        existing identity whose journal lacks its provisioning record (or is
+        gone) is state loss and must not silently become an empty dedup store.
+        """
+
+        if view.boot_sequence == 0 and not view.provisioned:
+            if not initialize:
+                raise EdgeTaskError(
+                    ErrorCode.ROBOT_STATE_LOST,
+                    "no persisted state for this robot identity: pass --initialize only for a genuine first boot; otherwise the journal was lost and an operator must recover it",
+                )
+            return
+        if initialize:
+            raise EdgeTaskError(ErrorCode.ROBOT_ALREADY_PROVISIONED, "this robot identity is already provisioned; start it without --initialize")
+        if not view.provisioned:
+            raise EdgeTaskError(ErrorCode.ROBOT_STATE_LOST, "the robot journal lacks its provisioning record; state continuity cannot be established")
+
+    def on_start(self, view: RobotView, now: datetime, *, initialize: bool = False) -> list[RecordSpec]:
+        self.assert_startable(view, initialize=initialize)
+        specs: list[RecordSpec] = []
+        token = view.provisioning_token
+        if initialize:
+            token = stable_digest({"robot_id": self.robot.robot_id, "provisioned_at_utc": utc_text(now)})[:12]
+            specs.append(
+                self._spec(
+                    ROBOT_PROVISIONED,
+                    now,
+                    {"robot_id": self.robot.robot_id, "provisioning_token": token, "simulation": True, "note": "explicit first boot of this robot identity (SIMULATION)"},
+                    origin="OPERATOR",
+                )
+            )
         boot_sequence = view.boot_sequence + 1
-        boot_id = f"boot-{self.robot.robot_id}-{boot_sequence}"
-        specs = [
+        boot_id = f"boot-{self.robot.robot_id}-{token}-{boot_sequence}"
+        specs.append(
             self._spec(
                 ROBOT_STARTED,
                 now,
@@ -393,19 +477,33 @@ class RobotCore:
                     "simulation": True,
                 },
             )
-        ]
-        # Restart branches are decided against the persisted evidence only.
-        view_after = RobotView(robot_id=self.robot.robot_id)
-        view_after.__dict__.update({k: v for k, v in view.__dict__.items()})
-        view_after.boot_sequence = boot_sequence
-        view_after.boot_id = boot_id
+        )
+        # Restart branches are decided against the persisted evidence only.  A
+        # scratch copy of the view receives each spec as it is produced so later
+        # decisions in the same batch see the earlier ones (e.g. an INCONCLUSIVE
+        # protects the robot before an undecided request is decided).
+        scratch = RobotView(robot_id=self.robot.robot_id)
+        scratch.__dict__.update({k: v for k, v in view.__dict__.items()})
+        scratch.tasks = {task_id: RobotTaskView(**{**task.__dict__, "events": list(task.events), "confirmed": set(task.confirmed)}) for task_id, task in view.tasks.items()}
+        scratch.executions_by_task = dict(view.executions_by_task)
+        scratch.rejections = [dict(item) for item in view.rejections]
+        scratch.confirmed_rejections = set(view.confirmed_rejections)
         saved_view = self.view
-        self.view = view_after
+        self.view = scratch
         try:
-            for task in sorted(view.tasks.values(), key=lambda t: t.task_id):
+            self._apply_scratch(scratch, specs)
+            ordered = sorted(scratch.tasks.values(), key=lambda t: t.task_id)
+            # Pass 1: accepted tasks interrupted by the restart (protection first).
+            for task in ordered:
                 if task.decision != "accepted" or task.is_terminal:
                     continue
-                if not task.execution_started:
+                if task.execution_completed:
+                    outcome = task.completed_outcome or "FAILED"
+                    if outcome == "SUCCEEDED":
+                        event = self._event(task, EventKind.SUCCEEDED, now, detail="collection cycle completed before restart; terminal record persisted after restart (SIMULATION)")
+                    else:
+                        event = self._event(task, EventKind.FAILED, now, reason_code="cannot_continue", detail="execution ended before restart with a failed outcome (SIMULATION)")
+                elif not task.execution_started:
                     event = self._event(
                         task,
                         EventKind.FAILED,
@@ -413,21 +511,7 @@ class RobotCore:
                         reason_code="not_started_after_restart",
                         detail="accepted before restart; execution never started; will not start without a new request (SIMULATION)",
                     )
-                    specs.append(self._spec(TASK_EVENT_PERSISTED, now, {"event": event}))
-                    specs.append(
-                        self._condition(
-                            now,
-                            availability=Availability.AWAITING_HUMAN,
-                            awaiting_human=True,
-                            can_continue=view.can_continue,
-                            needs_manual_recharge=view.needs_manual_recharge,
-                            safe_return_confirmed=None,
-                            fault_code=view.fault_code,
-                            reason="restart_before_execution_start",
-                            clear_current_task=True,
-                        )
-                    )
-                elif not task.execution_completed:
+                else:
                     event = self._event(
                         task,
                         EventKind.INCONCLUSIVE,
@@ -435,24 +519,41 @@ class RobotCore:
                         reason_code="interrupted_execution_unknown_outcome",
                         detail="execution started before restart; outcome unknown; not resumed (SIMULATION)",
                     )
-                    specs.append(self._spec(TASK_EVENT_PERSISTED, now, {"event": event}))
-                    specs.append(
-                        self._condition(
-                            now,
-                            availability=Availability.AWAITING_HUMAN,
-                            awaiting_human=True,
-                            can_continue=view.can_continue,
-                            needs_manual_recharge=view.needs_manual_recharge,
-                            safe_return_confirmed=None,
-                            fault_code=view.fault_code,
-                            reason="restart_during_execution",
-                            clear_current_task=True,
-                        )
-                    )
-                # completed-but-unpublished terminals are republished from pending_publications()
+                batch = [self._spec(TASK_EVENT_PERSISTED, now, {"event": event})]
+                specs.extend(batch)
+                self._apply_scratch(scratch, batch)
+                # completed-and-persisted-but-unpublished terminals are republished from pending_publications()
+            # Pass 2: a rejected decision whose REJECTED event was never persisted.
+            for task in ordered:
+                if task.decision == "rejected" and not task.events:
+                    event = self._event(task, EventKind.REJECTED, now, reason_code=task.reason_code, detail="rejection decided before restart; event persisted after restart (SIMULATION)", sequence=1)
+                    batch = [self._spec(TASK_EVENT_PERSISTED, now, {"event": event})]
+                    specs.extend(batch)
+                    self._apply_scratch(scratch, batch)
+            # Pass 3: a request persisted without any decision is decided now, as if it had just arrived.
+            for task in ordered:
+                if task.decision is None:
+                    batch = self._decide_new_task(scratch, task, now)
+                    specs.extend(batch)
+                    self._apply_scratch(scratch, batch)
         finally:
             self.view = saved_view
         return specs
+
+    def _apply_scratch(self, scratch: RobotView, specs: list[RecordSpec]) -> None:
+        for spec in specs:
+            sequence = scratch.applied_count + 1
+            scratch.apply(
+                JournalRecord(
+                    schema_version="scratch",
+                    sequence=sequence,
+                    record_id="scratch",
+                    record_kind=spec.record_kind,
+                    origin=spec.origin,
+                    recorded_at_utc=spec.recorded_at_utc,
+                    payload=dict(spec.payload),
+                )
+            )
 
     # ------------------------------------------------------------------
     # requests
@@ -477,7 +578,7 @@ class RobotCore:
                     simulation_env_id=self.config.simulation_env_id,
                     task_id=task_id,
                     robot_id=self.robot.robot_id,
-                    boot_id=view.boot_id or "boot-unknown",
+                    boot_id=view.boot_id or f"boot-{self.robot.robot_id}-unprovisioned-{max(view.boot_sequence, 1)}",
                     boot_sequence=max(view.boot_sequence, 1),
                     event_sequence=0,
                     kind=EventKind.REJECTED,
@@ -534,12 +635,20 @@ class RobotCore:
             )
         ]
         task = RobotTaskView(task_id=request.task_id, request=request, content_digest=request.content_digest())
+        specs.extend(self._decide_new_task(view, task, now))
+        return specs, []
 
-        def task_level_reject(reason_code: str, detail: str) -> tuple[list[RecordSpec], list[dict[str, Any]]]:
-            specs.append(self._spec(TASK_DECISION, now, {"task_id": request.task_id, "decision": "rejected", "reason_code": reason_code}))
+    def _decide_new_task(self, view: RobotView, task: RobotTaskView, now: datetime) -> list[RecordSpec]:
+        """The task-level decision for a request that has no decision yet (arrival or restart)."""
+
+        request = task.request
+
+        def task_level_reject(reason_code: str, detail: str) -> list[RecordSpec]:
             event = self._event(task, EventKind.REJECTED, now, reason_code=reason_code, detail=detail, sequence=1)
-            specs.append(self._spec(TASK_EVENT_PERSISTED, now, {"event": event}))
-            return specs, []
+            return [
+                self._spec(TASK_DECISION, now, {"task_id": request.task_id, "decision": "rejected", "reason_code": reason_code}),
+                self._spec(TASK_EVENT_PERSISTED, now, {"event": event}),
+            ]
 
         if view.awaiting_human or view.availability in {Availability.FAULTED, Availability.ESTOPPED, Availability.AWAITING_HUMAN}:
             if view.availability is Availability.ESTOPPED:
@@ -553,10 +662,11 @@ class RobotCore:
             return task_level_reject("robot_busy", f"robot already holds task {view.current_task_id}")
         if request.task_type not in self.effective_task_types:
             return task_level_reject("unsupported_task_type", f"{self.robot.role} ({self.behavior}) does not support {request.task_type}")
-        specs.append(self._spec(TASK_DECISION, now, {"task_id": request.task_id, "decision": "accepted", "reason_code": None}))
         event = self._event(task, EventKind.ACCEPTED, now, detail="accepted (SIMULATION)", sequence=1)
-        specs.append(self._spec(TASK_EVENT_PERSISTED, now, {"event": event}))
-        return specs, []
+        return [
+            self._spec(TASK_DECISION, now, {"task_id": request.task_id, "decision": "accepted", "reason_code": None}),
+            self._spec(TASK_EVENT_PERSISTED, now, {"event": event}),
+        ]
 
     # ------------------------------------------------------------------
     # simulated execution steps (one step per tick)
@@ -605,24 +715,20 @@ class RobotCore:
                 return [
                     self._spec(EXECUTION_COMPLETED, now, {"task_id": task_id, "outcome": "FAILED"}),
                     self._spec(TASK_EVENT_PERSISTED, now, {"event": self._event(task, EventKind.FAILED, now, reason_code="cannot_continue", detail="robot cannot continue the task (SIMULATION)")}),
-                    self._condition(now, availability=Availability.AWAITING_HUMAN, awaiting_human=True, can_continue=False, needs_manual_recharge=None, safe_return_confirmed=None, fault_code=None, reason="fail_cannot_continue", clear_current_task=True),
                 ]
             if behavior == "help_needs_manual_recharge":
                 return [
                     self._spec(TASK_EVENT_PERSISTED, now, {"event": self._event(task, EventKind.ASSISTANCE_REQUIRED, now, reason_code="energy_insufficient", detail="robot needs manual recharge to continue (SIMULATION)")}),
-                    self._condition(now, availability=Availability.AWAITING_HUMAN, awaiting_human=True, can_continue=False, needs_manual_recharge=True, safe_return_confirmed=None, fault_code=None, reason="help_needs_manual_recharge"),
                 ]
             if behavior == "help_unknown_fault":
                 code = self.behavior_argument or "E00"
                 return [
                     self._spec(TASK_EVENT_PERSISTED, now, {"event": self._event(task, EventKind.ASSISTANCE_REQUIRED, now, reason_code=f"unknown:{code}", detail=f"robot reported fault code {code} (SIMULATION)")}),
-                    self._condition(now, availability=Availability.FAULTED, awaiting_human=True, can_continue=None, needs_manual_recharge=None, safe_return_confirmed=None, fault_code=code, reason="help_unknown_fault"),
                 ]
         if step == 2 and behavior in {"accept_and_succeed", "crash_after_result_persisted"}:
             specs = [
                 self._spec(EXECUTION_COMPLETED, now, {"task_id": task_id, "outcome": "SUCCEEDED"}),
                 self._spec(TASK_EVENT_PERSISTED, now, {"event": self._event(task, EventKind.SUCCEEDED, now, detail="collection cycle completed (SIMULATION; no ball count is reported)")}),
-                self._condition(now, availability=Availability.AVAILABLE, awaiting_human=False, can_continue=True, needs_manual_recharge=False, safe_return_confirmed=None, fault_code=None, reason="task_completed", clear_current_task=True),
             ]
             if behavior == "crash_after_result_persisted":
                 self.exit_requested, self.exit_reason = True, "crash_after_result_persisted"
@@ -632,13 +738,16 @@ class RobotCore:
     def simulate_reset(self, view: RobotView, now: datetime) -> list[RecordSpec]:
         """Explicit SIMULATION-only local reset by an operator at the robot."""
 
-        specs = [self._spec(SIMULATE_RESET, now, {"simulation": True, "note": "operator reset at the robot (SIMULATION)"}, origin="OPERATOR")]
+        # The abandoned task's failure is persisted first; the operator record
+        # that clears protection is the last line, so a torn batch can only
+        # leave the robot protected.
+        specs: list[RecordSpec] = []
         task_id = view.current_task_id
         if task_id is not None and not view.tasks[task_id].is_terminal:
             task = view.tasks[task_id]
             specs.append(self._spec(EXECUTION_COMPLETED, now, {"task_id": task_id, "outcome": "FAILED"}))
             specs.append(self._spec(TASK_EVENT_PERSISTED, now, {"event": self._event(task, EventKind.FAILED, now, reason_code="cannot_continue", detail="task abandoned by local operator reset (SIMULATION)")}))
-        specs.append(self._condition(now, availability=Availability.AVAILABLE, awaiting_human=False, can_continue=True, needs_manual_recharge=False, safe_return_confirmed=None, fault_code=None, reason="simulate_reset", clear_current_task=True))
+        specs.append(self._spec(SIMULATE_RESET, now, {"simulation": True, "note": "operator reset at the robot (SIMULATION)"}, origin="OPERATOR"))
         return specs
 
     # ------------------------------------------------------------------
@@ -658,7 +767,7 @@ class RobotCore:
             deployment_id=self.config.deployment_id,
             simulation_env_id=self.config.simulation_env_id,
             robot_id=self.robot.robot_id,
-            boot_id=view.boot_id or f"boot-{self.robot.robot_id}-{view.boot_sequence}",
+            boot_id=view.boot_id or f"boot-{self.robot.robot_id}-unprovisioned-{max(view.boot_sequence, 1)}",
             boot_sequence=max(view.boot_sequence, 1),
             status_sequence=view.status_sequence,
             reported_at_utc=utc_text(now),
@@ -709,13 +818,13 @@ def _peek_task_id(payload: bytes) -> str | None:
 
 __all__ = [
     "BEHAVIORS",
-    "CONDITION_CHANGED",
     "EVENT_PUBLISH_CONFIRMED",
     "EXECUTION_COMPLETED",
     "EXECUTION_PROGRESS",
     "EXECUTION_STARTED",
     "REQUEST_RECEIVED",
     "REQUEST_REJECTED",
+    "ROBOT_PROVISIONED",
     "ROBOT_RECORD_KINDS",
     "ROBOT_STARTED",
     "SIMULATE_RESET",

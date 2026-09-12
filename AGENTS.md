@@ -231,8 +231,11 @@ An untracked document is never repository authority by itself.
   the single value `SIMULATION`), the Edge task/device journal derivation
   (content-derived `task_id`, `(boot_sequence, event_sequence)` ordering,
   duplicate/late-evidence dispositions, absorbing terminals, the terminal
-  conflict gate, session regression, liveness), and the protocol double's
-  executor rules (persist-before-publish, restart branches, history replay).
+  conflict gate, session regression by incarnation-prefixed `boot_id`,
+  liveness and read-time freshness), the journal high-water anchor and
+  operator-provisioned identity continuity, and the protocol double's
+  executor rules (persist-before-publish, evidence-derived protection,
+  restart branches, history replay).
   It owns no facility state, observation, commissioning, advice, human
   workflow, notification, transport, clock, or execution semantics; a task
   request is a simulated message to a protocol double and nothing in the
@@ -274,8 +277,9 @@ Use the exact, normative commands in
 [`.agent/workflows/testing.md`](.agent/workflows/testing.md). Python production
 changes require a complete all-extras environment, focused/boundary checks, the
 full suite, and config validation. ROI changes require typecheck, tests, and a
-build. The workflow also records the current `uv.lock`/`twin`-extra gap so an
-agent does not silently change the lock or skip USD coverage.
+build. The lock covers every declared extra (including `twin` and the
+script-confined `edge-gateway` client); provision with
+`uv sync --locked --all-extras` and never change the lock silently.
 
 No Python formatter, linter, or type checker is currently configured. The
 repository CI workflow and exact local equivalents are documented in

@@ -70,6 +70,8 @@ class ErrorCode(StrEnum):
     ROBOT_HAS_ACTIVE_TASK = "robot_has_active_task"
     AUTHORIZATION_BLOCKED = "authorization_blocked"
     INVALID_CONFIG = "invalid_config"
+    ROBOT_STATE_LOST = "robot_state_lost"
+    ROBOT_ALREADY_PROVISIONED = "robot_already_provisioned"
 
 
 class EdgeTaskError(ValueError):
@@ -431,6 +433,23 @@ def topic_parts(topic: object) -> tuple[str, str, str]:
 # Messages
 # --------------------------------------------------------------------------
 
+def incarnation_of(boot_id: str, boot_sequence: int) -> str:
+    """The incarnation prefix of a ``boot_id``.
+
+    Convention of the v1 status and event contracts: ``boot_id`` is
+    ``<incarnation>-<boot_sequence>`` where the incarnation prefix is fixed
+    when the robot identity is provisioned and only the suffix advances on
+    restart.  The Edge compares the prefix, so a re-provisioned robot is
+    recognised as a new incarnation even when its counter has moved past the
+    number the Edge last saw.
+    """
+
+    suffix = f"-{boot_sequence}"
+    if not boot_id.endswith(suffix) or len(boot_id) <= len(suffix):
+        raise EdgeTaskError(ErrorCode.INVALID_FIELD, "boot_id must be <incarnation>-<boot_sequence>")
+    return boot_id[: -len(suffix)]
+
+
 _STATUS_KEYS = frozenset(
     {
         "schema",
@@ -514,7 +533,7 @@ class RobotStatusMessage:
         except ValueError as exc:
             raise EdgeTaskError(ErrorCode.INVALID_FIELD, "availability is outside the closed vocabulary") from exc
         parse_utc(payload["reported_at_utc"], "reported_at_utc")
-        return cls(
+        message = cls(
             site_id=_identifier(payload["site_id"], "site_id"),
             deployment_id=_identifier(payload["deployment_id"], "deployment_id"),
             simulation_env_id=env["simulation_env_id"],
@@ -544,10 +563,16 @@ class RobotStatusMessage:
                 payload["location"]["coordinate_frame"], "location.coordinate_frame"
             ),
         )
+        incarnation_of(message.boot_id, message.boot_sequence)
+        return message
 
     @classmethod
     def from_json(cls, raw: bytes | str) -> "RobotStatusMessage":
         return cls.from_dict(decode_object(raw))
+
+    @property
+    def incarnation(self) -> str:
+        return incarnation_of(self.boot_id, self.boot_sequence)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -807,7 +832,7 @@ class TaskEvent:
         if event_sequence == 0 and kind is not EventKind.REJECTED:
             raise EdgeTaskError(ErrorCode.INVALID_FIELD, "event_sequence 0 is reserved for request-level REJECTED")
         parse_utc(payload["reported_at_utc"], "reported_at_utc")
-        return cls(
+        message = cls(
             site_id=_identifier(payload["site_id"], "site_id"),
             deployment_id=_identifier(payload["deployment_id"], "deployment_id"),
             simulation_env_id=env["simulation_env_id"],
@@ -822,10 +847,16 @@ class TaskEvent:
             reported_at_utc=payload["reported_at_utc"],
             phase=phase,
         )
+        incarnation_of(message.boot_id, message.boot_sequence)
+        return message
 
     @classmethod
     def from_json(cls, raw: bytes | str) -> "TaskEvent":
         return cls.from_dict(decode_object(raw))
+
+    @property
+    def incarnation(self) -> str:
+        return incarnation_of(self.boot_id, self.boot_sequence)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -867,6 +898,43 @@ class TaskEvent:
 # --------------------------------------------------------------------------
 # Deployment configuration (strict JSON, no live-hardware switch)
 # --------------------------------------------------------------------------
+
+_CONVENTIONAL_BROKER_PORTS = frozenset({1883, 8883})
+# boot_id = "boot-<robot_id>-<12 hex provisioning token>-<boot_sequence>" must fit
+# the 128-char identifier ceiling even at the largest representable sequence.
+MAX_ROBOT_ID_CHARS = 128 - len("boot-") - 1 - 12 - 1 - len(str(MAX_SEQUENCE))
+
+
+def _is_loopback_literal(host: str) -> bool:
+    """``127.0.0.0/8`` dotted quad or exactly ``::1``; names never qualify."""
+
+    if host == "::1":
+        return True
+    parts = host.split(".")
+    if len(parts) != 4 or parts[0] != "127":
+        return False
+    for part in parts:
+        if not (part.isascii() and part.isdigit()) or len(part) > 3 or (len(part) > 1 and part[0] == "0") or int(part) > 255:
+            return False
+    return True
+
+
+def assert_local_broker_endpoint(host: object, port: object) -> None:
+    """V0 admits only a loopback IP literal on a task-specific port.
+
+    Every process calls this before it opens a socket, so no config can point
+    the rehearsal at a site or shared broker: names (including ``localhost``)
+    and non-loopback addresses are refused, and the conventional MQTT ports
+    are refused so a shared local broker is never joined by accident.
+    """
+
+    if type(host) is not str or not _is_loopback_literal(host):
+        raise EdgeTaskError(ErrorCode.INVALID_CONFIG, "broker host must be a loopback IP literal (127.0.0.0/8 or ::1); V0 admits only a local broker")
+    if type(port) is not int or isinstance(port, bool) or not 1 <= port <= 65_535:
+        raise EdgeTaskError(ErrorCode.INVALID_CONFIG, "broker port must be an integer in 1..65535")
+    if port in _CONVENTIONAL_BROKER_PORTS:
+        raise EdgeTaskError(ErrorCode.INVALID_CONFIG, f"broker port {port} is a conventional MQTT port; use a task-specific port")
+
 
 _CONFIG_KEYS = frozenset({"schema", "site_id", "deployment_id", "simulation_env_id", "broker", "edge", "robots"})
 _BROKER_KEYS = frozenset({"host", "port", "keepalive_s"})
@@ -942,9 +1010,12 @@ class EdgeTaskConfig:
                         raise EdgeTaskError(
                             ErrorCode.INVALID_CONFIG, f"unsupported task_type {task_type!r} in config"
                         )
+                robot_id = _identifier(item["robot_id"], "config.robots[].robot_id")
+                if len(robot_id) > MAX_ROBOT_ID_CHARS:
+                    raise EdgeTaskError(ErrorCode.INVALID_CONFIG, f"robot_id longer than {MAX_ROBOT_ID_CHARS} chars cannot form a bounded boot_id")
                 robots.append(
                     RobotConfig(
-                        robot_id=_identifier(item["robot_id"], "config.robots[].robot_id"),
+                        robot_id=robot_id,
                         role=role,
                         task_types=tuple(task_types),
                         heartbeat_interval_s=_positive_number(item["heartbeat_interval_s"], "heartbeat_interval_s"),
@@ -960,18 +1031,28 @@ class EdgeTaskConfig:
                 raise EdgeTaskError(ErrorCode.INVALID_CONFIG, "MQTT client ids must be unique across processes")
             edge = payload["edge"]
             broker = payload["broker"]
+            broker_host = _text(broker["host"], "config.broker.host")
+            broker_port = _bounded_int(broker["port"], "config.broker.port", minimum=1, maximum=65_535)
+            assert_local_broker_endpoint(broker_host, broker_port)
+            stale_after_s = _positive_number(edge["stale_after_s"], "stale_after_s")
+            offline_after_s = _positive_number(edge["offline_after_s"], "offline_after_s")
+            restart_grace_s = _positive_number(edge["restart_grace_s"], "restart_grace_s")
+            if not stale_after_s < offline_after_s:
+                raise EdgeTaskError(ErrorCode.INVALID_CONFIG, "offline_after_s must exceed stale_after_s")
+            if restart_grace_s < stale_after_s:
+                raise EdgeTaskError(ErrorCode.INVALID_CONFIG, "restart_grace_s must be at least stale_after_s so the journaled and read-time liveness labels agree")
             return cls(
                 site_id=_identifier(payload["site_id"], "config.site_id"),
                 deployment_id=_identifier(payload["deployment_id"], "config.deployment_id"),
                 simulation_env_id=_identifier(payload["simulation_env_id"], "config.simulation_env_id"),
-                broker_host=_text(broker["host"], "config.broker.host"),
-                broker_port=_bounded_int(broker["port"], "config.broker.port", minimum=1, maximum=65_535),
+                broker_host=broker_host,
+                broker_port=broker_port,
                 keepalive_s=_bounded_int(broker["keepalive_s"], "config.broker.keepalive_s", minimum=1, maximum=3600),
                 edge_client_id=_identifier(edge["client_id"], "config.edge.client_id"),
                 edge_evidence_dir=_text(edge["evidence_dir"], "config.edge.evidence_dir"),
-                stale_after_s=_positive_number(edge["stale_after_s"], "stale_after_s"),
-                offline_after_s=_positive_number(edge["offline_after_s"], "offline_after_s"),
-                restart_grace_s=_positive_number(edge["restart_grace_s"], "restart_grace_s"),
+                stale_after_s=stale_after_s,
+                offline_after_s=offline_after_s,
+                restart_grace_s=restart_grace_s,
                 min_republish_interval_s=_positive_number(edge["min_republish_interval_s"], "min_republish_interval_s"),
                 max_republish_attempts=_bounded_int(edge["max_republish_attempts"], "max_republish_attempts", minimum=1, maximum=64),
                 default_progress_window_s=_bounded_int(edge["default_progress_window_s"], "default_progress_window_s", minimum=1, maximum=86_400),
@@ -1035,7 +1116,9 @@ __all__ = [
     "ENVIRONMENT_KIND_SIMULATION",
     "EVENT_SCHEMA",
     "MAX_PAYLOAD_BYTES",
+    "MAX_ROBOT_ID_CHARS",
     "PROTOCOL_ENTRY_REASONS",
+    "assert_local_broker_endpoint",
     "REQUEST_SCHEMA",
     "ROBOT_CONDITION_REASONS",
     "STATUS_SCHEMA",
@@ -1060,6 +1143,7 @@ __all__ = [
     "derive_task_id",
     "event_topic",
     "exact_keys",
+    "incarnation_of",
     "normalize_reason",
     "parse_utc",
     "reason_class",

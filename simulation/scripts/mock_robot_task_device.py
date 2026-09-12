@@ -13,9 +13,15 @@ Run from ``simulation/``::
 
     uv run --no-sync python -B scripts/mock_robot_task_device.py \
         --config configs/edge_task/pilot-course-a.sim.example.json \
-        --robot-id picker-01 --behavior accept_and_succeed
+        --robot-id picker-01 --behavior accept_and_succeed --initialize
 
-``--simulate-reset`` records an explicit operator reset at the robot and exits.
+``--initialize`` is the explicit first boot of a robot identity (it purges
+any stale broker session for the client id first).  Without it, a missing
+journal is state loss: the process refuses to start (exit 4) before it can
+read a single request, so a lost dedup store never becomes an empty one.
+``--simulate-reset`` records an explicit operator reset at the robot and
+exits.  ``--step-interval-s`` paces the simulated execution steps (test
+fixture only; the default advances one step per tick).
 """
 
 from __future__ import annotations
@@ -35,13 +41,15 @@ if str(SIM_ROOT) not in sys.path:
 
 from nxt_edge_task.contracts import (  # noqa: E402
     EdgeTaskConfig,
+    EdgeTaskError,
+    ErrorCode,
     RobotConfig,
     canonical_bytes,
     event_topic,
     request_topic,
     status_topic,
 )
-from nxt_edge_task.executor import ROBOT_RECORD_KINDS, RobotCore  # noqa: E402
+from nxt_edge_task.executor import ROBOT_RECORD_KINDS, RobotCore, derive_robot_view  # noqa: E402
 from nxt_edge_task.journal import JournalIntegrityError, JsonlJournal, PreconditionFailed  # noqa: E402
 from scripts.edge_task_transport import Delivery, PahoClient, TransportClient  # noqa: E402
 
@@ -68,6 +76,9 @@ class MockRobotDevice:
         *,
         clock: Callable[[], datetime] = utcnow,
         emit: Callable[[dict[str, Any]], None] | None = None,
+        initialize: bool = False,
+        purge_session: Callable[[], None] | None = None,
+        step_interval_s: float = 0.0,
     ) -> None:
         self.config = config
         self.robot = robot
@@ -75,6 +86,10 @@ class MockRobotDevice:
         self.client = client
         self.clock = clock
         self.emit = emit or _json_line
+        self.initialize = initialize
+        self.purge_session = purge_session
+        self.step_interval_s = step_interval_s
+        self._last_step_at: datetime | None = None
         self.core = RobotCore(config, robot, behavior)
         self.failure: Exception | None = None
         self.last_heartbeat: datetime | None = None
@@ -93,9 +108,32 @@ class MockRobotDevice:
 
     def start(self) -> None:
         now = self.clock()
-        appended = self.journal.append_via(self.core.builder(lambda view: self.core.on_start(view, now)))
+        # Identity continuity is checked before the journal file is touched
+        # (an "a+b" open would otherwise leave an empty file behind) and again
+        # inside the lock by on_start itself.
+        try:
+            records = self.journal.read()
+        except JournalIntegrityError as exc:
+            path = self.journal.path
+            if self.initialize and (not path.exists() or path.stat().st_size == 0):
+                # Explicit re-provisioning over a lost journal: the anchor of
+                # the dead incarnation is the only remnant and is discarded on
+                # the operator's say-so, never implicitly.
+                self.journal.discard_anchor()
+                records = ()
+            else:
+                raise EdgeTaskError(ErrorCode.ROBOT_STATE_LOST, f"robot journal continuity lost: {exc}") from exc
+        preview = derive_robot_view(self.robot.robot_id, records)
+        self.core.assert_startable(preview, initialize=self.initialize)
+        provisioning = self.initialize and not preview.provisioned
+        if provisioning and self.purge_session is not None:
+            # A new incarnation must not inherit requests queued for the dead
+            # one: discard the broker session for this client id first.
+            self.purge_session()
+            self.emit({"event": "broker_session_purged", "robot_id": self.robot.robot_id, "reason": "provisioning"})
+        appended = self.journal.append_via(self.core.builder(lambda view: self.core.on_start(view, now, initialize=self.initialize)))
         self.core.absorb(appended)
-        self.emit({"event": "robot_started", "robot_id": self.robot.robot_id, "boot_sequence": self.view.boot_sequence, "behavior": self.core.behavior, "disclaimer": DISCLAIMER})
+        self.emit({"event": "robot_started", "robot_id": self.robot.robot_id, "boot_sequence": self.view.boot_sequence, "provisioned_now": provisioning, "behavior": self.core.behavior, "disclaimer": DISCLAIMER})
         self.client.connect()
 
     def on_connect(self, session_present: bool) -> None:
@@ -137,7 +175,11 @@ class MockRobotDevice:
         if self.failure is not None:
             return
         now = self.clock()
-        appended = self._append(lambda view: self.core.tick(view, now))
+        appended = ()
+        if self._step_due(now):
+            appended = self._append(lambda view: self.core.tick(view, now))
+            if appended:
+                self._last_step_at = now
         for record in appended:
             self.emit({"event": record.record_kind, "sequence": record.sequence, **_summary(record)})
         if self.core.exit_requested:
@@ -145,6 +187,11 @@ class MockRobotDevice:
             return
         self.publish_pending()
         self.heartbeat_if_due(now)
+
+    def _step_due(self, now: datetime) -> bool:
+        if self.step_interval_s <= 0 or self._last_step_at is None:
+            return True
+        return (now - self._last_step_at).total_seconds() >= self.step_interval_s
 
     def publish_pending(self) -> None:
         if self.core.exit_requested:
@@ -244,7 +291,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--behavior", default="accept_and_succeed")
     parser.add_argument("--evidence-root", type=Path, default=SIM_ROOT)
     parser.add_argument("--max-seconds", type=float, default=None)
+    parser.add_argument("--initialize", action="store_true", help="explicit first boot of this robot identity (SIMULATION); never for a restart")
     parser.add_argument("--simulate-reset", action="store_true", help="record an operator reset at the robot (SIMULATION) and exit")
+    parser.add_argument("--step-interval-s", type=float, default=0.0, help="pace simulated execution steps (test fixture only)")
     args = parser.parse_args(argv)
 
     config = EdgeTaskConfig.from_json(args.config.read_bytes())
@@ -252,7 +301,20 @@ def main(argv: list[str] | None = None) -> int:
     behavior = args.behavior if robot.role == "picker" else "standby"
     journal = JsonlJournal(journal_path(robot, args.evidence_root), allowed_kinds=ROBOT_RECORD_KINDS)
     client = PahoClient(robot.client_id, config.broker_host, config.broker_port, config.keepalive_s)
-    device = MockRobotDevice(config, robot, behavior, journal, client)
+
+    def purge_session() -> None:
+        purger = PahoClient(robot.client_id, config.broker_host, config.broker_port, config.keepalive_s, clean_session=True)
+        purger.set_handlers(on_message=lambda d: None, on_connect=lambda p: None, on_disconnect=lambda r: None)
+        purger.connect()
+        deadline = time.monotonic() + PUBLISH_WAIT_S
+        while not purger.connected and time.monotonic() < deadline:
+            purger.loop(0.1)
+        if not purger.connected:
+            raise RuntimeError("could not reach the local broker to purge the stale session; provisioning refused")
+        purger.disconnect()
+        purger.loop(0.1)
+
+    device = MockRobotDevice(config, robot, behavior, journal, client, initialize=args.initialize, purge_session=purge_session, step_interval_s=args.step_interval_s)
 
     stop = {"requested": False}
 
@@ -263,7 +325,13 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
     try:
-        device.start()
+        try:
+            device.start()
+        except EdgeTaskError as exc:
+            # State loss or a misuse of --initialize: nothing was written, no
+            # socket was opened, no request can be read.  Loud, distinct exit.
+            _json_line({"event": "fail_stop", "code": exc.code.value, "detail": exc.detail, "robot_id": robot.robot_id, "disclaimer": DISCLAIMER})
+            return 4
         if args.simulate_reset:
             device.simulate_reset()
             for _ in range(10):

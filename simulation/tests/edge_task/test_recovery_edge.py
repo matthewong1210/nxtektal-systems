@@ -103,9 +103,7 @@ def test_torn_conflict_batch_restores_gate_from_evidence_record_on_restart(harne
     evidence_index = max(i for i, r in enumerate(records) if r.record_kind == "task_event_received" and r.payload.get("conflict") is True)
     assert kinds[evidence_index + 1 :] == ["conflicting_terminal", "task_reconciliation_flagged"]
     # Tear the batch: keep the evidence line, drop its two companions.
-    path = harness.edge_journal_path
-    lines = path.read_bytes().split(b"\n")[:-1]
-    path.write_bytes(b"\n".join(lines[: evidence_index + 1]) + b"\n")
+    harness.truncate_edge_journal(evidence_index + 1)
     harness.crash_edge()
     harness.start_edge()
     task = harness.task(task_id)
@@ -218,3 +216,21 @@ def test_broker_restart_mid_task_converges_without_duplicate_execution(harness: 
     run_until(harness, lambda: harness.task(task_id)["state"] == "SUCCEEDED", max_rounds=40)
     assert harness.executions("picker-01", task_id) == 1
     assert harness.task(task_id)["missing_sequences"] == []
+
+
+def test_rolled_back_edge_journal_fail_stops_the_gateway_before_any_socket(harness: Harness) -> None:
+    """The Edge's own journal below its anchor is state loss: no start, no connect."""
+
+    from scripts.edge_task_gateway_v0 import GatewayFailStop
+
+    harness.start_all()
+    harness.step(2)
+    task_id = harness.create()["task_id"]
+    run_until(harness, lambda: harness.task(task_id)["state"] == "SUCCEEDED")
+    harness.crash_edge()
+    harness._tear(harness.edge_journal_path, 3, keep_anchor=True)  # a valid three-record prefix, anchor intact
+    with pytest.raises((GatewayFailStop, Exception)) as raised:
+        harness.start_edge()
+    assert "rolled back" in str(raised.value)
+    assert any(e.get("event") == "fail_stop" for e in harness.events)
+    assert harness.broker.sessions[harness.config.edge_client_id].connected is False

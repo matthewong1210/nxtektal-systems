@@ -99,8 +99,22 @@ class Harness:
         self.edge.start()
         return self.edge
 
-    def start_robot(self, robot_id: str, behavior: str = "accept_and_succeed") -> MockRobotDevice:
+    def start_robot(self, robot_id: str, behavior: str = "accept_and_succeed", *, initialize: bool = False) -> MockRobotDevice:
+        """Start (or restart) a robot process.
+
+        ``initialize=True`` is the explicit first-boot provisioning act; a
+        restart never passes it.  A missing journal without it is a refused
+        start (state loss), exactly as the script behaves.
+        """
+
         robot = self.config.robot(robot_id)
+
+        def purge_session() -> None:
+            purger = self.broker.client(robot.client_id, clean_session=True)
+            purger.set_handlers(on_message=lambda d: None, on_connect=lambda p: None, on_disconnect=lambda r: None)
+            purger.connect()
+            purger.disconnect()
+
         device = MockRobotDevice(
             self.config,
             robot,
@@ -109,6 +123,8 @@ class Harness:
             self.broker.client(robot.client_id),
             clock=self.clock,
             emit=self.events.append,
+            initialize=initialize,
+            purge_session=purge_session,
         )
         device.start()
         if robot.role == "picker":
@@ -119,8 +135,8 @@ class Harness:
 
     def start_all(self, behavior: str = "accept_and_succeed") -> None:
         self.start_edge()
-        self.start_robot("picker-01", behavior)
-        self.start_robot("carrier-01")
+        self.start_robot("picker-01", behavior, initialize=True)
+        self.start_robot("carrier-01", initialize=True)
 
     # -- driving ----------------------------------------------------------
 
@@ -166,13 +182,77 @@ class Harness:
         else:
             self.carrier = None
 
+    @staticmethod
+    def _tear(path: Path, keep: int, *, keep_anchor: bool) -> int:
+        lines = path.read_bytes().split(b"\n")[:-1]
+        assert 0 <= keep <= len(lines)
+        path.write_bytes(b"".join(line + b"\n" for line in lines[:keep]))
+        if not keep_anchor:
+            # A torn batch is a crash before the anchor was advanced: the anchor
+            # still points at the last record that survived.
+            anchor = path.with_name(path.name + ".hwm")
+            last_id = json.loads(lines[keep - 1])["record_id"] if keep else None
+            anchor.write_text(json.dumps({"schema": "nxt-edge-task/journal-anchor/v1", "records": keep, "last_record_id": last_id}, separators=(",", ":"), sort_keys=True))
+        return len(lines) - keep
+
+    def truncate_robot_journal(self, robot_id: str, keep: int) -> int:
+        """Model a torn batch: records after ``keep`` never became durable, nor did the anchor."""
+
+        return self._tear(self.robot_journal_path(robot_id), keep, keep_anchor=False)
+
+    def rollback_robot_journal(self, robot_id: str, keep: int) -> int:
+        """Model state loss that is not a deletion: the journal is rolled back to a valid prefix; the anchor is intact."""
+
+        return self._tear(self.robot_journal_path(robot_id), keep, keep_anchor=True)
+
+    def truncate_edge_journal(self, keep: int) -> int:
+        return self._tear(self.edge_journal_path, keep, keep_anchor=False)
+
+    def request_bytes(self, task_id: str) -> bytes:
+        """The byte-identical request as the Edge journaled it (test-side resend material)."""
+
+        from nxt_edge_task.contracts import TaskRequest
+
+        for record in self.edge_records():
+            if record.record_kind == "task_created" and record.payload["task_id"] == task_id:
+                return TaskRequest.from_dict(json.loads(json.dumps(record.payload["request"], default=dict))).canonical_bytes()
+        raise KeyError(task_id)
+
+    def known_incarnation(self, robot_id: str) -> str:
+        """The incarnation prefix the Edge last saw for ``robot_id`` (injected events must belong to it)."""
+
+        from nxt_edge_task.contracts import incarnation_of
+
+        if self.edge is not None:
+            device = self.device(robot_id)
+            if device["boot_id"] is not None:
+                return incarnation_of(device["boot_id"], device["boot_sequence"])
+        return f"boot-{robot_id}-unseen"
+
+    def intruder(self, client_id: str = "intruder"):
+        client = self.broker.client(client_id, clean_session=True)
+        client.set_handlers(on_message=lambda d: None, on_connect=lambda p: None, on_disconnect=lambda r: None)
+        client.connect()
+        return client
+
+    def replay_event(self, event: Any, *, robot_id: str = "picker-01") -> None:
+        """Redeliver exactly these event bytes (broker redelivery / robot history replay)."""
+
+        from nxt_edge_task.contracts import event_topic
+
+        payload = json.loads(json.dumps(event, default=dict))
+        self.intruder().publish(event_topic(self.config.site_id, robot_id), json.dumps(payload).encode(), 1)
+        self.broker.pump()
+
     # -- assertions ---------------------------------------------------------
 
     def edge_records(self) -> list:
-        return list(self.edge_journal().read())
+        # The harness is an out-of-process inspector: it reads what survived,
+        # anchored or not; the processes themselves always read anchored.
+        return list(self.edge_journal().read(anchored=False))
 
     def robot_records(self, robot_id: str) -> list:
-        return list(self.robot_journal(robot_id).read())
+        return list(self.robot_journal(robot_id).read(anchored=False))
 
     def kinds(self, records) -> list[str]:
         return [record.record_kind for record in records]

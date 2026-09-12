@@ -79,9 +79,11 @@ standby) over a local, loopback-bound, nonpersistent Mosquitto on a
 task-specific port. It owns the versioned wire contracts, the Edge task and
 device journal derivation (content-derived `task_id`, dedup on both ends,
 `(boot_sequence, event_sequence)` ordering, late evidence, absorbing
-terminals, the terminal-conflict authorization gate, session regression,
-liveness), and the double's executor rules (persist-before-publish, restart
-branches, history replay). Tasks are created only by the SIMULATION test
+terminals, the terminal-conflict authorization gate, session regression by
+incarnation-prefixed `boot_id`, liveness and read-time freshness), the
+journal high-water anchor and operator-provisioned identity continuity, and
+the double's executor rules (persist-before-publish, evidence-derived
+protection, restart branches, history replay). Tasks are created only by the SIMULATION test
 entry CLI. It is not physical task admission, robot telemetry, facility
 state, advice, or execution; it adds no sensor, device, ROS, actuator, or
 emergency-stop path, and does not change the "Not implemented" rows above.

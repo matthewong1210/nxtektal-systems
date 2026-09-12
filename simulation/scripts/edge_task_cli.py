@@ -8,6 +8,11 @@ picks it up and publishes it.  ``list`` and ``show`` derive the current
 view from the journal.  PR B adds ``ack``/``resolve``; they do not exist
 here and nothing in this CLI can command a robot.
 
+Read views never re-stamp journaled state as current: ``list`` and ``show``
+report the journal's last derived state next to what can be verified at
+read time (``as_read``: the same receipt thresholds applied to the reader's
+clock, plus the evidence age) and whether an Edge process holds the lock.
+
 Run from ``simulation/``::
 
     uv run --no-sync python -B scripts/edge_task_cli.py \
@@ -21,6 +26,7 @@ Both timestamps must lie in the future at creation time.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import sys
 from datetime import datetime, timezone
@@ -31,16 +37,17 @@ SIM_ROOT = Path(__file__).resolve().parents[1]
 if str(SIM_ROOT) not in sys.path:
     sys.path.insert(0, str(SIM_ROOT))
 
-from nxt_edge_task.cases import EDGE_RECORD_KINDS, EdgeView, decide_task_create  # noqa: E402
+from nxt_edge_task.cases import EDGE_RECORD_KINDS, EdgeView, decide_task_create, read_time_liveness  # noqa: E402
 from nxt_edge_task.contracts import (  # noqa: E402
     TASK_TYPE_COLLECT_BALLS_ZONE,
     AdmissionFacts,
     EdgeTaskConfig,
     EdgeTaskError,
     TaskRequest,
+    parse_utc,
     utc_text,
 )
-from nxt_edge_task.journal import JsonlJournal  # noqa: E402
+from nxt_edge_task.journal import JournalIntegrityError, JsonlJournal  # noqa: E402
 
 DISCLAIMER = "SIMULATION — test entry; not a production scheduler"
 
@@ -101,6 +108,73 @@ def view_from(journal: JsonlJournal, config: EdgeTaskConfig) -> EdgeView:
     return view
 
 
+def edge_lock_held(journal_file: Path) -> bool | None:
+    """Read-only probe: does some Edge gateway process hold ``.edge.lock``?
+
+    Never creates the lock file and never keeps a lock.  ``None`` when the
+    lock file exists but cannot be probed (permissions).
+    """
+
+    lock_path = journal_file.parent / ".edge.lock"
+    if not lock_path.exists():
+        return False
+    try:
+        with lock_path.open("rb") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            return False
+    except OSError:
+        return None
+
+
+def _freshness(journal: JsonlJournal, config: EdgeTaskConfig, now: datetime) -> tuple[EdgeView, dict[str, Any]]:
+    records = journal.read()
+    view = EdgeView(config=config)
+    view.apply_all(records)
+    last = records[-1].recorded_at_utc if records else None
+    age = None if last is None else (now - parse_utc(last, "recorded_at_utc")).total_seconds()
+    return view, {
+        "read_at_utc": utc_text(now),
+        "journal_last_record_at_utc": last,
+        "journal_age_s": age,
+        "edge_lock_held": edge_lock_held(journal.path),
+    }
+
+
+def list_view(journal: JsonlJournal, config: EdgeTaskConfig, *, now: datetime) -> dict[str, Any]:
+    """Journaled state plus read-time freshness for every device and task."""
+
+    view, freshness = _freshness(journal, config, now)
+    return {
+        "disclaimer": DISCLAIMER,
+        **freshness,
+        "devices": {
+            robot_id: {**device.summary(), "as_read": read_time_liveness(device, config, now)}
+            for robot_id, device in view.devices.items()
+        },
+        "tasks": {task_id: task.summary() for task_id, task in view.tasks.items()},
+    }
+
+
+def show_view(journal: JsonlJournal, config: EdgeTaskConfig, task_id: str, *, now: datetime) -> dict[str, Any] | None:
+    view, freshness = _freshness(journal, config, now)
+    task = view.tasks.get(task_id)
+    if task is None:
+        return None
+    device = view.devices[task.request.target_robot_id]
+    return {
+        "disclaimer": DISCLAIMER,
+        **freshness,
+        **task.summary(),
+        "request": task.request.to_dict(),
+        "target_device_journaled_connectivity": device.connectivity.value,
+        "target_device_as_read": read_time_liveness(device, config, now),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
@@ -139,31 +213,23 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result, sort_keys=True, ensure_ascii=False))
             return 0 if result["status"] in {"created", "idempotent"} else 1
-        view = view_from(journal, config)
+        now = datetime.now(timezone.utc)
         if args.command == "list":
-            print(
-                json.dumps(
-                    {
-                        "disclaimer": DISCLAIMER,
-                        "as_of_utc": utc_text(datetime.now(timezone.utc)),
-                        "devices": {k: v.summary() for k, v in view.devices.items()},
-                        "tasks": {k: v.summary() for k, v in view.tasks.items()},
-                    },
-                    sort_keys=True,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
+            print(json.dumps(list_view(journal, config, now=now), sort_keys=True, ensure_ascii=False, indent=2))
             return 0
-        task = view.tasks.get(args.task_id)
-        if task is None:
+        shown = show_view(journal, config, args.task_id, now=now)
+        if shown is None:
             print(json.dumps({"error": "unknown_task", "task_id": args.task_id}))
             return 1
-        print(json.dumps({"disclaimer": DISCLAIMER, **task.summary(), "request": task.request.to_dict()}, sort_keys=True, ensure_ascii=False, indent=2))
+        print(json.dumps(shown, sort_keys=True, ensure_ascii=False, indent=2))
         return 0
     except EdgeTaskError as exc:
         print(json.dumps({"error": exc.code.value, "detail": exc.detail}), file=sys.stderr)
         return 1
+    except JournalIntegrityError as exc:
+        # A rolled-back, torn, or tampered journal: loud, machine-readable, distinct exit.
+        print(json.dumps({"error": "journal_integrity", "detail": str(exc)}), file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":

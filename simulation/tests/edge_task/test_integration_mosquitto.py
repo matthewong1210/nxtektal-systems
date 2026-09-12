@@ -24,6 +24,7 @@ if str(SIM_ROOT) not in sys.path:
     sys.path.insert(0, str(SIM_ROOT))
 
 from nxt_edge_task.cases import EDGE_RECORD_KINDS  # noqa: E402
+from nxt_edge_task.contracts import ENVIRONMENT_KIND_SIMULATION, EVENT_SCHEMA, TaskRequest, event_topic, request_topic, utc_text  # noqa: E402
 from nxt_edge_task.executor import ROBOT_RECORD_KINDS  # noqa: E402
 from nxt_edge_task.journal import JsonlJournal  # noqa: E402
 
@@ -73,6 +74,9 @@ class Stack:
         self.procs: dict[str, subprocess.Popen] = {}
         self.logs: dict[str, Path] = {}
         self.broker: subprocess.Popen | None = None
+        # Harness bookkeeping only: the first start of each identity is the
+        # explicit provisioning act; every later start is a plain restart.
+        self.provisioned: set[str] = set()
 
     # -- processes ----------------------------------------------------------
 
@@ -96,8 +100,16 @@ class Stack:
     def start_edge(self) -> None:
         self._spawn("edge", ["scripts/edge_task_gateway_v0.py", "--config", str(self.config_path), "--evidence-root", str(self.root)])
 
-    def start_robot(self, robot_id: str, behavior: str = "accept_and_succeed") -> None:
-        self._spawn(robot_id, ["scripts/mock_robot_task_device.py", "--config", str(self.config_path), "--robot-id", robot_id, "--behavior", behavior, "--evidence-root", str(self.root)])
+    def start_robot(self, robot_id: str, behavior: str = "accept_and_succeed", *, initialize: bool | None = None, step_interval_s: float | None = None) -> None:
+        args = ["scripts/mock_robot_task_device.py", "--config", str(self.config_path), "--robot-id", robot_id, "--behavior", behavior, "--evidence-root", str(self.root)]
+        if initialize is None:
+            initialize = robot_id not in self.provisioned
+        if initialize:
+            args.append("--initialize")
+            self.provisioned.add(robot_id)
+        if step_interval_s is not None:
+            args += ["--step-interval-s", str(step_interval_s)]
+        self._spawn(robot_id, args)
 
     def stop(self, name: str, *, timeout: float = 10.0) -> int:
         proc = self.procs.pop(name, None)
@@ -171,6 +183,94 @@ class Stack:
                 return
             time.sleep(0.25)
         raise AssertionError(f"records condition not met; logs: {self._tail()}")
+
+    def wait_robot_records(self, robot_id: str, predicate, timeout_s: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if predicate(self.robot_records(robot_id)):
+                return
+            time.sleep(0.2)
+        raise AssertionError(f"robot records condition not met; logs: {self._tail()}")
+
+    def received(self, task_id: str) -> list:
+        return [r for r in self.edge_records() if r.record_kind == "task_event_received" and r.payload["task_id"] == task_id]
+
+    def publish_attempts(self, task_id: str) -> int:
+        return sum(1 for r in self.edge_records() if r.record_kind == "task_publish_attempted" and r.payload["task_id"] == task_id)
+
+    def request_bytes(self, task_id: str) -> bytes:
+        for record in self.edge_records():
+            if record.record_kind == "task_created" and record.payload["task_id"] == task_id:
+                return TaskRequest.from_dict(json.loads(json.dumps(record.payload["request"], default=dict))).canonical_bytes()
+        raise KeyError(task_id)
+
+    # -- test-side transport helpers (fault injection through the real broker) ----
+
+    def _paho(self, client_id: str, *, clean_session: bool):
+        import paho.mqtt.client as mqtt  # noqa: PLC0415 - test-only injection
+
+        connected = {"ok": False}
+        client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, protocol=mqtt.MQTTv311, clean_session=clean_session)
+        client.on_connect = lambda c, u, f, rc, p=None: connected.__setitem__("ok", True)
+        client.connect("127.0.0.1", self.port, keepalive=10)
+        for _ in range(50):
+            client.loop(0.1)
+            if connected["ok"]:
+                break
+        assert connected["ok"], "test client could not connect to the local broker"
+        return client
+
+    def inject(self, topic: str, payload: bytes, *, qos: int = 1) -> None:
+        client = self._paho("integration-injector", clean_session=True)
+        info = client.publish(topic, payload, qos=qos, retain=False)
+        for _ in range(40):
+            client.loop(0.1)
+            if info.is_published():
+                break
+        assert info.is_published()
+        client.disconnect()
+        client.loop(0.1)
+
+    def known_incarnation(self, robot_id: str) -> str:
+        """The incarnation prefix the Edge journal last recorded for ``robot_id``."""
+
+        from nxt_edge_task.contracts import incarnation_of
+
+        boot_id, boot_sequence = None, None
+        for record in self.edge_records():
+            if record.record_kind in {"device_status_changed", "device_liveness_changed"} and record.payload["robot_id"] == robot_id and record.payload.get("status"):
+                boot_id, boot_sequence = record.payload["status"]["boot_id"], record.payload["status"]["boot_sequence"]
+        assert boot_id is not None, "the Edge has not seen this robot yet"
+        return incarnation_of(boot_id, boot_sequence)
+
+    def inject_event(self, task_id: str, kind: str, boot: int, seq: int, *, reason: str | None = None, robot_id: str = "picker-01") -> None:
+        event = {
+            "schema": EVENT_SCHEMA, "site_id": self.config["site_id"], "deployment_id": self.config["deployment_id"],
+            "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": self.config["simulation_env_id"]},
+            "task_id": task_id, "robot_id": robot_id, "boot_id": f"{self.known_incarnation(robot_id)}-{boot}", "boot_sequence": boot, "event_sequence": seq,
+            "kind": kind, "reason_code": reason, "detail": "injected by integration test",
+            "reported_at_utc": utc_text(datetime.now(timezone.utc)), "progress": None,
+        }
+        self.inject(event_topic(self.config["site_id"], robot_id), json.dumps(event).encode())
+
+    def reset_edge_session(self) -> None:
+        """Broker-side fault: the Edge's queued deliveries are lost, its persistent session is re-created empty.
+
+        Emulates a broker that lost the queue (e.g. restart without persistence)
+        while the Edge was down, without losing the robots' sessions.
+        """
+
+        client_id = self.config["edge"]["client_id"]
+        wipe = self._paho(client_id, clean_session=True)
+        wipe.disconnect()
+        wipe.loop(0.1)
+        keep = self._paho(client_id, clean_session=False)
+        for robot in self.config["robots"]:
+            keep.subscribe(event_topic(self.config["site_id"], robot["robot_id"]), qos=1)
+        for _ in range(10):
+            keep.loop(0.1)
+        keep.disconnect()
+        keep.loop(0.1)
 
     def _tail(self) -> dict[str, str]:
         return {name: path.read_text(encoding="utf-8", errors="replace")[-1500:] for name, path in self.logs.items()}
@@ -289,8 +389,8 @@ def test_broker_restart_mid_task_converges_without_duplicate_execution(stack: St
     assert len(decisions) == 1
 
 
-def test_late_terminal_history_is_applied_and_conflict_gate_holds(stack: Stack) -> None:
-    """A1/B3′ over the real broker: the Edge is down while the robot finishes; history arrives late."""
+def test_late_history_after_edge_downtime_is_applied_over_real_broker(stack: Stack) -> None:
+    """C5 shape: the Edge is down while the robot finishes; the queued history arrives late, in order, with no resend."""
 
     stack.start_edge()
     stack.start_robot("picker-01")
@@ -304,30 +404,141 @@ def test_late_terminal_history_is_applied_and_conflict_gate_holds(stack: Stack) 
     stack.start_edge()
     assert stack.wait_state(task_id, {"SUCCEEDED"}) == "SUCCEEDED"
     assert stack.executions("picker-01", task_id) == 1
-    confirmations = [r for r in stack.edge_records() if r.record_kind == "task_publish_confirmed" and r.payload["task_id"] == task_id]
-    assert len(confirmations) >= 1
-    # Inject a conflicting terminal from a later boot through the real broker and check the gate.
-    import paho.mqtt.client as mqtt  # noqa: PLC0415 - test-only injection
+    assert stack.publish_attempts(task_id) == 1
 
-    from nxt_edge_task.contracts import ENVIRONMENT_KIND_SIMULATION, EVENT_SCHEMA, event_topic, utc_text
 
-    event = {
-        "schema": EVENT_SCHEMA, "site_id": stack.config["site_id"], "deployment_id": stack.config["deployment_id"],
-        "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": stack.config["simulation_env_id"]},
-        "task_id": task_id, "robot_id": "picker-01", "boot_id": "boot-picker-01-9", "boot_sequence": 9, "event_sequence": 1,
-        "kind": "INCONCLUSIVE", "reason_code": "interrupted_execution_unknown_outcome", "detail": "injected by integration test",
-        "reported_at_utc": utc_text(datetime.now(timezone.utc)), "progress": None,
-    }
-    client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id="integration-injector", protocol=mqtt.MQTTv311, clean_session=True)
-    client.connect("127.0.0.1", stack.port, keepalive=10)
-    info = client.publish(event_topic(stack.config["site_id"], "picker-01"), json.dumps(event).encode(), qos=1, retain=False)
-    for _ in range(40):
-        client.loop(0.1)
-        if info.is_published():
-            break
-    client.disconnect()
+def test_terminal_before_acceptance_over_real_broker_has_zero_resend_and_natural_late_history(stack: Stack) -> None:
+    """A1 over the real broker (v3.1 §3.A): SUCCEEDED is the first thing the Edge sees.
+
+    Fault: the Edge's queued ACCEPTED/PROGRESS deliveries are lost at the broker
+    while the Edge is down.  Recovery: the terminal is applied with the gap
+    recorded; the Edge never republishes to recover history; a duplicate of
+    the original request still in flight makes the robot replay its history,
+    which fills the gap as late evidence without moving the terminal.
+    """
+
+    stack.start_edge()
+    stack.start_robot("carrier-01")
+    stack.start_robot("picker-01")  # provisions and subscribes; its persistent session outlives the process
+    time.sleep(2.0)
+    stack.stop("picker-01")
+    issued, expires = _times()
+    task_id = stack.create(issued=issued, expires=expires)["task_id"]
+    stack.wait_records(lambda records: any(r.record_kind == "task_publish_confirmed" and r.payload["task_id"] == task_id for r in records))
+    stack.stop("edge")
+    # The robot (paced: one execution step per 5 s) receives the queued request and runs the task while the Edge is down.
+    stack.start_robot("picker-01", step_interval_s=5.0)
+    stack.wait_robot_records("picker-01", lambda records: any(r.record_kind == "event_publish_confirmed" and (r.payload["boot_sequence"], r.payload["event_sequence"]) == (2, 3) for r in records), timeout_s=30)
+    stack.reset_edge_session()  # ACCEPTED(2,1) PROGRESS(2,2) PROGRESS(2,3) are lost; SUCCEEDED(2,4) will queue in the fresh session
+    stack.wait_robot_records("picker-01", lambda records: any(r.record_kind == "event_publish_confirmed" and (r.payload["boot_sequence"], r.payload["event_sequence"]) == (2, 4) for r in records), timeout_s=30)
+    stack.start_edge()
+    assert stack.wait_state(task_id, {"SUCCEEDED"}) == "SUCCEEDED"
+    first = stack.received(task_id)[0].payload
+    assert first["event"]["kind"] == "SUCCEEDED" and first["disposition"] == "applied" and first["state_before"] == "CREATED"
+    assert list(first["missing_sequences_after"]) == [1, 2, 3] and first["acceptance_observed_after"] is False
+    # Zero proactive resend after a legitimate terminal, even with the history gap, across two progress windows.
+    assert stack.publish_attempts(task_id) == 1
+    time.sleep(2 * stack.config["edge"]["default_progress_window_s"] + 2)
+    assert stack.publish_attempts(task_id) == 1
+    assert stack.executions("picker-01", task_id) == 1
+    # Natural late history: a copy of the original request still in flight reaches the robot; it replays its history.
+    stack.inject(request_topic(stack.config["site_id"], "picker-01"), stack.request_bytes(task_id))
+    stack.wait_records(lambda records: any(r.record_kind == "task_event_received" and r.payload["task_id"] == task_id and not r.payload["missing_sequences_after"] and r.payload["acceptance_observed_after"] is True for r in records), timeout_s=20)
+    dispositions = [(r.payload["event"]["kind"], r.payload["event"]["event_sequence"], r.payload["disposition"]) for r in stack.received(task_id)]
+    assert dispositions[0] == ("SUCCEEDED", 4, "applied")
+    assert sorted(dispositions[1:]) == [("ACCEPTED", 1, "late_evidence"), ("PROGRESS", 2, "late_evidence"), ("PROGRESS", 3, "late_evidence"), ("SUCCEEDED", 4, "duplicate")]
+    assert stack.task_state(task_id) == ("SUCCEEDED", None)
+    assert stack.publish_attempts(task_id) == 1
+    assert stack.executions("picker-01", task_id) == 1
+    assert sum(1 for r in stack.robot_records("picker-01") if r.record_kind == "task_decision") == 1
+
+
+def test_conflict_gate_holds_when_inconclusive_arrives_first_over_real_broker(stack: Stack) -> None:
+    """B3′a over the real broker: a genuine INCONCLUSIVE (crash + restart) then a late conflicting SUCCEEDED."""
+
+    stack.start_edge()
+    stack.start_robot("picker-01", "crash_after_execution_started")
+    stack.start_robot("carrier-01")
+    time.sleep(2.0)
+    issued, expires = _times()
+    task_id = stack.create(issued=issued, expires=expires)["task_id"]
+    assert stack.wait_exit("picker-01", timeout=30) == 3
+    stack.procs.pop("picker-01", None)
+    stack.start_robot("picker-01", "accept_and_succeed")
+    assert stack.wait_state(task_id, {"INCONCLUSIVE"}) == "INCONCLUSIVE"
+    attempts = stack.publish_attempts(task_id)
+    stack.inject_event(task_id, "SUCCEEDED", 1, 4)  # a late "success" for the same task from the crashed boot
     stack.wait_records(lambda records: any(r.record_kind == "conflicting_terminal" and r.payload["task_id"] == task_id for r in records), timeout_s=20)
+    conflict = next(r for r in stack.edge_records() if r.record_kind == "conflicting_terminal" and r.payload["task_id"] == task_id)
+    assert conflict.payload["first_terminal"]["kind"] == "INCONCLUSIVE" and conflict.payload["conflicting_terminal"]["kind"] == "SUCCEEDED"
+    last = stack.received(task_id)[-1].payload
+    assert last["disposition"] == "late_evidence" and last["conflict"] is True
+    assert stack.task_state(task_id) == ("INCONCLUSIVE", "CONFLICT")
     issued2, expires2 = _times(2)
     blocked = stack.create(issued=issued2, expires=expires2)
     assert blocked["status"] == "rejected" and blocked["code"] == "authorization_blocked"
+    time.sleep(3.0)
+    assert stack.publish_attempts(task_id) == attempts
     assert stack.executions("picker-01", task_id) == 1
+    # Replay == live: the gate survives an Edge restart.
+    stack.stop("edge")
+    stack.start_edge()
+    time.sleep(2.0)
+    blocked = stack.create(issued=issued2, expires=expires2)
+    assert blocked["code"] == "authorization_blocked"
+
+
+@pytest.mark.parametrize("kind, boot, seq, reason", [("INCONCLUSIVE", 9, 1, "interrupted_execution_unknown_outcome"), ("FAILED", 9, 1, "cannot_continue"), ("FAILED", 1, 4, "cannot_continue")])
+def test_conflict_gate_holds_when_success_arrives_first_over_real_broker(stack: Stack, kind: str, boot: int, seq: int, reason: str) -> None:
+    """B3′b over the real broker: a genuine SUCCEEDED, then a conflicting terminal from a later boot (INCONCLUSIVE, FAILED) or with the same key."""
+
+    stack.start_edge()
+    stack.start_robot("picker-01")
+    stack.start_robot("carrier-01")
+    time.sleep(2.0)
+    issued, expires = _times()
+    task_id = stack.create(issued=issued, expires=expires)["task_id"]
+    assert stack.wait_state(task_id, {"SUCCEEDED"}) == "SUCCEEDED"
+    attempts = stack.publish_attempts(task_id)
+    stack.inject_event(task_id, kind, boot, seq, reason=reason)
+    stack.wait_records(lambda records: any(r.record_kind == "conflicting_terminal" and r.payload["task_id"] == task_id for r in records), timeout_s=20)
+    last = stack.received(task_id)[-1].payload
+    assert last["event"]["kind"] == kind and last["conflict"] is True
+    assert last["disposition"] == ("conflicting_replay" if (boot, seq) == (1, 4) else "evidence")
+    assert stack.task_state(task_id) == ("SUCCEEDED", "CONFLICT")
+    issued2, expires2 = _times(2)
+    blocked = stack.create(issued=issued2, expires=expires2)
+    assert blocked["status"] == "rejected" and blocked["code"] == "authorization_blocked"
+    time.sleep(3.0)
+    assert stack.publish_attempts(task_id) == attempts
+    assert stack.executions("picker-01", task_id) == 1
+
+
+def test_lost_robot_journal_is_refused_and_never_re_executes_over_real_broker(stack: Stack) -> None:
+    """B4 identity continuity over the real broker: a wiped journal exits 4; re-provisioning purges the queued request."""
+
+    stack.start_edge()
+    stack.start_robot("picker-01")
+    stack.start_robot("carrier-01")
+    time.sleep(2.0)
+    issued, expires = _times()
+    task_id = stack.create(issued=issued, expires=expires)["task_id"]
+    assert stack.wait_state(task_id, {"SUCCEEDED"}) == "SUCCEEDED"
+    stack.stop("picker-01")
+    stack.inject(request_topic(stack.config["site_id"], "picker-01"), stack.request_bytes(task_id))  # queued for the offline robot
+    journal = stack.root / "robots" / "picker-01" / "robot_task_journal.jsonl"
+    journal.unlink()
+    stack.start_robot("picker-01", initialize=False)
+    assert stack.wait_exit("picker-01", timeout=20) == 4
+    stack.procs.pop("picker-01", None)
+    assert not journal.exists()
+    assert "robot_state_lost" in stack.logs["picker-01"].read_text(encoding="utf-8")
+    stack.start_robot("picker-01", initialize=True)
+    time.sleep(4.0)
+    kinds = [r.record_kind for r in stack.robot_records("picker-01")]
+    assert kinds[0] == "robot_provisioned"
+    assert kinds.count("request_received") == 0 and kinds.count("execution_started") == 0
+    assert any(r.record_kind == "session_regression" and r.payload["robot_id"] == "picker-01" for r in stack.edge_records())
+    issued2, expires2 = _times(2)
+    blocked = stack.create(issued=issued2, expires=expires2)
+    assert blocked["code"] == "authorization_blocked"

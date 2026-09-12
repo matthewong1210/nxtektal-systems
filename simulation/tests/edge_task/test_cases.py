@@ -29,7 +29,7 @@ def inject_event(harness: Harness, task_id: str, kind: str, boot: int, seq: int,
         "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": harness.config.simulation_env_id},
         "task_id": task_id,
         "robot_id": robot_id,
-        "boot_id": f"boot-{robot_id}-{boot}",
+        "boot_id": f"{harness.known_incarnation(robot_id)}-{boot}",
         "boot_sequence": boot,
         "event_sequence": seq,
         "kind": kind,
@@ -289,3 +289,103 @@ def test_post_terminal_acceptance_from_later_boot_does_not_complete_evidence(har
 
 def test_task_state_enum_matches_effective_results() -> None:
     assert {s.value for s in TaskState} >= {"SUCCEEDED", "FAILED", "INCONCLUSIVE", "REJECTED"}
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 1 regressions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("conflicting_kind, reason", [("FAILED", "cannot_continue"), ("INCONCLUSIVE", "interrupted_execution_unknown_outcome")])
+def test_same_key_conflicting_terminal_closes_the_authorization_gate(harness: Harness, conflicting_kind: str, reason: str) -> None:
+    """Codex R1 #3 (P2): same (boot, seq) with a different terminal is a terminal conflict, not just a replay anomaly."""
+
+    task_id = _created_task(harness)
+    inject_event(harness, task_id, "ACCEPTED", 1, 1)
+    inject_event(harness, task_id, "PROGRESS", 1, 2, phase="traveling")
+    inject_event(harness, task_id, "SUCCEEDED", 1, 3)
+    assert harness.task(task_id)["state"] == "SUCCEEDED"
+    calls = list(harness.publish_calls_for(task_id))
+    inject_event(harness, task_id, conflicting_kind, 1, 3, reason=reason)
+    task = harness.task(task_id)
+    assert task["state"] == "SUCCEEDED"  # the first accepted terminal stays the displayed state
+    assert task["effective_result"] == "CONFLICT" and task["result_verification"] == "conflicting"
+    assert "conflicting_terminal" in task["reconciliation_reasons"] and "conflicting_replay" in task["reconciliation_reasons"]
+    assert [t["kind"] for t in task["terminals"]] == ["SUCCEEDED", conflicting_kind]  # both raw pieces of evidence kept
+    assert harness.kinds(harness.edge_records()).count("conflicting_terminal") == 1
+    last = harness.event_dispositions(task_id)[-1]
+    assert last == (conflicting_kind, 1, 3, "conflicting_replay")
+    blocked = harness.create(issued="2026-09-12T08:05:00.000000Z")
+    assert blocked["code"] == "authorization_blocked"
+    harness.step(30)
+    assert harness.publish_calls_for(task_id) == calls
+    # Replay == live: the gate is derived again from the journal after an Edge restart.
+    harness.crash_edge()
+    harness.start_edge()
+    task = harness.task(task_id)
+    assert task["effective_result"] == "CONFLICT" and harness.create(issued="2026-09-12T08:06:00.000000Z")["code"] == "authorization_blocked"
+
+
+def test_same_key_conflict_against_a_late_evidence_terminal_is_kept_without_a_second_conflict_record(harness: Harness) -> None:
+    """The applied INCONCLUSIVE already conflicts with a late SUCCEEDED; a same-key FAILED at the late key is a third raw result."""
+
+    task_id = _created_task(harness)
+    inject_event(harness, task_id, "ACCEPTED", 2, 1)
+    inject_event(harness, task_id, "INCONCLUSIVE", 2, 2, reason="interrupted_execution_unknown_outcome")
+    inject_event(harness, task_id, "SUCCEEDED", 1, 4)  # late evidence, differing terminal -> conflict already
+    assert harness.task(task_id)["effective_result"] == "CONFLICT"
+    before = harness.kinds(harness.edge_records()).count("conflicting_terminal")
+    event = inject_event(harness, task_id, "FAILED", 1, 4, reason="cannot_continue")  # same key as the late SUCCEEDED
+    task = harness.task(task_id)
+    assert task["effective_result"] == "CONFLICT"
+    assert harness.kinds(harness.edge_records()).count("conflicting_terminal") == before  # written once per task
+    last = [r for r in harness.edge_records() if r.record_kind == "task_event_received" and r.payload["task_id"] == task_id][-1]
+    assert last.payload["disposition"] == "conflicting_replay" and last.payload["conflict"] is True
+    assert [t["kind"] for t in task["terminals"]] == ["INCONCLUSIVE", "SUCCEEDED", "FAILED"]  # every raw result kept
+    # A redelivery of the same conflicting bytes is a duplicate, not a fourth result.
+    replay_event(harness, event)
+    assert harness.event_dispositions(task_id)[-1] == ("FAILED", 1, 4, "duplicate")
+    assert [t["kind"] for t in harness.task(task_id)["terminals"]] == ["INCONCLUSIVE", "SUCCEEDED", "FAILED"]
+
+
+def test_two_differing_late_terminals_on_an_open_task_conflict(harness: Harness) -> None:
+    """Differing terminals below the applied maximum contradict each other as much as applied ones."""
+
+    task_id = _created_task(harness)
+    inject_event(harness, task_id, "ACCEPTED", 2, 1)
+    inject_event(harness, task_id, "SUCCEEDED", 1, 4)
+    assert harness.task(task_id)["effective_result"] is None  # one late terminal alone is just evidence
+    inject_event(harness, task_id, "FAILED", 1, 3, reason="cannot_continue")
+    task = harness.task(task_id)
+    assert task["state"] == "ACCEPTED" and task["effective_result"] == "CONFLICT" and task["result_verification"] == "conflicting"
+    assert harness.kinds(harness.edge_records()).count("conflicting_terminal") == 1
+    assert harness.create(issued="2026-09-12T08:05:00.000000Z")["code"] == "authorization_blocked"
+
+
+@pytest.mark.parametrize(
+    "prelude, anomaly, reason",
+    [
+        ([("ACCEPTED", 1, 1), ("SUCCEEDED", 1, 2)], ("PROGRESS", 1, 3), "post_terminal_activity"),
+        ([("ACCEPTED", 1, 1), ("PROGRESS", 1, 2)], ("ACCEPTED", 1, 3), "unexpected_acceptance"),
+        ([("ACCEPTED", 1, 1), ("PROGRESS", 1, 2)], ("REJECTED", 1, 3), "unexpected_rejection"),
+    ],
+)
+def test_evidence_conflicts_close_the_authorization_gate(harness: Harness, prelude, anomaly, reason) -> None:
+    """A robot reporting activity the Edge's record cannot explain gets no new authorization until a human reconciles."""
+
+    task_id = _created_task(harness)
+    for kind, boot, seq in prelude:
+        inject_event(harness, task_id, kind, boot, seq, phase="traveling" if kind == "PROGRESS" else None)
+    assert harness.create(issued="2026-09-12T08:05:00.000000Z")["code"] in {None, "robot_has_active_task"}
+    kind, boot, seq = anomaly
+    inject_event(harness, task_id, kind, boot, seq, reason="robot_busy" if kind == "REJECTED" else None, phase="collecting" if kind == "PROGRESS" else None)
+    task = harness.task(task_id)
+    assert reason in task["reconciliation_reasons"]
+    blocked = harness.create(issued="2026-09-12T08:06:00.000000Z")
+    assert blocked["code"] == "authorization_blocked" and reason in (blocked["detail"] or "")
+    calls = list(harness.publish_calls_for(task_id))
+    harness.step(30)
+    assert harness.publish_calls_for(task_id) == calls
+    harness.crash_edge()
+    harness.start_edge()
+    assert harness.create(issued="2026-09-12T08:07:00.000000Z")["code"] == "authorization_blocked"

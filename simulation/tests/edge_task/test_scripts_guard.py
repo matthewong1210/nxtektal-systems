@@ -22,7 +22,7 @@ ALLOWED_FIRST_PARTY = {
     GATEWAY: {"nxt_edge_task", "scripts"},
     ROBOT: {"nxt_edge_task", "scripts"},
     CLI: {"nxt_edge_task", "scripts"},
-    TRANSPORT: set(),
+    TRANSPORT: {"nxt_edge_task"},  # only the local-broker endpoint predicate and its error type
     FIXTURE: {"nxt_commissioning", "nxt_edge_task", "scripts"},
 }
 
@@ -60,6 +60,22 @@ def test_scripts_import_only_approved_first_party_roots_and_no_banned_stacks() -
         first_party = {r for r in roots if r.startswith("nxt_") or r == "scripts"}
         assert first_party <= allowed, f"{path.name} imports {first_party - allowed}"
         assert not (roots & BANNED_IMPORT_ROOTS), f"{path.name} imports banned {roots & BANNED_IMPORT_ROOTS}"
+
+
+def test_transport_imports_exactly_the_endpoint_predicate_from_the_package() -> None:
+    tree = ast.parse(TRANSPORT.read_text(encoding="utf-8"))
+    names = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("nxt_edge_task") for alias in node.names}
+    modules = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("nxt_edge_task")}
+    assert modules == {"nxt_edge_task.contracts"} and names == {"assert_local_broker_endpoint"}
+    assert not any(isinstance(node, ast.Import) and any(a.name.startswith("nxt_edge_task") for a in node.names) for node in ast.walk(tree))
+
+
+def test_scripts_never_bypass_the_journal_anchor() -> None:
+    for path in ALL_SCRIPTS:
+        text = path.read_text(encoding="utf-8")
+        assert "anchored=False" not in text, f"{path.name} bypasses the journal anchor (test-only escape hatch)"
+    robot = ROBOT.read_text(encoding="utf-8")
+    assert robot.count("discard_anchor(") == 1 and "initialize" in robot.split("discard_anchor(")[0][-600:]
 
 
 def test_paho_is_confined_to_the_transport_module() -> None:

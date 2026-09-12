@@ -35,6 +35,7 @@ from enum import StrEnum
 from typing import Any, Mapping
 
 from .contracts import (
+    incarnation_of,
     SUPPORTED_TASK_TYPES,
     TERMINAL_KINDS,
     AdmissionFacts,
@@ -129,18 +130,15 @@ class Connectivity(StrEnum):
     OFFLINE = "OFFLINE"
 
 
-# Reconciliation reasons that clear once robot evidence for the task arrives.
-CLEARABLE_REASONS = frozenset(
-    {
-        "new_boot_session",
-        "heartbeat_mismatch",
-        "progress_window_elapsed",
-        "acceptance_window_elapsed",
-        "expired_unconfirmed",
-        "edge_restart",
-        "transport_session_lost",
-    }
-)
+# Presence reasons ask "does the robot still hold this task?"; any robot
+# evidence for the task (a duplicate history replay included) answers them.
+PRESENCE_REASONS = frozenset({"new_boot_session", "expired_unconfirmed", "edge_restart", "transport_session_lost"})
+# Progress reasons state that no *trusted* progress arrived; only an applied
+# (state-advancing) event clears them.  Message receipt time is never
+# progress time: duplicates, late evidence, and conflicting replays leave
+# them untouched.
+PROGRESS_REASONS = frozenset({"heartbeat_mismatch", "progress_window_elapsed", "acceptance_window_elapsed"})
+CLEARABLE_REASONS = PRESENCE_REASONS | PROGRESS_REASONS
 # Sticky reasons are never cleared by later robot evidence.  Only a terminal
 # conflict (effective_result CONFLICT) and a session regression close the
 # authorization gate; the others stay visible for PR B's human handling.
@@ -156,6 +154,8 @@ STICKY_REASONS = frozenset(
 )
 
 EFFECTIVE_CONFLICT = "CONFLICT"
+# Sticky evidence conflicts that also close the device's authorization gate.
+EVIDENCE_CONFLICT_REASONS = ("post_terminal_activity", "unexpected_acceptance", "unexpected_rejection", "conflicting_replay")
 
 
 # --------------------------------------------------------------------------
@@ -173,6 +173,9 @@ class TaskView:
     applied_max: tuple[int, int] | None = None
     applied: list[dict[str, Any]] = field(default_factory=list)
     seen_keys: dict[tuple[int, int], str] = field(default_factory=dict)
+    # Other contents already recorded at a key (conflicting replays), so a
+    # redelivery of the same conflicting bytes is a duplicate, not new evidence.
+    conflict_digests: dict[tuple[int, int], set[str]] = field(default_factory=dict)
     events_by_boot: dict[int, set[int]] = field(default_factory=dict)
     acceptance_observed: bool = False
     terminals: list[dict[str, Any]] = field(default_factory=list)
@@ -186,10 +189,21 @@ class TaskView:
     publish_confirmations: int = 0
     last_publish_confirmed_at: datetime | None = None
     post_expiry_publishes: int = 0
+    # Receipt clock: any robot evidence for the task, whatever its disposition.
     last_event_received_at: datetime | None = None
+    last_event_record_sequence: int = 0
+    # Progress clock: the last applied (state-advancing) event only.
+    last_progress_at: datetime | None = None
     flagged_since_last_event: set[str] = field(default_factory=set)
+    flagged_since_last_progress: set[str] = field(default_factory=set)
+    # Journal sequence at which each pending reason was (re)flagged; a reason
+    # flagged after the last robot evidence is unanswered and may republish.
+    flag_record_sequence: dict[str, int] = field(default_factory=dict)
     expired_unconfirmed: bool = False
     exceptions: list[dict[str, Any]] = field(default_factory=list)
+
+    def unanswered(self, reason: str) -> bool:
+        return self.flag_record_sequence.get(reason, 0) > self.last_event_record_sequence
 
     @property
     def is_terminal(self) -> bool:
@@ -245,6 +259,8 @@ class TaskView:
             "last_publish_confirmed_at_utc": None
             if self.last_publish_confirmed_at is None
             else utc_text(self.last_publish_confirmed_at),
+            "last_event_received_at_utc": None if self.last_event_received_at is None else utc_text(self.last_event_received_at),
+            "last_progress_at_utc": None if self.last_progress_at is None else utc_text(self.last_progress_at),
             "expired_unconfirmed": self.expired_unconfirmed,
             "expires_at_utc": self.request.expires_at_utc,
             "issued_by": self.request.issued_by,
@@ -265,6 +281,15 @@ class DeviceView:
     session_regression: bool = False
     regression_detail: dict[str, Any] | None = None
     last_regression_rejection_at: datetime | None = None
+
+    @property
+    def incarnation(self) -> str | None:
+        if self.boot_id is None or self.boot_sequence is None:
+            return None
+        try:
+            return incarnation_of(self.boot_id, self.boot_sequence)
+        except EdgeTaskError:
+            return None
 
     @property
     def last_reported_availability(self) -> str | None:
@@ -317,8 +342,18 @@ class EdgeView:
         if device is not None and device.session_regression:
             return "session_regression"
         for task in self.tasks.values():
-            if task.request.target_robot_id == robot_id and task.authorization_conflict:
+            if task.request.target_robot_id != robot_id:
+                continue
+            if task.authorization_conflict:
                 return f"terminal_conflict:{task.task_id}"
+            # A robot reporting activity the Edge's record cannot explain
+            # (work on a finished task, a second acceptance, a rejection after
+            # acceptance, a same-key replay with other content) is executing
+            # something the Edge did not authorise as such: no new authorization
+            # until a human reconciles it (PR B).
+            for reason in EVIDENCE_CONFLICT_REASONS:
+                if reason in task.reconciliation_reasons:
+                    return f"{reason}:{task.task_id}"
         return None
 
     # ---- applying journal records --------------------------------------
@@ -338,8 +373,10 @@ class EdgeView:
                 device.connectivity_since = when
                 device.last_status_sequence = None
             for task in self.tasks.values():
-                if not task.is_terminal and "edge_restart" not in task.reconciliation_reasons:
-                    task.reconciliation_reasons.append("edge_restart")
+                if not task.is_terminal:
+                    if "edge_restart" not in task.reconciliation_reasons:
+                        task.reconciliation_reasons.append("edge_restart")
+                    task.flag_record_sequence["edge_restart"] = record.sequence
         elif kind == TRANSPORT_SESSION:
             if payload["event"] == "session_lost":
                 for device in self.devices.values():
@@ -347,8 +384,10 @@ class EdgeView:
                     device.connectivity_since = when
                     device.last_status_sequence = None
                 for task in self.tasks.values():
-                    if not task.is_terminal and "transport_session_lost" not in task.reconciliation_reasons:
-                        task.reconciliation_reasons.append("transport_session_lost")
+                    if not task.is_terminal:
+                        if "transport_session_lost" not in task.reconciliation_reasons:
+                            task.reconciliation_reasons.append("transport_session_lost")
+                        task.flag_record_sequence["transport_session_lost"] = record.sequence
         elif kind == TASK_CREATED:
             request = TaskRequest.from_dict(_thaw(payload["request"]))
             self.tasks[request.task_id] = TaskView(
@@ -411,12 +450,18 @@ class EdgeView:
                 task.exceptions.append(
                     {"kind": ROBOT_REQUEST_REJECTED, "reason_code": payload["reason_code"], "record_id": record.record_id}
                 )
+                # The robot answered (with a request-level rejection): a pending
+                # reconcile flag is answered, though nothing about progress changes.
+                task.last_event_received_at = when
+                task.last_event_record_sequence = record.sequence
         elif kind == TASK_RECONCILIATION_FLAGGED:
             task = self.tasks[payload["task_id"]]
             reason = payload["reason"]
             if reason not in task.reconciliation_reasons:
                 task.reconciliation_reasons.append(reason)
             task.flagged_since_last_event.add(reason)
+            task.flagged_since_last_progress.add(reason)
+            task.flag_record_sequence[reason] = record.sequence
             if reason == "expired_unconfirmed":
                 task.expired_unconfirmed = True
         elif kind == CONFLICTING_TERMINAL:
@@ -441,13 +486,26 @@ class EdgeView:
         event = TaskEvent.from_dict(dict(_thaw(payload["event"])))
         disposition = Disposition(payload["disposition"])
         key = event.order_key
+        conflict = payload.get("conflict") is True
+        # Receipt clock: any robot evidence for the task answers the presence
+        # reasons.  It is not progress and clears nothing about progress.
         task.last_event_received_at = when
+        task.last_event_record_sequence = record.sequence
         task.flagged_since_last_event.clear()
-        # Any robot evidence for the task clears the clearable reasons.
-        task.reconciliation_reasons = [r for r in task.reconciliation_reasons if r in STICKY_REASONS]
+        task.reconciliation_reasons = [r for r in task.reconciliation_reasons if r not in PRESENCE_REASONS]
         if disposition is Disposition.CONFLICTING_REPLAY:
             if "conflicting_replay" not in task.reconciliation_reasons:
                 task.reconciliation_reasons.append("conflicting_replay")
+            task.conflict_digests.setdefault(key, set()).add(event.content_digest())
+            if event.is_terminal:
+                # Both raw pieces of evidence stay visible; the same key is no
+                # exception to the mutual-exclusion check on terminals.
+                task.terminals.append(_terminal_ref(event, record.record_id))
+            if conflict:
+                task.effective_result = EFFECTIVE_CONFLICT
+                task.result_verification = "conflicting"
+                if "conflicting_terminal" not in task.reconciliation_reasons:
+                    task.reconciliation_reasons.append("conflicting_terminal")
             return
         if disposition is Disposition.DUPLICATE:
             return
@@ -457,7 +515,6 @@ class EdgeView:
         # this execution; an anomalous re-acceptance stays evidence.
         if event.kind is EventKind.ACCEPTED and disposition in {Disposition.APPLIED, Disposition.LATE_EVIDENCE}:
             task.acceptance_observed = True
-        conflict = payload.get("conflict") is True
         if disposition in {Disposition.LATE_EVIDENCE, Disposition.EVIDENCE, Disposition.UNEXPECTED_ACCEPTANCE, Disposition.UNEXPECTED_REJECTION}:
             if event.is_terminal:
                 task.terminals.append(_terminal_ref(event, record.record_id))
@@ -473,7 +530,10 @@ class EdgeView:
                 if "conflicting_terminal" not in task.reconciliation_reasons:
                     task.reconciliation_reasons.append("conflicting_terminal")
             return
-        # applied
+        # applied: the only disposition that is trusted progress.
+        task.last_progress_at = when
+        task.flagged_since_last_progress.clear()
+        task.reconciliation_reasons = [r for r in task.reconciliation_reasons if r not in PROGRESS_REASONS]
         task.applied_max = key
         task.applied.append({"kind": event.kind.value, "boot_sequence": event.boot_sequence, "event_sequence": event.event_sequence, "record_id": record.record_id})
         task.state = TaskState(payload["state_after"])
@@ -699,9 +759,15 @@ def decide_status(
 
     device = view.devices[message.robot_id]
     specs: list[RecordSpec] = []
-    if device.boot_sequence is not None and message.boot_sequence < device.boot_sequence:
-        # A live status from a lower boot than the one already seen: the robot's
-        # persisted boot counter went backwards (journal wiped).  Sticky.
+    regressed = device.boot_sequence is not None and device.boot_id is not None and (
+        message.boot_sequence < device.boot_sequence
+        or message.incarnation != device.incarnation
+        or (message.boot_sequence == device.boot_sequence and message.boot_id != device.boot_id)
+    )
+    if regressed:
+        # A live status from a lower boot than the one already seen, or from a
+        # different incarnation (re-provisioned robot, whatever its counter
+        # says now): the robot's persisted continuity is gone.  Sticky.
         if not device.session_regression:
             specs.append(
                 _spec(
@@ -710,8 +776,11 @@ def decide_status(
                     now,
                     {
                         "robot_id": message.robot_id,
+                        "source": "robot_status",
                         "seen_boot_sequence": device.boot_sequence,
+                        "seen_boot_id": device.boot_id,
                         "received_boot_sequence": message.boot_sequence,
+                        "received_boot_id": message.boot_id,
                         "status": message.to_dict(),
                         "transport": transport,
                     },
@@ -801,9 +870,9 @@ def decide_status(
             task.state in {TaskState.ACCEPTED, TaskState.RUNNING}
             and message.current_task is None
             and message.availability.value == "available"
-            and "heartbeat_mismatch" not in task.flagged_since_last_event
-            and task.last_event_received_at is not None
-            and now - task.last_event_received_at >= timedelta(seconds=config.stale_after_s)
+            and "heartbeat_mismatch" not in task.flagged_since_last_progress
+            and task.last_progress_at is not None
+            and now - task.last_progress_at >= timedelta(seconds=config.stale_after_s)
         ):
             specs.append(_flag(task, "heartbeat_mismatch", now, {"status_sequence": message.status_sequence}))
     return specs
@@ -907,21 +976,7 @@ def decide_event(
             },
         )
 
-    if key in task.seen_keys:
-        if task.seen_keys[key] == digest:
-            return [received(Disposition.DUPLICATE, task.state)]
-        return [
-            received(Disposition.CONFLICTING_REPLAY, task.state),
-            _flag(task, "conflicting_replay", now, {"boot_sequence": key[0], "event_sequence": key[1]}),
-        ]
-
-    above = task.applied_max is None or key > task.applied_max
-
-    device = view.devices.get(event.robot_id)
-    if device is not None and device.session_regression:
-        # A robot whose persisted boot counter went backwards may re-execute a
-        # queued request; its events are evidence only and never move the task.
-        return [received(Disposition.EVIDENCE, task.state, flag_reason="session_regression")]
+    this_terminal = {"kind": event.kind.value, "boot_sequence": key[0], "event_sequence": key[1], "reason_code": event.reason_code}
 
     def conflict_specs(first: Mapping[str, Any], conflicting: Mapping[str, Any]) -> list[RecordSpec]:
         specs: list[RecordSpec] = []
@@ -943,7 +998,54 @@ def decide_event(
         specs.append(_flag(task, "conflicting_terminal", now, {"boot_sequence": key[0], "event_sequence": key[1]}))
         return specs
 
-    this_terminal = {"kind": event.kind.value, "boot_sequence": key[0], "event_sequence": key[1], "reason_code": event.reason_code}
+    if key in task.seen_keys:
+        if task.seen_keys[key] == digest or digest in task.conflict_digests.get(key, set()):
+            return [received(Disposition.DUPLICATE, task.state)]
+        replay_flag = _flag(task, "conflicting_replay", now, {"boot_sequence": key[0], "event_sequence": key[1]})
+        differing = [t for t in task.terminals if t["kind"] != event.kind.value]
+        if event.is_terminal and differing:
+            # Same key, different terminal: a terminal conflict, not merely a
+            # replay anomaly.  Both raw results are kept and the gate closes.
+            first = task.first_terminal if task.first_terminal is not None else differing[0]
+            return [received(Disposition.CONFLICTING_REPLAY, task.state, conflict=True), *conflict_specs(first, this_terminal), replay_flag]
+        return [received(Disposition.CONFLICTING_REPLAY, task.state), replay_flag]
+
+    above = task.applied_max is None or key > task.applied_max
+
+    device = view.devices.get(event.robot_id)
+    if device is not None:
+        # Incarnation identity is checked on events as well as on status, so a
+        # re-provisioned robot whose events outrun its first heartbeat is
+        # caught here: the regression is recorded from the event itself.
+        regression: list[RecordSpec] = []
+        if not device.session_regression and device.incarnation is not None and event.incarnation != device.incarnation:
+            regression.append(
+                _spec(
+                    SESSION_REGRESSION,
+                    "EDGE",
+                    now,
+                    {
+                        "robot_id": event.robot_id,
+                        "source": "task_event",
+                        "seen_boot_sequence": device.boot_sequence,
+                        "seen_boot_id": device.boot_id,
+                        "received_boot_sequence": event.boot_sequence,
+                        "received_boot_id": event.boot_id,
+                        "status": None,
+                        "event": event.to_dict(),
+                        "transport": transport,
+                    },
+                )
+            )
+        if regression or device.session_regression:
+            # A robot whose persisted continuity is gone may re-execute a queued
+            # request; its events are evidence only and never move the task.  A
+            # differing terminal from it still makes the recorded result
+            # unverifiable: the conflict gate closes on top of the regression.
+            differing = [t for t in task.terminals if t["kind"] != event.kind.value]
+            if event.is_terminal and differing:
+                return [*regression, received(Disposition.EVIDENCE, task.state, flag_reason="session_regression", conflict=True), *conflict_specs(differing[0], this_terminal)]
+            return [*regression, received(Disposition.EVIDENCE, task.state, flag_reason="session_regression")]
 
     if task.is_terminal:
         assert task.first_terminal is not None
@@ -960,6 +1062,11 @@ def decide_event(
         ]
 
     if not above:
+        differing = [t for t in task.terminals if t["kind"] != event.kind.value]
+        if event.is_terminal and differing:
+            # Two differing terminals in the late evidence of a still-open task
+            # contradict each other just as much as an applied pair would.
+            return [received(Disposition.LATE_EVIDENCE, task.state, conflict=True), *conflict_specs(differing[0], this_terminal)]
         return [received(Disposition.LATE_EVIDENCE, task.state)]
 
     def apply_terminal(state_after: TaskState) -> list[RecordSpec]:
@@ -1045,9 +1152,10 @@ def decide_tick(view: EdgeView, now: datetime) -> list[RecordSpec]:
         if (
             task.state in {TaskState.ACCEPTED, TaskState.RUNNING}
             and device.connectivity in {Connectivity.ONLINE, Connectivity.STALE}
-            and "progress_window_elapsed" not in task.flagged_since_last_event
+            and "progress_window_elapsed" not in task.flagged_since_last_progress
         ):
-            anchor = task.last_event_received_at or task.created_at
+            # Anchored on trusted progress, never on message receipt.
+            anchor = task.last_progress_at or task.created_at
             if now - anchor >= timedelta(seconds=task.request.progress_window_s):
                 specs.append(_flag(task, "progress_window_elapsed", now, {"progress_window_s": task.request.progress_window_s}))
         if (
@@ -1055,12 +1163,37 @@ def decide_tick(view: EdgeView, now: datetime) -> list[RecordSpec]:
             and task.publish_confirmations > 0
             and now < task.expires_at
             and device.connectivity in {Connectivity.ONLINE, Connectivity.STALE}
-            and "acceptance_window_elapsed" not in task.flagged_since_last_event
+            and "acceptance_window_elapsed" not in task.flagged_since_last_progress
             and task.last_publish_confirmed_at is not None
             and now - task.last_publish_confirmed_at >= timedelta(seconds=task.request.progress_window_s)
         ):
             specs.append(_flag(task, "acceptance_window_elapsed", now, {"progress_window_s": task.request.progress_window_s}))
     return specs
+
+
+def read_time_liveness(device: DeviceView, config: EdgeTaskConfig, now: datetime) -> dict[str, Any]:
+    """What can be verified about a device *now* from journaled receipts alone.
+
+    The journaled ``connectivity`` is the Edge's last derived state; it stays
+    frozen when no Edge process ticks.  A reader applies the same receipt
+    thresholds against its own clock and reports the evidence age instead of
+    re-stamping stale state as current.
+    """
+
+    last = device.last_valid_received_at
+    if last is None:
+        return {"connectivity": Connectivity.UNKNOWN.value, "status_age_s": None, "basis": "journal_receipt_clock"}
+    age = (now - last).total_seconds()
+    if age < 0:
+        # The reader's clock is behind the journal: nothing can be verified.
+        return {"connectivity": Connectivity.UNKNOWN.value, "status_age_s": age, "basis": "journal_receipt_clock"}
+    if age >= config.offline_after_s:
+        state = Connectivity.OFFLINE
+    elif age >= config.stale_after_s:
+        state = Connectivity.STALE
+    else:
+        state = Connectivity.ONLINE
+    return {"connectivity": state.value, "status_age_s": age, "basis": "journal_receipt_clock"}
 
 
 def _liveness(device: DeviceView, to: Connectivity, reason: str, now: datetime) -> RecordSpec:
@@ -1119,7 +1252,10 @@ def republish_candidates(view: EdgeView, now: datetime) -> list[RepublishCandida
         if task.publish_confirmations == 0:
             candidates.append(RepublishCandidate(task.task_id, "initial", attempt))
             continue
-        pending = [r for r in task.reconciliation_reasons if r in CLEARABLE_REASONS]
+        # A reason the robot has already answered (any evidence for the task
+        # after the flag, a duplicate replay included) does not keep resending;
+        # it stays visible until trusted progress clears it.
+        pending = [r for r in task.reconciliation_reasons if r in CLEARABLE_REASONS and task.unanswered(r)]
         if not pending:
             continue
         candidates.append(RepublishCandidate(task.task_id, "reconcile:" + ",".join(sorted(pending)), attempt))
@@ -1203,4 +1339,8 @@ __all__ = [
     "publish_confirmed_spec",
     "republish_candidates",
     "transport_session_spec",
+    "read_time_liveness",
+    "PRESENCE_REASONS",
+    "PROGRESS_REASONS",
+    "EVIDENCE_CONFLICT_REASONS",
 ]

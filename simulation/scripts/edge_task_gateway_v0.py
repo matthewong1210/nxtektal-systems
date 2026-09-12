@@ -106,7 +106,9 @@ class EdgeGateway:
 
     def start(self) -> None:
         now = self.clock()
-        appended = self.journal.append_via(self.core.builder(lambda _view: [edge_started_spec(self.config, self.facts, now)]))
+        # A journal that was rolled back below its anchor (state loss) or is
+        # otherwise unreadable fail-stops here, before any socket is opened.
+        appended = self._append(lambda _view: [edge_started_spec(self.config, self.facts, now)])
         self.core.absorb(appended)
         self.emit({"event": "edge_started", "at": now.isoformat(), "tasks": len(self.core.view.tasks), "disclaimer": DISCLAIMER})
         self.client.connect()
@@ -269,12 +271,21 @@ def acquire_instance_lock(journal_file: Path):
     lock_path = journal_file.parent / ".edge.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     handle = lock_path.open("a+b")
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError as exc:
-        handle.close()
-        raise SystemExit(f"another Edge gateway holds {lock_path}; refusing to start a second instance") from exc
-    return handle
+    # A read-only CLI probe holds the lock for microseconds; retry briefly so
+    # that window cannot make a legitimately starting gateway exit.
+    for attempt in range(10):
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except BlockingIOError:
+            if attempt == 9:
+                break
+            time.sleep(0.02)
+        except OSError as exc:
+            handle.close()
+            raise SystemExit(f"cannot probe {lock_path}: {exc}") from exc
+    handle.close()
+    raise SystemExit(f"another Edge gateway holds {lock_path}; refusing to start a second instance")
 
 
 def main(argv: list[str] | None = None) -> int:
