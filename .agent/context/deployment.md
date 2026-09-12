@@ -71,6 +71,25 @@ course workflows' requirement sets (now versioned `requirements/v2`)
 satisfy exactly their map prerequisites while both workflows remain
 NOT_READY and Range Operations readiness is byte-identical either way.
 
+Also added after that baseline (verify merge status against the current
+branch): `nxt_edge_task`, Edge Task Exchange V0 (PR A) — a stdlib-only,
+SIMULATION-only task-exchange rehearsal between an Edge gateway process and
+two protocol doubles (`picker-01` collects, `carrier-01` only reports
+standby) over a local, loopback-bound, nonpersistent Mosquitto on a
+task-specific port. It owns the versioned wire contracts, the Edge task and
+device journal derivation (content-derived `task_id`, dedup on both ends,
+`(boot_sequence, event_sequence)` ordering, late evidence, absorbing
+terminals, the terminal-conflict authorization gate, session regression,
+liveness), and the double's executor rules (persist-before-publish, restart
+branches, history replay). Tasks are created only by the SIMULATION test
+entry CLI. It is not physical task admission, robot telemetry, facility
+state, advice, or execution; it adds no sensor, device, ROS, actuator, or
+emergency-stop path, and does not change the "Not implemented" rows above.
+Known gaps recorded for a future site acceptance: the Edge process cannot
+notify anyone about its own death (no host watchdog exists), and human
+intervention cases plus notification records are PR B, not part of this
+slice.
+
 ## Static truth versus dynamic evidence
 
 For a physical facility, commissioning owns **what exists and how it is
@@ -191,6 +210,7 @@ give Site Runtime ownership of simulation truth.
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
+| Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules | `nxt_edge_task` (SIMULATION rehearsal only; MQTT, clocks, processes, and the test-entry CLI stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
@@ -199,7 +219,7 @@ give Site Runtime ownership of simulation truth.
 | Facility visualization | `nxt_range_twin` projection from declared layout/state contracts |
 | Micro handoff task execution | `HandoffController` / `RobotTaskInterface` / selected adapter |
 | Concrete physical telemetry source/transport/publisher | Not implemented; requires approved integration design |
-| Physical site-level collector dispatch/command admission | Not implemented; no existing API or owner |
+| Physical site-level collector dispatch/command admission | Not implemented; no existing API or owner. The `nxt_edge_task` rehearsal exchanges simulated task messages with protocol doubles and is not this boundary |
 
 Before changing any row, run the
 [pre-implementation architecture review](../workflows/architecture-review.md).

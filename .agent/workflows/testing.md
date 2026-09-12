@@ -20,7 +20,10 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
 `twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
-`edge_observation`, `workflow_enablement`, and `course_world_model`.
+`edge_observation`, `workflow_enablement`, `course_world_model`, and
+`edge_task`. `tests/edge_task/test_integration_mosquitto.py` needs a local
+`mosquitto` binary; it skips with an explicit reason otherwise, and a skip is
+not delivery evidence for an Edge Task change — attach a local run.
 Root Phase 0 tests live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
@@ -45,6 +48,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_observation/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
   tests/course_world_model/test_architecture.py \
+  tests/edge_task/test_architecture.py \
+  tests/edge_task/test_scripts_guard.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -52,9 +57,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 ```
 
 For changes to merged Commissioning, Site Runtime, Agent Runtime, the Edge
-Observation adapter kit, Workflow Enablement, or the Course World Model, run
-the entire relevant package suites in addition to the architecture/safety
-subset:
+Observation adapter kit, Workflow Enablement, the Course World Model, or the
+Edge Task Exchange, run the entire relevant package suites in addition to the
+architecture/safety subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
@@ -63,7 +68,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/agent_runtime \
   tests/edge_observation \
   tests/workflow_enablement \
-  tests/course_world_model
+  tests/course_world_model \
+  tests/edge_task
 ```
 
 Run the full suite before handing off a Python production/contract change:
@@ -101,6 +107,7 @@ safe. Do not build into the repository.
 | AI/LLM integration | Proof outputs remain advisory; static/import tests prevent direct directive, robot-interface, adapter, ROS, actuator, or e-stop access |
 | Edge observation adapter | Calibration identity/unit/range/timestamp fail-closed behavior; explicit MISSING instead of an optimistic default; unmapped raw fields reported; deterministic observation identity; at-least-once feed semantics; boundary guards proving no transport, network, robot, actuator, or e-stop surface |
 | Course World Model contract/query | Immutable identity and content-digest verification; deterministic serialization across processes and hash seeds; coordinate/geometry/elevation fail-closed rules; pure read-only queries with explicit non-answer statuses and no fabricated intersection; site-binding cross-checks; Range Operations readiness byte-identical with and without Course Model evidence; boundary guards proving no runtime, transport, filesystem, or execution import |
+| Edge Task Exchange contract/journal/executor | Strict wire decoding (exact keys, single-member `SIMULATION` environment, content-derived `task_id`); Edge transition table enumerated cell by cell with duplicate/late/conflicting dispositions; terminal-conflict gate in both arrival orders with prior facts preserved; session regression; liveness and restart grace; crash injection on both sides with execution counts asserted from the double's own journal (exactly one `execution_started` for a completed task, zero for the carrier); no republish after a terminal; journal truncation/tamper fail loud; boundary guards proving stdlib-only, no other `nxt_*` import, no transport, clock, execution, or live-switch surface; plus a real local Mosquitto multi-process run attached to the delivery |
 | Physical/config value | Provenance and placeholder census/validation |
 | Bug fix | A regression test that fails for the reproduced defect |
 

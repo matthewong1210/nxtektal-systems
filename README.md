@@ -120,6 +120,7 @@ row; the "What is working now" section above describes `main` only.
 | `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented conversion kit; fixture-backed only, no transport, device connection, or command path |
 | `simulation/nxt_workflow_enablement/` | Shared-site commissioning gates, independent per-workflow readiness verdicts, and the deterministic enablement report | Implemented readiness layer; fixture-only, evaluation only, no runtime construction or execution path |
 | `simulation/nxt_course_world_model/` | Immutable, versioned course spatial truth and the deterministic read-only Map Query Service | Implemented spatial-truth layer; synthetic processed-scan fixtures only, no scan ingestion, live map, navigation, or execution path |
+| `simulation/nxt_edge_task/` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation, and protocol-double executor rules | Implemented rehearsal contract; local Mosquitto and two mock devices only, no physical robot, task admission, or execution path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |

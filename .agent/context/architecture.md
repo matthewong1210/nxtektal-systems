@@ -172,6 +172,10 @@ coupling in named seams:
   `nxt_commissioning`'s public surface; Course Model facts reach the
   readiness layer only as declared plain-data evidence derived by
   composition roots, and neither package imports the other
+- `nxt_edge_task` as a stdlib-only, SIMULATION-only task-exchange rehearsal
+  leaf that imports no other package; commissioned identities reach it as
+  plain admission data, and MQTT, clocks, and processes stay in the
+  `simulation/scripts/` Edge gateway, mock robot, and CLI composition roots
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
