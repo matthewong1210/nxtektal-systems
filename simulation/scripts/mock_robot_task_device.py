@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import time
@@ -79,6 +80,7 @@ class MockRobotDevice:
         initialize: bool = False,
         purge_session: Callable[[], None] | None = None,
         step_interval_s: float = 0.0,
+        provisioning_nonce: Callable[[], str] | None = None,
     ) -> None:
         self.config = config
         self.robot = robot
@@ -89,6 +91,8 @@ class MockRobotDevice:
         self.initialize = initialize
         self.purge_session = purge_session
         self.step_interval_s = step_interval_s
+        # Randomness lives here, in the composition root, never in the package.
+        self.provisioning_nonce = provisioning_nonce or (lambda: os.urandom(8).hex())
         self._last_step_at: datetime | None = None
         self.core = RobotCore(config, robot, behavior)
         self.failure: Exception | None = None
@@ -131,7 +135,8 @@ class MockRobotDevice:
             # one: discard the broker session for this client id first.
             self.purge_session()
             self.emit({"event": "broker_session_purged", "robot_id": self.robot.robot_id, "reason": "provisioning"})
-        appended = self.journal.append_via(self.core.builder(lambda view: self.core.on_start(view, now, initialize=self.initialize)))
+        nonce = self.provisioning_nonce() if provisioning else None
+        appended = self.journal.append_via(self.core.builder(lambda view: self.core.on_start(view, now, initialize=self.initialize, provisioning_nonce=nonce)))
         self.core.absorb(appended)
         self.emit({"event": "robot_started", "robot_id": self.robot.robot_id, "boot_sequence": self.view.boot_sequence, "provisioned_now": provisioning, "behavior": self.core.behavior, "disclaimer": DISCLAIMER})
         self.client.connect()

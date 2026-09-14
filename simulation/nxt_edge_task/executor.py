@@ -29,8 +29,12 @@ Invariants the mock robot honours (and a real device would have to):
   boot is an explicit operator act (``robot_provisioned``); afterwards a
   missing journal is state loss and the start is refused before any request
   can be read.  Re-provisioning is a new incarnation whose ``boot_id``
-  carries a fresh provisioning token, so the Edge can tell it apart even
-  when the boot counter restarts at the number it already saw;
+  carries a fresh provisioning token (hashing a nonce supplied by the
+  composition root, never the package's own randomness), so the Edge can
+  tell it apart whatever the boot counter says; the double refuses at
+  sequence 0 any request naming another incarnation
+  (``incarnation_mismatch``), so a resend still in flight for the dead
+  incarnation is never executed by the new one;
 * a duplicate identical request replays the task's full persisted history
   without executing; a request whose ``task_id`` does not match its
   content is rejected at ``event_sequence`` 0 and touches no task;
@@ -174,6 +178,14 @@ class RobotView:
     rejections: list[dict[str, Any]] = field(default_factory=list)
     confirmed_rejections: set[int] = field(default_factory=set)
     last_record_id: str | None = None
+
+    @property
+    def incarnation(self) -> str | None:
+        """This identity's incarnation prefix (fixed at provisioning); ``None`` before provisioning."""
+
+        if not self.provisioned or self.provisioning_token is None:
+            return None
+        return f"boot-{self.robot_id}-{self.provisioning_token}"
 
     def apply_all(self, records: tuple[JournalRecord, ...]) -> None:
         for record in records[self.applied_count :]:
@@ -449,17 +461,26 @@ class RobotCore:
         if not view.provisioned:
             raise EdgeTaskError(ErrorCode.ROBOT_STATE_LOST, "the robot journal lacks its provisioning record; state continuity cannot be established")
 
-    def on_start(self, view: RobotView, now: datetime, *, initialize: bool = False) -> list[RecordSpec]:
+    def on_start(self, view: RobotView, now: datetime, *, initialize: bool = False, provisioning_nonce: str | None = None) -> list[RecordSpec]:
+        """Journal a boot; with ``initialize`` the explicit first boot of this identity.
+
+        ``provisioning_nonce`` is supplied by the composition root (which owns
+        randomness) so two provisionings at the same clock instant still
+        yield distinct incarnations; the package itself stays deterministic.
+        """
+
         self.assert_startable(view, initialize=initialize)
         specs: list[RecordSpec] = []
         token = view.provisioning_token
         if initialize:
-            token = stable_digest({"robot_id": self.robot.robot_id, "provisioned_at_utc": utc_text(now)})[:12]
+            if not provisioning_nonce or type(provisioning_nonce) is not str:
+                raise ValueError("provisioning requires a nonce from the composition root")
+            token = stable_digest({"robot_id": self.robot.robot_id, "provisioned_at_utc": utc_text(now), "nonce": provisioning_nonce})[:12]
             specs.append(
                 self._spec(
                     ROBOT_PROVISIONED,
                     now,
-                    {"robot_id": self.robot.robot_id, "provisioning_token": token, "simulation": True, "note": "explicit first boot of this robot identity (SIMULATION)"},
+                    {"robot_id": self.robot.robot_id, "provisioning_token": token, "provisioning_nonce": provisioning_nonce, "simulation": True, "note": "explicit first boot of this robot identity (SIMULATION)"},
                     origin="OPERATOR",
                 )
             )
@@ -610,6 +631,10 @@ class RobotCore:
             return seq0_rejection(request.task_id, "simulation_env_mismatch", "request simulation_env_id is not this environment"), []
         if request.target_robot_id != self.robot.robot_id or topic_robot != self.robot.robot_id:
             return seq0_rejection(request.task_id, "target_mismatch", "request is not addressed to this robot"), []
+        if request.target_incarnation != view.incarnation:
+            # The authorization names another incarnation of this identity
+            # (typically the one whose journal was lost): never executed here.
+            return seq0_rejection(request.task_id, "incarnation_mismatch", "request authorizes a different incarnation of this robot"), []
 
         known = view.tasks.get(request.task_id)
         if known is not None:

@@ -19,9 +19,11 @@ def _intruder(harness: Harness):
     return client
 
 
-def inject_event(harness: Harness, task_id: str, kind: str, boot: int, seq: int, *, reason: str | None = None, robot_id: str = "picker-01", phase: str | None = None) -> None:
+def inject_event(harness: Harness, task_id: str, kind: str, boot: int, seq: int, *, reason: str | None = None, robot_id: str = "picker-01", phase: str | None = None, incarnation: str | None = None) -> None:
     """Publish a crafted task event on the robot's topic (test-only injection)."""
 
+    if incarnation is None:
+        incarnation = harness.known_incarnation(robot_id)
     event = {
         "schema": EVENT_SCHEMA,
         "site_id": harness.config.site_id,
@@ -29,7 +31,7 @@ def inject_event(harness: Harness, task_id: str, kind: str, boot: int, seq: int,
         "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": harness.config.simulation_env_id},
         "task_id": task_id,
         "robot_id": robot_id,
-        "boot_id": f"{harness.known_incarnation(robot_id)}-{boot}",
+        "boot_id": f"{incarnation}-{boot}",
         "boot_sequence": boot,
         "event_sequence": seq,
         "kind": kind,

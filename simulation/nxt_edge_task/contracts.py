@@ -72,6 +72,8 @@ class ErrorCode(StrEnum):
     INVALID_CONFIG = "invalid_config"
     ROBOT_STATE_LOST = "robot_state_lost"
     ROBOT_ALREADY_PROVISIONED = "robot_already_provisioned"
+    DEVICE_INCARNATION_UNKNOWN = "device_incarnation_unknown"
+    INCARNATION_MISMATCH = "incarnation_mismatch"
 
 
 class EdgeTaskError(ValueError):
@@ -147,6 +149,7 @@ PROTOCOL_ENTRY_REASONS = frozenset(
         "deployment_mismatch",
         "simulation_env_mismatch",
         "task_id_content_conflict",
+        "incarnation_mismatch",
         "unsupported_task_type",
         "unsupported_schema",
         "invalid_request",
@@ -641,6 +644,7 @@ _REQUEST_KEYS = frozenset(
         "environment",
         "task_id",
         "target_robot_id",
+        "target_incarnation",
         "task_type",
         "parameters",
         "issued_at_utc",
@@ -660,6 +664,12 @@ class TaskRequest:
     simulation_env_id: str
     task_id: str
     target_robot_id: str
+    # The robot incarnation this authorization is bound to: the incarnation
+    # prefix of the boot_id the Edge had seen for the robot when the task was
+    # created.  A re-provisioned robot is a different incarnation and rejects
+    # the request at sequence 0, so a resend still in flight across a
+    # re-provisioning can never be executed by the new one.
+    target_incarnation: str
     task_type: str
     zone_id: str
     issued_at_utc: str
@@ -674,6 +684,7 @@ class TaskRequest:
         deployment_id: str,
         simulation_env_id: str,
         target_robot_id: str,
+        target_incarnation: str,
         task_type: str,
         zone_id: str,
         issued_at_utc: str,
@@ -687,6 +698,7 @@ class TaskRequest:
             "deployment_id": deployment_id,
             "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": simulation_env_id},
             "target_robot_id": target_robot_id,
+            "target_incarnation": target_incarnation,
             "task_type": task_type,
             "parameters": {"zone_id": zone_id},
             "issued_at_utc": issued_at_utc,
@@ -727,6 +739,7 @@ class TaskRequest:
             simulation_env_id=env["simulation_env_id"],
             task_id=task_id,
             target_robot_id=_identifier(payload["target_robot_id"], "target_robot_id"),
+            target_incarnation=_identifier(payload["target_incarnation"], "target_incarnation"),
             task_type=task_type,
             zone_id=_identifier(payload["parameters"]["zone_id"], "parameters.zone_id"),
             issued_at_utc=payload["issued_at_utc"],
@@ -747,6 +760,7 @@ class TaskRequest:
             "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": self.simulation_env_id},
             "task_id": self.task_id,
             "target_robot_id": self.target_robot_id,
+            "target_incarnation": self.target_incarnation,
             "task_type": self.task_type,
             "parameters": {"zone_id": self.zone_id},
             "issued_at_utc": self.issued_at_utc,

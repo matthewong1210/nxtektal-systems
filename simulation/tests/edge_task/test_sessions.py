@@ -302,8 +302,12 @@ def test_duplicate_history_replays_do_not_reset_the_progress_window(harness: Har
     dispositions = harness.event_dispositions(task_id)
     assert dispositions.count(("ACCEPTED", 1, 1, "duplicate")) >= 6
     assert all(d[3] in {"applied", "duplicate"} for d in dispositions)
-    # One reconcile round trip answered by the robot's replay; duplicates are not new authorization to keep resending.
-    assert attempts_before < len(harness.publish_calls_for(task_id)) <= attempts_before + 1
+    # Bounded reconciliation continues while the task is unresolved, but duplicates never accelerate it:
+    # consecutive reconcile attempts are at least one progress window apart, and the total stays within the cap.
+    attempted = [r for r in harness.edge_records() if r.record_kind == "task_publish_attempted" and r.payload["task_id"] == task_id and r.payload["trigger"].startswith("reconcile:")]
+    assert attempted and len(attempted) + attempts_before <= harness.config.max_republish_attempts
+    times = [parse_utc(r.recorded_at_utc, "at") for r in attempted]
+    assert all((later - earlier).total_seconds() >= 20 for earlier, later in zip(times, times[1:]))
     assert harness.executions("picker-01", task_id) == 1
 
 
@@ -392,19 +396,27 @@ def test_events_of_a_new_incarnation_arriving_before_its_heartbeat_are_evidence(
     harness.broker.hold = lambda topic, payload: topic.endswith("/status")  # every heartbeat of the new incarnation is delayed
     harness.start_robot("picker-01", initialize=True)
     harness.step(12)
-    before_release = harness.event_dispositions(task_id)
-    assert before_release, "the resend reached the new incarnation and it reported events"
-    assert all(d[3] == "evidence" for d in before_release)
-    assert harness.task(task_id)["state"] == "CREATED"
+    # The resend reached the new incarnation: it is rejected at sequence 0 (the authorization names the
+    # dead incarnation), and that rejection alone reveals the new incarnation to the Edge.
+    assert harness.executions("picker-01") == 0 and harness.kinds(harness.robot_records("picker-01")).count("task_decision") == 0
+    rejections = [r for r in harness.edge_records() if r.record_kind == "robot_request_rejected" and r.payload["task_id"] == task_id]
+    assert rejections and rejections[-1].payload["reason_code"] == "incarnation_mismatch"
     regression = [r for r in harness.edge_records() if r.record_kind == "session_regression"]
     assert len(regression) == 1 and regression[0].payload["source"] == "task_event"
     assert harness.device("picker-01")["boot_id"] == seen["boot_id"]
     assert harness.create(issued="2026-09-12T08:05:00.000000Z")["code"] == "authorization_blocked"
+    # Task events claiming the new incarnation (forged here; the double never produces them) are evidence only.
+    from tests.edge_task.test_cases import inject_event
+
+    new_prefix = harness.picker.view.incarnation
+    for kind, seq in (("ACCEPTED", 1), ("SUCCEEDED", 2)):
+        inject_event(harness, task_id, kind, 1, seq, incarnation=new_prefix)
+    assert harness.event_dispositions(task_id) and all(d[3] == "evidence" for d in harness.event_dispositions(task_id))
+    assert harness.task(task_id)["state"] == "CREATED"
     harness.broker.release_held()
     harness.broker.hold = None
     harness.step(3)
     assert harness.kinds(harness.edge_records()).count("session_regression") == 1  # the later heartbeat adds nothing
-    assert all(d[3] == "evidence" for d in harness.event_dispositions(task_id))
     assert harness.task(task_id)["state"] == "CREATED"
 
 
@@ -429,3 +441,164 @@ def test_differing_terminal_from_a_regressed_session_marks_the_result_conflictin
     assert task["effective_result"] == "CONFLICT" and task["result_verification"] == "conflicting"
     assert harness.kinds(harness.edge_records()).count("conflicting_terminal") == 1
     assert harness.create(issued="2026-09-12T08:05:00.000000Z")["code"] == "authorization_blocked"
+
+
+# ---------------------------------------------------------------------------
+# Codex review round 2 regressions
+# ---------------------------------------------------------------------------
+
+
+def test_in_flight_resend_released_after_reprovisioning_is_refused_by_the_new_incarnation(harness: Harness) -> None:
+    """Codex R2 ① (P1): a resend already in flight when the identity is re-provisioned never executes on the new incarnation.
+
+    Authorization is bound to the incarnation the Edge saw when it created the
+    task; a byte-identical resend therefore names the dead incarnation and the
+    new one rejects it at sequence 0.  Cumulative executions across both
+    journals stay at one.
+    """
+
+    import pytest
+
+    from nxt_edge_task.contracts import EdgeTaskError, ErrorCode
+
+    harness.start_all("silent_after_accept")
+    harness.step(2)
+    task_id = harness.create(progress_window_s=4)["task_id"]
+    run_until(harness, lambda: harness.task(task_id)["state"] == "ACCEPTED")
+    harness.step(2)
+    old_executions = harness.executions("picker-01", task_id)
+    assert old_executions == 1
+    # Every request from now on stays in flight at the broker (the Edge's reconcile resend included).
+    harness.broker.hold = lambda topic, payload: topic.endswith("/task/request")
+    run_until(harness, lambda: any(c[1].startswith("reconcile:") for c in harness.publish_calls_for(task_id)), max_rounds=20)
+    assert harness.broker.held, "the Edge's resend must be in flight"
+    harness.crash_robot("picker-01")
+    harness.robot_journal_path("picker-01").unlink()
+    with pytest.raises(EdgeTaskError) as refused:
+        harness.start_robot("picker-01")
+    assert refused.value.code is ErrorCode.ROBOT_STATE_LOST
+    harness.start_robot("picker-01", "accept_and_succeed", initialize=True)  # purge, new incarnation
+    harness.step(3)
+    assert harness.device("picker-01")["session_regression"] is True
+    calls = list(harness.publish_calls_for(task_id))
+    # The in-flight resend now reaches the new incarnation.
+    harness.broker.hold = None
+    harness.broker.release_held()
+    harness.step(10)
+    kinds = harness.kinds(harness.robot_records("picker-01"))
+    assert kinds.count("task_decision") == 0 and kinds.count("execution_started") == 0
+    rejected = [r for r in harness.robot_records("picker-01") if r.record_kind == "request_rejected"]
+    assert rejected and rejected[-1].payload["code"] == "incarnation_mismatch" and rejected[-1].payload["task_id"] == task_id
+    assert old_executions + harness.executions("picker-01", task_id) == 1
+    edge_rejections = [r for r in harness.edge_records() if r.record_kind == "robot_request_rejected" and r.payload["task_id"] == task_id]
+    assert edge_rejections and edge_rejections[-1].payload["reason_code"] == "incarnation_mismatch"
+    task = harness.task(task_id)
+    assert task["state"] == "ACCEPTED" and "session_regression" in task["reconciliation_reasons"]
+    assert harness.publish_calls_for(task_id) == calls  # no further publication to the new incarnation
+    assert harness.create(issued="2026-09-12T08:05:00.000000Z")["code"] == "authorization_blocked"
+
+
+def _event_kind(payload: bytes) -> str | None:
+    import json as _json
+
+    try:
+        return _json.loads(payload.decode("utf-8")).get("kind")
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def test_reconciliation_continues_after_partial_history_answers_until_the_result_arrives(harness: Harness) -> None:
+    """Codex R2 ② (P2): replayed old history answers one probe; it never ends the bounded reconciliation of an unresolved task."""
+
+    harness.broker.drop = lambda topic, payload: topic.endswith("/task/event") and _event_kind(payload) == "SUCCEEDED"
+    harness.start_all()
+    harness.step(2)
+    task_id = harness.create(progress_window_s=20)["task_id"]
+    run_until(harness, lambda: harness.task(task_id)["state"] == "RUNNING")
+    harness.step(6)  # the robot finishes; its SUCCEEDED is lost in transit
+    assert harness.executions("picker-01", task_id) == 1
+    assert harness.kinds(harness.robot_records("picker-01")).count("execution_completed") == 1
+    assert harness.task(task_id)["state"] == "RUNNING"
+    harness.step(30)
+    from nxt_edge_task.cases import PROGRESS_REASONS
+    from nxt_edge_task.contracts import parse_utc
+
+    attempts = lambda: [r for r in harness.edge_records() if r.record_kind == "task_publish_attempted" and r.payload["task_id"] == task_id]  # noqa: E731
+    probes = lambda: [r for r in harness.edge_records() if r.record_kind == "task_reconciliation_flagged" and r.payload["task_id"] == task_id and r.payload["reason"] in PROGRESS_REASONS]  # noqa: E731
+    assert harness.task(task_id)["state"] == "RUNNING"
+    assert set(harness.task(task_id)["reconciliation_reasons"]) & PROGRESS_REASONS
+    assert len(probes()) >= 2, "probing must be re-armed after the replayed history answered it"
+    assert 3 <= len(attempts()) <= harness.config.max_republish_attempts
+    # Never faster than one probe per progress window, whichever progress-type reason fires.
+    times = [parse_utc(r.recorded_at_utc, "at") for r in probes()]
+    assert all((later - earlier).total_seconds() >= 20 for earlier, later in zip(times, times[1:]))
+    assert all(d[3] in {"applied", "duplicate"} for d in harness.event_dispositions(task_id))
+    # Delivery is restored: the next bounded probe recovers the result the robot has held all along.
+    harness.broker.drop = None
+    run_until(harness, lambda: harness.task(task_id)["state"] == "SUCCEEDED", max_rounds=60)
+    assert harness.executions("picker-01", task_id) == 1
+    assert harness.kinds(harness.robot_records("picker-01")).count("task_decision") == 1
+    assert len(attempts()) <= harness.config.max_republish_attempts
+    assert not (set(harness.task(task_id)["reconciliation_reasons"]) & PROGRESS_REASONS)
+
+
+def test_reconciliation_stays_bounded_when_the_result_never_arrives(harness: Harness) -> None:
+    """The re-armed probing is still capped: after max_republish_attempts the task stays visibly unresolved, nothing else is sent."""
+
+    harness.broker.drop = lambda topic, payload: topic.endswith("/task/event") and _event_kind(payload) == "SUCCEEDED"
+    harness.start_all()
+    harness.step(2)
+    task_id = harness.create(progress_window_s=20)["task_id"]
+    run_until(harness, lambda: harness.task(task_id)["state"] == "RUNNING")
+    harness.step(200)
+    attempts = [r for r in harness.edge_records() if r.record_kind == "task_publish_attempted" and r.payload["task_id"] == task_id]
+    assert len(attempts) == harness.config.max_republish_attempts
+    task = harness.task(task_id)
+    assert task["state"] == "RUNNING" and "progress_window_elapsed" in task["reconciliation_reasons"]
+    assert harness.executions("picker-01", task_id) == 1
+    assert harness.kinds(harness.robot_records("picker-01")).count("task_decision") == 1
+
+
+def test_reprovisioning_at_the_same_clock_instant_is_still_a_new_incarnation(harness: Harness) -> None:
+    """The incarnation token carries a composition-root nonce, so the injected clock alone never reproduces an incarnation."""
+
+    harness.start_all()
+    harness.step(1)
+    first = harness.picker.view.incarnation
+    harness.crash_robot("picker-01")
+    harness.robot_journal_path("picker-01").unlink()
+    harness.start_robot("picker-01", initialize=True)  # same FakeClock instant as the previous provisioning would be if not advanced
+    assert harness.picker.view.incarnation != first
+    harness.crash_robot("picker-01")
+    harness.robot_journal_path("picker-01").unlink()
+    harness.start_robot("picker-01", initialize=True)
+    third = harness.picker.view.incarnation
+    assert len({first, harness.picker.view.incarnation, third}) == 2 and third != first
+
+
+def test_a_continuous_duplicate_stream_cannot_postpone_reprobing(harness: Harness) -> None:
+    """The re-arm waits one window after the evidence that answered the flag, not after the latest duplicate."""
+
+    harness.broker.drop = lambda topic, payload: topic.endswith("/task/event") and _event_kind(payload) == "SUCCEEDED"
+    harness.start_all()
+    harness.step(2)
+    task_id = harness.create(progress_window_s=20)["task_id"]
+    run_until(harness, lambda: harness.task(task_id)["state"] == "RUNNING")
+    harness.step(6)
+    progress = next(r.payload["event"] for r in harness.edge_records() if r.record_kind == "task_event_received" and r.payload["task_id"] == task_id and r.payload["event"]["kind"] == "PROGRESS")
+    first_duplicate_at = None
+    for _ in range(6):
+        harness.step(10)
+        harness.replay_event(progress)  # an unsolicited duplicate every 10 s, faster than the window
+        first_duplicate_at = first_duplicate_at or harness.clock()
+    attempts = [r for r in harness.edge_records() if r.record_kind == "task_publish_attempted" and r.payload["task_id"] == task_id]
+    from nxt_edge_task.contracts import parse_utc
+
+    after_first_duplicate = [a for a in attempts if a.payload["trigger"].startswith("reconcile:") and parse_utc(a.recorded_at_utc, "at") > first_duplicate_at]
+    # Under a latest-evidence clock every duplicate would push the re-arm out by a full window and no
+    # reconcile probe could ever follow the first duplicate; the answer clock keeps them coming, one per window.
+    assert len(after_first_duplicate) >= 2, [(a.payload["trigger"], a.recorded_at_utc) for a in attempts]
+    assert len(attempts) <= harness.config.max_republish_attempts
+    harness.broker.drop = None
+    run_until(harness, lambda: harness.task(task_id)["state"] == "SUCCEEDED", max_rounds=60)
+    assert harness.executions("picker-01", task_id) == 1

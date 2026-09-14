@@ -162,6 +162,7 @@ def test_unknown_task_identity_rejection_is_acked_published_and_survives_restart
         deployment_id=harness.config.deployment_id,
         simulation_env_id=harness.config.simulation_env_id,
         target_robot_id="carrier-01",
+        target_incarnation=harness.known_incarnation("carrier-01"),
         task_type="COLLECT_BALLS_ZONE",
         zone_id="Z1",
         issued_at_utc="2026-09-12T08:00:00.000000Z",

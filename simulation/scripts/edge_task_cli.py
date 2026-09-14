@@ -37,17 +37,18 @@ SIM_ROOT = Path(__file__).resolve().parents[1]
 if str(SIM_ROOT) not in sys.path:
     sys.path.insert(0, str(SIM_ROOT))
 
-from nxt_edge_task.cases import EDGE_RECORD_KINDS, EdgeView, decide_task_create, read_time_liveness  # noqa: E402
+from nxt_edge_task.cases import EDGE_RECORD_KINDS, TASK_CREATE_REJECTED, CreateOutcome, EdgeView, decide_task_create, read_time_liveness  # noqa: E402
 from nxt_edge_task.contracts import (  # noqa: E402
     TASK_TYPE_COLLECT_BALLS_ZONE,
     AdmissionFacts,
     EdgeTaskConfig,
     EdgeTaskError,
+    ErrorCode,
     TaskRequest,
     parse_utc,
     utc_text,
 )
-from nxt_edge_task.journal import JournalIntegrityError, JsonlJournal  # noqa: E402
+from nxt_edge_task.journal import JournalIntegrityError, JsonlJournal, RecordSpec  # noqa: E402
 
 DISCLAIMER = "SIMULATION — test entry; not a production scheduler"
 
@@ -69,23 +70,40 @@ def create_task(
     progress_window_s: int | None,
     now: datetime,
 ) -> dict[str, Any]:
-    request = TaskRequest.build(
-        site_id=config.site_id,
-        deployment_id=config.deployment_id,
-        simulation_env_id=config.simulation_env_id,
-        target_robot_id=robot_id,
-        task_type=TASK_TYPE_COLLECT_BALLS_ZONE,
-        zone_id=zone_id,
-        issued_at_utc=issued_at_utc,
-        expires_at_utc=expires_at_utc,
-        progress_window_s=config.default_progress_window_s if progress_window_s is None else progress_window_s,
-        issued_by=f"SIMULATION_TEST_ENTRY:{operator}",
-    )
+    issued_by = f"SIMULATION_TEST_ENTRY:{operator}"
     outcome_box: dict[str, Any] = {}
 
     def build(records):
         view = EdgeView(config=config)
         view.apply_all(records)
+        device = view.devices.get(robot_id)
+        incarnation = None if device is None else device.incarnation
+        if incarnation is None:
+            # The authorization is bound to the robot incarnation the Edge has
+            # seen; without any received status there is nothing to bind to.
+            detail = "no status has ever been received from this robot; the authorization cannot be bound to an incarnation"
+            outcome_box["outcome"] = CreateOutcome("rejected", None, ErrorCode.DEVICE_INCARNATION_UNKNOWN.value, detail)
+            return [
+                RecordSpec(
+                    record_kind=TASK_CREATE_REJECTED,
+                    origin="SIM_ENTRY",
+                    recorded_at_utc=utc_text(now),
+                    payload={"task_id": None, "code": ErrorCode.DEVICE_INCARNATION_UNKNOWN.value, "detail": detail, "request": None, "target_robot_id": robot_id},
+                )
+            ]
+        request = TaskRequest.build(
+            site_id=config.site_id,
+            deployment_id=config.deployment_id,
+            simulation_env_id=config.simulation_env_id,
+            target_robot_id=robot_id,
+            target_incarnation=incarnation,
+            task_type=TASK_TYPE_COLLECT_BALLS_ZONE,
+            zone_id=zone_id,
+            issued_at_utc=issued_at_utc,
+            expires_at_utc=expires_at_utc,
+            progress_window_s=config.default_progress_window_s if progress_window_s is None else progress_window_s,
+            issued_by=issued_by,
+        )
         outcome, specs = decide_task_create(view, facts, request, now)
         outcome_box["outcome"] = outcome
         return specs
@@ -97,7 +115,7 @@ def create_task(
         "task_id": outcome.task_id,
         "code": outcome.code,
         "detail": outcome.detail,
-        "issued_by": request.issued_by,
+        "issued_by": issued_by,
         "disclaimer": DISCLAIMER,
     }
 

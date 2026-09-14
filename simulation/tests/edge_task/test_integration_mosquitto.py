@@ -542,3 +542,9 @@ def test_lost_robot_journal_is_refused_and_never_re_executes_over_real_broker(st
     issued2, expires2 = _times(2)
     blocked = stack.create(issued=issued2, expires=expires2)
     assert blocked["code"] == "authorization_blocked"
+    # A copy of the original request still in flight reaches the new incarnation: rejected at sequence 0, never executed.
+    stack.inject(request_topic(stack.config["site_id"], "picker-01"), stack.request_bytes(task_id))
+    stack.wait_records(lambda records: any(r.record_kind == "robot_request_rejected" and r.payload["task_id"] == task_id and r.payload["reason_code"] == "incarnation_mismatch" for r in records), timeout_s=20)
+    kinds = [r.record_kind for r in stack.robot_records("picker-01")]
+    assert kinds.count("task_decision") == 0 and kinds.count("execution_started") == 0
+    assert [r.payload["code"] for r in stack.robot_records("picker-01") if r.record_kind == "request_rejected"] == ["incarnation_mismatch"]

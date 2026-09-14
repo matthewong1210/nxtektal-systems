@@ -101,3 +101,26 @@ def test_cli_reports_a_rolled_back_journal_as_a_machine_readable_error(tmp_path,
     captured = capsys.readouterr()
     assert code == 3
     assert '"error": "journal_integrity"' in captured.err and "rolled back" in captured.err
+
+
+def test_task_creation_needs_a_seen_incarnation_and_refuses_a_foreign_one(harness: Harness) -> None:
+    from nxt_edge_task.cases import decide_task_create
+    from nxt_edge_task.contracts import TaskRequest
+
+    harness.start_edge()  # no robot has ever reported
+    refused = harness.create()
+    assert refused["status"] == "rejected" and refused["code"] == "device_incarnation_unknown" and refused["task_id"] is None
+    rejected = [r for r in harness.edge_records() if r.record_kind == "task_create_rejected"]
+    assert rejected and rejected[-1].payload["code"] == "device_incarnation_unknown" and rejected[-1].payload["request"] is None
+    harness.start_robot("picker-01", initialize=True)
+    harness.start_robot("carrier-01", initialize=True)
+    harness.step(2)
+    foreign = TaskRequest.build(
+        site_id=harness.config.site_id, deployment_id=harness.config.deployment_id, simulation_env_id=harness.config.simulation_env_id,
+        target_robot_id="picker-01", target_incarnation="boot-picker-01-deadbeef0000", task_type="COLLECT_BALLS_ZONE", zone_id="Z1",
+        issued_at_utc="2026-09-12T08:00:00.000000Z", expires_at_utc="2026-09-12T08:10:00.000000Z", progress_window_s=20, issued_by="SIMULATION_TEST_ENTRY:test",
+    )
+    harness._refresh_edge()
+    outcome, specs = decide_task_create(harness.edge.core.view, harness.facts, foreign, harness.clock())
+    assert outcome.status == "rejected" and outcome.code == "incarnation_mismatch" and specs[0].record_kind == "task_create_rejected"
+    assert harness.create()["status"] == "created"  # the CLI binds to the seen incarnation

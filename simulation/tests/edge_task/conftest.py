@@ -70,6 +70,13 @@ class Harness:
     picker: MockRobotDevice | None = None
     carrier: MockRobotDevice | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
+    provisionings: int = 0
+
+    def _next_nonce(self) -> str:
+        """Deterministic stand-in for the script's random nonce: unique per provisioning."""
+
+        self.provisionings += 1
+        return f"nonce-{self.provisionings:04d}"
 
     # -- construction -----------------------------------------------------
 
@@ -125,6 +132,7 @@ class Harness:
             emit=self.events.append,
             initialize=initialize,
             purge_session=purge_session,
+            provisioning_nonce=self._next_nonce,
         )
         device.start()
         if robot.role == "picker":

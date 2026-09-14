@@ -109,10 +109,18 @@ are bounded to 65,536 bytes.
   `level_fraction`, `x_m`, `y_m` as `null`: it has no battery model or
   position.
 - `task.request/v1` (Edge → robot, QoS 1, never retained): identity,
-  `task_id`, `target_robot_id`, `task_type` (`COLLECT_BALLS_ZONE`),
-  `parameters.zone_id`, `issued_at_utc`, `expires_at_utc`,
-  `progress_window_s`, `issued_by` (`SIMULATION_TEST_ENTRY:<operator>`).
+  `task_id`, `target_robot_id`, `target_incarnation` (the incarnation
+  prefix of the `boot_id` the Edge had seen for the robot when the task
+  was created; the robot rejects a request naming any other incarnation at
+  sequence 0 with `incarnation_mismatch`, so a resend still in flight
+  across a re-provisioning is never executed by the new incarnation),
+  `task_type` (`COLLECT_BALLS_ZONE`), `parameters.zone_id`,
+  `issued_at_utc`, `expires_at_utc`, `progress_window_s`, `issued_by`
+  (`SIMULATION_TEST_ENTRY:<operator>`).
   `task_id = "task_" + sha256(all other fields)[:24]`; both ends verify it.
+  A task cannot be created for a robot the Edge has never received a
+  status from (`device_incarnation_unknown`): there is nothing to bind the
+  authorization to.
 - `task.event/v1` (robot → Edge, QoS 1, never retained): identity,
   `task_id`, `robot_id`, `boot_id`, `boot_sequence`, `event_sequence`
   (per boot and task, from 1; `0` is reserved for request-level rejections
@@ -188,10 +196,10 @@ rolled-back journal, so the regression is the Edge's independent guard, not
 the only one. Task events from an older boot of the *same* incarnation
 arriving late are just late evidence. Residual: a request republished by
 the Edge before it learned of the regression and delivered to the fresh
-incarnation after provisioning is a new task for that incarnation; the
-Edge records its events as evidence and closes the gate, but the double
-executes it once. The window is one in-flight resend during
-re-provisioning; it is documented, not closed.
+incarnation after provisioning names the dead incarnation
+(`target_incarnation`) and is rejected at sequence 0 by the new one, which
+never executes it; the Edge records the rejection and the regression. The
+former "one in-flight resend" residual is closed.
 
 Evidence conflicts also close the gate: `post_terminal_activity` (a
 higher-key non-terminal event after a terminal), `unexpected_acceptance`,
@@ -233,12 +241,25 @@ Republication (byte-identical request, same `task_id`, never a new id):
 only for a non-terminal, non-blocked task whose device is `ONLINE`/`STALE`,
 with no authorization block, fewer than `max_republish_attempts` journaled
 attempts, at least `min_republish_interval_s` since the last attempt, at
-most one attempt after `expires_at_utc`, and only while a clearable
-reconciliation flag is **unanswered** — flagged after the last robot
-evidence for the task (or no publication was ever confirmed). A robot's
-reply to a reconcile resend (typically a duplicate history replay) answers
-the flag and stops the resends; the flag itself stays visible until trusted
-progress clears it. The
+most one attempt after `expires_at_utc`, only to the incarnation the request
+names, and only while a clearable reconciliation flag is **unanswered** —
+flagged after the last robot evidence for the task (or no publication was
+ever confirmed). Any robot evidence for the task journaled after the flag
+(typically a duplicate history replay) answers it; the flag itself stays
+visible until trusted progress clears it. An answered progress-type flag
+re-arms one full window after the evidence that answered it (not after the
+latest duplicate, so a duplicate stream cannot postpone it) while the task
+is still unresolved, so a result the robot holds but the transport lost
+keeps being probed within the same interval and attempt bounds; a stream
+of unsolicited duplicates therefore consumes the attempt cap rather than
+starving the probing, and once the cap is spent only PR B's human handling
+recovers the task. The progress-type
+reasons (`progress_window_elapsed`, `acceptance_window_elapsed`,
+`heartbeat_mismatch`) share one probe epoch: within one progress epoch
+(trusted progress starts a new one) there is never more than one
+progress-type probe per progress window, and never one past
+`max_republish_attempts`; once the cap is reached the task stays visibly
+unresolved for PR B's human handling. The
 attempt is journaled (`task_publish_attempted`) before the transport call,
 so the bound holds even when hop-1 never confirms. The gateway re-derives
 each candidate from the live view immediately before publishing, because
@@ -251,7 +272,8 @@ history only adds evidence.
 
 Validation order for a request: topic → schema (including
 `task_id == f(content)`) → site/deployment/environment/target identity →
-known `task_id` (identical
+incarnation (`target_incarnation` must name this incarnation, else
+`incarnation_mismatch` at sequence 0) → known `task_id` (identical
 content: replay the task's full persisted history, no execution; different
 content is unreachable and rejected at sequence 0) → robot condition
 (`awaiting_human`, `faulted`, `estopped` → task-level `REJECTED` with
@@ -364,13 +386,13 @@ are recorded in the PR A hand-off, not here.
 | Scenario | Test |
 |---|---|
 | Normal flow, Picker once, Carrier zero (standby rule), restart both, robot journal truncation fail-stop | `test_closed_loop_inmemory.py::test_normal_flow_contract`, `::test_restart_of_edge_and_picker_preserves_contract`, `::test_carrier_rejects_unsupported_task_and_never_executes`, `::test_standby_double_with_supported_task_type_still_rejects_and_never_executes`, `test_recovery_robot.py::test_truncated_robot_journal_fails_stop_without_second_execution_started`, `test_integration_mosquitto.py::test_normal_flow_over_real_broker` |
-| A1 terminal before acceptance, no resend, natural late history | `test_closed_loop_inmemory.py::test_terminal_before_acceptance_preserves_gaps_without_resend`, `::test_naturally_late_history_fills_gaps_without_resend_or_state_regression`, `test_integration_mosquitto.py::test_terminal_before_acceptance_over_real_broker_has_zero_resend_and_natural_late_history` |
+| A1 terminal before acceptance, no resend, late history (over the real broker the late history is driven by a test-injected delayed copy of the original request after the terminal, not by an observed broker-native in-flight packet) | `test_closed_loop_inmemory.py::test_terminal_before_acceptance_preserves_gaps_without_resend`, `::test_naturally_late_history_fills_gaps_without_resend_or_state_regression`, `test_integration_mosquitto.py::test_terminal_before_acceptance_over_real_broker_has_zero_resend_and_natural_late_history` |
 | A2 duplicate terminal | `test_closed_loop_inmemory.py::test_duplicate_terminal_is_idempotent` |
 | B1 old-boot progress after new-boot terminal | `test_cases.py::test_old_boot_progress_after_new_boot_terminal_is_late_evidence` |
 | B2 forged / foreign requests: sequence-0 rejections, repeated and for unknown ids | `test_recovery_robot.py::test_forged_same_id_request_is_rejected_at_sequence_zero_without_touching_task`, `::test_repeated_forged_same_id_requests_each_publish_a_sequence_zero_rejection`, `::test_legit_resend_after_forged_same_id_request_replays_no_sequence_zero`, `::test_unknown_task_identity_rejection_is_acked_published_and_survives_restart`, `test_cases.py::test_sequence_zero_rejection_never_transitions` |
 | B3 late legitimate terminal | `test_closed_loop_inmemory.py::test_late_legitimate_terminal_is_applied_after_resend` |
 | B3′a / B3′b terminal conflict, both orders, same-key conflict, prior facts preserved, torn batch | `test_cases.py::test_inconclusive_then_success_exposes_conflict_and_blocks_authorization`, `::test_success_then_conflicting_terminal_blocks_future_authorization`, `::test_conflicting_terminal_detected_regardless_of_arrival_order`, `::test_conflict_preserves_prior_release_and_dispatch_facts`, `::test_same_key_conflicting_terminal_closes_the_authorization_gate`, `test_recovery_edge.py::test_torn_conflict_batch_restores_gate_from_evidence_record_on_restart`, `test_integration_mosquitto.py::test_conflict_gate_holds_when_inconclusive_arrives_first_over_real_broker`, `::test_conflict_gate_holds_when_success_arrives_first_over_real_broker` (later-boot INCONCLUSIVE, later-boot FAILED, same-key FAILED), `test_cases.py::test_two_differing_late_terminals_on_an_open_task_conflict`, `::test_same_key_conflict_against_a_late_evidence_terminal_is_kept_without_a_second_conflict_record` |
-| B4 session regression and identity continuity (state loss refused, rolled-back journal refused, re-provisioning purges the queued request, same-boot and later-boot re-provisioning detected, events outrunning the first heartbeat, resend ban, event ban) | `test_sessions.py::test_lost_robot_journal_is_not_a_first_boot_and_never_re_executes_a_queued_request`, `::test_rolled_back_robot_journal_is_refused_even_though_the_prefix_is_valid`, `::test_reprovisioned_robot_at_the_same_boot_number_is_a_session_regression`, `::test_reprovisioned_incarnation_is_detected_even_after_its_counter_passes_the_seen_boot`, `::test_events_of_a_new_incarnation_arriving_before_its_heartbeat_are_evidence`, `::test_differing_terminal_from_a_regressed_session_marks_the_result_conflicting`, `::test_boot_sequence_regression_blocks_resend_and_opens_conflict`, `::test_events_from_regressed_session_are_evidence_not_applied`, `test_integration_mosquitto.py::test_lost_robot_journal_is_refused_and_never_re_executes_over_real_broker` |
+| B4 session regression and identity continuity (state loss refused, rolled-back journal refused, re-provisioning purges the queued request, same-boot and later-boot re-provisioning detected, events outrunning the first heartbeat, resend ban, event ban) | `test_sessions.py::test_lost_robot_journal_is_not_a_first_boot_and_never_re_executes_a_queued_request`, `::test_rolled_back_robot_journal_is_refused_even_though_the_prefix_is_valid`, `::test_reprovisioned_robot_at_the_same_boot_number_is_a_session_regression`, `::test_reprovisioned_incarnation_is_detected_even_after_its_counter_passes_the_seen_boot`, `::test_events_of_a_new_incarnation_arriving_before_its_heartbeat_are_evidence`, `::test_in_flight_resend_released_after_reprovisioning_is_refused_by_the_new_incarnation`, `::test_differing_terminal_from_a_regressed_session_marks_the_result_conflicting`, `::test_boot_sequence_regression_blocks_resend_and_opens_conflict`, `::test_events_from_regressed_session_are_evidence_not_applied`, `test_integration_mosquitto.py::test_lost_robot_journal_is_refused_and_never_re_executes_over_real_broker`, `test_sessions.py::test_reprovisioning_at_the_same_clock_instant_is_still_a_new_incarnation`, `test_cli_views.py::test_task_creation_needs_a_seen_incarnation_and_refuses_a_foreign_one` |
 | Evidence-conflict gate (post-terminal activity, unexpected acceptance/rejection) | `test_cases.py::test_evidence_conflicts_close_the_authorization_gate` |
 | Journal anchor (rollback, rewritten record, missing anchor, torn batch tolerance) | `test_journal.py::test_anchor_advances_with_every_append_and_lags_never_leads`, `::test_rollback_to_a_valid_prefix_fails_loud_on_read_and_append`, `::test_rewritten_record_at_the_anchor_fails_loud`, `::test_missing_journal_with_an_anchor_and_journal_without_anchor_both_fail`, `::test_discard_anchor_only_for_a_missing_or_empty_journal`, `::test_torn_batch_is_not_a_rollback` |
 | C1 Edge crash before publish confirmation; unconfirmed publish bounds | `test_recovery_edge.py::test_crash_after_task_created_before_publish_confirmed_republishes_same_bytes`, `::test_publish_without_hop1_confirmation_is_retried_and_deduplicated_by_the_robot`, `::test_unconfirmed_initial_publish_is_bounded_by_interval_and_attempt_cap` |
@@ -384,7 +406,7 @@ are recorded in the PR A hand-off, not here.
 | D2 known task replays history | `test_recovery_robot.py::test_known_task_resend_replays_history_without_execution` |
 | D3 expired unknown task | `test_closed_loop_inmemory.py::test_expired_unknown_task_is_rejected_and_never_executed` |
 | D4 no republish after terminal/blocked/offline; candidate re-derived after a hop-1 wait | `test_closed_loop_inmemory.py::test_terminal_and_blocked_tasks_are_not_republished`, `::test_terminal_applied_during_hop1_wait_is_not_republished`, `test_sessions.py::test_offline_device_gets_no_republication` |
-| Progress window (receipt ≠ progress), liveness, restart grace | `test_sessions.py` (incl. `::test_duplicate_history_replays_do_not_reset_the_progress_window`), `test_integration_mosquitto.py::test_silent_after_accept_leaves_persistent_unverified_progress_evidence` |
+| Progress window (receipt ≠ progress; bounded re-probing until the result arrives or the cap is reached), liveness, restart grace | `test_sessions.py` (incl. `::test_duplicate_history_replays_do_not_reset_the_progress_window`, `::test_reconciliation_continues_after_partial_history_answers_until_the_result_arrives`, `::test_reconciliation_stays_bounded_when_the_result_never_arrives`, `::test_a_continuous_duplicate_stream_cannot_postpone_reprobing`), `test_integration_mosquitto.py::test_silent_after_accept_leaves_persistent_unverified_progress_evidence` |
 | Read-time freshness of the CLI views | `test_cli_views.py` |
 | Local-broker boundary (config and transport, no network) | `test_contracts.py::test_config_refuses_non_loopback_or_conventional_broker_endpoints`, `::test_config_accepts_loopback_task_specific_endpoints`, `test_transport.py::test_paho_client_refuses_a_non_loopback_endpoint_before_any_socket` |
 | Broker restart | `test_recovery_edge.py::test_broker_restart_mid_task_converges_without_duplicate_execution`, `test_integration_mosquitto.py::test_broker_restart_mid_task_converges_without_duplicate_execution` |
@@ -424,13 +446,26 @@ Recorded so the plan can be amended rather than silently diverged from:
 4. The authorization gate also closes on the sticky evidence conflicts
    (`post_terminal_activity`, `unexpected_acceptance`,
    `unexpected_rejection`, `conflicting_replay`), not only on terminal
-   conflicts and session regression. PR B's human handling must decide
-   which of these a `resolve` may clear.
+   conflicts and session regression. PR B's `ack`/`resolve` never clear
+   any gate by themselves (plan D4 stands); how a human reconciliation
+   reopens authorization is a PR B design decision.
 5. Receipt and progress clocks are distinct; presence reasons are answered
-   by any robot evidence, progress reasons only by applied events, and a
-   reconcile resend is repeated only while its flag is unanswered.
+   by any robot evidence, progress reasons only by applied events; an
+   answered progress flag re-arms one window later while the task is
+   unresolved, within the existing interval and attempt bounds.
 6. A restart decides a request that was persisted without a decision as if
    it had just arrived (a first execution, never a re-execution).
+7. `task.request/v1` carries `target_incarnation`; the first-execution
+   authorization is bound to the robot incarnation the Edge saw at creation,
+   a task cannot be created for a never-seen robot, and the double rejects a
+   request naming another incarnation at sequence 0. The schema id stays
+   `v1` although a required field was added, because v1 is unreleased; Edge
+   journals written before this field are refused on read (no migration).
+   The incarnation token hashes a nonce supplied by the composition root,
+   so two provisionings at the same clock instant are distinct incarnations
+   (pinned by `test_sessions.py::test_reprovisioning_at_the_same_clock_instant_is_still_a_new_incarnation`;
+   creation and refusal paths in
+   `test_cli_views.py::test_task_creation_needs_a_seen_incarnation_and_refuses_a_foreign_one`).
 
 No physical robot, sensor, CAN, serial, ROS, arm, charger, or site broker;
 no automatic zone selection, density learning, or scheduling; no carrier
@@ -452,6 +487,6 @@ rolled-back journal is refused, but a journal and its anchor rolled back
 at that point (no external attestation exists in V0); the Edge still
 detects a new incarnation from the `boot_id` prefix, and an unexplained
 re-execution by the same incarnation surfaces as an evidence conflict that
-closes the gate. A resend already in flight during re-provisioning is the
-documented residual above. Journal growth is unbounded (heartbeat receipts
+closes the gate. A resend already in flight during re-provisioning is rejected at
+sequence 0 by the new incarnation (`target_incarnation`). Journal growth is unbounded (heartbeat receipts
 dominate); no rotation exists in PR A.

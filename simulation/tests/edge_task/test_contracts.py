@@ -35,6 +35,7 @@ def _request_fields(**overrides):
         "deployment_id": "pilot-a-edge-task-sim-v0",
         "environment": {"kind": ENVIRONMENT_KIND_SIMULATION, "simulation_env_id": "sim-local-01"},
         "target_robot_id": "picker-01",
+        "target_incarnation": "boot-picker-01-0123456789ab",
         "task_type": "COLLECT_BALLS_ZONE",
         "parameters": {"zone_id": "Z1"},
         "issued_at_utc": "2026-09-12T08:00:00.000000Z",

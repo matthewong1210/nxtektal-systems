@@ -199,11 +199,50 @@ class TaskView:
     # Journal sequence at which each pending reason was (re)flagged; a reason
     # flagged after the last robot evidence is unanswered and may republish.
     flag_record_sequence: dict[str, int] = field(default_factory=dict)
+    # Progress-type reasons share one probe epoch: at most one of them is
+    # (re)flagged per progress window, so re-probing never runs faster than
+    # the window whichever reason fires.
+    last_progress_probe_at: datetime | None = None
+    # When the first robot evidence after each flag arrived: the re-arm waits
+    # one window after the ANSWER, so a continuous stream of duplicates can
+    # never postpone re-probing indefinitely.
+    flag_answered_at: dict[str, datetime] = field(default_factory=dict)
     expired_unconfirmed: bool = False
     exceptions: list[dict[str, Any]] = field(default_factory=list)
 
     def unanswered(self, reason: str) -> bool:
         return self.flag_record_sequence.get(reason, 0) > self.last_event_record_sequence
+
+    def reprobe_due(self, reason: str, now: datetime, window: timedelta) -> bool:
+        """May a progress-type reason be (re)flagged now?
+
+        Never more than one progress-type probe per window within one
+        progress epoch (trusted progress starts a new epoch).  Within that
+        pacing: first time in this progress epoch, yes.  While the last flag
+        is still unanswered, no (the resend bounds already govern it).  Once
+        the robot answered without trusted progress (a replayed history, a
+        rejection), a full window after that answer, yes again, so an
+        unresolved result keeps being probed within the existing interval and
+        attempt bounds.
+        """
+
+        if self.last_progress_probe_at is not None and now - self.last_progress_probe_at < window:
+            return False
+        if reason not in self.flagged_since_last_progress:
+            return True
+        if self.unanswered(reason):
+            return False
+        answered_at = self.flag_answered_at.get(reason)
+        return answered_at is not None and now - answered_at >= window
+
+    def note_evidence(self, record_sequence: int, when: datetime) -> None:
+        """Receipt clock: any robot evidence for the task, whatever its disposition."""
+
+        for reason, flagged_at in self.flag_record_sequence.items():
+            if flagged_at > self.last_event_record_sequence:
+                self.flag_answered_at[reason] = when  # this evidence is the answer to that flag
+        self.last_event_received_at = when
+        self.last_event_record_sequence = record_sequence
 
     @property
     def is_terminal(self) -> bool:
@@ -452,8 +491,7 @@ class EdgeView:
                 )
                 # The robot answered (with a request-level rejection): a pending
                 # reconcile flag is answered, though nothing about progress changes.
-                task.last_event_received_at = when
-                task.last_event_record_sequence = record.sequence
+                task.note_evidence(record.sequence, when)
         elif kind == TASK_RECONCILIATION_FLAGGED:
             task = self.tasks[payload["task_id"]]
             reason = payload["reason"]
@@ -462,6 +500,8 @@ class EdgeView:
             task.flagged_since_last_event.add(reason)
             task.flagged_since_last_progress.add(reason)
             task.flag_record_sequence[reason] = record.sequence
+            if reason in PROGRESS_REASONS:
+                task.last_progress_probe_at = when
             if reason == "expired_unconfirmed":
                 task.expired_unconfirmed = True
         elif kind == CONFLICTING_TERMINAL:
@@ -489,8 +529,7 @@ class EdgeView:
         conflict = payload.get("conflict") is True
         # Receipt clock: any robot evidence for the task answers the presence
         # reasons.  It is not progress and clears nothing about progress.
-        task.last_event_received_at = when
-        task.last_event_record_sequence = record.sequence
+        task.note_evidence(record.sequence, when)
         task.flagged_since_last_event.clear()
         task.reconciliation_reasons = [r for r in task.reconciliation_reasons if r not in PRESENCE_REASONS]
         if disposition is Disposition.CONFLICTING_REPLAY:
@@ -532,6 +571,7 @@ class EdgeView:
             return
         # applied: the only disposition that is trusted progress.
         task.last_progress_at = when
+        task.last_progress_probe_at = None
         task.flagged_since_last_progress.clear()
         task.reconciliation_reasons = [r for r in task.reconciliation_reasons if r not in PROGRESS_REASONS]
         task.applied_max = key
@@ -655,6 +695,11 @@ def decide_task_create(
         return CreateOutcome("idempotent", request.task_id, None, None), []
     if now >= request.expires_at:
         return reject(ErrorCode.INVALID_FIELD, "request is already expired at creation")
+    device = view.devices[request.target_robot_id]
+    if device.incarnation is None:
+        return reject(ErrorCode.DEVICE_INCARNATION_UNKNOWN, "no status has ever been received from this robot; the authorization cannot be bound to an incarnation")
+    if request.target_incarnation != device.incarnation:
+        return reject(ErrorCode.INCARNATION_MISMATCH, "request names an incarnation other than the one last seen for this robot")
     block = view.authorization_block_reason(request.target_robot_id)
     if block is not None:
         return reject(ErrorCode.AUTHORIZATION_BLOCKED, f"device authorization gate closed: {block}")
@@ -870,7 +915,7 @@ def decide_status(
             task.state in {TaskState.ACCEPTED, TaskState.RUNNING}
             and message.current_task is None
             and message.availability.value == "available"
-            and "heartbeat_mismatch" not in task.flagged_since_last_progress
+            and task.reprobe_due("heartbeat_mismatch", now, timedelta(seconds=task.request.progress_window_s))
             and task.last_progress_at is not None
             and now - task.last_progress_at >= timedelta(seconds=config.stale_after_s)
         ):
@@ -938,14 +983,41 @@ def decide_event(
         return rejected(ErrorCode.UNKNOWN_TASK, "event references a task the Edge never created", event.task_id, event.robot_id)
     if event.robot_id != task.request.target_robot_id:
         return rejected(ErrorCode.TARGET_MISMATCH, "event robot_id is not the task's target robot", event.task_id, event.robot_id)
+
+    device = view.devices.get(event.robot_id)
+    # Incarnation identity is checked on every event (sequence-0 rejections
+    # included) as well as on status, so a re-provisioned robot whose events
+    # outrun its first heartbeat is caught here: the regression is recorded
+    # from the event itself.
+    regression: list[RecordSpec] = []
+    if device is not None and not device.session_regression and device.incarnation is not None and event.incarnation != device.incarnation:
+        regression.append(
+            _spec(
+                SESSION_REGRESSION,
+                "EDGE",
+                now,
+                {
+                    "robot_id": event.robot_id,
+                    "source": "task_event",
+                    "seen_boot_sequence": device.boot_sequence,
+                    "seen_boot_id": device.boot_id,
+                    "received_boot_sequence": event.boot_sequence,
+                    "received_boot_id": event.boot_id,
+                    "status": None,
+                    "event": event.to_dict(),
+                    "transport": transport,
+                },
+            )
+        )
     if event.is_request_level_rejection:
         return [
+            *regression,
             _spec(
                 ROBOT_REQUEST_REJECTED,
                 "EDGE",
                 now,
                 {"task_id": event.task_id, "robot_id": event.robot_id, "reason_code": event.reason_code, "reason_class": _class_text(event.reason_code), "event": event.to_dict(), "transport": transport},
-            )
+            ),
         ]
 
     base = {
@@ -1012,31 +1084,7 @@ def decide_event(
 
     above = task.applied_max is None or key > task.applied_max
 
-    device = view.devices.get(event.robot_id)
     if device is not None:
-        # Incarnation identity is checked on events as well as on status, so a
-        # re-provisioned robot whose events outrun its first heartbeat is
-        # caught here: the regression is recorded from the event itself.
-        regression: list[RecordSpec] = []
-        if not device.session_regression and device.incarnation is not None and event.incarnation != device.incarnation:
-            regression.append(
-                _spec(
-                    SESSION_REGRESSION,
-                    "EDGE",
-                    now,
-                    {
-                        "robot_id": event.robot_id,
-                        "source": "task_event",
-                        "seen_boot_sequence": device.boot_sequence,
-                        "seen_boot_id": device.boot_id,
-                        "received_boot_sequence": event.boot_sequence,
-                        "received_boot_id": event.boot_id,
-                        "status": None,
-                        "event": event.to_dict(),
-                        "transport": transport,
-                    },
-                )
-            )
         if regression or device.session_regression:
             # A robot whose persisted continuity is gone may re-execute a queued
             # request; its events are evidence only and never move the task.  A
@@ -1149,23 +1197,25 @@ def decide_tick(view: EdgeView, now: datetime) -> list[RecordSpec]:
         device = view.devices[task.request.target_robot_id]
         if task.state is TaskState.CREATED and now >= task.expires_at and not task.expired_unconfirmed:
             specs.append(_flag(task, "expired_unconfirmed", now, {"expires_at_utc": task.request.expires_at_utc}))
+        window = timedelta(seconds=task.request.progress_window_s)
         if (
             task.state in {TaskState.ACCEPTED, TaskState.RUNNING}
             and device.connectivity in {Connectivity.ONLINE, Connectivity.STALE}
-            and "progress_window_elapsed" not in task.flagged_since_last_progress
+            and task.reprobe_due("progress_window_elapsed", now, window)
         ):
-            # Anchored on trusted progress, never on message receipt.
+            # The deadline is anchored on trusted progress, never on message
+            # receipt; an answered probe re-arms one window after the answer.
             anchor = task.last_progress_at or task.created_at
-            if now - anchor >= timedelta(seconds=task.request.progress_window_s):
+            if now - anchor >= window:
                 specs.append(_flag(task, "progress_window_elapsed", now, {"progress_window_s": task.request.progress_window_s}))
         if (
             task.state is TaskState.CREATED
             and task.publish_confirmations > 0
             and now < task.expires_at
             and device.connectivity in {Connectivity.ONLINE, Connectivity.STALE}
-            and "acceptance_window_elapsed" not in task.flagged_since_last_progress
+            and task.reprobe_due("acceptance_window_elapsed", now, window)
             and task.last_publish_confirmed_at is not None
-            and now - task.last_publish_confirmed_at >= timedelta(seconds=task.request.progress_window_s)
+            and now - task.last_publish_confirmed_at >= window
         ):
             specs.append(_flag(task, "acceptance_window_elapsed", now, {"progress_window_s": task.request.progress_window_s}))
     return specs
@@ -1240,6 +1290,8 @@ def republish_candidates(view: EdgeView, now: datetime) -> list[RepublishCandida
         device = view.devices[task.request.target_robot_id]
         if device.connectivity not in {Connectivity.ONLINE, Connectivity.STALE}:
             continue
+        if device.incarnation != task.request.target_incarnation:
+            continue  # the authorized incarnation is gone; never resend to another
         if task.publish_attempts >= config.max_republish_attempts:
             continue
         expired = now >= task.expires_at
