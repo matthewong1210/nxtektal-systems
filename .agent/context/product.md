@@ -50,7 +50,7 @@ runtime dependency.
   where things are, never what is happening now, and commands nothing.
 - **Edge Task Exchange rehearsal:** `nxt_edge_task` plus its scripts exchange
   simulated collection tasks between an Edge gateway and two protocol doubles
-  (`picker-01`, `carrier-01`) over a local Mosquitto, with dedup on both
+  (`picker-01` collects; `carrier-01` only reports standby) over a local Mosquitto, with dedup on both
   ends, ordered evidence, a terminal-conflict gate, and restart-safe
   journals. Tasks come only from a SIMULATION-labelled test entry; nothing
   here is physical task admission, robot execution, or a real device.

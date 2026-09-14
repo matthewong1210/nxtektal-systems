@@ -20,7 +20,7 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, Edge Task Exchange (in-memory only: CI installs no Mosquitto, so `simulation/tests/edge_task/test_integration_mosquitto.py` skips there and real-broker evidence comes from a local run), architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
@@ -360,6 +360,9 @@ separate policy step decides whether it is acceptable. Operational Replay's
 typecheck, lint, tests, build, HTTP smoke, and production audit fail directly.
 A missing optional USD or Streamlit dependency fails through explicit imports,
 CLI execution, and live HTTP smoke instead of being hidden by a skipped test.
+The one deliberate exception is `simulation/tests/edge_task/test_integration_mosquitto.py`,
+which skips in CI because no broker is installed; its evidence is a local run
+recorded in the delivery hand-off, not a hosted check.
 
 The Python job runs every existing architecture and safety guard. A robust
 generic reachability guard from future LLM/agent code to execution surfaces, or

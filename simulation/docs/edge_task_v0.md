@@ -53,7 +53,7 @@ acceptance.
 
 | Process | Writes (only) | Reads | Never |
 |---|---|---|---|
-| `scripts/edge_task_gateway_v0.py` | `<evidence>/edge/<site>/<deployment>/edge_task_journal.jsonl` (+ its `.hwm` anchor) + `.edge.lock` (origin `EDGE` and robot facts *as received*) | its own journal | a robot or receiver directory; any robot internal state |
+| `scripts/edge_task_gateway_v0.py` | `<evidence>/edge/<site>/<deployment>/edge_task_journal.jsonl` (+ its `.hwm` anchor) + `.edge.lock` (origin `EDGE` and robot facts *as received*) | its own journal | a robot directory; any robot internal state |
 | `scripts/edge_task_cli.py` | the same Edge journal (and anchor), origin `SIM_ENTRY` only (`create-task`), under the same lock and admission rules | the Edge journal (`list`, `show`) | device/task state fields; robot directories |
 | `scripts/mock_robot_task_device.py --robot-id picker-01` | `<evidence>/robots/picker-01/robot_task_journal.jsonl` (+ `.hwm`) | its own journal | the Edge or carrier directory |
 | `scripts/mock_robot_task_device.py --robot-id carrier-01` | `<evidence>/robots/carrier-01/robot_task_journal.jsonl` (+ `.hwm`) | its own journal | the Edge or picker directory |
@@ -172,8 +172,10 @@ genuinely late `ACCEPTED`, never a post-terminal or unexpected one. Every
 Terminal conflict: a second, different terminal is preserved as evidence,
 a `conflicting_terminal` record is written once, `effective_result` becomes
 `CONFLICT` with `result_verification = conflicting`, and the device's
-authorization gate closes: no new task for that robot and no republication
-until PR B's human handling. The conflict is detected in every arrival
+authorization gate closes: no new task for that robot and no republication.
+Nothing in PR A reopens the gate, and a future `ack`/`resolve` never
+will on its own; resuming execution needs a separately defined evidence
+condition and acceptance contract (see deviation 4). The conflict is detected in every arrival
 order — a differing terminal that arrived earlier as late or unexpected
 evidence conflicts with the terminal applied later — and the
 `task_event_received` line that carries `conflict: true` closes the gate by
@@ -205,7 +207,9 @@ Evidence conflicts also close the gate: `post_terminal_activity` (a
 higher-key non-terminal event after a terminal), `unexpected_acceptance`,
 `unexpected_rejection`, and `conflicting_replay` are sticky and, like a
 terminal conflict or a session regression, refuse every new authorization
-and republication for that robot until PR B's human handling. A robot
+and republication for that robot; no reopening path exists in PR A, and a
+future human reconciliation needs its own evidence condition and
+acceptance contract (deviation 4). A robot
 reporting activity the Edge's record cannot explain is executing something
 the Edge did not authorise as such.
 
@@ -252,14 +256,15 @@ latest duplicate, so a duplicate stream cannot postpone it) while the task
 is still unresolved, so a result the robot holds but the transport lost
 keeps being probed within the same interval and attempt bounds; a stream
 of unsolicited duplicates therefore consumes the attempt cap rather than
-starving the probing, and once the cap is spent only PR B's human handling
-recovers the task. The progress-type
+starving the probing, and once the cap is spent the task stays unresolved;
+recovery after the retry budget is exhausted is not implemented in PR A
+and not yet defined. The progress-type
 reasons (`progress_window_elapsed`, `acceptance_window_elapsed`,
 `heartbeat_mismatch`) share one probe epoch: within one progress epoch
 (trusted progress starts a new one) there is never more than one
 progress-type probe per progress window, and never one past
 `max_republish_attempts`; once the cap is reached the task stays visibly
-unresolved for PR B's human handling. The
+unresolved; no recovery after cap exhaustion is implemented. The
 attempt is journaled (`task_publish_attempted`) before the transport call,
 so the bound holds even when hop-1 never confirms. The gateway re-derives
 each candidate from the live view immediately before publishing, because
@@ -374,7 +379,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -rs -p no:cacheprovider te
 ```
 
 The integration module needs a local `mosquitto`; it skips with an explicit
-reason otherwise, and a skip is not delivery evidence. It starts its own
+reason otherwise, and a skip is not delivery evidence. Hosted CI does not install Mosquitto, so
+the module skips there; real-broker evidence comes only from local runs. It starts its own
 broker on a random loopback port per scenario (the manual run above uses
 the task-specific port 18830 from the checked-in conf), with one temporary
 evidence root per scenario and a separate evidence directory per process
@@ -426,9 +432,9 @@ anchor changes is refused on read: robot journals without a
 `robot_provisioned` record or with `condition_changed` lines, and any
 journal (Edge or robot) without its `.hwm` anchor. The record vocabulary
 changed inside `nxt-edge-task/journal/v1` because the package is unmerged
-and no consumer exists; the only recovery for old evidence directories is
-deleting them and provisioning again. No migration exists for pre-merge V0
-evidence.
+and no consumer exists; old evidence directories may be archived and kept; point `--evidence-root`
+(or `evidence_dir`) at a new directory for this version and provision again.
+No migration exists for pre-merge V0 evidence.
 
 ## Deviations from plan v3.1 (errata candidates)
 
