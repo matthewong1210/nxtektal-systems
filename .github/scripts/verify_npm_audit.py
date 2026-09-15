@@ -12,18 +12,17 @@ from typing import Any
 
 SEVERITY = {"info": 0, "low": 1, "moderate": 2, "high": 3, "critical": 4}
 
-# Development-only advisories accepted by the unchanged baseline lockfile.
+# Development-only advisories accepted by the current baseline lockfile.
 # A missing advisory is considered resolved. New advisories and severity
 # increases fail verification.
-ACCEPTED_DEV_ADVISORIES = {
-    "GHSA-67mh-4wv8-2f99": "moderate",
-    "GHSA-2v37-7h3g-55p8": "high",
-    "GHSA-fxqj-rqcc-2cmp": "moderate",
-    "GHSA-4w7w-66w2-5vf9": "moderate",
-    "GHSA-v6wh-96g9-6wx3": "moderate",
-    "GHSA-fx2h-pf6j-xcff": "high",
-    "GHSA-5xrq-8626-4rwp": "critical",
-}
+#
+# The vitest 4.1.11 upgrade (GHSA-82fw-gwwq-j7x9) also resolved every advisory
+# previously accepted here (GHSA-67mh-4wv8-2f99, GHSA-2v37-7h3g-55p8,
+# GHSA-fxqj-rqcc-2cmp, GHSA-4w7w-66w2-5vf9, GHSA-v6wh-96g9-6wx3,
+# GHSA-fx2h-pf6j-xcff, GHSA-5xrq-8626-4rwp), so the accepted baseline is
+# empty: any development advisory now fails until it is explicitly reviewed
+# and added here with its maximum accepted severity.
+ACCEPTED_DEV_ADVISORIES: dict[str, str] = {}
 
 # npm reports counts for vulnerable dependency-graph nodes, not just unique
 # advisories. Keep that graph shape bounded as well as the advisory allowlist:
@@ -32,53 +31,16 @@ ACCEPTED_DEV_ADVISORIES = {
 ACCEPTED_DEV_SEVERITY_COUNTS = {
     "info": 0,
     "low": 0,
-    "moderate": 4,
-    "high": 2,
-    "critical": 1,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0,
 }
 
-# npm's current lockfile graph has seven vulnerable package nodes. Bind each
-# node to the accepted advisories it can currently reach so a disappearing
-# advisory or node is allowed, while a replacement wrapper cannot reuse an
-# unrelated accepted advisory to keep the aggregate counts unchanged.
-ACCEPTED_DEV_NODES = {
-    "@vitest/mocker": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-        }
-    ),
-    "esbuild": frozenset({"GHSA-67mh-4wv8-2f99"}),
-    "nanoid": frozenset({"GHSA-2v37-7h3g-55p8"}),
-    "postcss": frozenset({"GHSA-fxqj-rqcc-2cmp"}),
-    "vite": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-        }
-    ),
-    "vite-node": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-        }
-    ),
-    "vitest": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-            "GHSA-5xrq-8626-4rwp",
-        }
-    ),
-}
+# Bind each accepted vulnerable package node to the accepted advisories it may
+# reach, so a disappearing advisory or node is allowed while a replacement
+# wrapper cannot reuse an unrelated accepted advisory to keep the aggregate
+# counts unchanged. Empty while no development advisory is accepted.
+ACCEPTED_DEV_NODES: dict[str, frozenset[str]] = {}
 
 
 class DuplicateJsonKey(ValueError):

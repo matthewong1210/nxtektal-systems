@@ -4,8 +4,80 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
+import verify_npm_audit
 from verify_npm_audit import ACCEPTED_DEV_ADVISORIES, parse_report, validate
+
+# The live baseline accepts no development advisory. The graph-shape rules are
+# exercised against this historical baseline (the ROI lockfile before the
+# vitest 4.1.11 upgrade) so the mechanism stays tested while no real exception
+# exists.
+HISTORICAL_DEV_ADVISORIES = {
+    "GHSA-67mh-4wv8-2f99": "moderate",
+    "GHSA-2v37-7h3g-55p8": "high",
+    "GHSA-fxqj-rqcc-2cmp": "moderate",
+    "GHSA-4w7w-66w2-5vf9": "moderate",
+    "GHSA-v6wh-96g9-6wx3": "moderate",
+    "GHSA-fx2h-pf6j-xcff": "high",
+    "GHSA-5xrq-8626-4rwp": "critical",
+}
+HISTORICAL_DEV_SEVERITY_COUNTS = {
+    "info": 0,
+    "low": 0,
+    "moderate": 4,
+    "high": 2,
+    "critical": 1,
+}
+HISTORICAL_DEV_NODES = {
+    "@vitest/mocker": frozenset(
+        {
+            "GHSA-67mh-4wv8-2f99",
+            "GHSA-4w7w-66w2-5vf9",
+            "GHSA-v6wh-96g9-6wx3",
+            "GHSA-fx2h-pf6j-xcff",
+        }
+    ),
+    "esbuild": frozenset({"GHSA-67mh-4wv8-2f99"}),
+    "nanoid": frozenset({"GHSA-2v37-7h3g-55p8"}),
+    "postcss": frozenset({"GHSA-fxqj-rqcc-2cmp"}),
+    "vite": frozenset(
+        {
+            "GHSA-67mh-4wv8-2f99",
+            "GHSA-4w7w-66w2-5vf9",
+            "GHSA-v6wh-96g9-6wx3",
+            "GHSA-fx2h-pf6j-xcff",
+        }
+    ),
+    "vite-node": frozenset(
+        {
+            "GHSA-67mh-4wv8-2f99",
+            "GHSA-4w7w-66w2-5vf9",
+            "GHSA-v6wh-96g9-6wx3",
+            "GHSA-fx2h-pf6j-xcff",
+        }
+    ),
+    "vitest": frozenset(
+        {
+            "GHSA-67mh-4wv8-2f99",
+            "GHSA-4w7w-66w2-5vf9",
+            "GHSA-v6wh-96g9-6wx3",
+            "GHSA-fx2h-pf6j-xcff",
+            "GHSA-5xrq-8626-4rwp",
+        }
+    ),
+}
+
+
+def historical_baseline():
+    """Patch the verifier's accepted baseline with the historical ROI baseline."""
+
+    return mock.patch.multiple(
+        verify_npm_audit,
+        ACCEPTED_DEV_ADVISORIES=HISTORICAL_DEV_ADVISORIES,
+        ACCEPTED_DEV_SEVERITY_COUNTS=HISTORICAL_DEV_SEVERITY_COUNTS,
+        ACCEPTED_DEV_NODES=HISTORICAL_DEV_NODES,
+    )
 
 
 def report_from_vulnerabilities(vulnerabilities: dict) -> dict:
@@ -48,7 +120,7 @@ def accepted_development_report() -> dict:
     def advisory(identifier: str) -> dict:
         return {
             "url": f"https://github.com/advisories/{identifier}",
-            "severity": ACCEPTED_DEV_ADVISORIES[identifier],
+            "severity": HISTORICAL_DEV_ADVISORIES[identifier],
         }
 
     return report_from_vulnerabilities(
@@ -89,7 +161,42 @@ def accepted_development_report() -> dict:
     )
 
 
+class LiveBaselineTests(unittest.TestCase):
+    """The committed baseline accepts no development advisory at all."""
+
+    def test_live_baseline_accepts_nothing(self) -> None:
+        self.assertEqual(ACCEPTED_DEV_ADVISORIES, {})
+        self.assertEqual(verify_npm_audit.ACCEPTED_DEV_NODES, {})
+        self.assertEqual(
+            set(verify_npm_audit.ACCEPTED_DEV_SEVERITY_COUNTS.values()), {0}
+        )
+
+    def test_clean_development_audit_passes(self) -> None:
+        errors, notes = validate(report(), "development")
+        self.assertEqual(errors, [])
+        self.assertIn("development advisory evidence: 0 present, 0 no longer present", notes)
+
+    def test_any_development_advisory_fails_live_baseline(self) -> None:
+        for severity in ("info", "low", "moderate", "high", "critical"):
+            errors, _ = validate(report(("GHSA-82fw-gwwq-j7x9", severity)), "development")
+            self.assertTrue(
+                any("new development advisory: GHSA-82fw-gwwq-j7x9" in error for error in errors),
+                (severity, errors),
+            )
+            self.assertTrue(
+                any("new development vulnerability node: package-0" in error for error in errors),
+                (severity, errors),
+            )
+
+
 class AuditPolicyTests(unittest.TestCase):
+    """Graph-shape rules, exercised against the historical accepted baseline."""
+
+    def setUp(self) -> None:
+        patcher = historical_baseline()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_production_zero_passes(self) -> None:
         errors, notes = validate(report(), "production")
         self.assertEqual(errors, [])
@@ -111,7 +218,7 @@ class AuditPolicyTests(unittest.TestCase):
     def test_severity_increase_fails(self) -> None:
         identifier = next(
             item
-            for item, severity in ACCEPTED_DEV_ADVISORIES.items()
+            for item, severity in HISTORICAL_DEV_ADVISORIES.items()
             if severity == "moderate"
         )
         errors, _ = validate(report((identifier, "high")), "development")
@@ -184,7 +291,7 @@ class AuditPolicyTests(unittest.TestCase):
     def test_transitive_cycle_severity_cannot_exceed_reachable_advisory(self) -> None:
         identifier = next(
             item
-            for item, severity in ACCEPTED_DEV_ADVISORIES.items()
+            for item, severity in HISTORICAL_DEV_ADVISORIES.items()
             if severity == "moderate"
         )
         audit_report = report_from_vulnerabilities(
@@ -242,7 +349,7 @@ class AuditPolicyTests(unittest.TestCase):
 
     def test_transitive_via_resolves_to_concrete_advisory(self) -> None:
         identifier = "GHSA-67mh-4wv8-2f99"
-        severity = ACCEPTED_DEV_ADVISORIES[identifier]
+        severity = HISTORICAL_DEV_ADVISORIES[identifier]
         audit_report = report_from_vulnerabilities(
             {
                 "esbuild": {
