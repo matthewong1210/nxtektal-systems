@@ -12,6 +12,13 @@ from typing import Any
 
 SEVERITY = {"info": 0, "low": 1, "moderate": 2, "high": 3, "critical": 4}
 
+# `npm audit --json` report formats this verifier understands. Version 2 is
+# the format emitted by npm 7 and later; it was checked against real reports
+# from npm 11.11.0 (the CI runner's bundled npm) and npm 11.11.1. Any other
+# value, a missing or null field, or a non-integer type is refused rather than
+# assumed compatible.
+SUPPORTED_AUDIT_REPORT_VERSIONS = frozenset({2})
+
 # Development-only advisories accepted by the current baseline lockfile.
 # A missing advisory is considered resolved. New advisories and severity
 # increases fail verification.
@@ -73,11 +80,57 @@ def advisory_id(item: dict[str, Any]) -> str | None:
     return identifier
 
 
+def validate_report_shape(report: Any) -> list[str]:
+    """Refuse anything that is not a supported npm audit report.
+
+    Runs before any vulnerability counting: an npm error response (which can
+    carry an empty ``vulnerabilities`` object and all-zero metadata next to
+    its top-level ``error``), a report without ``auditReportVersion``, a
+    version of the wrong type, or a version this verifier has not been
+    checked against must never pass as "zero vulnerabilities".
+    """
+
+    if not isinstance(report, dict):
+        return ["npm audit JSON root must be an object"]
+    if "error" in report:
+        error = report["error"]
+        summary = ""
+        if isinstance(error, dict):
+            summary = str(error.get("summary") or error.get("code") or "").strip()
+        if not summary and isinstance(report.get("message"), str):
+            summary = report["message"].strip()
+        if not summary:
+            summary = "no summary given"
+        return [
+            "npm audit returned an error response, not a report; nothing was "
+            f"audited: {summary}"
+        ]
+    if "auditReportVersion" not in report:
+        return [
+            "npm audit JSON is missing auditReportVersion; the report format "
+            "cannot be verified"
+        ]
+    version = report["auditReportVersion"]
+    if type(version) is not int:
+        return [
+            "npm audit JSON auditReportVersion must be an integer, got "
+            f"{type(version).__name__}: {version!r}"
+        ]
+    if version not in SUPPORTED_AUDIT_REPORT_VERSIONS:
+        supported = ", ".join(str(v) for v in sorted(SUPPORTED_AUDIT_REPORT_VERSIONS))
+        return [
+            f"unsupported npm audit report version {version}; this verifier "
+            f"understands version {supported} only"
+        ]
+    return []
+
+
 def validate(report: Any, policy: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     notes: list[str] = []
-    if not isinstance(report, dict):
-        return ["npm audit JSON root must be an object"], notes
+    shape_errors = validate_report_shape(report)
+    if shape_errors:
+        return shape_errors, notes
 
     vulnerabilities = report.get("vulnerabilities")
     metadata_container = report.get("metadata")

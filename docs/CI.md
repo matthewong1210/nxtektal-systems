@@ -225,6 +225,12 @@ GHSA-fxqj-rqcc-2cmp, GHSA-4w7w-66w2-5vf9, GHSA-v6wh-96g9-6wx3,
 GHSA-2v37-7h3g-55p8, GHSA-fx2h-pf6j-xcff, GHSA-5xrq-8626-4rwp), and those
 entries were removed under the rule below.
 
+Before any counting, the verifier refuses input that is not a supported
+report: an npm error response (a top-level `error`, even next to an empty
+`vulnerabilities` object and all-zero counts), a missing, null, or
+non-integer `auditReportVersion`, or a version other than 2 (the format
+checked against real npm 11.11.0 and 11.11.1 reports) exits non-zero with
+the reason; no default version is assumed.
 A new advisory, an unclassified audit result, or a severity increase fails.
 An advisory that disappears does not fail. The development graph is capped at
 0 info, 0 low, 0 moderate, 0 high, and 0 critical nodes while nothing is
