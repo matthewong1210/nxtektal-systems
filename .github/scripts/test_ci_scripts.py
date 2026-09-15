@@ -650,17 +650,43 @@ class AuditPolicyTests(unittest.TestCase):
 
         self.assertTrue(any("invalid severity" in error for error in errors))
 
+    def test_root_array_fails_as_non_object(self) -> None:
+        errors, _ = validate([], "development")
+        self.assertEqual(errors, ["npm audit JSON root must be an object"])
+
     def test_malformed_json_containers_fail(self) -> None:
-        malformed_reports = (
-            [],
-            {"vulnerabilities": [], "metadata": {"vulnerabilities": {}}},
-            {"vulnerabilities": {}, "metadata": []},
-            {"vulnerabilities": {}, "metadata": {"vulnerabilities": []}},
+        # Each case starts from the complete, valid zero report (auditReportVersion
+        # stays the integer 2) and breaks exactly one container, so the only
+        # possible error is the one naming that container.
+        vulnerabilities_broken = full_zero_report()
+        vulnerabilities_broken["vulnerabilities"] = []
+        metadata_broken = full_zero_report()
+        metadata_broken["metadata"] = []
+        metadata_counts_broken = full_zero_report()
+        metadata_counts_broken["metadata"]["vulnerabilities"] = []
+        cases = (
+            (
+                "vulnerabilities",
+                vulnerabilities_broken,
+                "npm audit JSON vulnerabilities must be an object",
+            ),
+            (
+                "metadata",
+                metadata_broken,
+                "npm audit JSON metadata must be an object",
+            ),
+            (
+                "metadata.vulnerabilities",
+                metadata_counts_broken,
+                "npm audit JSON metadata.vulnerabilities must be an object",
+            ),
         )
-        for audit_report in malformed_reports:
-            with self.subTest(audit_report=audit_report):
-                errors, _ = validate(audit_report, "development")
-                self.assertTrue(errors)
+        for field, audit_report, expected in cases:
+            with self.subTest(field=field):
+                self.assertEqual(audit_report["auditReportVersion"], 2)
+                for policy in ("production", "development"):
+                    errors, _ = validate(audit_report, policy)
+                    self.assertEqual(errors, [expected], (field, policy, errors))
 
     def test_duplicate_json_keys_fail_closed(self) -> None:
         evidence = (
