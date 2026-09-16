@@ -15,8 +15,8 @@ A deliberately small loopback-only HTTP surface:
 
 The transport owns no semantics: every operation delegates to the
 service shell, which delegates canonical behavior to the existing
-runtime, queue, and ledger contracts.  A transport or browser error
-can never mutate canonical evidence, no endpoint creates a physical
+runtime, queue, and ledger contracts. A transport or browser error
+cannot roll back already committed evidence, no endpoint creates a physical
 command, and manager acceptance stays workflow evidence only.
 
 Security posture (V0): local fixture use only.  The server refuses to
@@ -50,6 +50,7 @@ _STATUS_BY_CODE = {
     "invalid_request": 400,
     "invalid_response_kind": 400,
     "workflow_transition_rejected": 409,
+    "manager_response_result_unknown": 503,
     "advance_refused": 409,
     "restart_refused": 409,
     "reset_refused": 409,

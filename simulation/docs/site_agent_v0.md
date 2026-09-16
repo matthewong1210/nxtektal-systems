@@ -159,8 +159,9 @@ explicit MISSING evidence, never zero inventory; a stale reading is
 never relabeled fresh; a rejected cycle produces no policy evaluation
 and remains visible in exceptions; runtime fail-closed incidents put
 the service into FAILED (read-only API still serves diagnostics); a
-broken evidence store surfaces as FAILED at recovery; and an API or
-browser error can never mutate canonical evidence.
+broken evidence store surfaces as FAILED at recovery. A transport error does
+not roll back an already committed manager response; clients must reconcile
+an uncertain result against the canonical ledger through the read API.
 
 ## Manager API v0 (`nxt-site-agent/api/v0`)
 
@@ -199,6 +200,35 @@ single-response legality, and the hash-chained ledger are unchanged.
 `responded_at` uses scenario/observation time (the latest delivered
 observation), never a wall clock, keeping evidence deterministic and
 `execute_before` comparisons meaningful.
+
+Successful manager POSTs retain the existing recommendation projection and
+add `commit_receipt` with `status: "committed"`, `response_id`, `event_id`,
+`sequence`, and `record_hash`, taken directly from the returned `LedgerRecord`.
+`manager_response` always contains that committed record's original response.
+After commit, queue, journal, ledger, or projection read failures still return
+HTTP 200: `projection_status: "unavailable"` and `projection_error` explain
+the unavailable enrichment; the other recommendation/trace/source fields are
+explicitly `null`. The committed ID, response, and response-derived case status
+remain available. A complete enrichment has `projection_status: "available"`
+and `projection_error: null`. This receipt is a projection, not another store.
+
+V0 has no request-id idempotency contract. Exact repeats and attempts to change
+an already recorded response return HTTP 409 `workflow_transition_rejected`
+without appending another response. When the queue raises before returning a
+reliable record (including a failure after persistence), HTTP 503
+`manager_response_result_unknown` means **possibly committed**, not rejected.
+A lost HTTP connection has the same uncertainty. Read
+`GET /api/v0/recommendations`, locate the recommendation ID, and compare the
+stored `manager_response` (kind, operator, reason, note, timestamp, and any
+modification) with the intended response. If the ledger cannot be read, keep
+the result unknown and restore readable evidence before retrying. Do not
+automatically submit a different response to compensate. If no response exists
+after a successful verified read, a retry may be submitted; normal workflow
+legality still prevents a second response. An omitted `responded_at` resolves
+to current scenario time on each request and is not an idempotency key.
+`operator_id` is attribution only; this unauthenticated service does not use
+it to establish permission. Acceptance continues to record human workflow
+evidence only and never creates a task.
 
 ## Shift Briefing projection
 

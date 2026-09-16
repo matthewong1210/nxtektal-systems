@@ -570,6 +570,153 @@ def test_manager_modify_records_a_linked_modification(tmp_path, launch):
     assert original["action"] == "operator_intervention"
 
 
+@pytest.mark.parametrize("kind", ["accept", "reject", "modify"])
+@pytest.mark.parametrize("failure", ["queue", "journal", "ledger", "missing_entry"])
+def test_committed_response_survives_projection_read_failures(
+    tmp_path, launch, monkeypatch, kind, failure
+):
+    service = launch(tmp_path)
+    service.advance()
+    service.advance()
+    recommendation_id = service.recommendations_snapshot()[0]["recommendation_id"]
+    queue = service._composed.runtime.queue
+    operation = getattr(queue, kind)
+    journal_path = service.storage.workflow_evidence_root / "evaluations.jsonl"
+    journal_bytes = journal_path.read_bytes()
+    committed = []
+
+    def broken_read():
+        raise OSError("injected post-commit read failure")
+
+    def commit_then_break(*args, **kwargs):
+        record = operation(*args, **kwargs)
+        committed.append(record)
+        if failure == "queue":
+            monkeypatch.setattr(queue, "entries", broken_read)
+        elif failure == "journal":
+            journal_path.write_text("broken journal\n", encoding="utf-8")
+        elif failure == "ledger":
+            monkeypatch.setattr(service, "_ledger_reader", broken_read)
+        else:
+            monkeypatch.setattr(queue, "entries", lambda: ())
+        return record
+
+    with monkeypatch.context() as patch:
+        patch.setattr(queue, kind, commit_then_break)
+        options = {
+            "replacement_action": "operator_intervention",
+            "replacement_execute_before": "2026-08-08T19:00:00+00:00",
+        } if kind == "modify" else {}
+        result = service.respond(
+            recommendation_id,
+            kind=kind,
+            operator_id="mgr",
+            reason_code="reviewed",
+            **options,
+        )
+    assert len(committed) == 1
+    record = committed[0]
+    assert result["commit_receipt"] == {
+        "status": "committed",
+        "response_id": record.payload["response"]["response_id"],
+        "event_id": record.event_id,
+        "sequence": record.sequence,
+        "record_hash": record.record_hash,
+    }
+    assert result["manager_response"]["kind"] == kind
+    assert result["case_status"] == {
+        "accept": "accepted", "reject": "rejected", "modify": "modified"
+    }[kind]
+    assert result["projection_status"] == "unavailable"
+    assert result["projection_error"] is not None
+    assert result["recommendation"] is None
+    assert result["trace"] is None
+    journal_path.write_bytes(journal_bytes)
+    monkeypatch.undo()
+    # A new service instance reconstructs the one canonical response even
+    # though enrichment failed during the original POST.
+    resumed = launch(tmp_path)
+    stored = resumed.recommendations_snapshot()[0]
+    assert stored["manager_response"] == result["manager_response"]
+    response_records = [
+        record for record in resumed._ledger_reader().records()
+        if record.event_type == "recommendation_response"
+    ]
+    assert len(response_records) == 1
+
+
+def test_duplicate_manager_response_after_restart_never_appends(tmp_path, launch):
+    service = launch(tmp_path)
+    service.advance()
+    service.advance()
+    recommendation_id = service.recommendations_snapshot()[0]["recommendation_id"]
+    request = {
+        "kind": "accept",
+        "operator_id": "mgr",
+        "reason_code": "reviewed",
+        "responded_at": "2026-08-08T18:30:00+00:00",
+    }
+    result = service.respond(recommendation_id, **request)
+    assert result["projection_status"] == "available"
+    assert result["projection_error"] is None
+    assert result["recommendation"] is not None
+    before = evidence_bytes(service.storage)
+    resumed = launch(tmp_path)
+    with pytest.raises(SiteAgentError) as excinfo:
+        resumed.respond(recommendation_id, **request)
+    assert excinfo.value.code == "workflow_transition_rejected"
+    assert "already recorded" in excinfo.value.detail
+    assert evidence_bytes(resumed.storage) == before
+    assert resumed.recommendations_snapshot()[0]["manager_response"] == (
+        result["manager_response"]
+    )
+
+
+@pytest.mark.parametrize("commit_first", [False, True])
+def test_manager_response_uncertain_write_requires_read_reconciliation(
+    tmp_path, launch, monkeypatch, commit_first
+):
+    service = launch(tmp_path)
+    service.advance()
+    service.advance()
+    recommendation_id = service.recommendations_snapshot()[0]["recommendation_id"]
+    queue = service._composed.runtime.queue
+    accept = queue.accept
+
+    def interrupted(*args, **kwargs):
+        if commit_first:
+            accept(*args, **kwargs)
+        raise OSError("injected uncertain append result")
+
+    request = {
+        "kind": "accept", "operator_id": "mgr", "reason_code": "reviewed",
+        "responded_at": "2026-08-08T18:30:00+00:00",
+    }
+    with monkeypatch.context() as patch:
+        patch.setattr(queue, "accept", interrupted)
+        with pytest.raises(SiteAgentError) as excinfo:
+            service.respond(recommendation_id, **request)
+    assert excinfo.value.code == "manager_response_result_unknown"
+    assert "/api/v0/recommendations" in excinfo.value.detail
+    resumed = launch(tmp_path)
+    stored = resumed.recommendations_snapshot()[0]
+    assert (stored["manager_response"] is not None) is commit_first
+    if commit_first:
+        before = evidence_bytes(resumed.storage)
+        with pytest.raises(SiteAgentError) as excinfo:
+            resumed.respond(recommendation_id, **request)
+        assert excinfo.value.code == "workflow_transition_rejected"
+        assert evidence_bytes(resumed.storage) == before
+    else:
+        # Only the verified absence allows the operator to submit again.
+        result = resumed.respond(recommendation_id, **request)
+        assert result["commit_receipt"]["status"] == "committed"
+    assert len([
+        record for record in resumed._ledger_reader().records()
+        if record.event_type == "recommendation_response"
+    ]) == 1
+
+
 def test_launch_seam_is_deterministic(tmp_path, seam):
     probe_root = (
         tmp_path / "probe" / SITE_ID / DEPLOYMENT_ID / RANGE_OPS_WORKFLOW_ID

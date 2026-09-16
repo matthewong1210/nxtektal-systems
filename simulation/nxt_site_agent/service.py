@@ -40,7 +40,12 @@ from nxt_agent_runtime import (
     ManagerDecisionQueueError,
 )
 from nxt_pilot_ops.contracts import RecommendationAction
-from nxt_pilot_ops.ledger import JsonlEventLedger, LedgerTransitionError
+from nxt_pilot_ops.ledger import (
+    JsonlEventLedger,
+    LedgerIntegrityError,
+    LedgerRecord,
+    LedgerTransitionError,
+)
 from nxt_pilot_ops.serialization import to_primitive
 from nxt_workflow_enablement import (
     RANGE_OPS_WORKFLOW_ID,
@@ -1162,7 +1167,7 @@ class SiteAgentService:
             queue = self._composed.runtime.queue
             try:
                 if kind == "accept":
-                    queue.accept(
+                    record = queue.accept(
                         recommendation_id,
                         operator_id=operator_id,
                         responded_at=when,
@@ -1170,7 +1175,7 @@ class SiteAgentService:
                         note=note,
                     )
                 elif kind == "reject":
-                    queue.reject(
+                    record = queue.reject(
                         recommendation_id,
                         operator_id=operator_id,
                         responded_at=when,
@@ -1178,7 +1183,7 @@ class SiteAgentService:
                         note=note,
                     )
                 else:
-                    queue.modify(
+                    record = queue.modify(
                         recommendation_id,
                         operator_id=operator_id,
                         responded_at=when,
@@ -1202,27 +1207,107 @@ class SiteAgentService:
                 raise SiteAgentError(
                     "workflow_transition_rejected", str(exc)
                 ) from exc
+            except SiteAgentError:
+                # Request parsing in the service happens before the queue
+                # call, so these coded refusals have no commit uncertainty.
+                raise
+            except (OSError, RuntimeError, LedgerIntegrityError) as exc:
+                # An append can become durable before a later operation
+                # (including lock release) raises. Without its returned
+                # record we cannot assert that this request did not commit.
+                raise SiteAgentError(
+                    "manager_response_result_unknown",
+                    "The response may have been recorded. Read "
+                    "/api/v0/recommendations and reconcile the stored "
+                    "manager_response before submitting again; an unreadable "
+                    f"ledger leaves the result unknown. {type(exc).__name__}: {exc}",
+                ) from exc
             except (TypeError, ValueError) as exc:
+                if isinstance(exc, ValueError) and str(exc).startswith(
+                    "duplicate event_id:"
+                ):
+                    raise SiteAgentError(
+                        "workflow_transition_rejected",
+                        "This exact response is already recorded. Read "
+                        "/api/v0/recommendations to recover it; no second "
+                        "response was appended.",
+                    ) from exc
                 raise SiteAgentError("invalid_request", str(exc)) from exc
-            # Project only the entry that was just answered rather than
-            # rebuilding the entire queue.  The response was already
-            # recorded, so a read failure here degrades enrichment only
-            # (trace/response fields absent); it must not be reported
-            # as a failed response.
-            traces, recs, responses, _, _ledger_error = self._ledger_index()
+            return self._committed_response_projection(record)
+
+    def _committed_response_projection(
+        self, record: LedgerRecord
+    ) -> dict[str, Any]:
+        """Preserve the commit result independently of optional read models.
+
+        This receipt projects the existing immutable ledger record; it is
+        neither a second response store nor an alternative workflow owner.
+        """
+        response = to_primitive(record.payload["response"])
+        recommendation_id = response["recommendation_id"]
+        result = {
+            "recommendation_id": recommendation_id,
+            "action": None,
+            "target_robot_id": None,
+            "summary": None,
+            "policy_id": None,
+            "policy_version": None,
+            "trace_id": None,
+            "issued_at": None,
+            "execute_before": None,
+            "source_envelope_id": None,
+            "source_sequence": None,
+            "evaluation_id": None,
+            "deferred_until": None,
+            "deferral_note": None,
+            "recommendation": None,
+            "trace": None,
+            "case_status": {
+                "accept": "accepted",
+                "reject": "rejected",
+                "modify": "modified",
+            }[response["kind"]],
+            "response_kind": response["kind"],
+            "manager_response": response,
+            "commit_receipt": {
+                "status": "committed",
+                "response_id": response["response_id"],
+                "event_id": record.event_id,
+                "sequence": record.sequence,
+                "record_hash": record.record_hash,
+            },
+            "projection_status": "unavailable",
+            "projection_error": None,
+        }
+        # Every enrichment operation occurs after the reliable receipt
+        # exists. Journal/ledger/queue or projection failure cannot turn a
+        # recorded response into an HTTP error or erase its response ID.
+        try:
+            traces, recs, _, _, ledger_error = self._ledger_index()
+            if ledger_error is not None:
+                raise SiteAgentError("ledger_unreadable", ledger_error)
             for entry in self._queue_entries():
                 if entry.recommendation_id == recommendation_id:
-                    return recommendation_projection(
+                    result.update(recommendation_projection(
                         entry,
                         trace=traces.get(recommendation_id),
                         recommendation=recs.get(recommendation_id),
-                        response=responses.get(recommendation_id),
-                    )
-            raise SiteAgentError(
-                "unknown_recommendation",
-                f"recommendation {recommendation_id!r} disappeared after "
-                "the response was recorded",
-            )
+                        response=response,
+                    ))
+                    result["projection_status"] = "available"
+                    break
+            else:
+                raise SiteAgentError(
+                    "queue_entry_unavailable",
+                    "the recorded response is not present in the queue projection",
+                )
+        except Exception as exc:  # noqa: BLE001 - post-commit enrichment only
+            result["projection_error"] = {
+                "code": exc.code if isinstance(exc, SiteAgentError)
+                else "projection_unavailable",
+                "detail": str(exc),
+            }
+        return result
 
     def _resolve_responded_at(self, value: str | None) -> datetime:
         if value is not None:

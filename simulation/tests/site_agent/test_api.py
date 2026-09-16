@@ -200,6 +200,75 @@ def test_accept_reject_modify_and_error_paths(served):
     assert payload["error"]["code"] == "workflow_transition_rejected"
 
 
+def test_committed_response_with_failed_enrichment_returns_http_200(
+    served, monkeypatch
+):
+    service, _, connection = served
+    service.advance()
+    service.advance()
+    recommendation_id = service.recommendations_snapshot()[0]["recommendation_id"]
+    queue = service._composed.runtime.queue
+    accept = queue.accept
+
+    def broken_entries():
+        raise OSError("injected post-commit queue failure")
+
+    def commit_then_break(*args, **kwargs):
+        record = accept(*args, **kwargs)
+        monkeypatch.setattr(queue, "entries", broken_entries)
+        return record
+
+    monkeypatch.setattr(queue, "accept", commit_then_break)
+    status, payload = post(
+        connection, f"/api/v0/recommendations/{recommendation_id}/accept",
+        {"operator_id": "mgr", "reason_code": "reviewed"},
+    )
+    assert status == 200
+    assert "error" not in payload
+    assert payload["data"]["commit_receipt"]["status"] == "committed"
+    assert payload["data"]["manager_response"]["kind"] == "accept"
+    assert payload["data"]["projection_status"] == "unavailable"
+    assert payload["data"]["recommendation"] is None
+    monkeypatch.undo()
+    _, recovered = get(connection, "/api/v0/recommendations")
+    assert recovered["data"][0]["manager_response"] == (
+        payload["data"]["manager_response"]
+    )
+
+
+def test_uncertain_response_returns_503_and_duplicate_returns_409(
+    served, monkeypatch
+):
+    service, _, connection = served
+    service.advance()
+    service.advance()
+    recommendation_id = service.recommendations_snapshot()[0]["recommendation_id"]
+    queue = service._composed.runtime.queue
+    accept = queue.accept
+
+    def committed_without_ack(*args, **kwargs):
+        accept(*args, **kwargs)
+        raise OSError("injected lost append acknowledgement")
+
+    request = {
+        "operator_id": "mgr", "reason_code": "reviewed",
+        "responded_at": "2026-08-08T18:30:00+00:00",
+    }
+    path = f"/api/v0/recommendations/{recommendation_id}/accept"
+    with monkeypatch.context() as patch:
+        patch.setattr(queue, "accept", committed_without_ack)
+        status, payload = post(connection, path, request)
+    assert status == 503
+    assert payload["error"]["code"] == "manager_response_result_unknown"
+    _, recovered = get(connection, "/api/v0/recommendations")
+    assert recovered["data"][0]["manager_response"]["kind"] == "accept"
+    before = evidence_bytes(service)
+    status, payload = post(connection, path, request)
+    assert status == 409
+    assert payload["error"]["code"] == "workflow_transition_rejected"
+    assert evidence_bytes(service) == before
+
+
 def test_modify_requires_replacement_fields(served):
     _, _, connection = served
     post(connection, "/api/v0/demo/advance")
