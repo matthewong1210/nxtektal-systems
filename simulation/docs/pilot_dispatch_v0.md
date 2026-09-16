@@ -103,3 +103,38 @@ actual unloading/energy workflow before implementing a physical adapter.
 Carrier-01 remains standby only. This slice does not implement two-robot handoff,
 automatic unloading/charging, a physical cancellation command, field networking,
 authentication, a hardware watchdog, or production operation.
+
+## Human-led planning v1 extension
+
+The same runner now injects a separate `/api/v1/planning` callback. See the
+[shared contract](contracts/planning-v1/README.md) and
+[architecture gate](planning_v1_architecture.md). Launch command and loopback
+scope are unchanged. Before the console is integrated, start the API alone:
+
+```bash
+uv run --no-sync python -B scripts/pilot_dispatch_demo.py --out /tmp/planning-demo --initialize --api-only
+```
+
+Use a new empty evidence directory for first launch; restart with the same
+`--out` and omit `--initialize`. GET starts with null input and empty arrays: no fixture
+inventory or demand is used as manual planning evidence. Planning identity and
+timezone are bound to the validated task rehearsal manifest; the old state and
+advice panels remain a separately labelled fixture deployment.
+
+A durable explicit confirmation binds one version to one frozen schedule. Tick
+recovers unfinished materialization before transport work; due-time admission
+uses a gate over the same locked journal prefix. `nxt-edge-schedule/v2` adds
+only the opaque admission reference. Missing gate fails closed. Legacy unbound
+v1 bytes remain unchanged; older software does not understand new records and
+must not be used to run an evidence directory after its first v1 planning write.
+Use a new evidence directory to run the old demo; do not delete history.
+
+The existing `/api/v0/task-ops/schedules` endpoint cannot forge a bound schedule.
+Cancellation remains the existing pending-only operation. It never stops an
+admitted task or resets confirmation uniqueness. Confirmation is recorded before
+materialization; a temporary null schedule status is pending linkage, not a
+failed confirmation. After unknown response, query/retry the same request ID.
+
+COLLECTED, UNLOADED, WASHED and SUPPLIED each require explicit quantity/source/
+time evidence. The picker double does not perform a ball process or automatically
+provide those quantities. No task completion can add clean stock.

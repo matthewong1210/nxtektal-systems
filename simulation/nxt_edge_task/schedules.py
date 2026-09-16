@@ -10,7 +10,8 @@ Transport and clock ownership remain with the caller.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from types import MappingProxyType
+from typing import Any, Callable, Mapping
 
 from .cases import TASK_CREATED, decide_task_create, derive_edge_view, read_time_liveness
 from .contracts import AdmissionFacts, EdgeTaskConfig, EdgeTaskError, TASK_TYPE_COLLECT_BALLS_ZONE, TaskRequest, parse_utc, stable_digest, utc_text
@@ -18,10 +19,15 @@ from .inbox import decide_response, derive_notifications, validate_operator, val
 from .journal import JsonlJournal, JournalRecord, PreconditionFailed, RecordSpec
 
 SCHEDULE_SCHEMA = "nxt-edge-schedule/v1"
+BOUND_SCHEDULE_SCHEMA = "nxt-edge-schedule/v2"
 SNAPSHOT_SCHEMA = "nxt-edge-schedules/v0"
 _REQUIRED = frozenset({"robot_id", "zone_id", "due_at_utc", "expires_at_utc", "operator"})
-_OPTIONAL = frozenset({"progress_window_s"})
+_OPTIONAL = frozenset({"progress_window_s", "admission_reference"})
 _TERMINAL_KINDS = {"schedule_cancelled": "CANCELLED", "schedule_rejected": "REJECTED", "schedule_missed": "MISSED"}
+AdmissionGate = Callable[
+    [tuple[JournalRecord, ...], Mapping[str, Any], datetime],
+    tuple[str, str] | None,
+]
 
 
 def _now(now: datetime) -> datetime:
@@ -30,9 +36,22 @@ def _now(now: datetime) -> datetime:
     return now.astimezone(timezone.utc)
 
 
-def _payload(payload: Any, config: EdgeTaskConfig, facts: AdmissionFacts) -> dict[str, Any]:
+def normalized_schedule(payload: Any, config: EdgeTaskConfig, facts: AdmissionFacts) -> dict[str, Any]:
+    """Return the canonical body used for content-derived schedule identity.
+
+    Omitting the opaque admission reference preserves the original v1 bytes.
+    A reference creates a v2 schedule requiring an injected due-time gate.
+    This function performs no reads, writes, or clock access.
+    """
+    if (config.site_id, config.deployment_id) != (facts.site_id, facts.deployment_id):
+        raise PreconditionFailed("deployment_mismatch", "configuration and admission facts must name one deployment")
     if not isinstance(payload, Mapping) or not _REQUIRED <= payload.keys() or payload.keys() - (_REQUIRED | _OPTIONAL):
-        raise PreconditionFailed("invalid_schedule", "exact fields are robot_id, zone_id, due_at_utc, expires_at_utc, operator, and optional progress_window_s")
+        raise PreconditionFailed("invalid_schedule", "exact fields are robot_id, zone_id, due_at_utc, expires_at_utc, operator, and optional progress_window_s or admission_reference")
+    reference = None
+    if "admission_reference" in payload:
+        reference = validate_reference(payload["admission_reference"], "admission_reference")
+        if not reference.strip():
+            raise PreconditionFailed("invalid_reference", "admission_reference must not be blank")
     operator = validate_operator(payload["operator"])
     robot_id, zone_id = payload["robot_id"], payload["zone_id"]
     if type(robot_id) is not str or robot_id not in facts.robot_ids or robot_id not in config.robot_ids:
@@ -49,8 +68,8 @@ def _payload(payload: Any, config: EdgeTaskConfig, facts: AdmissionFacts) -> dic
     progress = payload.get("progress_window_s", config.default_progress_window_s)
     if type(progress) is not int or not 1 <= progress <= 86_400:
         raise PreconditionFailed("invalid_schedule", "progress_window_s must be an integer from 1 through 86400")
-    return {
-        "schema": SCHEDULE_SCHEMA,
+    body = {
+        "schema": SCHEDULE_SCHEMA if reference is None else BOUND_SCHEDULE_SCHEMA,
         "site_id": config.site_id,
         "deployment_id": config.deployment_id,
         "simulation_env_id": config.simulation_env_id,
@@ -63,6 +82,9 @@ def _payload(payload: Any, config: EdgeTaskConfig, facts: AdmissionFacts) -> dic
         "operator": operator,
         "progress_window_s": progress,
     }
+    if reference is not None:
+        body["admission_reference"] = reference
+    return body
 
 
 def derive_schedules(records: tuple[JournalRecord, ...], config: EdgeTaskConfig, facts: AdmissionFacts) -> dict[str, dict[str, Any]]:
@@ -80,10 +102,17 @@ def derive_schedules(records: tuple[JournalRecord, ...], config: EdgeTaskConfig,
         if record.record_kind == "schedule_created":
             body = dict(p["schedule"])
             expected = "schedule_" + stable_digest(body)[:24]
-            if p["schedule_id"] != expected or body.get("schema") != SCHEDULE_SCHEMA:
+            if p["schedule_id"] != expected or body.get("schema") not in {SCHEDULE_SCHEMA, BOUND_SCHEDULE_SCHEMA}:
                 raise PreconditionFailed("schedule_integrity", "schedule content identity or schema disagrees")
             if any(body.get(key) != value for key, value in identity.items()):
                 raise PreconditionFailed("schedule_identity_mismatch", "schedule belongs to another deployment, configuration, or manifest")
+            request = {key: value for key, value in body.items() if key not in {*identity, "schema"}}
+            try:
+                normalized = normalized_schedule(request, config, facts)
+            except PreconditionFailed as exc:
+                raise PreconditionFailed("schedule_integrity", f"invalid stored schedule: {exc.detail}") from exc
+            if normalized != body:
+                raise PreconditionFailed("schedule_integrity", "schedule schema, fields, or canonical values disagree")
             if expected in rows:
                 raise PreconditionFailed("schedule_integrity", "duplicate schedule creation evidence")
             rows[expected] = {
@@ -106,20 +135,29 @@ def derive_schedules(records: tuple[JournalRecord, ...], config: EdgeTaskConfig,
 class ScheduleService:
     """Small journal-backed composition API; no worker, transport, or clock."""
 
-    def __init__(self, journal: JsonlJournal, config: EdgeTaskConfig, facts: AdmissionFacts) -> None:
+    def __init__(
+        self, journal: JsonlJournal, config: EdgeTaskConfig, facts: AdmissionFacts,
+        *, admission_gate: AdmissionGate | None = None,
+    ) -> None:
         if (config.site_id, config.deployment_id) != (facts.site_id, facts.deployment_id):
             raise PreconditionFailed("deployment_mismatch", "configuration and admission facts must name one deployment")
         self.journal = journal
         self.config = config
         self.facts = facts
+        if admission_gate is not None and not callable(admission_gate):
+            raise TypeError("admission_gate must be callable or None")
+        self.admission_gate = admission_gate
 
     def create(self, payload: Mapping[str, Any], now: datetime) -> dict[str, Any]:
         now = _now(now)
-        body = _payload(payload, self.config, self.facts)
+        body = normalized_schedule(payload, self.config, self.facts)
         schedule_id = "schedule_" + stable_digest(body)[:24]
         outcome: dict[str, Any] = {}
+        prior: tuple[JournalRecord, ...] = ()
 
         def build(records):
+            nonlocal prior
+            prior = records
             rows = derive_schedules(records, self.config, self.facts)
             if schedule_id in rows:
                 outcome["status"] = "idempotent"
@@ -129,8 +167,8 @@ class ScheduleService:
             outcome["status"] = "created"
             return [RecordSpec("schedule_created", "OPERATOR", utc_text(now), {"schedule_id": schedule_id, "schedule": body})]
 
-        self.journal.append_via(build)
-        outcome["schedule"] = derive_schedules(self.journal.read(), self.config, self.facts)[schedule_id]
+        appended = self.journal.append_via(build)
+        outcome["schedule"] = derive_schedules(prior + appended, self.config, self.facts)[schedule_id]
         return outcome
 
     def cancel(self, schedule_id: str, operator: str, now: datetime) -> dict[str, Any]:
@@ -138,8 +176,11 @@ class ScheduleService:
         schedule_id = validate_reference(schedule_id, "schedule_id")
         operator = validate_operator(operator)
         outcome: dict[str, Any] = {}
+        prior: tuple[JournalRecord, ...] = ()
 
         def build(records):
+            nonlocal prior
+            prior = records
             row = derive_schedules(records, self.config, self.facts).get(schedule_id)
             if row is None:
                 raise PreconditionFailed("unknown_schedule", "schedule does not exist")
@@ -151,8 +192,8 @@ class ScheduleService:
             outcome["status"] = "cancelled"
             return [RecordSpec("schedule_cancelled", "OPERATOR", utc_text(now), {"schedule_id": schedule_id, "operator": operator})]
 
-        self.journal.append_via(build)
-        outcome["schedule"] = derive_schedules(self.journal.read(), self.config, self.facts)[schedule_id]
+        appended = self.journal.append_via(build)
+        outcome["schedule"] = derive_schedules(prior + appended, self.config, self.facts)[schedule_id]
         return outcome
 
     def _due(self, records: tuple[JournalRecord, ...], schedule_id: str, now: datetime) -> list[RecordSpec]:
@@ -168,6 +209,17 @@ class ScheduleService:
 
         if now >= parse_utc(row["expires_at_utc"]):
             return refused("dispatch_window_missed", "The dispatch window elapsed before admission; no task was created.", missed=True)
+        if "admission_reference" in row:
+            if self.admission_gate is None:
+                return refused("admission_gate_unavailable", "This schedule requires its admission gate; no task was created.")
+            # The callback sees the same verified journal prefix used by
+            # admission, under its exclusive lock. It cannot rewrite intent.
+            decision = self.admission_gate(records, MappingProxyType(row), now)
+            if decision is not None:
+                if (not isinstance(decision, tuple) or len(decision) != 2
+                        or any(type(value) is not str or not value.strip() for value in decision)):
+                    raise PreconditionFailed("invalid_admission_gate", "admission_gate must return None or a non-empty (code, detail) tuple")
+                return refused(*decision)
         view = derive_edge_view(self.config, records)
         device = view.devices[row["robot_id"]]
         if read_time_liveness(device, self.config, now)["connectivity"] != "ONLINE" or device.connectivity.value != "ONLINE":
@@ -217,14 +269,17 @@ class ScheduleService:
     def _respond(self, notification_id: str, action: str, operator: str, note: str, now: datetime) -> dict[str, Any]:
         now = _now(now)
         outcome: dict[str, Any] = {}
+        prior: tuple[JournalRecord, ...] = ()
 
         def build(records):
+            nonlocal prior
+            prior = records
             result, specs = decide_response(records, self.config, notification_id, action, operator, note, now)
             outcome.update(result)
             return specs
 
-        self.journal.append_via(build)
-        outcome["notification"] = next(row for row in derive_notifications(self.journal.read(), self.config, now) if row["notification_id"] == notification_id)
+        appended = self.journal.append_via(build)
+        outcome["notification"] = next(row for row in derive_notifications(prior + appended, self.config, now) if row["notification_id"] == notification_id)
         return outcome
 
     def acknowledge(self, notification_id: str, operator: str, note: str, now: datetime) -> dict[str, Any]:

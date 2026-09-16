@@ -55,3 +55,12 @@ confirmation duplicate/conflict/concurrency/crash/restart, due invalidation,
 immutable dispatched linkage, four independent result stages; existing
 architecture/safety/package/full suites, config validation and local Mosquitto.
 Frontend integration and browser acceptance wait for Claude's final commit.
+
+Implementation detail: only the composition root's journal instance registers
+planning record kinds (`EDGE_RECORD_KINDS | PLANNING_RECORD_KINDS`); Edge's own
+kind vocabulary remains unchanged. The generic schedule v2 binding is an opaque
+confirmation ID. Before startup transport/republication and at each tick, the
+root verifies deterministic planning replay and frozen schedule/task identity.
+No callback reads a file while inside the journal lock. Human operator text is
+retained verbatim as evidence; a stable internal token satisfies the legacy
+simulated TaskRequest issuer vocabulary without pretending to authenticate it.

@@ -29,14 +29,15 @@ from nxt_edge_task.cases import EDGE_RECORD_KINDS  # noqa: E402
 from nxt_edge_task.contracts import EdgeTaskConfig, utc_text  # noqa: E402
 from nxt_edge_task.executor import ROBOT_RECORD_KINDS  # noqa: E402
 from nxt_edge_task.journal import JsonlJournal, PreconditionFailed  # noqa: E402
-from nxt_edge_task.schedules import ScheduleService  # noqa: E402
+from nxt_pilot_ops.planning_workflow import PLANNING_RECORD_KINDS  # noqa: E402
+from scripts.planning_operations import PlanningOperations  # noqa: E402
 from nxt_site_agent import SiteAgentApiServer, SiteAgentError, SiteAgentService  # noqa: E402
 from nxt_workflow_enablement import RANGE_OPS_WORKFLOW_ID  # noqa: E402
 from scripts.edge_task_cli import list_view  # noqa: E402
 from scripts.edge_task_gateway_v0 import EdgeGateway  # noqa: E402
 from scripts.edge_task_transport import InMemoryBroker  # noqa: E402
 from scripts.mock_robot_task_device import MockRobotDevice  # noqa: E402
-from scripts.pilot_course_a_task_fixture import admission_facts  # noqa: E402
+from scripts.pilot_course_a_task_fixture import admission_facts, commissioned_site  # noqa: E402
 from scripts.site_agent_fixture import DEPLOYMENT_ID, SITE_ID, service_composition_seam  # noqa: E402
 
 DISCLAIMER = "SIMULATION ONLY — scheduled protocol rehearsal; no physical robot or live customer data"
@@ -65,9 +66,11 @@ class PilotDispatchRuntime:
         self.step_interval_s = step_interval_s
         self.initialize = initialize
         self.config = EdgeTaskConfig.from_json(CONFIG_PATH.read_bytes())
-        self.facts = admission_facts()
-        self.journal = JsonlJournal(self.root / "edge" / "edge_task_journal.jsonl", allowed_kinds=EDGE_RECORD_KINDS)
-        self.schedules = ScheduleService(self.journal, self.config, self.facts)
+        manifest = commissioned_site()
+        self.facts = admission_facts(manifest)
+        self.journal = JsonlJournal(self.root / "edge" / "edge_task_journal.jsonl", allowed_kinds=EDGE_RECORD_KINDS | PLANNING_RECORD_KINDS)
+        self.planning = PlanningOperations(self.journal, self.config, self.facts, self.clock, site_timezone=manifest.timezone)
+        self.schedules = self.planning.schedules
         self.broker = InMemoryBroker()
         self.devices: list[MockRobotDevice] = []
         self.gateway: EdgeGateway | None = None
@@ -110,6 +113,9 @@ class PilotDispatchRuntime:
                 self.journal.path.parent.mkdir(parents=True, exist_ok=True)
                 self._edge_lock = (self.journal.path.parent / ".edge.lock").open("a+b")
                 fcntl.flock(self._edge_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Validate every planning/task association before transport
+                # can replay durable requests after a restart.
+                self.planning.history(self.journal.read())
                 self.gateway = EdgeGateway(
                     self.config, self.facts, self.journal,
                     self.broker.client(self.config.edge_client_id),
@@ -144,6 +150,7 @@ class PilotDispatchRuntime:
             if not self.started or self.failure is not None:
                 return
             try:
+                self.planning.recover()
                 self.broker.pump()
                 for device in self.devices:
                     if device.core.exit_requested:
@@ -198,6 +205,8 @@ class PilotDispatchRuntime:
                     raise SiteAgentError("task_ops_unavailable", self.failure or "scheduler is not running")
                 now = self.clock()
                 if path == "/api/v0/task-ops/schedules":
+                    if "admission_reference" in body:
+                        raise SiteAgentError("invalid_request", "bound schedules require explicit plan confirmation")
                     return self.schedules.create(body, now)
                 prefix = "/api/v0/task-ops/"
                 parts = path[len(prefix):].split("/") if path.startswith(prefix) else []
@@ -220,6 +229,18 @@ class PilotDispatchRuntime:
                 self.failure = f"{type(exc).__name__}: {exc}"
                 self._stop.set()
                 raise SiteAgentError("task_ops_unavailable", self.failure) from exc
+
+    def route_planning(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            if method == "POST" and (not self.started or self.failure is not None):
+                raise SiteAgentError("planning_unavailable", self.failure or "scheduler is not running")
+            try:
+                return self.planning.route(method, path, body)
+            except SiteAgentError as exc:
+                if exc.code in {"planning_unavailable", "planning_result_unknown"}:
+                    self.failure = f"{exc.code}: {exc.detail}"
+                    self._stop.set()
+                raise
 
     def _close_resources(self) -> None:
         for device in self.devices:
@@ -247,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--initialize", action="store_true")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--console", type=Path, default=SIM_ROOT.parent / "apps/site-agent-console/out")
+    parser.add_argument("--api-only", action="store_true", help="serve the local API without requiring a console export")
     parser.add_argument("--behavior", choices=("accept_and_succeed", "fail_cannot_continue", "help_needs_manual_recharge", "silent_after_accept"), default="accept_and_succeed")
     args = parser.parse_args(argv)
     runtime = PilotDispatchRuntime(args.out, initialize=args.initialize, behavior=args.behavior)
@@ -260,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
             deployment_id=DEPLOYMENT_ID, workflow_id=RANGE_OPS_WORKFLOW_ID,
             seam=service_composition_seam(),
         )
-        server = SiteAgentApiServer(service, port=args.port, console_dir=args.console, task_operations=runtime.route)
+        server = SiteAgentApiServer(service, port=args.port, console_dir=None if args.api_only else args.console, task_operations=runtime.route, planning_operations=runtime.route_planning)
         server.start_background()
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda _sig, _frame: stop.set())

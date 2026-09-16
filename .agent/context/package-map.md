@@ -104,3 +104,19 @@ Contract changes have a large fan-out. Prefer additive versioned envelopes or
 adapters over silently changing a stable payload. When a schema change is truly
 required, name migration, replay, drift, serialization, and downstream impact
 in the plan.
+
+## Human-led planning v1 composition
+
+The [reviewed v1 gate](../../simulation/docs/planning_v1_architecture.md) extends
+existing responsibilities. `nxt_pilot_ops.planning_contracts`, `planning`, and
+`planning_workflow` own strict cold-start evidence, pure scenario calculations,
+versioned amendments and results. They import self/stdlib only, have no clock,
+I/O or execution calls, and reuse the existing stockout projection.
+
+`simulation/scripts/planning_operations.py` composes those public modules with
+`nxt_edge_task.schedules` and the existing anchored journal; its root owns the
+clock and injects an optional planning callback into the local Manager API.
+`nxt_site_agent` does not import task code; Edge does not import planning code.
+Edge's opaque `admission_reference` requires an injected gate before due-time
+admission. Missing/expired/invalidated planning evidence blocks pending intent;
+already admitted tasks are immutable. No change permits physical commands.

@@ -67,7 +67,10 @@ unreadable evidence or unknown commit outcome.
 | POST `/api/v1/planning/outcomes` | `OutcomeRequest` | MutationReceipt with result evidence |
 | GET `/api/v1/planning/requests/{request_id}` | none | MutationReceipt, or 404 `planning_request_not_found` |
 
-Every mutation has a caller-generated stable `request_id`. Preserve the exact
+Every mutation has a caller-generated stable `request_id`. Once committed, that
+ID is bound to its content. The explicitly described already-confirmed/new-ID
+case below returns the original committed ID without binding a new alias.
+URL-encode the ID as one path segment when querying it. Preserve the exact
 request bytes/values across retry (JSON key order is irrelevant). Same ID plus
 same content returns `disposition: "duplicate"`; same ID with different content
 returns 409 `planning_conflict`. GET by request ID is the recovery path after
@@ -188,7 +191,11 @@ Confirmation stores `confirmation_id`, `request`, `plan_id`, `plan_version`,
 creation payload (`robot_id`, `zone_id`, `due_at_utc`, `expires_at_utc`,
 `operator`, `admission_reference`, the opaque confirmation ID). Bound schedules
 use `nxt-edge-schedule/v2`; unbound legacy schedules retain v1 bytes and behavior.
-Only the composition root can create a bound schedule. Read projection may add `schedule_status` and `task_id`.
+The internal schedule operator is `planning-` plus the first 24 hex digits of
+the canonical SHA-256 digest of the original operator text; the original name
+remains in `confirmation.request.operator`. This preserves the legacy task
+wire vocabulary and is attribution only. Only the composition root can create
+a bound schedule. Read projection may add `schedule_status` and `task_id`.
 A second request ID for the same exact plan version returns the existing
 confirmation as duplicate with the original committed `request_id` in its
 receipt; no alias record is appended. Query that original ID. If this duplicate
@@ -198,6 +205,12 @@ different version conflicts. At most one schedule
 per plan ID. A durable confirmation intent is recovered into the identical
 content-derived schedule after restart. Unknown write outcome is queried and
 retried by original request ID; a failed projection is not proof of failure.
+
+`start_at_utc` is the earliest intended start, with an exclusive latest-start
+deadline. Confirmation a few seconds after that earliest time is permitted
+while the same admission window remains valid. The due time and original
+projection stay frozen; actual admission/results retain their actual times.
+No delayed admission may pass the conservative latest-start deadline.
 
 At due time, validate version/input identity, expiry and all restrictions again
 inside scheduling admission. A revised input, closed zone, expired weather/work

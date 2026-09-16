@@ -291,3 +291,14 @@ and add a guard when changing that boundary.
   by pure contracts.
 
 See [package-map.md](package-map.md) for responsibility-by-package details.
+
+## Explicit human-confirmed planning rehearsal
+
+The [v1 shared contract](../../simulation/docs/contracts/planning-v1/README.md)
+adds dated manual evidence -> pure `nxt_pilot_ops` scenarios -> immutable plan
+version -> explicit human confirmation -> composition-root association ->
+existing SIMULATION schedule admission. The old recommendation acceptance path
+is unchanged. The root verifies planning/task linkage before any transport
+replay and revalidates freshness/version under the schedule journal lock. Four
+independent result stages remain evidence; task success never creates quantity
+or live inventory. Physical execution and authentication remain unimplemented.

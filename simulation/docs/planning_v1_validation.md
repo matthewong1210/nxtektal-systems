@@ -59,3 +59,75 @@ unknown result. Manager acceptance still does not create a task.
   parity are covered. No frontend calculations or runtime state writes added.
 - This commit is the pure policy/evidence layer. Transport, persistence
   composition and simulated task/result integration follow in stage 4.
+
+## Stage 4: local simulation bridge and actual results
+
+- `uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider`
+  — **2045 passed**, **no skips**, in 163.79s. Includes all relevant package
+  suites, architecture/safety guards and the real local Mosquitto wire tests.
+- `uv run --no-sync python -B scripts/validate_configs.py`
+  — **0 errors, 0 warnings**.
+- Independent Edge verification:
+  `uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_task`
+  — **250 passed**, no skips, in 116.92s.
+- Independent bridge fault review:
+  `uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent/test_planning_failures.py`
+  — **20 passed** in 1.91s. Covered encoded request IDs, invalid UTF-8,
+  human confirmation delay, actual admission time, ambiguous durable writes,
+  restart uniqueness, malformed-but-byte-valid evidence, task/schedule identity,
+  and verification before transport publication or device startup.
+- Real-clock CLI smoke:
+  `uv run --no-sync python -B /private/tmp/nxtektal-planning-cli-smoke.py`
+  — **PASS**. The script launched `scripts/pilot_dispatch_demo.py --api-only`
+  against a new temporary evidence directory, used actual loopback HTTP,
+  submitted input/plan/duplicate confirmation, observed one successful task,
+  explicitly entered SUPPLIED, verified unchanged input inventory, and shut
+  down the process. Exactly one confirmation, schedule and task were observed.
+  The durable automated counterpart is
+  `tests/site_agent/test_planning_composition.py`; all four result stages are
+  exercised there. The smoke script/output are temporary validation artifacts,
+  not production code or evidence of a physical ball process.
+- `uv build --out-dir /private/tmp/nxtektal-planning-build`
+  — source distribution and wheel built; ZIP inspection confirmed all three
+  new planning modules are included. Initial restricted-cache build could not
+  resolve Hatchling due to sandbox DNS; the standard cache build above passed.
+- From repository root:
+  `uv run --no-project --python 3.13.14 python -B -m unittest discover -s .github/scripts -p 'test_*.py' -v`
+  — **111 passed** in 4.599s. Initial sandbox run had six socket permission
+  errors; authorized loopback rerun passed. `uv --version` was **0.11.29**.
+- `uv run --no-project --python 3.13.14 python -B .github/scripts/verify_repository.py`
+  — **passed**: 597 tracked/nonignored paths, 72 Markdown files, local links,
+  anchors, skills, conflict markers, secrets/machine paths, generated artifacts,
+  submodules and dependency boundaries.
+
+Final hygiene commands, from the repository root:
+
+```bash
+git status --short --branch
+git diff --check
+git diff --stat
+git diff --name-status
+git ls-files --others --exclude-standard
+git diff --cached --check
+```
+
+New text files also received `git diff --no-index --check /dev/null <file>`.
+No whitespace errors; no apps implementation changed. Baseline checkout,
+pre-existing main modifications and Claude's working directories were untouched.
+No push, deployment, real-device connection or main merge was performed.
+
+## Remaining integration and limits
+
+Claude's final commit was not supplied during backend implementation. Its code
+has not been imported or independently reviewed; frontend typecheck/tests/build
+and combined browser acceptance remain pending that handoff. The user-facing
+interface must consume the schema frozen in stage 2. Later documentation
+clarifies UTC start-window semantics, original-ID duplicate receipts, and the
+internal attribution token; it does not add a second wire shape.
+
+This is a local, unauthenticated SIMULATION rehearsal. Operator names do not
+establish permission. Human counts/estimates are evidence, not live truth;
+results never directly increment facility inventory. No learned demand model,
+hardware bridge, production deployment, remote notification, automatic mode or
+throughput/long-history performance claim is included. Existing v0 acceptance
+continues to mean human workflow evidence only.

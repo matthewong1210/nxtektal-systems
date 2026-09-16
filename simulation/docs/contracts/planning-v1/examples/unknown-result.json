@@ -63,7 +63,7 @@
                 "zone_id": "Z1",
                 "due_at_utc": "2026-09-16T08:05:00Z",
                 "expires_at_utc": "2026-09-16T08:09:40Z",
-                "operator": "course-manager",
+                "operator": "planning-7c3d683a12604724916c7768",
                 "admission_reference": "confirmation_example_001"
               }
             }
@@ -114,7 +114,7 @@
                 "zone_id": "Z1",
                 "due_at_utc": "2026-09-16T08:05:00Z",
                 "expires_at_utc": "2026-09-16T08:09:40Z",
-                "operator": "course-manager",
+                "operator": "planning-7c3d683a12604724916c7768",
                 "admission_reference": "confirmation_example_001"
               }
             }

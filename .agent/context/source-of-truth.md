@@ -199,3 +199,22 @@ When documentation conflicts, use this order:
 
 Do not use the order to hide a contradiction. Record it and reconcile the
 documentation in the same change when that is safely in scope.
+
+### Human-led planning v1 (local unmerged branch)
+
+`nxt_pilot_ops` owns cold-start input evidence, immutable plan versions,
+scenario calculations, human amendment and four independent actual-result
+records under the [shared v1 contract](../../simulation/docs/contracts/planning-v1/README.md).
+They are hypotheses/advice/history, never another FacilityState or mutable
+inventory. Stockout arithmetic reuses the existing projection. This policy is
+explicitly separate from Guardian and broad Facility advice; no reconciliation
+or third decision engine is introduced.
+
+The reviewed `simulation/scripts/planning_operations.py` root binds a new,
+explicit exact-version human confirmation to one SIMULATION schedule. Old
+recommendation acceptance is unchanged and creates no schedule. The root reuses
+Edge's anchored journal as a plain-data persistence mechanism; planning payload
+semantics remain in Shadow Ops. This does not claim the planning records have
+Shadow Ops ledger hash-chain guarantees. Operator text is attribution only.
+A task status is never a ball quantity; even an entered SUPPLIED quantity does
+not mutate live stock. Physical admission/execution remains absent.

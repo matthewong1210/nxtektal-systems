@@ -44,6 +44,14 @@ from .service import SiteAgentService
 _MAX_BODY_BYTES = 65536
 
 _STATUS_BY_CODE = {
+    "planning_invalid_request": 400,
+    "planning_not_found": 404,
+    "planning_request_not_found": 404,
+    "planning_conflict": 409,
+    "planning_expired": 409,
+    "planning_not_ready": 409,
+    "planning_unavailable": 503,
+    "planning_result_unknown": 503,
     "unknown_recommendation": 404,
     "task_ops_conflict": 409,
     "task_ops_unavailable": 503,
@@ -235,7 +243,9 @@ class _Handler(BaseHTTPRequestHandler):
             ):
                 # A GET carrying an unread body would desync keep-alive.
                 self.close_connection = True
-            if path == "/api/v0/task-ops" or path.startswith("/api/v0/task-ops/"):
+            if path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
+                self._send_json(200, _envelope(self._route_planning("GET", path, {})))
+            elif path == "/api/v0/task-ops" or path.startswith("/api/v0/task-ops/"):
                 self._send_json(200, _envelope(self._route_task_ops("GET", path, {})))
             elif path == "/api/v0/health":
                 self._send_json(
@@ -284,7 +294,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_error_code("forbidden_origin", reason or "refused")
                 return
             body = self._read_body()
-            if path == "/api/v0/task-ops" or path.startswith("/api/v0/task-ops/"):
+            if path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
+                self._send_json(200, _envelope(self._route_planning("POST", path, body)))
+            elif path == "/api/v0/task-ops" or path.startswith("/api/v0/task-ops/"):
                 self._send_json(200, _envelope(self._route_task_ops("POST", path, body)))
             elif path == "/api/v0/demo/advance":
                 self._send_json(200, _envelope(self._service.advance()))
@@ -311,6 +323,12 @@ class _Handler(BaseHTTPRequestHandler):
                     "internal_error", f"{type(exc).__name__}: {exc}"
                 ),
             )
+
+    def _route_planning(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        callback = self.server.planning_operations
+        if callback is None:
+            raise SiteAgentError("planning_unavailable", "planning is not configured for this service")
+        return callback(method, path, body)
 
     def _route_task_ops(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
         # Optional composition-root route. It cannot intercept recommendations
@@ -414,10 +432,12 @@ class _Server(ThreadingHTTPServer):
         service: SiteAgentService,
         console_dir: Path | None,
         task_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
+        planning_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         self.service = service
         self.console_dir = console_dir
         self.task_operations = task_operations
+        self.planning_operations = planning_operations
         super().__init__(address, _Handler)
 
 
@@ -432,6 +452,7 @@ class SiteAgentApiServer:
         port: int = 0,
         console_dir: Path | None = None,
         task_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
+        planning_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         if host not in LOOPBACK_HOSTS:
             raise SiteAgentError(
@@ -452,7 +473,7 @@ class SiteAgentApiServer:
                     f"console directory does not exist: {resolved_console}",
                 )
         self._service = service
-        self._server = _Server((host, port), service, resolved_console, task_operations)
+        self._server = _Server((host, port), service, resolved_console, task_operations, planning_operations)
         self._thread: threading.Thread | None = None
         self._serving = False
 

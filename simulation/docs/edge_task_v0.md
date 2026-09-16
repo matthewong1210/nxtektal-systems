@@ -496,3 +496,20 @@ re-execution by the same incarnation surfaces as an evidence conflict that
 closes the gate. A resend already in flight during re-provisioning is rejected at
 sequence 0 by the new incarnation (`target_incarnation`). Journal growth is unbounded (heartbeat receipts
 dominate); no rotation exists in PR A.
+
+## Optional bound schedule v2
+
+`normalized_schedule()` preserves unbound `nxt-edge-schedule/v1` canonical
+content. An optional nonempty opaque `admission_reference` uses
+`nxt-edge-schedule/v2`. `ScheduleService(admission_gate=...)` requires a callback
+for that v2 schedule before creating its task. The callback receives the same
+verified journal prefix under the existing exclusive lock, a read-only schedule,
+and explicit UTC time; it returns `None` or `(code, detail)`. It must not read the
+journal again while holding the lock. No callback means rejection, and callback
+errors fail-stop. Existing online/availability/protection/conflict rules apply
+after the gate. There is no planning-package import or physical admission here.
+
+The human-led rehearsal root may register its own opaque evidence kinds on its
+journal instance. Edge continues to interpret only its own kinds; the root
+validates other owners' payloads before transport recovery. Newer journal
+readers can read v1 schedules unchanged; old software is not a v2 reader.

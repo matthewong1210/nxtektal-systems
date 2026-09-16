@@ -357,3 +357,16 @@ Reject or revise a change that:
 - Human operating manual: [`docs/AGENT_OPERATING_MANUAL.md`](docs/AGENT_OPERATING_MANUAL.md)
 - Safe-change skill: [`.agent/skills/nxtektal-change/SKILL.md`](.agent/skills/nxtektal-change/SKILL.md)
 - Review skill: [`.agent/skills/nxtektal-review/SKILL.md`](.agent/skills/nxtektal-review/SKILL.md)
+
+## Human-led planning v1 extension
+
+The local implementation is governed by
+[`simulation/docs/contracts/planning-v1/README.md`](simulation/docs/contracts/planning-v1/README.md)
+and its strict JSON Schema. `nxt_pilot_ops` owns manual planning evidence,
+scenario calculation, immutable revisions and actual-result records. Reuse its
+stockout projection; never duplicate calculations in the console. The reviewed
+composition-root bridge accepts a separate exact-version human confirmation
+and produces only a SIMULATION schedule through the existing Edge admission.
+Old recommendation acceptance remains workflow-only. The API receives a
+callback, Edge receives an opaque admission reference/gate, and neither imports
+the other's domain. No LLM, advisor or physical device gains execution access.

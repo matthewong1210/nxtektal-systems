@@ -403,3 +403,15 @@ They live in the tool-neutral `.agent/skills/` tree requested for this
 repository and are not assumed to auto-register with Codex or Claude Code.
 `AGENTS.md` and `CLAUDE.md` route agents to load them explicitly; do not fork
 copies into tool-specific trees that can drift.
+
+## Human-led planning v1 handoff
+
+For the local simulation planning extension, begin with the
+[shared API contract](../simulation/docs/contracts/planning-v1/README.md),
+[architecture gate](../simulation/docs/planning_v1_architecture.md), and
+[observed validation record](../simulation/docs/planning_v1_validation.md).
+Backend and console must use the same schema/examples. Manual assumptions,
+measured input, system calculations and actual results stay distinct. New
+plan confirmation is an explicit simulation action; accepting an old Guardian
+recommendation still only records human workflow. Names are attribution, not
+access control, and no physical deployment is implemented.

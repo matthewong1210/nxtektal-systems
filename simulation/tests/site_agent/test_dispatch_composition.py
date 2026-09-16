@@ -245,6 +245,6 @@ def test_runner_is_a_narrow_simulation_composition_root():
             roots.update(n.name.split(".")[0] for n in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
             roots.add(node.module.split(".")[0])
-    assert roots <= {"__future__", "argparse", "fcntl", "json", "signal", "sys", "threading", "datetime", "pathlib", "typing", "nxt_edge_task", "nxt_site_agent", "nxt_workflow_enablement", "scripts"}
+    assert roots <= {"__future__", "argparse", "fcntl", "json", "signal", "sys", "threading", "datetime", "pathlib", "typing", "nxt_edge_task", "nxt_pilot_ops", "nxt_site_agent", "nxt_workflow_enablement", "scripts"}
     for forbidden in ("RobotTaskInterface", "apply_directive", "import paho", "--live", "--real-robot"):
         assert forbidden not in path.read_text()
