@@ -48,12 +48,25 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 | `nxt_edge_observation` | Raw device sample conversion into canonical observations, with explicit adapter diagnostics; fixture-backed, no transport or command surface |
 | `nxt_workflow_enablement` | Workflow identity registry, shared-site gates, independent per-workflow readiness verdicts, deterministic enablement report, and fixture-only launch-plan data |
 | `nxt_course_world_model` | Immutable, versioned course spatial truth (course-local frame, elevation surface, semantic features, map revisions) and the deterministic read-only Map Query Service |
-| `nxt_edge_task` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation with dedup, ordering, terminal-conflict gate, and liveness, plus the protocol double's executor rules; stdlib-only, no transport or execution surface |
+| `nxt_edge_task` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation with dedup, ordering, terminal-conflict gate, and liveness, plus the protocol double's executor rules, dated UTC schedules, and local operator inbox; stdlib-only, no transport or physical execution surface |
+| `nxt_site_agent` | Local readiness-gated Site Agent service shell: loopback Manager API, noncanonical projections/briefing, fixture source-cursor persistence; fixture-backed Shadow Mode only |
 | `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
 
 The robot handoff packages and Site OS packages remain separate layers. The
 full dependency and truth map is in
 [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md).
+
+## Local Pilot Dispatch rehearsal
+
+[Pilot Dispatch Console V0](docs/pilot_dispatch_v0.md) composes the fixture
+Site Agent service and Edge Task protocol doubles through
+`scripts/pilot_dispatch_demo.py`. The console can create a single-date
+collection schedule, show task progress, and record local inbox handling.
+The existing Edge journal owns schedules and response evidence; the runner
+owns clocks and in-memory transport. No new package is added, advice does not
+create tasks, and active uncertainty cannot be resolved by an operator note.
+There are no remote notifications, recurring schedules, or physical devices;
+`carrier-01` remains standby and CE82A integration remains future work.
 
 ## Honest-scope disclaimers
 

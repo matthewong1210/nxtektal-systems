@@ -20,7 +20,9 @@ fact class and runtime boundary.
 | Raw-device-to-canonical-observation conversion and its diagnostics | `nxt_edge_observation` adapters, adapter-local device profiles, and `EdgeAdapterReport` | Observation semantics, a second telemetry envelope, facility truth, a channel registry, a commissioned fact, or any transport/command surface |
 | Multi-workflow commissioning readiness | `nxt_workflow_enablement` workflow registry, versioned requirement definitions, independent per-workflow verdicts, deterministic enablement report, and fixture-only launch-plan data | Commissioning truth, facility state, telemetry, policy output, workflow-case records, proof a registered capability exists, live device connectivity, or physical execution |
 | Versioned course spatial truth (course-local frame, elevation surface, semantic course features, map revisions) and deterministic map queries | Immutable `nxt_course_world_model.CourseWorldModel` plus its read-only `MapQueryService`, bound to commissioned identity and validated with `validate_model_against_site` | Commissioned static truth, facility state, telemetry, a live map, twin/USD output, readiness verdicts, a route planner, a navigation stack, a landing model, or any command surface |
-| Simulated Edge<->robot task-exchange evidence (task requests issued by the SIMULATION test entry, received robot status and task events, Edge task/device derivation, the terminal-conflict gate) | `nxt_edge_task` wire contracts and the append-only Edge journal (`nxt-edge-task/journal/v1`); the protocol double's own journal is the only authority for what it decided, started, and completed | Physical task admission, robot telemetry truth, facility state, an observation, advice, human workflow, or proof that a physical act occurred; the Edge learns robot results only through received messages |
+| Simulated Edge<->robot task-exchange evidence (task requests issued by the SIMULATION test entry or admitted dated schedule, received robot status and task events, Edge task/device derivation, the terminal-conflict gate) | `nxt_edge_task` wire contracts and the append-only Edge journal (`nxt-edge-task/journal/v1`); the protocol double's own journal is the only authority for what it decided, started, and completed | Physical task admission, robot telemetry truth, facility state, an observation, advice, recommendation workflow, or proof that a physical act occurred; the Edge learns robot results only through received messages |
+| Dated rehearsal schedule intent and local operator inbox responses | `nxt_edge_task` records in the existing Edge journal; due-time task admission retains the existing task/device rules | A recurring calendar, advice-to-task conversion, remote notification, evidence that an uncertain task was completed, or authority to clear a device/task restriction |
+| Site Agent service shell | `nxt_site_agent` service lifecycle state, versioned loopback Manager API projections and optional composition-root `/api/v0/task-ops` route transport, fixture source-cursor persistence, and noncanonical service diagnostics | Facility truth, observation semantics, policy or workflow semantics, a second evidence store, wall-clock canonical times, an authentication story, or any physical command surface |
 | Facility advice | `nxt_facility.decisions.Recommendation` | Directive or execution acknowledgement |
 | Shadow decision evaluation | `nxt_pilot_ops` snapshot, evaluation, trace, and recommendation | Command, actuator, safety shield, or live state |
 | Human/execution workflow evidence | Shadow Ops immutable workflow records and hash-chained ledger | Proof the physical act occurred beyond the recorded acknowledgement |
@@ -142,11 +144,13 @@ the sole owner of FacilityState-derived advice about faulted, e-stopped,
 awaiting-help, or low-battery robots (`robot_down`, `assist_backlog`,
 `battery_reserve`), and `nxt_pilot_ops` stays the owner of recommendation
 workflow. The rehearsal never reads `FacilityState`, emits no
-`Recommendation`, applies no battery threshold, and records only what a
-protocol double reported or what the Edge observed on the transport; its
-task requests come from an explicitly SIMULATION-labelled test entry, never
-from advice or manager acceptance. No component merges, ranks, or reconciles
-its records with either advisory output.
+`Recommendation`, applies no battery threshold, and records protocol-double reports, Edge transport evidence, dated operator
+schedule intent, and local inbox responses. Task requests come from an
+explicitly SIMULATION-labelled test entry or due schedule admission, never
+from advice or manager acceptance. Human inbox responses cannot resolve active
+uncertainty or reopen authorization, and no remote notifications are sent.
+No component merges, ranks, or reconciles its records with either advisory
+output.
 
 No LLM, generative agent, advisory policy, or Site Runtime component has execution
 authority. It must not directly invoke `RangeSimulation.apply_directive()`,

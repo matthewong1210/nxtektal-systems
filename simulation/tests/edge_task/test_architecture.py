@@ -131,6 +131,7 @@ OTHER_PACKAGES = (
     "nxt_edge_observation",
     "nxt_workflow_enablement",
     "nxt_course_world_model",
+    "nxt_site_agent",
 )
 
 

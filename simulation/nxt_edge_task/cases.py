@@ -93,6 +93,14 @@ EDGE_RECORD_KINDS = frozenset(
         ROBOT_REQUEST_REJECTED,
         TASK_RECONCILIATION_FLAGGED,
         CONFLICTING_TERMINAL,
+        # Local dated scheduling and inbox evidence. These records never alter
+        # task/device derivation or reopen any authorization gate.
+        "schedule_created",
+        "schedule_cancelled",
+        "schedule_rejected",
+        "schedule_missed",
+        "notification_acknowledged",
+        "notification_resolved",
     }
 )
 

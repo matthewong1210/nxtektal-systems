@@ -36,7 +36,8 @@ Classify the feature before choosing a directory:
 | Raw device payload conversion into a canonical observation | `nxt_edge_observation` (conversion plus the source-side delivery cursor; no transport, sequence validation, state, or command) |
 | Workflow identity registration, per-workflow readiness evaluation, enablement report, launch-plan data | `nxt_workflow_enablement` (readiness gating only; runtime assembly stays in composition roots) |
 | Versioned course spatial truth, elevation surface, semantic course geometry, map revisions, deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; evidence derivation stays in composition roots) |
-| Simulated Edge<->robot task-exchange wire contracts, Edge task/device journal derivation, protocol-double executor rules | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, and the test-entry CLI stay in `simulation/scripts/`; not physical admission) |
+| Simulated Edge<->robot task-exchange wire contracts, Edge task/device journal derivation, protocol-double executor rules, dated schedule intent, local inbox responses | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, the test-entry CLI and integrated runner stay in `simulation/scripts/`; no recurring calendar, remote notification delivery, uncertain-task resolution, or physical admission) |
+| Local service lifecycle, Manager API/projection transport, service health, fixture source-cursor persistence | `nxt_site_agent` (application shell only; loopback-only, noncanonical; fixture composition and the optional `/api/v0/task-ops` callback stay in composition roots; no task-package import) |
 | Physical static onboarding facts | `nxt_commissioning` |
 | Policy-specific trust, trace, evaluation, workflow, ledger | `nxt_pilot_ops` |
 | Historical evidence | `nxt_memory` |

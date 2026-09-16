@@ -92,6 +92,36 @@ notify anyone about its own death (no host watchdog exists), and human
 intervention cases plus notification records are PR B, not part of this
 slice.
 
+Also added after that baseline (verify merge status against the current
+branch): `nxt_site_agent` plus `apps/site-agent-console`, the Pilot Site
+Agent Service V0 — a local, loopback-only, fixture-backed application
+boundary that verifies a READY enablement report, drives the existing
+Agent Runtime one bounded cycle at a time, persists the fixture source
+resume cursor, projects existing evidence through a versioned local
+Manager API, and serves a static Manager Console. Manager acceptance
+remains workflow evidence only. It is not a production or cloud
+service: no authentication, no public exposure, no physical sensor,
+transport, or device connection, no robot/actuator command path, and
+no change to the "Not implemented" rows above.
+
+The PR A and original Site Agent descriptions above retain their historical
+scope. The integration branch adds
+[Pilot Dispatch Console V0](../../simulation/docs/pilot_dispatch_v0.md):
+`pilot_dispatch_demo.py` composes both in one local console through an optional
+`/api/v0/task-ops` callback. `nxt_edge_task` now owns dated UTC schedule intent
+and a durable local operator inbox in its existing journal; the runner owns
+the clock, process lock, loop, and in-memory protocol doubles. This is a
+composition of existing packages, not a new package or physical deployment.
+The upstream PRs remain unmerged; integration here does not change that status.
+
+Manager acceptance still does not create an Edge task. Task/status evidence
+has its own console projection and never becomes fixture facility truth.
+Schedules are single-date, expire explicitly, and pass existing admission only
+when due. Inbox acknowledgement and permitted resolution record human handling;
+active uncertainty cannot be resolved, no authorization gate is cleared, and
+no remote notification is sent. Carrier transport, two-robot handoff, automatic
+unloading/charging, CE82A integration, and field operation remain absent.
+
 ## Static truth versus dynamic evidence
 
 For a physical facility, commissioning owns **what exists and how it is
@@ -212,7 +242,8 @@ give Site Runtime ownership of simulation truth.
 | Raw device payload conversion into a canonical observation, its diagnostics, and the source-side at-least-once delivery cursor | `nxt_edge_observation` (no transport, sequence validation, state, or command) |
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
-| Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules | `nxt_edge_task` (SIMULATION rehearsal only; MQTT, clocks, processes, and the test-entry CLI stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
+| Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules, dated schedules, and local inbox response evidence | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, and the test-entry CLI / integrated runner stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
+| Local service lifecycle, Manager API projection transport, fixture source-cursor persistence, service diagnostics | `nxt_site_agent` (noncanonical application shell; loopback-only; no state, policy, workflow, or execution semantics) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |

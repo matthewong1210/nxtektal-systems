@@ -193,7 +193,7 @@ One evidence directory per `(site_id, deployment_id)`:
 
 | File | Writer | Nature |
 |---|---|---|
-| `snapshots.jsonl` | `JsonlSnapshotPublisher` | Published envelope `to_dict()` stream; regenerable presentation/replay projection, idempotent by `envelope_id`; **not** a state truth store and never read back as live input |
+| `snapshots.jsonl` | `JsonlSnapshotPublisher` | Published envelope `to_dict()` stream; regenerable presentation/replay projection, idempotent by `envelope_id`; **not** a state truth store and never an input to assembly, policy, or any live-loop decision (presentation readers such as the Site Agent Manager Console may display it) |
 | `ledger.jsonl` | `nxt_pilot_ops.JsonlEventLedger` | Canonical decision/workflow evidence (hash-chained, append-only) |
 | `evaluations.jsonl` | `EvaluationJournal` | Canonical runtime evaluation evidence (`nxt-agent-runtime/evaluation/v1`), one record per admitted envelope, idempotent by `evaluation_id`, contiguous by sequence |
 | `checkpoints/site/…` | `nxt_site_runtime.JsonCheckpointStore` | Publication progress (existing contract) |
