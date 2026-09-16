@@ -557,12 +557,12 @@ mirror. Preserve exact command output in the migration record.
 
 ### Python package, architecture, and demo
 
-From `simulation/`, use the repository's current dependency workaround without
-changing the lockfile:
+From `simulation/`, require the manifest and lock to agree and install every
+declared extra:
 
 ```bash
-uv sync --frozen --all-extras
-uv pip install --python .venv/bin/python "usd-core==26.8"
+uv lock --check
+uv sync --locked --all-extras
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider
 uv run --no-sync python -B scripts/validate_configs.py
 
@@ -570,8 +570,8 @@ python_build_dir="$(mktemp -d)"
 uv build --out-dir "$python_build_dir"
 ```
 
-Inspect the wheel contents and prove all declared packages are present. Record
-the known `uv.lock`/`twin`-extra gap rather than silently editing the lock.
+Inspect the wheel contents and prove all declared packages are present. Keep
+the checked lock unchanged throughout extraction verification.
 
 Then run the verified simulation-first replay path in `docs/DEMO.md`: generate
 the benchmark, capture the deterministic facility-state/briefing artifacts,

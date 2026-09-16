@@ -1,0 +1,22 @@
+edge_gateway:
+  schema: nxt-edge-gateway/config/v0
+  mode: HYBRID_RUNTIME_REHEARSAL
+  site_id: pilot-course-a
+  deployment_id: pilot-a-edge-v0
+  gateway_id: gw-pilot-a-01
+  broker:
+    host: mosquitto
+    port: 1883
+    keepalive_s: 30
+    qos: 1
+    client_id: gw-pilot-a-01
+  devices:
+    - device_id: loadcell-controller-01
+      sensor_ids:
+        - sensor-lc-dispenser-count
+        - sensor-lc-dispenser-sensed
+  status:
+    host: 0.0.0.0
+    port: 8080
+  evidence_dir: reports/edge-gateway-v0
+  fixture_cycle_index: 0

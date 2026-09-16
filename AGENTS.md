@@ -87,8 +87,9 @@ architectural responsibility, not an inferred person or team.
     handoff cycle; it is not a site-level collector-dispatch API or physical
    command gateway. The Isaac Sim simulation adapter and ROS 2 physical adapter
    are currently stubs; do not claim deployed robot execution. The Edge
-    Observation Adapter Kit V0 converts already-read synthetic samples only; it
-    has no live transport, physical device, register write, or command surface.
+    Observation Adapter Kit V0 converts already-read raw samples; repository-
+    backed inputs remain fixture/mock-derived, and the package itself has no
+    live transport, physical device, register write, or command surface.
 11. The AI operating layer—the trusted state, advisory, trace, and evaluation
    system—is the strategic moat. Preserve its boundaries instead of collapsing
    it into the simulator, twin, or robot adapter.
@@ -130,6 +131,7 @@ Use, in order:
    `simulation/docs/site_runtime_design.md`,
    `simulation/docs/agent_runtime_v1.md`,
    `simulation/docs/edge_observation_v0.md`,
+   `simulation/docs/edge_gateway_live_input_v0.md`,
    `simulation/docs/workflow_enablement_v0.md`, and
    `simulation/docs/course_world_model_v0.md`.
 4. Design documents for rationale.
@@ -253,8 +255,8 @@ Use the exact, normative commands in
 [`.agent/workflows/testing.md`](.agent/workflows/testing.md). Python production
 changes require a complete all-extras environment, focused/boundary checks, the
 full suite, and config validation. ROI changes require typecheck, tests, and a
-build. The workflow also records the current `uv.lock`/`twin`-extra gap so an
-agent does not silently change the lock or skip USD coverage.
+build. The workflow requires a lock-consistent all-extras setup so an agent does
+not silently change the lock or skip optional USD or MQTT coverage.
 
 No Python formatter, linter, or type checker is currently configured. The
 repository CI workflow and exact local equivalents are documented in

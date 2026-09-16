@@ -10,11 +10,17 @@ of touching a physical facility.
 V0 does **not** connect to physical Modbus devices, serial ports, MQTT, Kafka,
 OPC-UA, ROS 2, Nav2, an AgileX or other vendor SDK, robot motors, actuators,
 emergency-stop circuits, live cameras, or a cloud service. There is no live
-load-cell, washer, or robot telemetry, no deployed Edge Gateway, no customer-site
-installation, no validated sensor accuracy, no production Modbus/MQTT/ROS
+load-cell, washer, or robot telemetry, no customer-site installation, no
+validated sensor accuracy, no production Modbus/MQTT/ROS
 integration, no physical command admission, and no robot execution. Every
-sample in this repository is synthetic and labelled
+sample in this package's fixture/demo path is synthetic and labelled
 `SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA`.
+
+Edge Gateway Live Input V0 now exists separately under `simulation/scripts/`.
+It uses a local Mosquitto broker and deterministic mock publisher to exercise
+this unchanged conversion API. That script-level composition does not add MQTT,
+networking, or clocks to `nxt_edge_observation` and is not physical telemetry,
+a deployed customer gateway, or a production transport.
 
 The mechanical guards in `tests/edge_observation/test_architecture.py` enforce
 the absence: the package may import exactly one first-party module
@@ -78,6 +84,19 @@ nxt_commissioning.project_telemetry_adapter_config(site)   (one-way projection)
                  v
           nxt_site_runtime  ->  nxt_agent_runtime
 ```
+
+The additional local rehearsal path preserves the same dependency direction:
+
+```text
+mock publisher -> local Mosquitto -> scripts/edge_gateway_live_input_v0
+    -> existing LoadCellSample / RawSampleBatch
+    -> nxt_edge_observation
+    -> canonical Observation + EdgeAdapterReport
+```
+
+In its hybrid mode, the script—not this package—then combines only the matching
+sensor channel with explicitly simulation-labelled Pilot Course A inputs and
+implements the existing `ObservationSource` port.
 
 `nxt_edge_observation` must not import `nxt_site_runtime`: the repository
 invariant is that only the designated `nxt_agent_runtime` composition layer may
@@ -380,11 +399,13 @@ python scripts/edge_observation_adapter_demo.py --out reports/edge-observation
 evidence directory, and repeated runs produce byte-identical stdout and
 byte-identical evidence files.
 
-## Next seam for a real transport
+## Next seam for a physical or production transport
 
-The conversion kit is transport-free and does not change. The seam is **two
-objects, not one**, and it is worth being precise about the second because the
-fixture hides it:
+The conversion kit is transport-free and does not change. Edge Gateway Live
+Input V0 demonstrates the seam only with a local mock MQTT message, an in-memory
+cursor, and a synthetic fixture-compatible value. A physical device reader or
+production transport still needs **two objects, not one**, and it is worth being
+precise about the second because the fixture and mock path hide it:
 
 1. **The reader replaces `FixtureRawSampleFeed`.** A real Modbus, MQTT,
    OPC-UA, or robot-vendor reader must decode its own wire protocol and emit
@@ -409,8 +430,8 @@ fixture hides it:
    declared absence for those channels.
 
 Downstream of the composition root — Site Runtime, Agent Runtime, Shadow Ops —
-nothing changes. Such a transport is a new
-high-risk boundary — live hardware, vendor integration, and site deployment
-remain unimplemented in this repository — and requires its own architecture
-review before it is built. Physical command admission and robot execution
-remain out of scope entirely and are not reachable from this path.
+nothing changes. A physical or production transport is still a new high-risk
+boundary: live hardware, vendor integration, durable raw-message recovery, and
+site deployment remain unimplemented in this repository and require their own
+architecture review. Physical command admission and robot execution remain out
+of scope entirely and are not reachable from this path.

@@ -35,6 +35,11 @@ from nxt_sim.config.models import (  # noqa: E402
 )
 from nxt_sim.config.validation import Severity, cross_validate  # noqa: E402
 from nxt_sim.scenarios.sweep import expand_grid  # noqa: E402
+from scripts.edge_gateway_live_input_v0 import (  # noqa: E402
+    GatewayError,
+    load_gateway_config,
+)
+from scripts.pilot_course_a_edge_fixture import commissioned_site  # noqa: E402
 
 
 def main() -> int:
@@ -79,6 +84,19 @@ def main() -> int:
                 ok = False
                 messages.append(str(exc))
             report(path, ok, messages)
+
+    # Edge Gateway V0 is a deployment composition root, not a nxt_sim config
+    # model. Validate its strict versioned document against the authoritative
+    # commissioned Pilot Course A identity and load-cell bindings.
+    for edge_gateway_path in sorted((configs / "edge_gateway").glob("*.yaml")):
+        messages = []
+        ok = True
+        try:
+            load_gateway_config(edge_gateway_path, site=commissioned_site())
+        except GatewayError as exc:
+            ok = False
+            messages.append(str(exc))
+        report(edge_gateway_path, ok, messages)
 
     # Scenario + sweep files (full bundle + cross validation)
     for path in sorted((configs / "scenarios").glob("*.yaml")):

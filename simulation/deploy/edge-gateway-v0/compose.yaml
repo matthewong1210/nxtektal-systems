@@ -1,0 +1,69 @@
+name: nxtektal-edge-gateway-v0
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    restart: "no"
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - "./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -h 127.0.0.1 -p 1883
+          -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null 2>&1
+      interval: 2s
+      timeout: 4s
+      retries: 15
+      start_period: 2s
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/edge-gateway-v0/Dockerfile
+    # V0 replay/cursor state is deliberately process-local and non-durable.
+    restart: "no"
+    command:
+      - python
+      - -B
+      - scripts/edge_gateway_live_input_v0.py
+      - --config
+      - configs/edge_gateway/pilot-course-a.example.yaml
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -B
+        - -c
+        - >-
+          import json, urllib.request;
+          payload=json.load(urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=2));
+          assert payload.get('broker_connected') is True
+      interval: 2s
+      timeout: 4s
+      retries: 30
+      start_period: 2s
+
+  publisher:
+    build:
+      context: ../..
+      dockerfile: deploy/edge-gateway-v0/Dockerfile
+    restart: "no"
+    command:
+      - python
+      - -B
+      - scripts/mock_edge_load_cell_publisher.py
+      - --config
+      - configs/edge_gateway/pilot-course-a.example.yaml
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy

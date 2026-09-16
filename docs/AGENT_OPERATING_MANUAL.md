@@ -176,11 +176,15 @@ ObservationFrame + SiteConfig + UpstreamInputs + optional previous FacilityState
     -> FacilityState + AssemblyReport
 ```
 
-`SyntheticSensorBank` is the only implemented producer. The general telemetry
-assembler supports optional previous-state backfill, but `SiteRuntimePipeline`
-calls its three-argument path and rejects missing/stale required input before
-publication. `AssemblyReport` is separate quality evidence and must accompany
-deployment-path use; missing/backfilled values are not measurements.
+`SyntheticSensorBank` remains the core package producer. The script-level Edge
+Gateway V0 also accepts strict local mock-MQTT load-cell input for diagnostic or
+explicitly hybrid fixture rehearsal; it is not a physical device adapter,
+durable source, production service, or customer telemetry integration. The
+general telemetry assembler supports optional previous-state backfill, but
+`SiteRuntimePipeline` calls its three-argument path and rejects missing/stale
+required input before publication. `AssemblyReport` is separate quality
+evidence and must accompany deployment-path use; missing/backfilled values are
+not measurements.
 
 Commissioning answers what physically exists and projects static facts one way.
 `project_site_config()` is static-only and not constructor-ready for the current
@@ -336,10 +340,10 @@ The executable sequence is in
 
 Use the exact commands in
 [`.agent/workflows/testing.md`](../.agent/workflows/testing.md), the single
-normative testing source. It covers all-extras Python setup, the current
-`uv.lock`/`twin`-extra gap, focused package tests, architecture guards, the full
-suite, config validation, package builds, ROI typecheck/tests/build, and root
-documentation and agent-infrastructure checks.
+normative testing source. It covers lock-consistent all-extras Python setup,
+focused package tests, architecture guards, the full suite, config validation,
+package builds, ROI typecheck/tests/build, and root documentation and
+agent-infrastructure checks.
 
 The core rule is evidence outward from the change: focused regression, package,
 boundary/parity/determinism, then the full surface. Optional dependency skips
