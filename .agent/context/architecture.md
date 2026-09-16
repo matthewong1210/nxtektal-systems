@@ -172,6 +172,10 @@ coupling in named seams:
   `nxt_commissioning`'s public surface; Course Model facts reach the
   readiness layer only as declared plain-data evidence derived by
   composition roots, and neither package imports the other
+- `nxt_site_agent` as the local application boundary over the public
+  `nxt_agent_runtime`, `nxt_pilot_ops`, and `nxt_workflow_enablement` surfaces
+  (readiness-gated service lifecycle, loopback Manager API, noncanonical
+  projections only; fixture composition is injected from scripts)
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
@@ -226,6 +230,8 @@ type:
 | Edge adapter kit single-import conversion leaf, transport/process/nondeterminism bans, and no reverse dependency | `simulation/tests/edge_observation/test_architecture.py` |
 | Workflow enablement commissioning-only imports, purity bans, no canonical-contract duplication, and no reverse dependency | `simulation/tests/workflow_enablement/test_architecture.py` |
 | Course World Model commissioning-only imports, purity/transport/execution bans, no canonical-contract duplication, and no reverse dependency | `simulation/tests/course_world_model/test_architecture.py` |
+| Site Agent service approved-surface imports, stdlib whitelist, execution/LLM/nondeterminism bans, script transport bans, and no reverse dependency | `simulation/tests/site_agent/test_architecture.py` |
+| Site Agent Console API-only presentation leaf: no Python/ROI imports, no robot-command vocabulary, no hidden browser persistence, `/api/v0/` only | `apps/site-agent-console/tests/boundaries.test.ts` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
 | Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |

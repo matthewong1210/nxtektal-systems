@@ -49,6 +49,7 @@ from nxt_agent_runtime import (  # noqa: E402
 )
 from nxt_pilot_ops.ledger import JsonlEventLedger  # noqa: E402
 from nxt_site_runtime.checkpoints import JsonCheckpointStore  # noqa: E402
+from nxt_site_runtime.ports import ObservationSource  # noqa: E402
 
 from nxt_workflow_enablement import (  # noqa: E402
     AdapterCompositionEvidence,
@@ -342,6 +343,9 @@ def assemble_range_ops_runtime(
     specs=ENABLEMENT_CYCLES,
     consumed_cycles: int = 0,
     first_sequence_number: int = 0,
+    source=None,
+    runtime_sink=None,
+    site_config: SiteConfig | None = None,
 ) -> AgentRuntime:
     """Bounded composition factory: a READY plan becomes the existing loop.
 
@@ -356,6 +360,12 @@ def assemble_range_ops_runtime(
     bypassing readiness evaluation and owns that violation.  The resume
     parameters mirror the underlying fixture source: a restarted
     composition must not replay from the beginning.
+
+    ``source`` lets another composition root supply an already-resumed
+    fixture ``ObservationSource`` (``specs``/``consumed_cycles``/
+    ``first_sequence_number`` are then that source's responsibility);
+    ``runtime_sink`` threads a best-effort visibility sink into the
+    existing runtime.  Neither parameter changes plan validation.
     """
     if not isinstance(plan, RangeOpsLaunchPlan):
         raise WorkflowEnablementError(
@@ -387,16 +397,40 @@ def assemble_range_ops_runtime(
             f"factory creates: {plan.evidence_paths!r} vs "
             f"{EVIDENCE_RELATIVE_PATHS!r}"
         )
-    source = pilot_observation_source(
-        site,
-        specs=specs,
-        consumed_cycles=consumed_cycles,
-        first_sequence_number=first_sequence_number,
-    )
+    if site_config is not None and not isinstance(site_config, SiteConfig):
+        raise WorkflowEnablementError(
+            "site_config must be a SiteConfig projected from the same "
+            "commissioned site; the composition root owns that consistency"
+        )
+    if source is not None:
+        if not isinstance(source, ObservationSource):
+            raise WorkflowEnablementError(
+                "source must implement the runtime ObservationSource "
+                "protocol (peek-until-ack, reject with sequence reuse)"
+            )
+        if (
+            specs is not ENABLEMENT_CYCLES
+            or consumed_cycles != 0
+            or first_sequence_number != 0
+        ):
+            raise WorkflowEnablementError(
+                "source= supersedes specs/consumed_cycles/"
+                "first_sequence_number; resume the supplied source "
+                "itself instead of passing resume parameters here"
+            )
+    else:
+        source = pilot_observation_source(
+            site,
+            specs=specs,
+            consumed_cycles=consumed_cycles,
+            first_sequence_number=first_sequence_number,
+        )
     return AgentRuntime(
         site_id=plan.site_id,
         deployment_id=plan.deployment_id,
-        site_config=enablement_site_config(site),
+        site_config=(
+            enablement_site_config(site) if site_config is None else site_config
+        ),
         observation_source=source,
         publisher=JsonlSnapshotPublisher(evidence_root / "snapshots.jsonl"),
         ledger=JsonlEventLedger(evidence_root / "ledger.jsonl"),
@@ -411,6 +445,7 @@ def assemble_range_ops_runtime(
         evaluation_checkpoint_store=JsonEvaluationCheckpointStore(
             evidence_root / "checkpoints" / "evaluation"
         ),
+        runtime_sink=runtime_sink,
     )
 
 

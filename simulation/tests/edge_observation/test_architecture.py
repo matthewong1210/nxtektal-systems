@@ -155,6 +155,9 @@ OTHER_PACKAGES = (
     "nxt_agent_runtime",
     "nxt_workflow_enablement",
     "nxt_course_world_model",
+    # The Site Agent service shell receives adapter diagnostics as plain
+    # data from composition roots and must not import the adapter kit.
+    "nxt_site_agent",
 )
 
 

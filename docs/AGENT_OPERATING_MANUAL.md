@@ -30,13 +30,14 @@ workflow, testing expectations, and review standard.
 
 ## Repository reality
 
-This standalone repository has three independent implementation surfaces:
+This standalone repository has four independent implementation surfaces:
 
 | Surface | Technology | Role |
 |---|---|---|
 | `simulation/` | Python 3.11+, `uv`, Hatch, pytest | NXTektal virtual handoff, range operations, and Site OS layers |
 | `nxtektal-roi-engine/` | TypeScript, npm, Vitest | Formula-locked deterministic ROI model |
 | `apps/operational-replay/` | TypeScript, Next.js, npm, Vitest | Read-only browser storytelling over exported replay artifacts |
+| `apps/site-agent-console/` | TypeScript, Next.js, npm, Vitest | Static Manager Console over the local fixture-backed Site Agent service's Manager API |
 
 The root README is the NXTektal product and investor overview. Root
 documentation and `.agent/` form the shared governance layer; they do not add a

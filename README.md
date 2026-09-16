@@ -97,9 +97,9 @@ simulation artifacts locally and does not replace the canonical exporter.
 
 ## Repository map
 
-This standalone repository retains three independent implementation surfaces:
-the Python simulation/Site OS stack, the TypeScript ROI engine, and the
-read-only Operational Replay web app. Repository governance and documentation
+This standalone repository retains four independent implementation surfaces:
+the Python simulation/Site OS stack, the TypeScript ROI engine, the read-only
+Operational Replay web app, and the Site Agent Manager Console static app. Repository governance and documentation
 apply across them without creating runtime dependencies.
 
 The table below inventories every implementation surface in the repository,
@@ -120,9 +120,11 @@ row; the "What is working now" section above describes `main` only.
 | `simulation/nxt_edge_observation/` | Raw device sample conversion into the canonical observation boundary, with adapter diagnostics | Implemented conversion kit; fixture-backed only, no transport, device connection, or command path |
 | `simulation/nxt_workflow_enablement/` | Shared-site commissioning gates, independent per-workflow readiness verdicts, and the deterministic enablement report | Implemented readiness layer; fixture-only, evaluation only, no runtime construction or execution path |
 | `simulation/nxt_course_world_model/` | Immutable, versioned course spatial truth and the deterministic read-only Map Query Service | Implemented spatial-truth layer; synthetic processed-scan fixtures only, no scan ingestion, live map, navigation, or execution path |
+| `simulation/nxt_site_agent/` | Local readiness-gated service around the Agent Runtime, with a versioned loopback Manager API, projections, and shift briefing | Implemented application shell; fixture-backed Shadow Mode only, loopback-only, no authentication, no physical device or command path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |
+| `apps/site-agent-console/` | Manager Console for the local fixture-backed Site Agent service | Implemented static export; consumes only the local Manager API, clearly labeled simulated |
 | `nxtektal-roi-engine/` | Versioned, deterministic ROI calculations | Implemented standalone package |
 | `AGENTS.md`, `.agent/`, `docs/AGENT_OPERATING_MANUAL.md` | AI engineering governance and architecture-safe workflows | Implemented repository operating system |
 

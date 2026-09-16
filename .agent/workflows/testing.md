@@ -26,7 +26,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
 `twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
-`edge_observation`, `workflow_enablement`, and `course_world_model`.
+`edge_observation`, `workflow_enablement`, `course_world_model`, and
+`site_agent`.
 Root Phase 0 tests live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
@@ -51,6 +52,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_observation/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
   tests/course_world_model/test_architecture.py \
+  tests/site_agent/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -69,7 +71,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/agent_runtime \
   tests/edge_observation \
   tests/workflow_enablement \
-  tests/course_world_model
+  tests/course_world_model \
+  tests/site_agent
 ```
 
 Run the full suite before handing off a Python production/contract change:
@@ -143,6 +146,28 @@ npm audit --omit=dev
 The tests must cover deterministic parsing, malformed and missing artifacts,
 advice/task/outcome separation, simulation/reference labeling, no invented
 motion, source-file mapping, forbidden imports, and machine-specific paths.
+
+## Site Agent Console web app
+
+Use Node.js `>=22.13.0` as required by the package manifest. From
+`apps/site-agent-console/`:
+
+```bash
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run smoke
+npm audit --omit=dev
+```
+
+The build is a static export (`out/`) that the local Site Agent service
+serves same-origin; `npm run smoke` serves that export on loopback and
+asserts the title, fixture disclaimer, and traversal defense. The tests
+must keep covering the manager-decision and fixture-control states, the
+explicit missing/stale/no-data rendering, forbidden Python/ROI imports,
+robot-command vocabulary, and hidden browser persistence.
 
 ## Documentation and agent infrastructure
 
