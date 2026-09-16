@@ -155,6 +155,7 @@ OTHER_PACKAGES = (
     "nxt_agent_runtime",
     "nxt_workflow_enablement",
     "nxt_course_world_model",
+    "nxt_edge_task",
 )
 
 

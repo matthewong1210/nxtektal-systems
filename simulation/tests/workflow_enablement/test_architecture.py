@@ -33,6 +33,7 @@ BANNED_IMPORT_ROOTS = {
     "nxt_agent_runtime",
     "nxt_edge_observation",
     "nxt_course_world_model",
+    "nxt_edge_task",
     # simulation / USD / robotics stacks
     "simpy",
     "gymnasium",
@@ -167,6 +168,7 @@ OTHER_PACKAGES = (
     "nxt_agent_runtime",
     "nxt_edge_observation",
     "nxt_course_world_model",
+    "nxt_edge_task",
 )
 
 # The exact runtime-bearing package names this package's *source* may
@@ -401,6 +403,7 @@ def test_the_package_imports_without_any_runtime_simulation_or_transport_stack()
             "nxt_agent_runtime",
             "nxt_edge_observation",
             "nxt_course_world_model",
+            "nxt_edge_task",
         )
     )
     assert result.returncode == 0, result.stderr

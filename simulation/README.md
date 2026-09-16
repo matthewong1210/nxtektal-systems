@@ -48,6 +48,7 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 | `nxt_edge_observation` | Raw device sample conversion into canonical observations, with explicit adapter diagnostics; fixture-backed, no transport or command surface |
 | `nxt_workflow_enablement` | Workflow identity registry, shared-site gates, independent per-workflow readiness verdicts, deterministic enablement report, and fixture-only launch-plan data |
 | `nxt_course_world_model` | Immutable, versioned course spatial truth (course-local frame, elevation surface, semantic features, map revisions) and the deterministic read-only Map Query Service |
+| `nxt_edge_task` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation with dedup, ordering, terminal-conflict gate, and liveness, plus the protocol double's executor rules; stdlib-only, no transport or execution surface |
 | `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
 
 The robot handoff packages and Site OS packages remain separate layers. The

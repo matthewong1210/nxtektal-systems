@@ -223,6 +223,30 @@ An untracked document is never repository authority by itself.
   evidence for readiness evaluation belongs to composition roots, and a
   model identity or coordinate-reference mismatch fails closed rather than
   answering.
+- Keep `nxt_edge_task` a stdlib-only, SIMULATION-only task-exchange rehearsal
+  leaf. It imports no other `nxt_*` package; commissioned identities reach it
+  as plain admission data from composition roots. It owns the versioned
+  Edge<->robot wire contracts (`nxt.edge.robot-status/v1`,
+  `nxt.edge.task.request/v1`, `nxt.edge.task.event/v1`; `environment.kind` is
+  the single value `SIMULATION`), the Edge task/device journal derivation
+  (content-derived `task_id`, `(boot_sequence, event_sequence)` ordering,
+  duplicate/late-evidence dispositions, absorbing terminals, the terminal
+  conflict gate, session regression by incarnation-prefixed `boot_id`,
+  liveness and read-time freshness), the journal high-water anchor and
+  operator-provisioned identity continuity, and the protocol double's
+  executor rules (persist-before-publish, evidence-derived protection,
+  restart branches, history replay).
+  It owns no facility state, observation, commissioning, advice, human
+  workflow, notification, transport, clock, or execution semantics; a task
+  request is a simulated message to a protocol double and nothing in the
+  package or its scripts can move, stop, reset, or command a device. It must
+  not import the simulator, telemetry, edge adapters, Site Runtime, Agent
+  Runtime, Shadow Ops, memory, twin, viewer, robot, ROS, actuator,
+  transport/field-bus, network, subprocess, threading, wall-clock, or
+  randomness modules, and no existing package may import it. MQTT and the
+  wall clock live only in the `simulation/scripts/edge_task_*` and
+  `mock_robot_task_device.py` composition roots. Physical site-level task
+  admission remains unimplemented and unowned.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula
@@ -253,8 +277,9 @@ Use the exact, normative commands in
 [`.agent/workflows/testing.md`](.agent/workflows/testing.md). Python production
 changes require a complete all-extras environment, focused/boundary checks, the
 full suite, and config validation. ROI changes require typecheck, tests, and a
-build. The workflow also records the current `uv.lock`/`twin`-extra gap so an
-agent does not silently change the lock or skip USD coverage.
+build. The lock covers every declared extra (including `twin` and the
+script-confined `edge-gateway` client); provision with
+`uv sync --locked --all-extras` and never change the lock silently.
 
 No Python formatter, linter, or type checker is currently configured. The
 repository CI workflow and exact local equivalents are documented in

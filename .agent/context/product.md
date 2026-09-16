@@ -48,6 +48,12 @@ runtime dependency.
   features, controlled map revisions, and the deterministic read-only Map
   Query Service. Derived from synthetic processed-scan fixtures; it answers
   where things are, never what is happening now, and commands nothing.
+- **Edge Task Exchange rehearsal:** `nxt_edge_task` plus its scripts exchange
+  simulated collection tasks between an Edge gateway and two protocol doubles
+  (`picker-01` collects; `carrier-01` only reports standby) over a local Mosquitto, with dedup on both
+  ends, ordered evidence, a terminal-conflict gate, and restart-safe
+  journals. Tasks come only from a SIMULATION-labelled test entry; nothing
+  here is physical task admission, robot execution, or a real device.
 - **Site Runtime:** merged `nxt_site_runtime` orchestration around commissioned
   identity/configuration, sequenced observations, the existing telemetry
   assembler, publication-quality admission, exact FacilityState/AssemblyReport

@@ -1,0 +1,40 @@
+{
+  "schema": "nxt-edge-task/config/v1",
+  "site_id": "pilot-course-a",
+  "deployment_id": "pilot-a-edge-task-sim-v0",
+  "simulation_env_id": "sim-local-01",
+  "broker": {
+    "host": "127.0.0.1",
+    "port": 18830,
+    "keepalive_s": 30
+  },
+  "edge": {
+    "client_id": "pilot-a-edge-task-sim-v0.edge",
+    "evidence_dir": "reports/edge-task-v0/edge",
+    "stale_after_s": 6,
+    "offline_after_s": 15,
+    "restart_grace_s": 15,
+    "min_republish_interval_s": 5,
+    "max_republish_attempts": 6,
+    "default_progress_window_s": 20,
+    "tick_interval_s": 0.5
+  },
+  "robots": [
+    {
+      "robot_id": "picker-01",
+      "role": "picker",
+      "task_types": ["COLLECT_BALLS_ZONE"],
+      "heartbeat_interval_s": 2,
+      "evidence_dir": "reports/edge-task-v0/robots/picker-01",
+      "client_id": "pilot-a-edge-task-sim-v0.picker-01"
+    },
+    {
+      "robot_id": "carrier-01",
+      "role": "carrier",
+      "task_types": [],
+      "heartbeat_interval_s": 2,
+      "evidence_dir": "reports/edge-task-v0/robots/carrier-01",
+      "client_id": "pilot-a-edge-task-sim-v0.carrier-01"
+    }
+  ]
+}

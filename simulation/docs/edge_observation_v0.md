@@ -414,3 +414,20 @@ high-risk boundary — live hardware, vendor integration, and site deployment
 remain unimplemented in this repository — and requires its own architecture
 review before it is built. Physical command admission and robot execution
 remain out of scope entirely and are not reachable from this path.
+
+### Related: the Edge Task Exchange status message
+
+The SIMULATION-only Edge Task Exchange (`nxt_edge_task`,
+`simulation/docs/edge_task_v0.md`) carries a `nxt.edge.robot-status/v1`
+heartbeat that carries the same semantic facts as `RobotStatusSample` under
+different names and nesting (`availability` ↔ `activity`/`device_status`,
+`energy.level_fraction` ↔ `battery`, `safety.estop_latched`,
+`safety.awaiting_human`, `fault_code`, `location.zone_id` ↔ `assigned_zone`,
+`location.x_m`/`y_m` ↔ `position_x_m`/`position_y_m`). V0 does **not**
+convert that message into an
+`Observation`: the Edge gateway journals it as device-session evidence for
+task liveness only. If a future composition root needs those fields as
+observations, it must decode the wire message into `RobotStatusSample` and
+go through this kit — the seam described above — rather than adding a
+second conversion path. Nothing in the task exchange touches
+`nxt_edge_observation`.

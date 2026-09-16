@@ -20,7 +20,7 @@ they do not change any dependency manifest or lockfile.
 | Required-check candidate | Responsibility |
 |---|---|
 | `docs-hygiene` | Tests the CI policy helpers; checks whitespace in the committed event change set; verifies local Markdown links and anchors, fence balance, repository skill metadata, conflict markers, likely credentials, machine paths, excluded legacy paths, generated/cache/build artifacts, unexpected symlinks and submodules, and forbidden dependencies; proves the checkout was not mutated. External URLs are not fetched. |
-| `python-verification` | Installs every Python extra with the recorded USD workaround; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
+| `python-verification` | Installs the complete locked all-extras Python environment, including USD; runs the focused Site Runtime, Shadow Ops, Commissioning, Edge Observation, Workflow Enablement, Course World Model, Edge Task Exchange (in-memory only: CI installs no Mosquitto, so `simulation/tests/edge_task/test_integration_mosquitto.py` skips there and real-broker evidence comes from a local run), architecture/import/safety, and complete suites; validates configs; compiles sources; builds and inspects the wheel/sdist; installs the wheel in isolation; and runs dependency checks. |
 | `roi-verification` | Installs the locked npm graph, typechecks, tests, and builds the formula-locked ROI engine; requires zero production vulnerabilities and applies the accepted development-advisory ratchet. |
 | `operational-replay-verification` | Installs the independent locked Operational Replay graph under Node.js 22.23.2, then typechecks, lints, tests, builds, live-smokes the HTTP surface, and requires zero production dependency vulnerabilities. |
 | `replay-demo-verification` | Runs focused benchmark/viewer/demo/twin tests, two complete 400-episode benchmarks, two viewer exports, two state/briefing captures, two USD builds, byte-compares each pair, and live-smokes Streamlit health and HTTP responses. |
@@ -67,12 +67,14 @@ test -z "$(git ls-files --others --exclude-standard)"
 
 ### Python
 
-The current `uv.lock` omits the declared `twin` extra. Preserve the lockfile:
+The `uv.lock` covers every declared extra, including `twin` and the
+script-confined `edge-gateway` MQTT client. Require the lock to be current and
+install the complete locked environment:
 
 ```bash
 cd simulation
-uv sync --python 3.13.14 --frozen --all-extras
-uv pip install --python .venv/bin/python "usd-core==26.8"
+uv lock --check
+uv sync --python 3.13.14 --locked --all-extras
 uv run --no-sync python -B - <<'PY'
 from importlib.metadata import version
 from pxr import Usd
@@ -84,8 +86,10 @@ PY
 uv pip check --python .venv/bin/python
 ```
 
-Every later project invocation uses `--no-sync` so uv does not remove the
-manually installed USD package:
+All subsequent project commands use `uv run --no-sync` to reuse the all-extras
+environment installed above without another synchronization. Lock validation
+and environment installation are performed explicitly by the preceding
+commands. USD is installed from the lockfile, not through a manual workaround.
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_runtime
@@ -94,6 +98,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/edge_observation
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/workflow_enablement
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/course_world_model
+uv run --no-sync python -B -m pytest -o addopts='' -q -rs -p no:cacheprovider tests/edge_task
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \
@@ -113,6 +118,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_observation/test_architecture.py \
   tests/workflow_enablement/test_architecture.py \
   tests/course_world_model/test_architecture.py \
+  tests/edge_task/test_architecture.py \
+  tests/edge_task/test_scripts_guard.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -131,7 +138,7 @@ uv run --no-sync python -m compileall -q -f \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
   nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
-  scripts ../.github/scripts
+  nxt_edge_task scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
 mkdir -p "$python_dist_dir"
@@ -159,7 +166,7 @@ shipped = (
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
     "nxt_edge_observation", "nxt_workflow_enablement",
-    "nxt_course_world_model",
+    "nxt_course_world_model", "nxt_edge_task",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:
@@ -176,8 +183,8 @@ git diff --exit-code HEAD --
 test -z "$(git ls-files --others --exclude-standard)"
 ```
 
-Do not substitute `uv lock --check`: it currently fails because of the known
-`twin`-extra gap. Repairing `uv.lock` is a separate dependency change.
+`uv lock --check` is part of the verified locked environment; a lock that
+drifts from `pyproject.toml` fails the Python job before any test runs.
 
 ### ROI
 
@@ -357,6 +364,9 @@ separate policy step decides whether it is acceptable. Operational Replay's
 typecheck, lint, tests, build, HTTP smoke, and production audit fail directly.
 A missing optional USD or Streamlit dependency fails through explicit imports,
 CLI execution, and live HTTP smoke instead of being hidden by a skipped test.
+The one deliberate exception is `simulation/tests/edge_task/test_integration_mosquitto.py`,
+which skips in CI because no broker is installed; its evidence is a local run
+recorded in the delivery hand-off, not a hosted check.
 
 The Python job runs every existing architecture and safety guard. A robust
 generic reachability guard from future LLM/agent code to execution surfaces, or
