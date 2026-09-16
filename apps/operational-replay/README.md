@@ -23,6 +23,17 @@ artifacts**.
 Set `NEXT_PUBLIC_REPLAY_SITE_URL` to the deployed origin when validating social
 metadata outside local development. It defaults to `http://localhost:3000`.
 
+## YC Dispatch / Report demo
+
+The two-state presentation route is available at
+`http://localhost:3000/yc-dispatch-report`. It is a supervised-prototype filming
+surface only: its controls change browser presentation state and do not issue a
+live robot dispatch, consume live telemetry, or perform a live facility-log
+write.
+See [YC_DISPATCH_REPORT_DEMO.md](YC_DISPATCH_REPORT_DEMO.md) for fullscreen and
+keyboard controls, URL options, filming-value updates, and the recording
+sequence.
+
 ## Social preview
 
 `public/og.png` is a `1200 × 630` repository-authored social preview generated
