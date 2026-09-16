@@ -41,3 +41,21 @@ unknown result. Manager acceptance still does not create a task.
 - The contract commit contains docs/schema/examples/tests only; backend
   implementation follows separately. Content IDs in examples are illustrative;
   consumers use server-returned IDs. No frontend code or dependency changed.
+
+## Stage 3: pure planning and evidence workflow
+
+- `uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/pilot_ops`
+  — **325 passed** in 1.05s.
+- The exact architecture/safety subset in `.agent/workflows/testing.md`
+  — **205 passed** in 5.88s; two additional planning purity/negative-control
+  checks subsequently passed with the package suite above.
+- Independent reviews produced regression fixes for nested null evidence,
+  boolean/number retry confusion, malformed duplicate requests, deterministic
+  semantic replay, and exact confirmation windows. All are covered by focused
+  tests; five plan-result shapes also validate against the shared schema.
+- Input and plan CAS, original/new amendment history, restore-as-new-version,
+  no fabricated missing data, all six replenishment stages, allowed-zone
+  ranking, expired evidence, low/typical/high demand and stockout projection
+  parity are covered. No frontend calculations or runtime state writes added.
+- This commit is the pure policy/evidence layer. Transport, persistence
+  composition and simulated task/result integration follow in stage 4.
