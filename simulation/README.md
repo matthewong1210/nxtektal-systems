@@ -68,6 +68,17 @@ create tasks, and active uncertainty cannot be resolved by an operator note.
 There are no remote notifications, recurring schedules, or physical devices;
 `carrier-01` remains standby and CE82A integration remains future work.
 
+## Whole-course monitoring rehearsal
+
+[Whole-course monitoring V0](docs/course_monitoring_v0.md) adds a synthetic
+18-hole map, 54 point checks and a finite observation/review/work/verification
+episode. Run `python -m scripts.course_monitoring_demo --out /tmp/course-day`
+from this directory to export a replayable offline HTML report and workflow
+evidence. A manager action file can rehearse review, priority and assignment.
+This does not integrate cameras, image inference, physical robot commands or a
+live manager API. The report is read-only; point coverage is not area coverage,
+and grounds-maintenance readiness remains `NOT_READY`.
+
 ## Honest-scope disclaimers
 
 * **Every physical value is a placeholder.** No AgileX, basket, or equipment
