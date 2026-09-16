@@ -80,6 +80,8 @@ describe("console boundaries", () => {
   });
 
   it("talks only to the versioned same-origin manager API", () => {
+    // v0 is the Manager API; /api/v1/planning is the frozen human-led planning
+    // contract (simulation/docs/contracts/planning-v1). Nothing else is allowed.
     for (const file of sourceFiles()) {
       const text = readFileSync(file, "utf-8");
       const urls = text.match(/https?:\/\/[^\s"'`]+/g) ?? [];
@@ -87,7 +89,11 @@ describe("console boundaries", () => {
       const apiPaths = text.match(/\/api\/v\d+[^\s"'`]*/g) ?? [];
       for (const path of apiPaths) {
         expect(
-          path === "/api/v0" || path.startsWith("/api/v0/"),
+          path === "/api/v0" ||
+            path.startsWith("/api/v0/") ||
+            path === "/api/v1/planning" ||
+            path.startsWith("/api/v1/planning/") ||
+            path.startsWith("/api/v1/planning$"),
           `${file} uses ${path}`,
         ).toBe(true);
       }

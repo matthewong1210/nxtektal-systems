@@ -44,7 +44,9 @@ export interface ConsoleController {
   start(): void;
   stop(): void;
   refresh(): Promise<void>;
-  mutate(operation: () => Promise<unknown>): Promise<void>;
+  /** `requireCurrent: false` lets a recovery read-and-replay run over a stale
+   * or empty view; it still needs an active, idle controller. */
+  mutate(operation: () => Promise<unknown>, options?: { requireCurrent?: boolean }): Promise<void>;
 }
 
 export const UNCERTAIN_OUTCOME_NOTICE =
@@ -118,10 +120,10 @@ export function createConsoleController<T>(
       if (!active || view.busy) return Promise.resolve();
       return load();
     },
-    async mutate(operation) {
+    async mutate(operation, options = {}) {
       if (!active) throw new Error("The console view is not connected.");
       if (view.busy) return; // a repeated click during an in-flight change is inert
-      if (!canMutateConsole(view)) {
+      if (options.requireCurrent !== false && !canMutateConsole(view)) {
         throw new Error(
           "Changes are disabled until the console view is refreshed successfully.",
         );

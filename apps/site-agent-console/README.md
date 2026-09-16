@@ -9,6 +9,22 @@ to start both in one local service. The original fixture runner still works and
 shows task operations as unavailable. Task creation is separate from advice
 acceptance; neither runner can operate physical equipment.
 
+Manager planning v1 adds a human-led planning panel at the top of the page.
+It consumes only the frozen contract in
+[`simulation/docs/contracts/planning-v1`](../../simulation/docs/contracts/planning-v1/README.md)
+(`GET /api/v1/planning`, the four `POST` writes and `GET ./requests/{id}`):
+the manager records operating input with per-field evidence (measured or
+manual estimate, source, observation time, validity), asks the service for
+three manual demand scenarios and a suggested plan, adjusts zone, robot and
+start time as new plan versions, confirms one exact version (which creates one
+simulated schedule through the existing task admission) and records the four
+result stages independently. The browser computes no stockout or ranking,
+persists no effective setting, generates one stable request ID per write,
+recovers an unknown outcome only by that ID, and never turns advice into a
+task. Times are entered and shown in the site timezone from the planning
+context and transported as UTC. Operator names are attribution, not
+authentication.
+
 A minimal, decision-first Manager Console for the local fixture-backed
 Pilot Site Agent service. The console is a static Next.js export served
 same-origin by the Python service; it consumes only the versioned local
@@ -68,4 +84,5 @@ npm audit --omit=dev
 
 `tests/boundaries.test.ts` mechanically forbids Python/ROI/replay
 imports, robot-command vocabulary, hidden browser persistence, hardcoded
-network URLs, and any API path outside `/api/v0/`.
+network URLs, and any API path outside `/api/v0/` and the frozen
+`/api/v1/planning` contract.

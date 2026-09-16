@@ -624,3 +624,26 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
   .dispatch-form-grid, .dispatch-response-grid { grid-template-columns: minmax(0, 1fr); }
   .dispatch-kv { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Manager planning panel */
+.planning-step { margin-top: 22px; padding-top: 12px; border-top: 1px solid var(--line); }
+.planning-form { margin-top: 12px; }
+.planning-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.evidence-block { border: 1px solid var(--line); border-radius: 5px; padding: 8px 12px 12px; margin-top: 12px; min-width: 0; }
+.evidence-block legend { font-size: 13px; color: var(--text); padding: 0 4px; }
+.evidence-block legend input { margin-right: 6px; }
+.evidence-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 12px; }
+.evidence-list .kv dd { overflow-wrap: anywhere; }
+.evidence-value { font-variant-numeric: tabular-nums; }
+.evidence-meta { font-size: 12px; color: var(--text-dim); }
+.plan-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 12px 0; display: block; overflow-x: auto; }
+.plan-table caption { caption-side: top; text-align: left; color: var(--text-dim); font-size: 12px; padding: 0 0 6px; }
+.plan-table th, .plan-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-variant-numeric: tabular-nums; }
+.plan-table th { color: var(--text-dim); font-weight: 600; font-size: 12px; }
+.rationale-list { margin: 8px 0; padding-left: 18px; font-size: 13px; }
+.plan-adjustment { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 5px; }
+.plan-card { margin-bottom: 12px; }
+.stage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; }
+.stage-card { min-width: 0; }
+.outcome-group { margin-top: 12px; }
+.zone-entry { margin-top: 12px; }

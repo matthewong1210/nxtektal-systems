@@ -7,6 +7,7 @@ import { BriefingPanel } from "./BriefingPanel";
 import { DispatchPanel } from "./DispatchPanel";
 import { ExceptionsPanel } from "./ExceptionsPanel";
 import { FixtureControls } from "./FixtureControls";
+import { PlanningPanel } from "./PlanningPanel";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { StatePanel } from "./StatePanel";
 import { StatusBar } from "./StatusBar";
@@ -48,6 +49,7 @@ export function ConsoleScreen({
           {loading ? "Loading…" : "Refresh"}
         </button>
       </header>
+      <div className="dispatch-shell"><PlanningPanel /></div>
       <div className="dispatch-shell"><DispatchPanel /></div>
       <div className="legacy-heading"><h2>Agent observations and advice</h2><span>Fixture-backed Shadow Mode</span></div>
       {data === null && error !== null ? (
