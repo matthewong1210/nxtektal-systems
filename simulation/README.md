@@ -79,6 +79,19 @@ This does not integrate cameras, image inference, physical robot commands or a
 live manager API. The report is read-only; point coverage is not area coverage,
 and grounds-maintenance readiness remains `NOT_READY`.
 
+## Joint weather and dispatch learning
+
+[Joint weather learning V1](docs/joint_weather_learning_v1.md) connects the
+range's conserved ball inventory and robots to sampled rain, customer-demand
+surprises and course-inspection labor. Robot recovery and inspection share one
+staff pool. Run `python -m scripts.joint_learning run --state-dir /tmp/joint-learning`
+from this directory for a bounded accelerated batch and offline report. Repeating
+the command resumes interrupted batches or starts fresh, disjoint simulated days.
+The companion `status`, `pause` and `resume` commands use the same state directory.
+Learning compares six fixed parameter sets using separate training, validation
+and test scenarios; promotion is simulation-only. Background execution requires
+the separately configured local Codex heartbeat, not an always-running daemon.
+
 ## Honest-scope disclaimers
 
 * **Every physical value is a placeholder.** No AgileX, basket, or equipment

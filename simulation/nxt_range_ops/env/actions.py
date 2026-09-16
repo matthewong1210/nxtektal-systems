@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from nxt_range_ops.config.models import RangeOpsScenario
 from nxt_range_ops.core.directives import (
     AssignCollection,
+    AssignStaffWork,
     Directive,
     PauseRobot,
     ReassignRobot,
@@ -27,6 +28,7 @@ from nxt_range_ops.core.directives import (
     Wait,
 )
 from nxt_range_ops.core.entities import HumanAssistReason
+from nxt_range_ops.core.joint_inputs import validate_joint_inputs
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,7 @@ class ActionSpec:
 
 
 class ActionCatalog:
-    def __init__(self, scenario: RangeOpsScenario):
+    def __init__(self, scenario: RangeOpsScenario, joint_inputs: dict | None = None):
         robots = sorted(scenario.robot_ids)
         zones = sorted(scenario.zone_ids)
         specs: list[ActionSpec] = []
@@ -66,6 +68,14 @@ class ActionCatalog:
                     f"request_human_assistance({r},{reason.value})",
                     RequestHumanAssistance(robot_id=r, reason=reason),
                 )
+        joint = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
+                                      open_minute=scenario.hours.open_minute,
+                                      close_minute=scenario.hours.close_minute)
+        if joint is not None:
+            # Append only: existing fleet-action indices never move.
+            for job in joint["staff_jobs"]:
+                job_id = job["job_id"]
+                add(f"assign_staff_work({job_id})", AssignStaffWork(job_id))
         self._specs = specs
         self._by_name = {s.name: s for s in specs}
 

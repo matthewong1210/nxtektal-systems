@@ -20,6 +20,7 @@ from gymnasium import spaces
 
 from nxt_range_ops.config.models import RangeOpsScenario
 from nxt_range_ops.core.entities import RobotActivity, RobotHealth
+from nxt_range_ops.core.joint_inputs import validate_joint_inputs
 from nxt_range_ops.core.sim import RangeSimulation
 from nxt_range_ops.core.skills import SkillOutcomeModel
 from nxt_range_ops.env.actions import ActionCatalog
@@ -40,11 +41,16 @@ class RangeOpsEnv(gym.Env):
         skill_model_factory: Optional[
             Callable[[RangeOpsScenario], SkillOutcomeModel]
         ] = None,
+        *,
+        joint_inputs: dict | None = None,
     ):
         super().__init__()
         self.scenario = scenario
+        self._joint_inputs = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
+                                                  open_minute=scenario.hours.open_minute,
+                                                  close_minute=scenario.hours.close_minute)
         self._skill_model_factory = skill_model_factory
-        self.catalog = ActionCatalog(scenario)
+        self.catalog = ActionCatalog(scenario, joint_inputs=self._joint_inputs)
         self.sim: Optional[RangeSimulation] = None
         self._episode_seed: Optional[int] = None
         self._steps = 0
@@ -108,7 +114,8 @@ class RangeOpsEnv(gym.Env):
             if self._skill_model_factory is not None
             else None
         )
-        self.sim = RangeSimulation(self.scenario, self._episode_seed, skill_model)
+        self.sim = RangeSimulation(self.scenario, self._episode_seed, skill_model,
+                                   joint_inputs=self._joint_inputs)
         self._steps = 0
         self._metrics_prev = self.sim.metrics.copy()
         obs = self._build_obs()
@@ -264,6 +271,14 @@ class RangeOpsEnv(gym.Env):
             "stations": [s.to_dict() for s in self._last_stations],
             "termination_reason": termination_reason,
         }
+        if self._joint_inputs is not None:
+            capacity, busy, queued = sim.staff_summary()
+            info["joint_ops"] = {
+                "staff": {"capacity": capacity, "busy": busy, "queued": queued},
+                "staff_jobs": sim.staff_work_snapshots(),
+                "collection_access": {zone_id: sim.collection_access_allowed(zone_id)
+                                      for zone_id in sorted(self.scenario.zone_ids)},
+            }
         if action_taken is not None:
             info["action"] = action_taken
             info["action_name"] = self.catalog.name_of(action_taken)

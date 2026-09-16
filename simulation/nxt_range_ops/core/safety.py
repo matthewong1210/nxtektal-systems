@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 
 from nxt_range_ops.core.directives import (
     AssignCollection,
+    AssignStaffWork,
     Directive,
     PauseRobot,
     ReassignRobot,
@@ -68,6 +69,11 @@ class SafetyShield:
         sim = self._sim
         if isinstance(directive, Wait):
             return ShieldDecision.ok(directive)
+
+        if isinstance(directive, AssignStaffWork):
+            reason = sim.staff_work_rejection(directive.job_id)
+            return (ShieldDecision.reject(directive, reason) if reason
+                    else ShieldDecision.ok(directive))
 
         robot = sim.robot_or_none(directive.robot_id)
         if robot is None:
@@ -128,6 +134,8 @@ class SafetyShield:
             return ShieldDecision.reject(directive, "unknown zone id")
         if not zone.is_open:
             return ShieldDecision.reject(directive, "zone is closed")
+        if not sim.collection_access_allowed(directive.zone_id):
+            return ShieldDecision.reject(directive, "collection access is blocked; play may remain open")
         if sim.facility_closed:
             return ShieldDecision.reject(
                 directive, "facility is closed; no new collection assignments"
