@@ -54,6 +54,15 @@ runtime dependency.
   ends, ordered evidence, a terminal-conflict gate, and restart-safe
   journals. Tasks come only from a SIMULATION-labelled test entry; nothing
   here is physical task admission, robot execution, or a real device.
+- **Edge Task Interventions rehearsal:** `nxt_edge_interventions` plus its
+  scripts turn evidence already in the Edge journal (explicit help
+  requests, a lost robot holding a task, unconfirmable results, evidence
+  conflicts) into persisted human-handling cases, persisted notification
+  intents delivered with bounded retries to a loopback-only local test
+  receiver, reminders and escalations, and human `ack`/`resolve` records.
+  Human records clear no gate and command nothing; a receipt proves local
+  persistence only. No real notification channel, recovery protocol, real
+  device, or authenticated operator exists here.
 - **Site Runtime:** merged `nxt_site_runtime` orchestration around commissioned
   identity/configuration, sequenced observations, the existing telemetry
   assembler, publication-quality admission, exact FacilityState/AssemblyReport

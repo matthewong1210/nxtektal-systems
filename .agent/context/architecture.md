@@ -176,6 +176,12 @@ coupling in named seams:
   leaf that imports no other package; commissioned identities reach it as
   plain admission data, and MQTT, clocks, and processes stay in the
   `simulation/scripts/` Edge gateway, mock robot, and CLI composition roots
+- `nxt_edge_interventions` as a stdlib-only, SIMULATION-only human-handling
+  rehearsal leaf that imports no other package; the Edge view reaches it as
+  plain `EdgeSnapshot` data, and HTTP, clocks, and processes stay in the
+  `simulation/scripts/` intervention service, loopback test receiver, and
+  operator CLI composition roots, which read the Edge journal and never
+  write it
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public

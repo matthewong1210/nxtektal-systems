@@ -139,10 +139,16 @@ class JsonlJournal:
         *,
         allowed_kinds: frozenset[str] | None = None,
         allowed_origins: frozenset[str] = ORIGINS,
+        schema: str = JOURNAL_SCHEMA,
     ) -> None:
         if _fcntl is None:
             raise RuntimeError("JsonlJournal requires POSIX fcntl advisory locking")
         self.path = Path(path)
+        # Every record of this journal carries this schema label; a journal of
+        # another vocabulary (another label) is refused on read.
+        if not isinstance(schema, str) or not schema:
+            raise ValueError("journal schema label must be a non-empty string")
+        self.schema = schema
         # The directory is created on the first append, never by a reader.
         self._allowed_kinds = allowed_kinds
         self._allowed_origins = allowed_origins
@@ -293,7 +299,7 @@ class JsonlJournal:
                 raise JournalIntegrityError(f"{self.path.name}: line {line_number} is not canonical JSON ({exc})") from exc
             if canonical != text:
                 raise JournalIntegrityError(f"{self.path.name}: line {line_number} is not canonical JSON")
-            if raw["schema_version"] != JOURNAL_SCHEMA:
+            if raw["schema_version"] != self.schema:
                 raise JournalIntegrityError(f"{self.path.name}: line {line_number} has an unsupported schema")
             if type(raw["sequence"]) is not int or raw["sequence"] != line_number:
                 raise JournalIntegrityError(f"{self.path.name}: sequence mismatch at line {line_number}")
@@ -315,7 +321,7 @@ class JsonlJournal:
                 raise JournalIntegrityError(f"{self.path.name}: record_id mismatch at line {line_number}")
             records.append(
                 JournalRecord(
-                    schema_version=JOURNAL_SCHEMA,
+                    schema_version=self.schema,
                     sequence=line_number,
                     record_id=raw["record_id"],
                     record_kind=raw["record_kind"],
@@ -365,7 +371,7 @@ class JsonlJournal:
                         raise TypeError("payload must be a mapping")
                     record_id = _record_id(next_sequence, spec)
                     body = {
-                        "schema_version": JOURNAL_SCHEMA,
+                        "schema_version": self.schema,
                         "sequence": next_sequence,
                         "record_id": record_id,
                         "record_kind": spec.record_kind,
@@ -376,7 +382,7 @@ class JsonlJournal:
                     lines.append(canonical_json(body).encode("utf-8") + b"\n")
                     appended.append(
                         JournalRecord(
-                            schema_version=JOURNAL_SCHEMA,
+                            schema_version=self.schema,
                             sequence=next_sequence,
                             record_id=record_id,
                             record_kind=spec.record_kind,

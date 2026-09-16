@@ -37,6 +37,7 @@ Classify the feature before choosing a directory:
 | Workflow identity registration, per-workflow readiness evaluation, enablement report, launch-plan data | `nxt_workflow_enablement` (readiness gating only; runtime assembly stays in composition roots) |
 | Versioned course spatial truth, elevation surface, semantic course geometry, map revisions, deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; evidence derivation stays in composition roots) |
 | Simulated Edge<->robot task-exchange wire contracts, Edge task/device journal derivation, protocol-double executor rules | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, and the test-entry CLI stay in `simulation/scripts/`; not physical admission) |
+| Simulated human-handling cases over the Edge journal, persisted notification intents with bounded loopback delivery, human ack/resolve records | `nxt_edge_interventions` (SIMULATION rehearsal only; HTTP, clocks, processes, the loopback test receiver, and the operator CLI stay in `simulation/scripts/`; human records clear no gate; not a real notification channel or recovery protocol) |
 | Physical static onboarding facts | `nxt_commissioning` |
 | Policy-specific trust, trace, evaluation, workflow, ledger | `nxt_pilot_ops` |
 | Historical evidence | `nxt_memory` |
