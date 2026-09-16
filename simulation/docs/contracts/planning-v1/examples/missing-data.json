@@ -1,0 +1,237 @@
+{
+  "description": "Independent empty-journal example. Partial input persists but cannot produce a confirmable plan.",
+  "clock_at_utc": "2026-09-16T08:01:00Z",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/inputs",
+        "schema_ref": "#/$defs/InputRequest",
+        "body": {
+          "schema": "nxt-planning-input/v1",
+          "request_id": "missing-input-001",
+          "expected_revision": 0,
+          "site_id": "pilot-course-a",
+          "deployment_id": "pilot-a-edge-task-sim-v0",
+          "site_timezone": "Asia/Shanghai",
+          "operator": "course-manager",
+          "reason": "Opening count and explicitly estimated demand; no historical export available.",
+          "scope": "SHIFT",
+          "effective_at_utc": "2026-09-16T08:00:00Z",
+          "valid_until_utc": "2026-09-16T09:15:00Z",
+          "operating_window": {
+            "start_at_utc": "2026-09-16T08:00:00Z",
+            "end_at_utc": "2026-09-16T09:15:00Z"
+          },
+          "inventory_clean_balls": null,
+          "demand": null,
+          "safety_stock_balls": {
+            "value": 200,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-safety-target-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "buffer_minutes": {
+            "value": 2,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-timing-margin-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "minutes"
+          },
+          "operations_allowed": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-work-window-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "washer_available": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-washer-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "zones": []
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "missing-input-001",
+            "record": {
+              "schema": "nxt-planning-input/v1",
+              "request_id": "missing-input-001",
+              "expected_revision": 0,
+              "site_id": "pilot-course-a",
+              "deployment_id": "pilot-a-edge-task-sim-v0",
+              "site_timezone": "Asia/Shanghai",
+              "operator": "course-manager",
+              "reason": "Opening count and explicitly estimated demand; no historical export available.",
+              "scope": "SHIFT",
+              "effective_at_utc": "2026-09-16T08:00:00Z",
+              "valid_until_utc": "2026-09-16T09:15:00Z",
+              "operating_window": {
+                "start_at_utc": "2026-09-16T08:00:00Z",
+                "end_at_utc": "2026-09-16T09:15:00Z"
+              },
+              "inventory_clean_balls": null,
+              "demand": null,
+              "safety_stock_balls": {
+                "value": 200,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-safety-target-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "buffer_minutes": {
+                "value": 2,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-timing-margin-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "minutes"
+              },
+              "operations_allowed": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-work-window-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "washer_available": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-washer-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "zones": [],
+              "revision": 1,
+              "input_digest": "8957728f99419207da2445cb93660f33082fa7e85c22272cc9603ee217e8aeda",
+              "recorded_at_utc": "2026-09-16T08:00:00Z",
+              "changes": []
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:00:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/plans",
+        "schema_ref": "#/$defs/PlanRequest",
+        "body": {
+          "schema": "nxt-planning-request/v1",
+          "request_id": "missing-plan-001",
+          "plan_id": null,
+          "expected_plan_version": 0,
+          "input_revision": 1,
+          "operator": "course-manager",
+          "reason": "Delay departure four minutes to complete the local zone check.",
+          "scope": "ONE_TASK",
+          "valid_until_utc": "2026-09-16T09:10:00Z",
+          "selection": null
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "missing-plan-001",
+            "record": {
+              "plan_id": "plan_missing_001",
+              "version": 1,
+              "request": {
+                "schema": "nxt-planning-request/v1",
+                "request_id": "missing-plan-001",
+                "plan_id": null,
+                "expected_plan_version": 0,
+                "input_revision": 1,
+                "operator": "course-manager",
+                "reason": "Delay departure four minutes to complete the local zone check.",
+                "scope": "ONE_TASK",
+                "valid_until_utc": "2026-09-16T09:10:00Z",
+                "selection": null
+              },
+              "input_revision": 1,
+              "input_digest": "8957728f99419207da2445cb93660f33082fa7e85c22272cc9603ee217e8aeda",
+              "rules_version": "human-led-ball-supply/v1",
+              "generated_at_utc": "2026-09-16T08:01:00Z",
+              "valid_until_utc": "2026-09-16T09:10:00Z",
+              "status": "MISSING_DATA",
+              "missing": [
+                "inventory_clean_balls",
+                "demand",
+                "zones"
+              ],
+              "rationale": [
+                "Missing input remains unknown; no zero inventory or default demand was invented."
+              ],
+              "system_selection": null,
+              "selection": null,
+              "adjustment": {
+                "before": null,
+                "after": null,
+                "operator": "course-manager",
+                "reason": "Delay departure four minutes to complete the local zone check.",
+                "scope": "ONE_TASK",
+                "valid_until_utc": "2026-09-16T09:10:00Z"
+              },
+              "scenarios": [],
+              "candidates": []
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:01:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/confirmations",
+        "schema_ref": "#/$defs/ConfirmationRequest",
+        "body": {
+          "schema": "nxt-planning-confirmation/v1",
+          "request_id": "missing-confirm-001",
+          "plan_id": "plan_missing_001",
+          "plan_version": 1,
+          "operator": "course-manager"
+        }
+      },
+      "response": {
+        "http_status": 409,
+        "schema_ref": "#/$defs/ErrorEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "error": {
+            "code": "planning_not_ready",
+            "detail": "The selected plan has missing required inventory, demand and candidate evidence."
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:01:00Z"
+    }
+  ]
+}

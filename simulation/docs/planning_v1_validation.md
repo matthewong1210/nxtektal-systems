@@ -28,3 +28,16 @@ read failure, disappeared projection entry, reliable ledger receipt, duplicate
 responses after recovery, and append failures before/after durability. HTTP
 coverage distinguishes successful-but-unavailable projection, conflict, and
 unknown result. Manager acceptance still does not create a task.
+
+## Stage 2: shared wire contract
+
+- `uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/pilot_ops/test_planning_wire_contract.py tests/pilot_ops/test_boundaries.py tests/site_agent/test_architecture.py`
+  — **46 passed** in 0.32s (31 schema/example checks plus architecture guards).
+- Every request/response in all six JSON example files validates against the
+  strict Draft 2020-12 schema; malformed units, source tags, unknown keys,
+  missing keys, booleans masquerading as numbers and UTC precision are rejected.
+- Architecture gate: `planning_v1_architecture.md`, **Proceed** using existing
+  owners and explicit human-confirmed SIMULATION composition only.
+- The contract commit contains docs/schema/examples/tests only; backend
+  implementation follows separately. Content IDs in examples are illustrative;
+  consumers use server-returned IDs. No frontend code or dependency changed.

@@ -1,0 +1,127 @@
+{
+  "description": "A failed write response does not prove absence. Query the original request ID; this example finds the durable confirmation. Never create a fresh ID merely because the response was lost.",
+  "clock_at_utc": "2026-09-16T08:02:00Z",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/confirmations",
+        "schema_ref": "#/$defs/ConfirmationRequest",
+        "body": {
+          "schema": "nxt-planning-confirmation/v1",
+          "request_id": "demo-confirm-001",
+          "plan_id": "plan_example_001",
+          "plan_version": 1,
+          "operator": "course-manager"
+        }
+      },
+      "response": {
+        "http_status": 503,
+        "schema_ref": "#/$defs/ErrorEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "error": {
+            "code": "planning_result_unknown",
+            "detail": "No reliable commit receipt was obtained; query or retry this same request ID."
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:02:00Z"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/planning/requests/demo-confirm-001"
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "duplicate",
+            "request_id": "demo-confirm-001",
+            "record": {
+              "confirmation_id": "confirmation_example_001",
+              "request": {
+                "schema": "nxt-planning-confirmation/v1",
+                "request_id": "demo-confirm-001",
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "operator": "course-manager"
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "confirmed_at_utc": "2026-09-16T08:02:00Z",
+              "schedule_id": "schedule_example_001",
+              "schedule": {
+                "robot_id": "picker-01",
+                "zone_id": "Z1",
+                "due_at_utc": "2026-09-16T08:05:00Z",
+                "expires_at_utc": "2026-09-16T08:09:40Z",
+                "operator": "course-manager",
+                "admission_reference": "confirmation_example_001"
+              }
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:02:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/confirmations",
+        "schema_ref": "#/$defs/ConfirmationRequest",
+        "body": {
+          "schema": "nxt-planning-confirmation/v1",
+          "request_id": "demo-confirm-001",
+          "plan_id": "plan_example_001",
+          "plan_version": 1,
+          "operator": "course-manager"
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "duplicate",
+            "request_id": "demo-confirm-001",
+            "record": {
+              "confirmation_id": "confirmation_example_001",
+              "request": {
+                "schema": "nxt-planning-confirmation/v1",
+                "request_id": "demo-confirm-001",
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "operator": "course-manager"
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "confirmed_at_utc": "2026-09-16T08:02:00Z",
+              "schedule_id": "schedule_example_001",
+              "schedule": {
+                "robot_id": "picker-01",
+                "zone_id": "Z1",
+                "due_at_utc": "2026-09-16T08:05:00Z",
+                "expires_at_utc": "2026-09-16T08:09:40Z",
+                "operator": "course-manager",
+                "admission_reference": "confirmation_example_001"
+              }
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:02:00Z"
+    }
+  ]
+}
