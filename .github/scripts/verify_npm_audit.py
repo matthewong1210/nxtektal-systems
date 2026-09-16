@@ -12,18 +12,24 @@ from typing import Any
 
 SEVERITY = {"info": 0, "low": 1, "moderate": 2, "high": 3, "critical": 4}
 
-# Development-only advisories accepted by the unchanged baseline lockfile.
+# `npm audit --json` report formats this verifier understands. Version 2 is
+# the format emitted by npm 7 and later; it was checked against real reports
+# from npm 11.11.0 (the CI runner's bundled npm) and npm 11.11.1. Any other
+# value, a missing or null field, or a non-integer type is refused rather than
+# assumed compatible.
+SUPPORTED_AUDIT_REPORT_VERSIONS = frozenset({2})
+
+# Development-only advisories accepted by the current baseline lockfile.
 # A missing advisory is considered resolved. New advisories and severity
 # increases fail verification.
-ACCEPTED_DEV_ADVISORIES = {
-    "GHSA-67mh-4wv8-2f99": "moderate",
-    "GHSA-2v37-7h3g-55p8": "high",
-    "GHSA-fxqj-rqcc-2cmp": "moderate",
-    "GHSA-4w7w-66w2-5vf9": "moderate",
-    "GHSA-v6wh-96g9-6wx3": "moderate",
-    "GHSA-fx2h-pf6j-xcff": "high",
-    "GHSA-5xrq-8626-4rwp": "critical",
-}
+#
+# The vitest 4.1.11 upgrade (GHSA-82fw-gwwq-j7x9) also resolved every advisory
+# previously accepted here (GHSA-67mh-4wv8-2f99, GHSA-2v37-7h3g-55p8,
+# GHSA-fxqj-rqcc-2cmp, GHSA-4w7w-66w2-5vf9, GHSA-v6wh-96g9-6wx3,
+# GHSA-fx2h-pf6j-xcff, GHSA-5xrq-8626-4rwp), so the accepted baseline is
+# empty: any development advisory now fails until it is explicitly reviewed
+# and added here with its maximum accepted severity.
+ACCEPTED_DEV_ADVISORIES: dict[str, str] = {}
 
 # npm reports counts for vulnerable dependency-graph nodes, not just unique
 # advisories. Keep that graph shape bounded as well as the advisory allowlist:
@@ -32,53 +38,16 @@ ACCEPTED_DEV_ADVISORIES = {
 ACCEPTED_DEV_SEVERITY_COUNTS = {
     "info": 0,
     "low": 0,
-    "moderate": 4,
-    "high": 2,
-    "critical": 1,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0,
 }
 
-# npm's current lockfile graph has seven vulnerable package nodes. Bind each
-# node to the accepted advisories it can currently reach so a disappearing
-# advisory or node is allowed, while a replacement wrapper cannot reuse an
-# unrelated accepted advisory to keep the aggregate counts unchanged.
-ACCEPTED_DEV_NODES = {
-    "@vitest/mocker": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-        }
-    ),
-    "esbuild": frozenset({"GHSA-67mh-4wv8-2f99"}),
-    "nanoid": frozenset({"GHSA-2v37-7h3g-55p8"}),
-    "postcss": frozenset({"GHSA-fxqj-rqcc-2cmp"}),
-    "vite": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-        }
-    ),
-    "vite-node": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-        }
-    ),
-    "vitest": frozenset(
-        {
-            "GHSA-67mh-4wv8-2f99",
-            "GHSA-4w7w-66w2-5vf9",
-            "GHSA-v6wh-96g9-6wx3",
-            "GHSA-fx2h-pf6j-xcff",
-            "GHSA-5xrq-8626-4rwp",
-        }
-    ),
-}
+# Bind each accepted vulnerable package node to the accepted advisories it may
+# reach, so a disappearing advisory or node is allowed while a replacement
+# wrapper cannot reuse an unrelated accepted advisory to keep the aggregate
+# counts unchanged. Empty while no development advisory is accepted.
+ACCEPTED_DEV_NODES: dict[str, frozenset[str]] = {}
 
 
 class DuplicateJsonKey(ValueError):
@@ -111,11 +80,57 @@ def advisory_id(item: dict[str, Any]) -> str | None:
     return identifier
 
 
+def validate_report_shape(report: Any) -> list[str]:
+    """Refuse anything that is not a supported npm audit report.
+
+    Runs before any vulnerability counting: an npm error response (which can
+    carry an empty ``vulnerabilities`` object and all-zero metadata next to
+    its top-level ``error``), a report without ``auditReportVersion``, a
+    version of the wrong type, or a version this verifier has not been
+    checked against must never pass as "zero vulnerabilities".
+    """
+
+    if not isinstance(report, dict):
+        return ["npm audit JSON root must be an object"]
+    if "error" in report:
+        error = report["error"]
+        summary = ""
+        if isinstance(error, dict):
+            summary = str(error.get("summary") or error.get("code") or "").strip()
+        if not summary and isinstance(report.get("message"), str):
+            summary = report["message"].strip()
+        if not summary:
+            summary = "no summary given"
+        return [
+            "npm audit returned an error response, not a report; nothing was "
+            f"audited: {summary}"
+        ]
+    if "auditReportVersion" not in report:
+        return [
+            "npm audit JSON is missing auditReportVersion; the report format "
+            "cannot be verified"
+        ]
+    version = report["auditReportVersion"]
+    if type(version) is not int:
+        return [
+            "npm audit JSON auditReportVersion must be an integer, got "
+            f"{type(version).__name__}: {version!r}"
+        ]
+    if version not in SUPPORTED_AUDIT_REPORT_VERSIONS:
+        supported = ", ".join(str(v) for v in sorted(SUPPORTED_AUDIT_REPORT_VERSIONS))
+        return [
+            f"unsupported npm audit report version {version}; this verifier "
+            f"understands version {supported} only"
+        ]
+    return []
+
+
 def validate(report: Any, policy: str) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     notes: list[str] = []
-    if not isinstance(report, dict):
-        return ["npm audit JSON root must be an object"], notes
+    shape_errors = validate_report_shape(report)
+    if shape_errors:
+        return shape_errors, notes
 
     vulnerabilities = report.get("vulnerabilities")
     metadata_container = report.get("metadata")

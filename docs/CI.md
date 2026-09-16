@@ -225,33 +225,35 @@ test -z "$(git ls-files --others --exclude-standard)"
 
 CI retains both npm audit JSON reports and exit codes as a downloadable artifact
 for 14 days. Production dependencies must remain at zero vulnerabilities. The
-unchanged private-repository development baseline temporarily accepts these
-advisories:
+development baseline currently accepts **no** advisory: the `vitest` 4.1.11
+upgrade (the first release patching GHSA-82fw-gwwq-j7x9) also resolved every
+development advisory the earlier baseline had accepted (GHSA-67mh-4wv8-2f99,
+GHSA-fxqj-rqcc-2cmp, GHSA-4w7w-66w2-5vf9, GHSA-v6wh-96g9-6wx3,
+GHSA-2v37-7h3g-55p8, GHSA-fx2h-pf6j-xcff, GHSA-5xrq-8626-4rwp), and those
+entries were removed under the rule below.
 
-| Advisory | Maximum accepted severity |
-|---|---|
-| `GHSA-67mh-4wv8-2f99` | moderate |
-| `GHSA-fxqj-rqcc-2cmp` | moderate |
-| `GHSA-4w7w-66w2-5vf9` | moderate |
-| `GHSA-v6wh-96g9-6wx3` | moderate |
-| `GHSA-2v37-7h3g-55p8` | high |
-| `GHSA-fx2h-pf6j-xcff` | high |
-| `GHSA-5xrq-8626-4rwp` | critical |
-
+Before any counting, the verifier refuses input that is not a supported
+report: an npm error response (a top-level `error`, even next to an empty
+`vulnerabilities` object and all-zero counts), a missing, null, or
+non-integer `auditReportVersion`, or a version other than 2 (the format
+checked against real npm 11.11.0 and 11.11.1 reports) exits non-zero with
+the reason; no default version is assumed.
 A new advisory, an unclassified audit result, or a severity increase fails.
-An advisory that disappears does not fail. The development graph is also capped
-at 0 info, 0 low, 4 moderate, 2 high, and 1 critical nodes; another affected
-wrapper node, a replacement package node, an unexpected advisory relationship,
-or a node severity above its reachable accepted advisory ceiling fails. The
-accepted baseline lives in
-[`verify_npm_audit.py`](../.github/scripts/verify_npm_audit.py); remove resolved
-entries in a later dependency-hygiene change.
+An advisory that disappears does not fail. The development graph is capped at
+0 info, 0 low, 0 moderate, 0 high, and 0 critical nodes while nothing is
+accepted; another affected wrapper node, a replacement package node, an
+unexpected advisory relationship, or a node severity above its reachable
+accepted advisory ceiling fails. The accepted baseline lives in
+[`verify_npm_audit.py`](../.github/scripts/verify_npm_audit.py): accepting a
+new development advisory is an explicit, reviewed edit there with its maximum
+severity, and resolved entries are removed in the dependency change that
+resolves them.
 
-The dependency remediation remains a separate concern tracked in
-[issue #2](https://github.com/matthewong1210/nxtektal-systems/issues/2). This CI
-foundation does not update ROI dependencies. The raw development audit's
-expected nonzero exit does not fail an unchanged baseline; the committed
-policy verifier fails only new, substituted, expanded, or more severe debt.
+Dependency remediation history is tracked in
+[issue #2](https://github.com/matthewong1210/nxtektal-systems/issues/2). The raw
+development audit's exit status is captured, then the committed policy
+verifier decides; with an empty accepted baseline, any development advisory
+fails.
 
 ### Operational Replay
 
