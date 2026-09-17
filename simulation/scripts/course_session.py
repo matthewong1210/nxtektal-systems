@@ -411,7 +411,23 @@ class Session:
             state = "UNOBSERVED" if frame is None else "STALE" if self.minute-frame["minute"] > 90 else frame["detection"]["quality"]
             coverage.append({"checkpoint_id": cp["id"], "status": state,
                              "last_minute": frame["minute"] if frame else None})
+        visible, visible_info = policy_inputs(self.obs, self.info)
+        # Export only the existing policy-visible observation seam. Runtime
+        # summaries, scenario weather and evaluator labels remain separate.
+        observed_range = {
+            "schema": "nxt-course-observed-range/v1", "minute": self.minute,
+            "inventory_fraction": float(visible["dispenser_inventory_frac"][0]),
+            "zones": [{"zone_id": zone_id, "balls": float(visible["zone_balls"][index]),
+                       "is_open": bool(visible["zone_open"][index])}
+                      for index, zone_id in enumerate(sorted(self.env.scenario.zone_ids))],
+            "robots": [{"robot_id": row["robot_id"], "activity": row["activity"],
+                        "health": row["health"], "location": row["location"],
+                        "battery_fraction": row["battery_frac"], "payload_balls": row["payload_balls"],
+                        "awaiting_human": row["awaiting_human"]} for row in visible_info["robots"]],
+            "staff": visible_info.get("joint_ops", {}).get("staff"),
+        }
         return {"schema": SCHEMA, "environment": "SIMULATION", "status": status,
+                "observed_range": observed_range,
                 "summary": self.summary(), "config": self.config, "catalog": list(self.catalog.values()),
                 "assumptions": self.compiled.get("assumptions", {}),
                 "timeline": self.timeline, "frames": self.frames, "observations": self.observations,

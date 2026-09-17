@@ -262,6 +262,33 @@ class PilotDispatchRuntime:
             self._close_resources()
 
 
+def course_read_callbacks(series_root: Path | None):
+    """Bind optional saved evidence; never instantiate or advance a session."""
+    if series_root is None:
+        return None, None
+    from scripts.course_operations import CourseOpsError, CourseOpsReader
+
+    reader = CourseOpsReader(series_root)
+
+    def snapshot():
+        try:
+            return reader.snapshot()
+        except CourseOpsError as exc:
+            raise SiteAgentError(exc.code, str(exc)) from exc
+        except Exception as exc:
+            raise SiteAgentError("course_ops_unavailable", "Saved course evidence cannot be read.") from exc
+
+    def media(round_id, frame_id, expected_sha=None):
+        try:
+            return reader.media(round_id, frame_id, expected_sha)
+        except CourseOpsError as exc:
+            raise SiteAgentError(exc.code, str(exc)) from exc
+        except Exception as exc:
+            raise SiteAgentError("course_ops_unavailable", "Saved course image cannot be read.") from exc
+
+    return snapshot, media
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, required=True)
@@ -269,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--console", type=Path, default=SIM_ROOT.parent / "apps/site-agent-console/out")
     parser.add_argument("--api-only", action="store_true", help="serve the local API without requiring a console export")
+    parser.add_argument("--course-series", type=Path, help="read saved whole-course evidence from this series; does not start or resume it")
     parser.add_argument("--behavior", choices=("accept_and_succeed", "fail_cannot_continue", "help_needs_manual_recharge", "silent_after_accept"), default="accept_and_succeed")
     args = parser.parse_args(argv)
     runtime = PilotDispatchRuntime(args.out, initialize=args.initialize, behavior=args.behavior)
@@ -282,7 +310,10 @@ def main(argv: list[str] | None = None) -> int:
             deployment_id=DEPLOYMENT_ID, workflow_id=RANGE_OPS_WORKFLOW_ID,
             seam=service_composition_seam(),
         )
-        server = SiteAgentApiServer(service, port=args.port, console_dir=None if args.api_only else args.console, task_operations=runtime.route, planning_operations=runtime.route_planning)
+        course_operations, course_media = course_read_callbacks(args.course_series)
+        server = SiteAgentApiServer(service, port=args.port, console_dir=None if args.api_only else args.console,
+                                    task_operations=runtime.route, planning_operations=runtime.route_planning,
+                                    course_operations=course_operations, course_media=course_media)
         server.start_background()
         for sig in (signal.SIGINT, signal.SIGTERM):
             signal.signal(sig, lambda _sig, _frame: stop.set())

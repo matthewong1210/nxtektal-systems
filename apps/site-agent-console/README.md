@@ -2,6 +2,21 @@
 
 SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA.
 
+Whole-course monitoring v1 adds a read-only panel above the pilot controls.
+It shows 54 inspection points across 18 synthetic holes, the last observed
+positions of up to 16 carts, saved synthetic camera images/detections, condition
+cases and recorded work. New reports also expose the driving range's existing
+observations of ball counts, robots and staff. Older reports leave these fields
+UNKNOWN. The map is a checkpoint schematic, not surveyed course geometry.
+
+The panel consumes only the
+[`course-ops-v1` contract](../../simulation/docs/contracts/course-ops-v1/README.md).
+It distinguishes saved simulation time, source pause flags and API read time;
+successful polling never makes a saved frame live. Missing/broken reads keep
+the last snapshot marked stale, and unavailable images have an explicit retry.
+The pilot controls below belong to a separate protocol rehearsal and do not
+dispatch robots or staff in the 18-hole session.
+
 The integrated dated-task rehearsal adds a task panel above the fixture panels:
 single-date collection schedules, automatic task/device refresh, and a local
 operator inbox. Follow the [Pilot Dispatch Console guide](../../simulation/docs/pilot_dispatch_v0.md)
@@ -9,7 +24,7 @@ to start both in one local service. The original fixture runner still works and
 shows task operations as unavailable. Task creation is separate from advice
 acceptance; neither runner can operate physical equipment.
 
-Manager planning v1 adds a human-led planning panel at the top of the page.
+Manager planning v1 adds a human-led planning panel above the task panel.
 It consumes only the frozen contract in
 [`simulation/docs/contracts/planning-v1`](../../simulation/docs/contracts/planning-v1/README.md)
 (`GET /api/v1/planning`, the four `POST` writes and `GET ./requests/{id}`):
@@ -44,7 +59,8 @@ real pollers under fake timers; it ships nothing to the static export.
 A minimal, decision-first Manager Console for the local fixture-backed
 Pilot Site Agent service. The console is a static Next.js export served
 same-origin by the Python service; it consumes only the versioned local
-Manager API (`/api/v0/`), imports no Python Site OS package, and holds
+Manager API (`/api/v0/`, `/api/v1/planning` and `/api/v1/course-ops`),
+imports no Python Site OS package, and holds
 no authoritative state — after any refresh or restart it reconstructs
 its entire view from the API and the service's persisted evidence.
 
@@ -78,6 +94,21 @@ Then open `http://127.0.0.1:8765/`. `npm run dev` serves the UI shell
 alone for styling work; without the local service it shows the honest
 "Service Unreachable" state, which is itself a supported screen.
 
+To attach an existing whole-course V2 series, build the same console export,
+then run from `simulation/` with the path of that saved series:
+
+```bash
+uv run --no-sync python -B scripts/pilot_dispatch_demo.py \
+  --out reports/course-console --initialize --port 8766 \
+  --course-series reports/whole-course-series
+```
+
+`--out` must be a new, separate rehearsal directory on first launch. Restart
+with the same arguments but omit `--initialize`. `--course-series` reads saved
+artifacts only; it does not create, resume or modify the selected experiment.
+The console is served at `http://127.0.0.1:8766/`. Omit `--course-series` to keep
+the original runner behavior; the monitoring panel then reports unavailable.
+
 ## Security boundary
 
 Local fixture use only. The service binds loopback, has no
@@ -101,4 +132,4 @@ npm audit --omit=dev
 `tests/boundaries.test.ts` mechanically forbids Python/ROI/replay
 imports, robot-command vocabulary, hidden browser persistence, hardcoded
 network URLs, and any API path outside `/api/v0/` and the frozen
-`/api/v1/planning` contract.
+`/api/v1/planning` and read-only `/api/v1/course-ops` contracts.

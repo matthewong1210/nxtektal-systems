@@ -1,0 +1,618 @@
+{
+  "schema": "nxt-site-agent/api/v0",
+  "disclaimer": "SIMULATION ONLY \u2014 saved synthetic report; not live course data",
+  "data": {
+    "schema": "nxt-course-ops/v1",
+    "environment": "SIMULATION",
+    "generated_at_utc": "2026-09-18T01:00:00Z",
+    "source": {
+      "kind": "SAVED_SIMULATION_REPORT",
+      "series_id": "c77219ab9ff65d93ff84ce5b850fea0ddd6918a8e317ab3f022a94b6f8fe7b67",
+      "session_id": "d73ad306764db71515423d7b32408c83067c9a16d3492f42d7d78d9b99018aef",
+      "engine_digest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "round_id": "round-0000000000",
+      "index": 0,
+      "seed": 12,
+      "status": "CHILD_CHUNK_COMPLETE",
+      "parent_paused": true,
+      "child_paused": false,
+      "published_at_utc": null,
+      "report_sha256": "f52c28906959ee3e60462d220edf092915190c8231009483dc41a67941292187",
+      "live": false
+    },
+    "clock": {
+      "simulated_minute": 500,
+      "simulated_at_utc": "2026-09-17T08:20:00Z"
+    },
+    "course": {
+      "site_id": "synthetic-course-18",
+      "deployment_id": "synthetic-course-18-monitoring-v0",
+      "map_revision": null,
+      "geometry": null,
+      "hole_count": 18,
+      "cart_count": 16,
+      "checkpoints": [
+        {
+          "checkpoint_id": "cp-h01-fairway",
+          "hole_number": 1,
+          "feature_id": "hole-01-fairway",
+          "surface_type": "fairway",
+          "x_m": 130.0,
+          "y_m": 90.0,
+          "coverage_status": "USABLE",
+          "last_observed_minute": 480
+        },
+        {
+          "checkpoint_id": "cp-h01-bunker",
+          "hole_number": 1,
+          "feature_id": "hole-01-bunker",
+          "surface_type": "bunker",
+          "x_m": 237.0,
+          "y_m": 59.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h01-green",
+          "hole_number": 1,
+          "feature_id": "hole-01-green",
+          "surface_type": "green",
+          "x_m": 250.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h02-fairway",
+          "hole_number": 2,
+          "feature_id": "hole-02-fairway",
+          "surface_type": "fairway",
+          "x_m": 430.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h02-bunker",
+          "hole_number": 2,
+          "feature_id": "hole-02-bunker",
+          "surface_type": "bunker",
+          "x_m": 537.0,
+          "y_m": 59.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h02-green",
+          "hole_number": 2,
+          "feature_id": "hole-02-green",
+          "surface_type": "green",
+          "x_m": 550.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h03-fairway",
+          "hole_number": 3,
+          "feature_id": "hole-03-fairway",
+          "surface_type": "fairway",
+          "x_m": 730.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h03-bunker",
+          "hole_number": 3,
+          "feature_id": "hole-03-bunker",
+          "surface_type": "bunker",
+          "x_m": 837.0,
+          "y_m": 59.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h03-green",
+          "hole_number": 3,
+          "feature_id": "hole-03-green",
+          "surface_type": "green",
+          "x_m": 850.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h04-fairway",
+          "hole_number": 4,
+          "feature_id": "hole-04-fairway",
+          "surface_type": "fairway",
+          "x_m": 1030.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h04-bunker",
+          "hole_number": 4,
+          "feature_id": "hole-04-bunker",
+          "surface_type": "bunker",
+          "x_m": 1137.0,
+          "y_m": 59.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h04-green",
+          "hole_number": 4,
+          "feature_id": "hole-04-green",
+          "surface_type": "green",
+          "x_m": 1150.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h05-fairway",
+          "hole_number": 5,
+          "feature_id": "hole-05-fairway",
+          "surface_type": "fairway",
+          "x_m": 1330.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h05-bunker",
+          "hole_number": 5,
+          "feature_id": "hole-05-bunker",
+          "surface_type": "bunker",
+          "x_m": 1437.0,
+          "y_m": 59.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h05-green",
+          "hole_number": 5,
+          "feature_id": "hole-05-green",
+          "surface_type": "green",
+          "x_m": 1450.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h06-fairway",
+          "hole_number": 6,
+          "feature_id": "hole-06-fairway",
+          "surface_type": "fairway",
+          "x_m": 1630.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h06-bunker",
+          "hole_number": 6,
+          "feature_id": "hole-06-bunker",
+          "surface_type": "bunker",
+          "x_m": 1737.0,
+          "y_m": 59.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h06-green",
+          "hole_number": 6,
+          "feature_id": "hole-06-green",
+          "surface_type": "green",
+          "x_m": 1750.0,
+          "y_m": 90.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h07-fairway",
+          "hole_number": 7,
+          "feature_id": "hole-07-fairway",
+          "surface_type": "fairway",
+          "x_m": 130.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h07-bunker",
+          "hole_number": 7,
+          "feature_id": "hole-07-bunker",
+          "surface_type": "bunker",
+          "x_m": 237.0,
+          "y_m": 239.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h07-green",
+          "hole_number": 7,
+          "feature_id": "hole-07-green",
+          "surface_type": "green",
+          "x_m": 250.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h08-fairway",
+          "hole_number": 8,
+          "feature_id": "hole-08-fairway",
+          "surface_type": "fairway",
+          "x_m": 430.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h08-bunker",
+          "hole_number": 8,
+          "feature_id": "hole-08-bunker",
+          "surface_type": "bunker",
+          "x_m": 537.0,
+          "y_m": 239.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h08-green",
+          "hole_number": 8,
+          "feature_id": "hole-08-green",
+          "surface_type": "green",
+          "x_m": 550.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h09-fairway",
+          "hole_number": 9,
+          "feature_id": "hole-09-fairway",
+          "surface_type": "fairway",
+          "x_m": 730.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h09-bunker",
+          "hole_number": 9,
+          "feature_id": "hole-09-bunker",
+          "surface_type": "bunker",
+          "x_m": 837.0,
+          "y_m": 239.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h09-green",
+          "hole_number": 9,
+          "feature_id": "hole-09-green",
+          "surface_type": "green",
+          "x_m": 850.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h10-fairway",
+          "hole_number": 10,
+          "feature_id": "hole-10-fairway",
+          "surface_type": "fairway",
+          "x_m": 1030.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h10-bunker",
+          "hole_number": 10,
+          "feature_id": "hole-10-bunker",
+          "surface_type": "bunker",
+          "x_m": 1137.0,
+          "y_m": 239.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h10-green",
+          "hole_number": 10,
+          "feature_id": "hole-10-green",
+          "surface_type": "green",
+          "x_m": 1150.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h11-fairway",
+          "hole_number": 11,
+          "feature_id": "hole-11-fairway",
+          "surface_type": "fairway",
+          "x_m": 1330.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h11-bunker",
+          "hole_number": 11,
+          "feature_id": "hole-11-bunker",
+          "surface_type": "bunker",
+          "x_m": 1437.0,
+          "y_m": 239.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h11-green",
+          "hole_number": 11,
+          "feature_id": "hole-11-green",
+          "surface_type": "green",
+          "x_m": 1450.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h12-fairway",
+          "hole_number": 12,
+          "feature_id": "hole-12-fairway",
+          "surface_type": "fairway",
+          "x_m": 1630.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h12-bunker",
+          "hole_number": 12,
+          "feature_id": "hole-12-bunker",
+          "surface_type": "bunker",
+          "x_m": 1737.0,
+          "y_m": 239.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h12-green",
+          "hole_number": 12,
+          "feature_id": "hole-12-green",
+          "surface_type": "green",
+          "x_m": 1750.0,
+          "y_m": 270.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h13-fairway",
+          "hole_number": 13,
+          "feature_id": "hole-13-fairway",
+          "surface_type": "fairway",
+          "x_m": 130.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h13-bunker",
+          "hole_number": 13,
+          "feature_id": "hole-13-bunker",
+          "surface_type": "bunker",
+          "x_m": 237.0,
+          "y_m": 419.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h13-green",
+          "hole_number": 13,
+          "feature_id": "hole-13-green",
+          "surface_type": "green",
+          "x_m": 250.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h14-fairway",
+          "hole_number": 14,
+          "feature_id": "hole-14-fairway",
+          "surface_type": "fairway",
+          "x_m": 430.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h14-bunker",
+          "hole_number": 14,
+          "feature_id": "hole-14-bunker",
+          "surface_type": "bunker",
+          "x_m": 537.0,
+          "y_m": 419.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h14-green",
+          "hole_number": 14,
+          "feature_id": "hole-14-green",
+          "surface_type": "green",
+          "x_m": 550.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h15-fairway",
+          "hole_number": 15,
+          "feature_id": "hole-15-fairway",
+          "surface_type": "fairway",
+          "x_m": 730.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h15-bunker",
+          "hole_number": 15,
+          "feature_id": "hole-15-bunker",
+          "surface_type": "bunker",
+          "x_m": 837.0,
+          "y_m": 419.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h15-green",
+          "hole_number": 15,
+          "feature_id": "hole-15-green",
+          "surface_type": "green",
+          "x_m": 850.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h16-fairway",
+          "hole_number": 16,
+          "feature_id": "hole-16-fairway",
+          "surface_type": "fairway",
+          "x_m": 1030.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h16-bunker",
+          "hole_number": 16,
+          "feature_id": "hole-16-bunker",
+          "surface_type": "bunker",
+          "x_m": 1137.0,
+          "y_m": 419.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h16-green",
+          "hole_number": 16,
+          "feature_id": "hole-16-green",
+          "surface_type": "green",
+          "x_m": 1150.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h17-fairway",
+          "hole_number": 17,
+          "feature_id": "hole-17-fairway",
+          "surface_type": "fairway",
+          "x_m": 1330.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h17-bunker",
+          "hole_number": 17,
+          "feature_id": "hole-17-bunker",
+          "surface_type": "bunker",
+          "x_m": 1437.0,
+          "y_m": 419.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h17-green",
+          "hole_number": 17,
+          "feature_id": "hole-17-green",
+          "surface_type": "green",
+          "x_m": 1450.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h18-fairway",
+          "hole_number": 18,
+          "feature_id": "hole-18-fairway",
+          "surface_type": "fairway",
+          "x_m": 1630.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h18-bunker",
+          "hole_number": 18,
+          "feature_id": "hole-18-bunker",
+          "surface_type": "bunker",
+          "x_m": 1737.0,
+          "y_m": 419.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        },
+        {
+          "checkpoint_id": "cp-h18-green",
+          "hole_number": 18,
+          "feature_id": "hole-18-green",
+          "surface_type": "green",
+          "x_m": 1750.0,
+          "y_m": 450.0,
+          "coverage_status": "UNOBSERVED",
+          "last_observed_minute": null
+        }
+      ]
+    },
+    "carts": [
+      {
+        "cart_id": "CART-01",
+        "frame_id": "frame-000000",
+        "minute": 480,
+        "x_m": 131,
+        "y_m": 36,
+        "accuracy_m": 3
+      }
+    ],
+    "frames": [
+      {
+        "frame_id": "frame-000000",
+        "cart_id": "CART-01",
+        "checkpoint_id": "cp-h01-fairway",
+        "minute": 480,
+        "image_url": "/api/v1/course-ops/media/round-0000000000/frame-000000.png?sha256=d7d4050642e678f5ca5f574fa77789a368a599a8fcedb7480221c7a80178567d",
+        "image_sha256": "d7d4050642e678f5ca5f574fa77789a368a599a8fcedb7480221c7a80178567d",
+        "width": 64,
+        "height": 48,
+        "quality": "USABLE",
+        "score_calibration": "NOT_CALIBRATED",
+        "detections": []
+      }
+    ],
+    "observations": [],
+    "cases": [],
+    "tasks": [],
+    "staff_jobs": [],
+    "range": {
+      "status": "UNKNOWN",
+      "observed_minute": null,
+      "inventory_fraction": null,
+      "zones": [],
+      "robots": [],
+      "staff": null
+    },
+    "weather": {
+      "status": "UNKNOWN"
+    }
+  }
+}

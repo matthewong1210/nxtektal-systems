@@ -44,6 +44,8 @@ from .service import SiteAgentService
 _MAX_BODY_BYTES = 65536
 
 _STATUS_BY_CODE = {
+    "course_ops_unavailable": 503,
+    "course_ops_not_found": 404,
     "planning_invalid_request": 400,
     "planning_not_found": 404,
     "planning_request_not_found": 404,
@@ -243,7 +245,9 @@ class _Handler(BaseHTTPRequestHandler):
             ):
                 # A GET carrying an unread body would desync keep-alive.
                 self.close_connection = True
-            if path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
+            if path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
+                self._serve_course(path)
+            elif path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
                 self._send_json(200, _envelope(self._route_planning("GET", path, {})))
             elif path == "/api/v0/task-ops" or path.startswith("/api/v0/task-ops/"):
                 self._send_json(200, _envelope(self._route_task_ops("GET", path, {})))
@@ -294,7 +298,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_error_code("forbidden_origin", reason or "refused")
                 return
             body = self._read_body()
-            if path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
+            if path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
+                raise SiteAgentError("method_not_allowed", "course evidence is read-only")
+            elif path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
                 self._send_json(200, _envelope(self._route_planning("POST", path, body)))
             elif path == "/api/v0/task-ops" or path.startswith("/api/v0/task-ops/"):
                 self._send_json(200, _envelope(self._route_task_ops("POST", path, body)))
@@ -323,6 +329,45 @@ class _Handler(BaseHTTPRequestHandler):
                     "internal_error", f"{type(exc).__name__}: {exc}"
                 ),
             )
+
+    def _serve_course(self, path: str) -> None:
+        # Evidence selection and integrity belong to the injected reader.
+        # The transport accepts no filesystem paths or mutation callback.
+        if path == "/api/v1/course-ops":
+            callback = self.server.course_operations
+            if callback is None:
+                raise SiteAgentError("not_found", "course evidence is not configured")
+            self._send_json(200, _envelope(callback()))
+            return
+        prefix = "/api/v1/course-ops/media/"
+        parts = path[len(prefix):].split("/") if path.startswith(prefix) else []
+        callback = self.server.course_media
+        if len(parts) != 2 or callback is None:
+            raise SiteAgentError("course_ops_not_found", "unknown course evidence path")
+        round_id, name = parts
+        frame_id = name.removesuffix(".png")
+        if not (
+            len(round_id) == 16 and round_id.startswith("round-")
+            and round_id[6:].isascii() and round_id[6:].isdigit()
+            and name.endswith(".png") and len(frame_id) == 12
+            and frame_id.startswith("frame-") and frame_id[6:].isascii() and frame_id[6:].isdigit()
+        ):
+            raise SiteAgentError("course_ops_not_found", "unknown course evidence path")
+        query = self.path.partition("?")[2]
+        expected_sha = query.removeprefix("sha256=")
+        if not (query.startswith("sha256=") and len(expected_sha) == 64
+                and all(character in "0123456789abcdef" for character in expected_sha)):
+            raise SiteAgentError("course_ops_not_found", "image snapshot hash is required")
+        body = callback(round_id, frame_id, expected_sha)
+        if not isinstance(body, bytes) or len(body) > 4 * 1024 * 1024 or not body.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise SiteAgentError("course_ops_unavailable", "invalid course image response")
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.wfile.write(body)
 
     def _route_planning(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
         callback = self.server.planning_operations
@@ -433,11 +478,15 @@ class _Server(ThreadingHTTPServer):
         console_dir: Path | None,
         task_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
         planning_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
+        course_operations: Callable[[], dict[str, Any]] | None = None,
+        course_media: Callable[[str, str, str], bytes] | None = None,
     ) -> None:
         self.service = service
         self.console_dir = console_dir
         self.task_operations = task_operations
         self.planning_operations = planning_operations
+        self.course_operations = course_operations
+        self.course_media = course_media
         super().__init__(address, _Handler)
 
 
@@ -453,6 +502,8 @@ class SiteAgentApiServer:
         console_dir: Path | None = None,
         task_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
         planning_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
+        course_operations: Callable[[], dict[str, Any]] | None = None,
+        course_media: Callable[[str, str, str], bytes] | None = None,
     ) -> None:
         if host not in LOOPBACK_HOSTS:
             raise SiteAgentError(
@@ -473,7 +524,7 @@ class SiteAgentApiServer:
                     f"console directory does not exist: {resolved_console}",
                 )
         self._service = service
-        self._server = _Server((host, port), service, resolved_console, task_operations, planning_operations)
+        self._server = _Server((host, port), service, resolved_console, task_operations, planning_operations, course_operations, course_media)
         self._thread: threading.Thread | None = None
         self._serving = False
 

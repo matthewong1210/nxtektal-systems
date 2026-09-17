@@ -4,6 +4,7 @@ import { canMutateConsole, type ConsoleView } from "../lib/actions";
 import { DISCLAIMER } from "../lib/api";
 import type { ConsoleActions, ConsoleData } from "../lib/console";
 import { BriefingPanel } from "./BriefingPanel";
+import { CourseOperationsPanel } from "./CourseOperationsPanel";
 import { ExceptionsPanel } from "./ExceptionsPanel";
 import { FixtureControls } from "./FixtureControls";
 import { PilotOperations } from "./PilotOperations";
@@ -48,6 +49,7 @@ export function ConsoleScreen({
           {loading ? "Loading…" : "Refresh"}
         </button>
       </header>
+      <CourseOperationsPanel />
       <PilotOperations />
       <div className="legacy-heading"><h2>Agent observations and advice</h2><span>Fixture-backed Shadow Mode</span></div>
       {data === null && error !== null ? (

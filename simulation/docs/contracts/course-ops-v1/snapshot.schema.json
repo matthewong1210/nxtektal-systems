@@ -1,0 +1,833 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "nxt-course-ops/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "environment",
+    "generated_at_utc",
+    "source",
+    "clock",
+    "course",
+    "carts",
+    "frames",
+    "observations",
+    "cases",
+    "tasks",
+    "staff_jobs",
+    "range",
+    "weather"
+  ],
+  "properties": {
+    "schema": {
+      "const": "nxt-course-ops/v1"
+    },
+    "environment": {
+      "const": "SIMULATION"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "series_id",
+        "session_id",
+        "engine_digest",
+        "round_id",
+        "index",
+        "seed",
+        "status",
+        "parent_paused",
+        "child_paused",
+        "published_at_utc",
+        "report_sha256",
+        "live"
+      ],
+      "properties": {
+        "kind": {
+          "const": "SAVED_SIMULATION_REPORT"
+        },
+        "series_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "engine_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "round_id": {
+          "type": "string",
+          "pattern": "^round-[0-9]{10}$"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "parent_paused": {
+          "type": "boolean"
+        },
+        "child_paused": {
+          "type": "boolean"
+        },
+        "published_at_utc": {
+          "const": null
+        },
+        "report_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "live": {
+          "const": false
+        }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "simulated_minute",
+        "simulated_at_utc"
+      ],
+      "properties": {
+        "simulated_minute": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10080
+        },
+        "simulated_at_utc": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        }
+      }
+    },
+    "course": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site_id",
+        "deployment_id",
+        "map_revision",
+        "geometry",
+        "hole_count",
+        "cart_count",
+        "checkpoints"
+      ],
+      "properties": {
+        "site_id": {
+          "const": "synthetic-course-18"
+        },
+        "deployment_id": {
+          "const": "synthetic-course-18-monitoring-v0"
+        },
+        "map_revision": {
+          "anyOf": [
+            {
+              "const": "sha256:058b2d16ad60dae347b5fb1f39d39e3880f5017313ce348df2dab3084ec5837f"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "geometry": {
+          "const": null
+        },
+        "hole_count": {
+          "const": 18
+        },
+        "cart_count": {
+          "const": 16
+        },
+        "checkpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "checkpoint_id",
+              "hole_number",
+              "feature_id",
+              "surface_type",
+              "x_m",
+              "y_m",
+              "coverage_status",
+              "last_observed_minute"
+            ],
+            "properties": {
+              "checkpoint_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "hole_number": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 18
+              },
+              "feature_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "surface_type": {
+                "enum": [
+                  "fairway",
+                  "bunker",
+                  "green"
+                ]
+              },
+              "x_m": {
+                "type": "number",
+                "minimum": -10000,
+                "maximum": 10000
+              },
+              "y_m": {
+                "type": "number",
+                "minimum": -10000,
+                "maximum": 10000
+              },
+              "coverage_status": {
+                "enum": [
+                  "USABLE",
+                  "BLURRED",
+                  "OCCLUDED",
+                  "STALE",
+                  "UNOBSERVED"
+                ]
+              },
+              "last_observed_minute": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "maxItems": 54,
+          "minItems": 54
+        }
+      }
+    },
+    "carts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cart_id",
+          "frame_id",
+          "minute",
+          "x_m",
+          "y_m",
+          "accuracy_m"
+        ],
+        "properties": {
+          "cart_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "frame_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "minute": {
+            "type": "number",
+            "minimum": 0
+          },
+          "x_m": {
+            "type": "number",
+            "minimum": -10000,
+            "maximum": 10000
+          },
+          "y_m": {
+            "type": "number",
+            "minimum": -10000,
+            "maximum": 10000
+          },
+          "accuracy_m": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000
+          }
+        }
+      },
+      "maxItems": 16
+    },
+    "frames": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "frame_id",
+          "cart_id",
+          "checkpoint_id",
+          "minute",
+          "image_url",
+          "image_sha256",
+          "width",
+          "height",
+          "quality",
+          "score_calibration",
+          "detections"
+        ],
+        "properties": {
+          "frame_id": {
+            "type": "string",
+            "pattern": "^frame-[0-9]{6}$"
+          },
+          "cart_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "minute": {
+            "type": "number",
+            "minimum": 0
+          },
+          "image_url": {
+            "type": "string",
+            "pattern": "^/api/v1/course-ops/media/round-[0-9]{10}/frame-[0-9]{6}\\.png\\?sha256=[a-f0-9]{64}$"
+          },
+          "image_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 768
+          },
+          "quality": {
+            "enum": [
+              "USABLE",
+              "BLURRED",
+              "OCCLUDED"
+            ]
+          },
+          "score_calibration": {
+            "const": "NOT_CALIBRATED"
+          },
+          "detections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "condition",
+                "score",
+                "bbox"
+              ],
+              "properties": {
+                "condition": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1000
+                },
+                "score": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "bbox": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "minItems": 4,
+                  "maxItems": 4
+                }
+              }
+            },
+            "maxItems": 100
+          }
+        }
+      },
+      "maxItems": 10000
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observation_id",
+          "checkpoint_id",
+          "frame_id",
+          "condition",
+          "quality",
+          "captured_at_utc",
+          "detection_score"
+        ],
+        "properties": {
+          "observation_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "frame_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "condition": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "quality": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "captured_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "detection_score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "maxItems": 20000
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "case_id",
+          "checkpoint_id",
+          "condition_kind",
+          "status",
+          "priority",
+          "opened_at_utc",
+          "updated_at_utc",
+          "latest_task_id"
+        ],
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "condition_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "priority": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "opened_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "updated_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "latest_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "maxItems": 20000
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "task_id",
+          "case_id",
+          "task_kind",
+          "status",
+          "resource_id",
+          "resource_kind",
+          "assigned_at_utc",
+          "started_at_utc",
+          "completed_at_utc"
+        ],
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "case_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "task_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "resource_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "resource_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "assigned_at_utc": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "Z$"
+          },
+          "started_at_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_at_utc": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "Z$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "maxItems": 20000
+    },
+    "staff_jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "job_id",
+          "checkpoint_id",
+          "task_kind",
+          "status",
+          "started_at_s",
+          "completed_at_s"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "checkpoint_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "task_kind": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "started_at_s": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completed_at_s": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "maxItems": 20000
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "observed_minute",
+        "inventory_fraction",
+        "zones",
+        "robots",
+        "staff"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "UNKNOWN",
+            "OBSERVED"
+          ]
+        },
+        "observed_minute": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inventory_fraction": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "zone_id",
+              "balls",
+              "is_open"
+            ],
+            "properties": {
+              "zone_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "balls": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "is_open": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          },
+          "maxItems": 100
+        },
+        "robots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "robot_id",
+              "activity",
+              "health",
+              "location",
+              "battery_fraction",
+              "payload_balls",
+              "awaiting_human"
+            ],
+            "properties": {
+              "robot_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "activity": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "health": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "location": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "battery_fraction": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "payload_balls": {
+                "type": "number",
+                "minimum": 0
+              },
+              "awaiting_human": {
+                "type": "boolean"
+              }
+            }
+          },
+          "maxItems": 100
+        },
+        "staff": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "capacity",
+                "busy",
+                "queued"
+              ],
+              "properties": {
+                "capacity": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "busy": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "queued": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "weather": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "const": "UNKNOWN"
+        }
+      }
+    }
+  }
+}
