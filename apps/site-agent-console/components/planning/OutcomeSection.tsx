@@ -8,19 +8,43 @@ import { formatSiteTime } from "../../lib/site-time";
 import { Badge, EmptyNote } from "../ui";
 import { errorText, sourceLabel } from "./shared";
 
-function OutcomeForm({
+export interface CorrectionTarget {
+  /** The record this draft corrects; null when the form was opened to record a first result. */
+  supersedes: string | null;
+  /** True when the stage's latest record changed after the form was opened. */
+  diverged: boolean;
+  /** The record that arrived meanwhile, if any. */
+  newer: OutcomeRecord | null;
+}
+
+/** The correction target is fixed when the form opens. A newer record that
+ * arrives through polling is reported, never adopted silently: the manager
+ * reviews it and retargets explicitly, or the service refuses the stale
+ * reference. */
+export function correctionTarget(target: string | null, latest: OutcomeRecord | undefined): CorrectionTarget {
+  const current = latest?.outcome_id ?? null;
+  if (current === target) return { supersedes: target, diverged: false, newer: null };
+  return { supersedes: target, diverged: true, newer: latest ?? null };
+}
+
+export function OutcomeForm({
   confirmation,
   stage,
-  supersedes,
+  target,
+  latest,
   disabled,
   onRecord,
+  onRetarget,
   onClose,
 }: {
   confirmation: ConfirmationRecord;
   stage: Stage;
-  supersedes: OutcomeRecord | null;
+  /** Frozen when the form opened; see `correctionTarget`. */
+  target: string | null;
+  latest: OutcomeRecord | undefined;
   disabled: boolean;
   onRecord: (confirmation: ConfirmationRecord, draft: OutcomeDraft, supersedesOutcomeId: string | null) => Promise<void>;
+  onRetarget: () => void;
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<OutcomeDraft>({
@@ -38,15 +62,16 @@ function OutcomeForm({
   const lock = useRef(false);
   const id = `${confirmation.confirmation_id}-${stage}`;
   const patch = (next: Partial<OutcomeDraft>) => setDraft((current) => ({ ...current, ...next }));
+  const correction = correctionTarget(target, latest);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (disabled || lock.current) return;
+    if (disabled || correction.diverged || lock.current) return;
     lock.current = true;
     setSubmitting(true);
     setError(null);
     try {
-      await onRecord(confirmation, draft, supersedes?.outcome_id ?? null);
+      await onRecord(confirmation, draft, correction.supersedes);
       onClose();
     } catch (cause) {
       setError(errorText(cause));
@@ -81,26 +106,45 @@ function OutcomeForm({
           </div>
           <div className="form-row">
             <label htmlFor={`${id}-started`}>Stage started · site time</label>
-            <input id={`${id}-started`} type="datetime-local" value={draft.startedAt} onChange={(event) => patch({ startedAt: event.target.value })} />
+            <input id={`${id}-started`} type="datetime-local" step="1" value={draft.startedAt} onChange={(event) => patch({ startedAt: event.target.value })} />
           </div>
           <div className="form-row">
             <label htmlFor={`${id}-completed`}>Stage completed · site time</label>
-            <input id={`${id}-completed`} type="datetime-local" value={draft.completedAt} onChange={(event) => patch({ completedAt: event.target.value })} />
+            <input id={`${id}-completed`} type="datetime-local" step="1" value={draft.completedAt} onChange={(event) => patch({ completedAt: event.target.value })} />
           </div>
           <div className="form-row dispatch-time">
             <label htmlFor={`${id}-reason`}>Reason or note</label>
-            <input id={`${id}-reason`} value={draft.reason} onChange={(event) => patch({ reason: event.target.value })} placeholder={supersedes ? "Why the earlier record is being corrected" : "Where and when this was observed"} />
+            <input id={`${id}-reason`} value={draft.reason} onChange={(event) => patch({ reason: event.target.value })} placeholder={target ? "Why the earlier record is being corrected" : "Where and when this was observed"} />
           </div>
         </div>
-        {supersedes ? (
+        {target ? (
           <p className="fineprint">
-            Corrects <span className="mono">{supersedes.outcome_id}</span>; the earlier record stays in the history.
+            Corrects <span className="mono">{target}</span>; the earlier record stays in the history.
+          </p>
+        ) : (
+          <p className="fineprint">First record for this stage.</p>
+        )}
+        {correction.diverged ? (
+          <p role="alert" className="form-error">
+            A newer record for this stage was saved while this form was open
+            {correction.newer ? (
+              <>
+                : <span className="mono">{correction.newer.outcome_id}</span> ({correction.newer.request.quantity_balls} balls · {sourceLabel(correction.newer.request.source_kind)} · by{" "}
+                {correction.newer.request.operator})
+              </>
+            ) : null}
+            . This draft still targets {target ? <span className="mono">{target}</span> : "a first record"} and cannot be saved as is. Review the newer record, then choose to correct it with this draft or close the form.
           </p>
         ) : null}
         <div className="form-actions">
-          <button type="submit" className="btn btn-primary">
+          <button type="submit" className="btn btn-primary" disabled={disabled || submitting || correction.diverged}>
             {submitting ? "Saving…" : `Save ${stage} result`}
           </button>
+          {correction.diverged ? (
+            <button type="button" className="btn" onClick={onRetarget} disabled={disabled || submitting}>
+              Review and correct the newer record
+            </button>
+          ) : null}
           <button type="button" className="btn btn-quiet" onClick={onClose}>
             Cancel
           </button>
@@ -128,7 +172,9 @@ function StageCard({
   disabled: boolean;
   onRecord: (confirmation: ConfirmationRecord, draft: OutcomeDraft, supersedesOutcomeId: string | null) => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
+  // The target is captured when the manager opens the form and changes only
+  // through an explicit retarget; polling cannot move it under the draft.
+  const [opened, setOpened] = useState<{ target: string | null } | null>(null);
   const canRecord = !!confirmation.task_id && !disabled;
   return (
     <article className="dispatch-record stage-card">
@@ -170,11 +216,20 @@ function StageCard({
       ) : (
         <p className="fineprint">This stage stays unknown until someone records its quantity, source and times.</p>
       )}
-      {open ? (
-        <OutcomeForm confirmation={confirmation} stage={stage} supersedes={latest ?? null} disabled={disabled} onRecord={onRecord} onClose={() => setOpen(false)} />
+      {opened ? (
+        <OutcomeForm
+          confirmation={confirmation}
+          stage={stage}
+          target={opened.target}
+          latest={latest}
+          disabled={disabled}
+          onRecord={onRecord}
+          onRetarget={() => setOpened({ target: latest?.outcome_id ?? null })}
+          onClose={() => setOpened(null)}
+        />
       ) : (
         <div className="form-actions">
-          <button type="button" className="btn" disabled={!canRecord} onClick={() => setOpen(true)}>
+          <button type="button" className="btn" disabled={!canRecord} onClick={() => setOpened({ target: latest?.outcome_id ?? null })}>
             {latest ? "Correct this stage" : `Record ${stage}`}
           </button>
         </div>

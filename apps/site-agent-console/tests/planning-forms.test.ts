@@ -9,6 +9,7 @@ import {
   buildPlanRequest,
   draftFromInput,
   emptyInputDraft,
+  fillEvidenceTimes,
   type InputDraft,
 } from "../lib/planning-forms";
 import type { InputRecord, InputRequest, OutcomeRequest, PlanRequest } from "../lib/planning";
@@ -227,5 +228,114 @@ describe("plan, confirmation, and outcome builders", () => {
         { requestId: "r", confirmationId: "c", taskId: "t", supersedesOutcomeId: null, timeZone: "Asia/Shanghai" },
       ),
     ).toThrow(/before/i);
+  });
+});
+
+describe("unchanged times keep their original wire text", () => {
+  const precise: InputRecord = {
+    ...record<InputRecord>("InputRequest"),
+    effective_at_utc: "2026-09-16T08:00:45.123456Z",
+    valid_until_utc: "2026-09-16T09:15:30.5Z",
+    operating_window: { start_at_utc: "2026-09-16T08:00:45.123456Z", end_at_utc: "2026-09-16T09:15:30.5Z" },
+    inventory_clean_balls: {
+      ...record<InputRecord>("InputRequest").inventory_clean_balls!,
+      observed_at_utc: "2026-09-16T08:00:45.123456Z",
+      valid_until_utc: "2026-09-16T09:30:00.000007Z",
+    },
+    demand: { ...record<InputRecord>("InputRequest").demand!, observed_at_utc: "2026-09-16T08:00:45.123456Z" },
+    zones: record<InputRecord>("InputRequest").zones.map((zone) => ({
+      ...zone,
+      cycle_minutes: { ...zone.cycle_minutes!, observed_at_utc: "2026-09-16T08:00:59.999999Z", valid_until_utc: "2026-09-16T09:30:00.1Z" },
+    })),
+  };
+  const strip = (input: InputRecord): InputRequest => {
+    const copy: Record<string, unknown> = { ...input };
+    for (const key of ["revision", "input_digest", "recorded_at_utc", "changes"]) delete copy[key];
+    return copy as unknown as InputRequest;
+  };
+
+  it("changing only the reason leaves every time and evidence byte-identical", () => {
+    const draft = draftFromInput(precise, "Asia/Shanghai");
+    draft.reason = "Only the note changed.";
+    const rebuilt = buildInputRequest(draft, { requestId: precise.request_id, expectedRevision: 1, context: CONTEXT });
+    expect(rebuilt).toEqual({ ...strip(precise), expected_revision: 1, reason: "Only the note changed." });
+    expect(rebuilt.effective_at_utc).toBe("2026-09-16T08:00:45.123456Z");
+    expect(rebuilt.inventory_clean_balls?.observed_at_utc).toBe("2026-09-16T08:00:45.123456Z");
+    expect(rebuilt.zones[0].cycle_minutes?.observed_at_utc).toBe("2026-09-16T08:00:59.999999Z");
+  });
+
+  it("keeps an original fall-back-hour instant verbatim instead of guessing an offset", () => {
+    const fallBack: InputRecord = {
+      ...precise,
+      site_timezone: "America/New_York",
+      effective_at_utc: "2026-11-01T06:30:00Z",
+      operating_window: { start_at_utc: "2026-11-01T06:30:00Z", end_at_utc: "2026-11-01T09:00:00Z" },
+      valid_until_utc: "2026-11-01T09:00:00Z",
+      inventory_clean_balls: { ...precise.inventory_clean_balls!, observed_at_utc: "2026-11-01T06:30:00Z", valid_until_utc: "2026-11-01T09:30:00Z" },
+      demand: { ...precise.demand!, observed_at_utc: "2026-11-01T06:30:00Z", valid_until_utc: "2026-11-01T09:30:00Z" },
+    };
+    const context = { ...CONTEXT, site_timezone: "America/New_York" };
+    const draft = draftFromInput(fallBack, "America/New_York");
+    expect(draft.effectiveAt).toBe("2026-11-01T01:30");
+    const rebuilt = buildInputRequest(draft, { requestId: "r", expectedRevision: 1, context });
+    expect(rebuilt.effective_at_utc).toBe("2026-11-01T06:30:00Z");
+    expect(rebuilt.inventory_clean_balls?.observed_at_utc).toBe("2026-11-01T06:30:00Z");
+    // an explicit edit into the repeated hour must be refused, not guessed
+    draft.effectiveAt = "2026-11-01T01:45";
+    expect(() => buildInputRequest(draft, { requestId: "r", expectedRevision: 1, context })).toThrow(/twice/);
+  });
+
+  it("converts an explicitly edited time at the precision entered and rejects nonexistent local times", () => {
+    const draft = draftFromInput(precise, "Asia/Shanghai");
+    draft.effectiveAt = "2026-09-16T16:05:30";
+    draft.inventory.observedAt = "2026-09-16T16:05:30";
+    draft.demand.observedAt = "2026-09-16T16:05:30.25";
+    const rebuilt = buildInputRequest(draft, { requestId: "r", expectedRevision: 1, context: CONTEXT });
+    expect(rebuilt.effective_at_utc).toBe("2026-09-16T08:05:30Z");
+    expect(rebuilt.demand?.observed_at_utc).toBe("2026-09-16T08:05:30.25Z");
+    expect(rebuilt.valid_until_utc).toBe("2026-09-16T09:15:30.5Z"); // untouched field still verbatim
+    const spring = { ...CONTEXT, site_timezone: "America/New_York" };
+    const gap = draftFromInput({ ...precise, site_timezone: "America/New_York" }, "America/New_York");
+    gap.effectiveAt = "2026-03-08T02:30";
+    expect(() => buildInputRequest(gap, { requestId: "r", expectedRevision: 1, context: spring })).toThrow(/does not exist/);
+  });
+
+  it("copies the effective time into empty evidence times as the same exact instant", () => {
+    const draft = draftFromInput(precise, "Asia/Shanghai");
+    draft.safetyStock.observedAt = "";
+    draft.safetyStock.validUntil = "";
+    const filled = fillEvidenceTimes(draft);
+    const rebuilt = buildInputRequest(filled, { requestId: "r", expectedRevision: 1, context: CONTEXT });
+    expect(rebuilt.safety_stock_balls?.observed_at_utc).toBe("2026-09-16T08:00:45.123456Z");
+    expect(rebuilt.safety_stock_balls?.valid_until_utc).toBe("2026-09-16T09:15:30.5Z");
+  });
+
+  it("keeps plan times verbatim when the manager only edits the reason", () => {
+    const built = buildPlanRequest(
+      {
+        operator: "course-manager",
+        reason: "Only the reason changed.",
+        scope: "ONE_TASK",
+        validUntil: utcToSiteInput("2026-09-16T09:10:15.250000Z", "Asia/Shanghai"),
+        selection: { zoneId: "Z1", robotId: "picker-01", startAt: utcToSiteInput("2026-09-16T08:05:00.000001Z", "Asia/Shanghai") },
+        originals: { validUntil: "2026-09-16T09:10:15.250000Z", startAt: "2026-09-16T08:05:00.000001Z" },
+      },
+      { requestId: "r", planId: "plan_x", expectedPlanVersion: 1, inputRevision: 1, timeZone: "Asia/Shanghai" },
+    );
+    expect(built.valid_until_utc).toBe("2026-09-16T09:10:15.250000Z");
+    expect(built.selection?.start_at_utc).toBe("2026-09-16T08:05:00.000001Z");
+    const edited = buildPlanRequest(
+      {
+        operator: "course-manager",
+        reason: "Moved the start.",
+        scope: "ONE_TASK",
+        validUntil: utcToSiteInput("2026-09-16T09:10:15.250000Z", "Asia/Shanghai"),
+        selection: { zoneId: "Z1", robotId: "picker-01", startAt: "2026-09-16T16:07" },
+        originals: { validUntil: "2026-09-16T09:10:15.250000Z", startAt: "2026-09-16T08:05:00.000001Z" },
+      },
+      { requestId: "r", planId: "plan_x", expectedPlanVersion: 1, inputRevision: 1, timeZone: "Asia/Shanghai" },
+    );
+    expect(edited.selection?.start_at_utc).toBe("2026-09-16T08:07:00Z");
+    expect(edited.valid_until_utc).toBe("2026-09-16T09:10:15.250000Z");
   });
 });

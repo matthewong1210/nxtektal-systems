@@ -311,3 +311,77 @@ describe("planning controller", () => {
     await expect(h.controller.submit("confirmations", confirmation)).rejects.toThrow(/not connected/);
   });
 });
+
+describe("recovery keeps UNKNOWN unless the service answers about the original request", () => {
+  async function unknownWrite() {
+    const h = harness();
+    await h.ready();
+    const pending = h.controller.submit("confirmations", confirmation);
+    await flush();
+    h.submits[0].reject(new TypeError("fetch failed"));
+    await flush();
+    h.snapshots[1].resolve(snapshot());
+    await expect(pending).rejects.toThrow("fetch failed");
+    expect(h.last().write?.status).toBe("unknown");
+    return h;
+  }
+
+  for (const [label, error] of [
+    ["a plain 404 from a runner without the lookup route", new ManagerApiError(404, { code: "not_found", detail: "unknown API path" })],
+    ["a 400 on the lookup itself", new ManagerApiError(400, { code: "planning_invalid_request", detail: "request ID path must be valid UTF-8" })],
+    ["a 409 on the lookup", new ManagerApiError(409, { code: "planning_conflict", detail: "unexpected" })],
+    ["a 503 on the lookup", new ManagerApiError(503, { code: "planning_unavailable", detail: "evidence unreadable" })],
+  ] as const) {
+    it(`keeps UNKNOWN, the original ID and the request content after ${label}`, async () => {
+      const h = await unknownWrite();
+      const recovery = h.controller.recover();
+      await flush();
+      h.lookups[0].reject(error);
+      await flush();
+      h.snapshots[2].resolve(snapshot());
+      await expect(recovery).rejects.toThrow(error.code);
+      const write = h.last().write;
+      expect(write).toMatchObject({ status: "unknown", kind: "confirmations", requestId: "confirmations-new-id", recovering: false });
+      expect(write?.status === "unknown" && write.body).toEqual(confirmation);
+      expect(write?.status === "unknown" && write.detail).toContain(error.code);
+      expect(canWritePlanning(h.last())).toBe(false);
+      expect(h.client.submit).toHaveBeenCalledTimes(1); // no replay, no new ID
+      await expect(h.controller.submit("confirmations", { ...confirmation, request_id: "fresh" })).rejects.toThrow(/unknown/i);
+      h.controller.stop();
+    });
+  }
+
+  it("treats a definite refusal of the identical replay as the answer for that request", async () => {
+    const h = await unknownWrite();
+    const recovery = h.controller.recover();
+    await flush();
+    h.lookups[0].reject(new ManagerApiError(404, { code: "planning_request_not_found", detail: "no committed request" }));
+    await flush();
+    expect(h.client.submit).toHaveBeenCalledTimes(2);
+    expect(h.client.submit.mock.calls[1]).toEqual(["confirmations", confirmation]);
+    h.submits[1].reject(new ManagerApiError(409, { code: "planning_expired", detail: "input or plan validity elapsed" }));
+    await flush();
+    h.snapshots[2].resolve(snapshot());
+    await expect(recovery).rejects.toThrow("planning_expired");
+    expect(h.last().write).toMatchObject({ status: "rejected", code: "planning_expired", requestId: "confirmations-new-id" });
+    expect(canWritePlanning(h.last())).toBe(true);
+    h.controller.stop();
+  });
+
+  it("keeps UNKNOWN when the identical replay itself gets no reliable receipt", async () => {
+    const h = await unknownWrite();
+    const recovery = h.controller.recover();
+    await flush();
+    h.lookups[0].reject(new ManagerApiError(404, { code: "planning_request_not_found", detail: "no committed request" }));
+    await flush();
+    h.submits[1].reject(new ManagerApiError(503, { code: "planning_result_unknown", detail: "no reliable receipt" }));
+    await flush();
+    h.snapshots[2].resolve(snapshot());
+    await expect(recovery).rejects.toThrow("planning_result_unknown");
+    expect(h.last().write).toMatchObject({ status: "unknown", requestId: "confirmations-new-id", recovering: false });
+    const held = h.last().write;
+    expect(held?.status === "unknown" && held.body).toEqual(confirmation);
+    expect(canWritePlanning(h.last())).toBe(false);
+    h.controller.stop();
+  });
+});

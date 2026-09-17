@@ -194,22 +194,31 @@ export function createPlanningController(
       try {
         await inner.mutate(
           async () => {
+            let found: MutationReceipt | undefined;
             try {
-              try {
-                receipt = await client.lookup(pending.requestId);
-              } catch (cause) {
-                if (cause instanceof ManagerApiError && cause.code === "planning_request_not_found") {
-                  // Not in the verified journal: replaying the identical request
-                  // is safe and recovers a duplicate's original receipt.
-                  receipt = await client.submit(pending.kind, pending.body);
-                } else {
-                  throw cause;
-                }
-              }
-              write = { status: "committed", kind: pending.kind, requestId: pending.requestId, receipt };
+              found = await client.lookup(pending.requestId);
             } catch (cause) {
-              finish(pending.kind, pending.requestId, cause, pending.body);
+              if (!(cause instanceof ManagerApiError && cause.code === "planning_request_not_found")) {
+                // Any other lookup failure (a runner without the route, a
+                // malformed-ID 400, a 503) says nothing about the original
+                // request: it stays unknown with its ID and content.
+                write = { ...pending, recovering: false, detail: `lookup failed: ${describe(cause)}` };
+                throw cause;
+              }
             }
+            if (found === undefined) {
+              // Explicitly absent from the verified journal: replaying the
+              // identical request is safe and recovers a duplicate's original
+              // receipt. Only this replay may answer for the request: a
+              // definite refusal rejects it, an ambiguous failure keeps it unknown.
+              try {
+                found = await client.submit(pending.kind, pending.body);
+              } catch (cause) {
+                finish(pending.kind, pending.requestId, cause, pending.body);
+              }
+            }
+            receipt = found;
+            write = { status: "committed", kind: pending.kind, requestId: pending.requestId, receipt: found as MutationReceipt };
           },
           { requireCurrent: false },
         );

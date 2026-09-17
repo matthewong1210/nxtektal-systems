@@ -34,7 +34,7 @@ import {
   type YieldEvidence,
   type ZoneInput,
 } from "./planning";
-import { siteTimeToUtc, utcToSiteInput } from "./site-time";
+import { sameSiteInput, siteTimeToUtc, utcToSiteInput } from "./site-time";
 
 export interface EvidenceDraft {
   /** false = unknown: the field is sent as null and the plan reports it missing. */
@@ -44,6 +44,8 @@ export interface EvidenceDraft {
   /** site-local `datetime-local` values */
   observedAt: string;
   validUntil: string;
+  /** UTC strings these fields were rendered from; re-emitted verbatim while unchanged. */
+  originals?: { observedAt?: string; validUntil?: string };
 }
 
 export type BooleanText = "true" | "false";
@@ -71,6 +73,8 @@ export interface InputDraft {
   operationsAllowed: EvidenceDraft & { value: BooleanText };
   washerAvailable: EvidenceDraft & { value: BooleanText };
   zones: ZoneDraft[];
+  /** UTC strings the header times were rendered from; re-emitted verbatim while unchanged. */
+  originals?: { effectiveAt?: string; validUntil?: string; windowStart?: string; windowEnd?: string };
 }
 
 export interface PlanDraft {
@@ -79,6 +83,8 @@ export interface PlanDraft {
   scope: Scope;
   validUntil: string;
   selection: { zoneId: string; robotId: string; startAt: string } | null;
+  /** UTC strings the plan times were rendered from; re-emitted verbatim while unchanged. */
+  originals?: { validUntil?: string; startAt?: string };
 }
 
 export interface OutcomeDraft {
@@ -165,7 +171,8 @@ const scopeOf = (value: string): Scope => {
   throw new Error("Scope must be SHIFT, DAY or ONE_TASK.");
 };
 
-const timeOf = (value: string, label: string, timeZone: string): string => {
+const timeOf = (value: string, label: string, timeZone: string, original?: string): string => {
+  if (original !== undefined && sameSiteInput(value, original, timeZone)) return original;
   try {
     return siteTimeToUtc(value, timeZone);
   } catch (cause) {
@@ -190,8 +197,8 @@ function evidenceOf<V, U extends string>(
     value: value(),
     source_kind: draft.sourceKind,
     source_ref: sourceRef,
-    observed_at_utc: timeOf(draft.observedAt, `${label} observed at`, timeZone),
-    valid_until_utc: timeOf(draft.validUntil, `${label} valid until`, timeZone),
+    observed_at_utc: timeOf(draft.observedAt, `${label} observed at`, timeZone, draft.originals?.observedAt),
+    valid_until_utc: timeOf(draft.validUntil, `${label} valid until`, timeZone, draft.originals?.validUntil),
     unit,
   };
 }
@@ -278,11 +285,11 @@ export function buildInputRequest(
     operator,
     reason,
     scope,
-    effective_at_utc: timeOf(draft.effectiveAt, "Effective at", timeZone),
-    valid_until_utc: timeOf(draft.validUntil, "Input valid until", timeZone),
+    effective_at_utc: timeOf(draft.effectiveAt, "Effective at", timeZone, draft.originals?.effectiveAt),
+    valid_until_utc: timeOf(draft.validUntil, "Input valid until", timeZone, draft.originals?.validUntil),
     operating_window: {
-      start_at_utc: timeOf(draft.windowStart, "Operating window start", timeZone),
-      end_at_utc: timeOf(draft.windowEnd, "Operating window end", timeZone),
+      start_at_utc: timeOf(draft.windowStart, "Operating window start", timeZone, draft.originals?.windowStart),
+      end_at_utc: timeOf(draft.windowEnd, "Operating window end", timeZone, draft.originals?.windowEnd),
     },
     inventory_clean_balls: evidenceOf<number, "balls">(
       draft.inventory,
@@ -332,6 +339,7 @@ function evidenceDraftOf(evidence: Evidence<unknown, string> | null, timeZone: s
     sourceRef: evidence.source_ref,
     observedAt: utcToSiteInput(evidence.observed_at_utc, timeZone),
     validUntil: utcToSiteInput(evidence.valid_until_utc, timeZone),
+    originals: { observedAt: evidence.observed_at_utc, validUntil: evidence.valid_until_utc },
   };
 }
 
@@ -349,6 +357,12 @@ export function draftFromInput(record: InputRecord, timeZone: string): InputDraf
     validUntil: utcToSiteInput(record.valid_until_utc, timeZone),
     windowStart: utcToSiteInput(record.operating_window.start_at_utc, timeZone),
     windowEnd: utcToSiteInput(record.operating_window.end_at_utc, timeZone),
+    originals: {
+      effectiveAt: record.effective_at_utc,
+      validUntil: record.valid_until_utc,
+      windowStart: record.operating_window.start_at_utc,
+      windowEnd: record.operating_window.end_at_utc,
+    },
     inventory: { ...evidenceDraftOf(record.inventory_clean_balls, timeZone), value: numberText(record.inventory_clean_balls?.value) },
     demand: {
       ...evidenceDraftOf(record.demand, timeZone),
@@ -408,14 +422,14 @@ export function buildPlanRequest(
     operator: trimmed(draft.operator, "Operator"),
     reason: trimmed(draft.reason, "Reason"),
     scope: scopeOf(draft.scope),
-    valid_until_utc: timeOf(draft.validUntil, "Plan valid until", options.timeZone),
+    valid_until_utc: timeOf(draft.validUntil, "Plan valid until", options.timeZone, draft.originals?.validUntil),
     selection:
       draft.selection === null
         ? null
         : {
             zone_id: trimmed(draft.selection.zoneId, "Zone"),
             robot_id: trimmed(draft.selection.robotId, "Robot"),
-            start_at_utc: timeOf(draft.selection.startAt, "Start at", options.timeZone),
+            start_at_utc: timeOf(draft.selection.startAt, "Start at", options.timeZone, draft.originals?.startAt),
           },
   };
 }
@@ -475,11 +489,19 @@ export function buildOutcomeRequest(
  * blocks whose times are still empty (observation = effective time, validity
  * = input validity). It never fills a value, source, or unknown field. */
 export function fillEvidenceTimes(draft: InputDraft): InputDraft {
-  const fill = <T extends EvidenceDraft>(block: T): T => ({
-    ...block,
-    observedAt: block.observedAt || draft.effectiveAt,
-    validUntil: block.validUntil || draft.validUntil,
-  });
+  const fill = <T extends EvidenceDraft>(block: T): T => {
+    const originals = { ...block.originals };
+    const next = { ...block, originals };
+    if (!block.observedAt) {
+      next.observedAt = draft.effectiveAt;
+      originals.observedAt = draft.originals?.effectiveAt;
+    }
+    if (!block.validUntil) {
+      next.validUntil = draft.validUntil;
+      originals.validUntil = draft.originals?.validUntil;
+    }
+    return next;
+  };
   return {
     ...draft,
     inventory: fill(draft.inventory),

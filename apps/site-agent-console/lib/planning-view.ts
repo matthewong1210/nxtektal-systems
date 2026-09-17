@@ -5,14 +5,22 @@
  */
 
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, Stage } from "./planning";
+import { compareUtc } from "./site-time";
+
+/** Newest first by real generation instant (mixed whole-second and
+ * fractional text compare correctly), then higher version of the same plan,
+ * then plan ID, so the order is stable whatever the array order. */
+export function comparePlansNewestFirst(a: PlanRecord, b: PlanRecord): number {
+  const byInstant = compareUtc(b.generated_at_utc, a.generated_at_utc);
+  if (byInstant !== 0) return byInstant;
+  if (a.plan_id === b.plan_id) return b.version - a.version;
+  return a.plan_id < b.plan_id ? -1 : 1;
+}
 
 /** The most recently generated plan version is the manager's focus. */
 export function focusPlan(plans: PlanRecord[]): PlanRecord | null {
   if (plans.length === 0) return null;
-  return [...plans].sort((a, b) => {
-    if (a.generated_at_utc !== b.generated_at_utc) return a.generated_at_utc < b.generated_at_utc ? 1 : -1;
-    return b.version - a.version;
-  })[0];
+  return [...plans].sort(comparePlansNewestFirst)[0];
 }
 
 export function latestVersion(plans: PlanRecord[], planId: string): number {
@@ -66,7 +74,7 @@ export function latestOutcomes(outcomes: OutcomeRecord[], confirmationId: string
   for (const item of mine) {
     if (superseded.has(item.outcome_id)) continue;
     const current = latest[item.request.stage];
-    if (!current || current.recorded_at_utc <= item.recorded_at_utc) latest[item.request.stage] = item;
+    if (!current || compareUtc(current.recorded_at_utc, item.recorded_at_utc) <= 0) latest[item.request.stage] = item;
   }
   return latest;
 }
@@ -74,5 +82,5 @@ export function latestOutcomes(outcomes: OutcomeRecord[], confirmationId: string
 export function outcomeHistory(outcomes: OutcomeRecord[], confirmationId: string, stage: Stage): OutcomeRecord[] {
   return outcomes
     .filter((item) => item.request.confirmation_id === confirmationId && item.request.stage === stage)
-    .sort((a, b) => (a.recorded_at_utc < b.recorded_at_utc ? -1 : 1));
+    .sort((a, b) => compareUtc(a.recorded_at_utc, b.recorded_at_utc));
 }

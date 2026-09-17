@@ -134,11 +134,11 @@ function EvidenceFields<T extends EvidenceDraft>({
           </div>
           <div className="form-row">
             <label htmlFor={`${id}-observed`}>Observed at · site time</label>
-            <input id={`${id}-observed`} type="datetime-local" value={block.observedAt} onChange={(event) => set("observedAt", event.target.value as T["observedAt"])} />
+            <input id={`${id}-observed`} type="datetime-local" step="1" value={block.observedAt} onChange={(event) => set("observedAt", event.target.value as T["observedAt"])} />
           </div>
           <div className="form-row">
             <label htmlFor={`${id}-valid`}>Valid until · site time</label>
-            <input id={`${id}-valid`} type="datetime-local" value={block.validUntil} onChange={(event) => set("validUntil", event.target.value as T["validUntil"])} />
+            <input id={`${id}-valid`} type="datetime-local" step="1" value={block.validUntil} onChange={(event) => set("validUntil", event.target.value as T["validUntil"])} />
           </div>
         </div>
       ) : (
@@ -294,19 +294,19 @@ export function InputForm({
           </div>
           <div className="form-row">
             <label htmlFor="input-effective">Effective at · site time ({timeZone})</label>
-            <input id="input-effective" type="datetime-local" value={draft.effectiveAt} onChange={(event) => patch({ effectiveAt: event.target.value })} />
+            <input id="input-effective" type="datetime-local" step="1" value={draft.effectiveAt} onChange={(event) => patch({ effectiveAt: event.target.value })} />
           </div>
           <div className="form-row">
             <label htmlFor="input-valid">Input valid until · site time</label>
-            <input id="input-valid" type="datetime-local" value={draft.validUntil} onChange={(event) => patch({ validUntil: event.target.value })} />
+            <input id="input-valid" type="datetime-local" step="1" value={draft.validUntil} onChange={(event) => patch({ validUntil: event.target.value })} />
           </div>
           <div className="form-row">
             <label htmlFor="input-window-start">Operating window start</label>
-            <input id="input-window-start" type="datetime-local" value={draft.windowStart} onChange={(event) => patch({ windowStart: event.target.value })} />
+            <input id="input-window-start" type="datetime-local" step="1" value={draft.windowStart} onChange={(event) => patch({ windowStart: event.target.value })} />
           </div>
           <div className="form-row">
             <label htmlFor="input-window-end">Operating window end</label>
-            <input id="input-window-end" type="datetime-local" value={draft.windowEnd} onChange={(event) => patch({ windowEnd: event.target.value })} />
+            <input id="input-window-end" type="datetime-local" step="1" value={draft.windowEnd} onChange={(event) => patch({ windowEnd: event.target.value })} />
           </div>
         </div>
         <div className="form-actions">

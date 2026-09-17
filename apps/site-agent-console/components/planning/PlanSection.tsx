@@ -3,7 +3,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import type { ConfirmationRecord, InputRecord, PlanRecord, PlanningContext, Scenario, Scope } from "../../lib/planning";
 import type { PlanDraft } from "../../lib/planning-forms";
-import { confirmationBlocker, effectiveStatus, previousVersion } from "../../lib/planning-view";
+import { comparePlansNewestFirst, confirmationBlocker, effectiveStatus, previousVersion } from "../../lib/planning-view";
 import { formatSiteTime, utcToSiteInput } from "../../lib/site-time";
 import { Badge, EmptyNote, KeyValue } from "../ui";
 import { errorText, SelectionText, statusTone } from "./shared";
@@ -101,6 +101,9 @@ function PlanRequestForm({
 }) {
   const timeZone = context.site_timezone;
   const base = plan?.selection ?? plan?.system_selection ?? null;
+  // The UTC strings the time fields were rendered from; re-emitted verbatim
+  // (seconds, microseconds, offset) while the manager leaves them unchanged.
+  const originals = { validUntil: plan?.valid_until_utc ?? latestInput.valid_until_utc, startAt: base?.start_at_utc };
   const [operator, setOperator] = useState(plan?.request.operator ?? "");
   const [reason, setReason] = useState("");
   const [scope, setScope] = useState<Scope>(plan?.request.scope ?? "ONE_TASK");
@@ -119,7 +122,7 @@ function PlanRequestForm({
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit({ operator, reason, scope, validUntil, selection });
+      await onSubmit({ operator, reason, scope, validUntil, selection, originals });
     } catch (cause) {
       setError(errorText(cause));
     } finally {
@@ -158,7 +161,7 @@ function PlanRequestForm({
           </div>
           <div className="form-row">
             <label htmlFor={`${id}-valid`}>Plan valid until · site time</label>
-            <input id={`${id}-valid`} type="datetime-local" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} />
+            <input id={`${id}-valid`} type="datetime-local" step="1" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} />
           </div>
           {allowSelection ? (
             <>
@@ -180,7 +183,7 @@ function PlanRequestForm({
               </div>
               <div className="form-row">
                 <label htmlFor={`${id}-start`}>Start at · site time</label>
-                <input id={`${id}-start`} type="datetime-local" value={startAt} onChange={(event) => setStartAt(event.target.value)} />
+                <input id={`${id}-start`} type="datetime-local" step="1" value={startAt} onChange={(event) => setStartAt(event.target.value)} />
               </div>
             </>
           ) : null}
@@ -312,7 +315,7 @@ export function PlanSection({
           <summary>Plan history ({plans.length} versions)</summary>
           <ul>
             {[...plans]
-              .sort((a, b) => (a.generated_at_utc < b.generated_at_utc ? 1 : -1))
+              .sort(comparePlansNewestFirst)
               .map((item) => (
                 <li key={`${item.plan_id}:${item.version}`}>
                   <span className="mono">{item.plan_id}</span> v{item.version} · {effectiveStatus(item)} · {formatSiteTime(item.generated_at_utc, timeZone)} ·{" "}
