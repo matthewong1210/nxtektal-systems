@@ -1,6 +1,6 @@
 """The discrete-event operational simulator (SimPy).
 
-Models one operating day of the full ball-flow loop:
+Models an operating day, or an opt-in finite multi-day session, of the full ball-flow loop:
 
     dispenser -> customer demand -> range zones -> robot collection
     -> robot payload -> handoff/washer queue -> washing -> dispenser
@@ -15,12 +15,14 @@ from one seed; simultaneous SimPy events resolve in scheduling order, and all
 fleet iteration is in sorted-id order — so a seed plus an action sequence
 replays to an identical event log.
 
-Simulated time is seconds since midnight. The episode starts at facility
-open and ends (terminated) at facility close.
+Simulated time is seconds since day-zero midnight. Legacy episodes terminate
+at their first facility close. Session inputs keep the same resources and ledger
+across daily closing periods and terminate only at their final declared close.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Generator, Optional
 
 import numpy as np
@@ -56,6 +58,7 @@ from nxt_range_ops.core.entities import (
 from nxt_range_ops.core.events import EventKind, EventLog
 from nxt_range_ops.core.ledger import BallLedger
 from nxt_range_ops.core.joint_inputs import validate_joint_inputs
+from nxt_range_ops.core.session_inputs import validate_observation_admission, validate_session_inputs
 from nxt_range_ops.core.metrics import OpsMetrics
 from nxt_range_ops.core.safety import SafetyShield, ShieldDecision
 from nxt_range_ops.core.skills import (
@@ -143,7 +146,7 @@ class _Station:
 
 
 class RangeSimulation:
-    """One operating day of range operations, driven by fleet directives."""
+    """Range operations driven by guarded fleet directives, with optional sessions."""
 
     def __init__(
         self,
@@ -152,17 +155,40 @@ class RangeSimulation:
         skill_model: Optional[SkillOutcomeModel] = None,
         *,
         joint_inputs: dict | None = None,
+        session_inputs: dict | None = None,
     ):
+        if joint_inputs is not None and session_inputs is not None:
+            raise ValueError("joint_inputs and session_inputs are mutually exclusive")
         self.scenario = scenario
         self._joint_inputs = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
                                                   open_minute=scenario.hours.open_minute,
                                                   close_minute=scenario.hours.close_minute)
+        self._session_inputs = validate_session_inputs(session_inputs, zone_ids=scenario.zone_ids,
+                                                      open_minute=scenario.hours.open_minute,
+                                                      close_minute=scenario.hours.close_minute)
+        if self._session_inputs is not None:
+            closed_zones = {zone.zone_id: zone.closure_windows for zone in scenario.zones
+                            if zone.closure_windows}
+            if closed_zones:
+                for index, targets in enumerate(self._session_inputs["landing_zones_by_minute"]):
+                    minute = (scenario.hours.open_minute + index) % 1440
+                    if any(any(window.contains(minute) for window in closed_zones.get(target, []))
+                           for target in set(targets)):
+                        raise ValueError("pre-sampled landing targets conflict with a declared play closure")
+        self._observation_jobs: dict[str, dict] = {}
         self._joint_demand_history: list[dict] = []
         self._staff_jobs = {
             job["job_id"]: {**job, "status": "PENDING", "assigned_at_s": None,
                             "started_at_s": None, "completed_at_s": None}
             for job in (self._joint_inputs["staff_jobs"] if self._joint_inputs else [])
         }
+        if self._session_inputs is not None:
+            self._staff_jobs = {
+                slot["job_id"]: {**slot, "status": "UNOBSERVED", "available_minute": None,
+                                 "deadline_minute": None, "assigned_at_s": None,
+                                 "started_at_s": None, "completed_at_s": None}
+                for slot in self._session_inputs["staff_job_slots"]
+            }
         self.seed = int(seed)
         master = np.random.default_rng(self.seed)
         (
@@ -250,8 +276,13 @@ class RangeSimulation:
         bucket_min = d.forecast_bucket_minutes
         buckets = []
         minute = h.open_minute
-        while minute < h.close_minute:
-            base = d.base_rate_at(minute + bucket_min / 2.0)
+        while minute < self.session_end_s / 60:
+            forecast_minute = minute + bucket_min / 2.0
+            if self._session_inputs is not None:
+                forecast_minute %= 1440
+            base = d.base_rate_at(forecast_minute)
+            if self._session_inputs is not None and not h.open_minute <= forecast_minute < h.close_minute:
+                base = 0.0
             noise = 1.0 + self._rng_forecast.normal(0.0, d.forecast_noise_sd)
             buckets.append(max(0.0, base * d.forecast_bias * max(0.0, noise)))
             minute += bucket_min
@@ -262,21 +293,33 @@ class RangeSimulation:
         # open take effect before the first demand draw of the day.
         for zone_id in sorted(self._zones):
             zone = self._zones[zone_id]
-            if self._joint_inputs is not None:
-                for window in self._joint_inputs["collection_blocks"][zone_id]:
+            external_inputs = self._session_inputs if self._session_inputs is not None else self._joint_inputs
+            if external_inputs is not None:
+                for window in external_inputs["collection_blocks"][zone_id]:
                     if window["end_minute"] * 60.0 > self.now:
                         self.env.process(self._collection_block_proc(
                             zone, window["start_minute"], window["end_minute"]))
-            for start_min, end_min in _merge_windows(zone.cfg.closure_windows):
-                if end_min * 60.0 <= self.now:
-                    continue  # window already over before facility open
-                self.env.process(self._zone_closure_proc(zone, start_min, end_min))
+            days = self._session_inputs["days"] if self._session_inputs is not None else 1
+            for day in range(days):
+                for start_min, end_min in _merge_windows(zone.cfg.closure_windows):
+                    start_min, end_min = start_min + day * 1440, end_min + day * 1440
+                    if end_min * 60.0 <= self.now:
+                        continue  # window already over before facility open
+                    self.env.process(self._zone_closure_proc(zone, start_min, end_min))
+                if (self._session_inputs is not None and day < days - 1
+                        and self.scenario.hours.close_minute < 1440 + self.scenario.hours.open_minute):
+                    self.env.process(self._collection_block_proc(
+                        zone, day * 1440 + self.scenario.hours.close_minute,
+                        (day + 1) * 1440 + self.scenario.hours.open_minute))
         for station_id in sorted(self._stations):
             station = self._stations[station_id]
-            for start_min, end_min in _merge_windows(station.cfg.outage_windows):
-                if end_min * 60.0 <= self.now:
-                    continue
-                self.env.process(self._station_outage_proc(station, start_min, end_min))
+            days = self._session_inputs["days"] if self._session_inputs is not None else 1
+            for day in range(days):
+                for start_min, end_min in _merge_windows(station.cfg.outage_windows):
+                    start_min, end_min = start_min + day * 1440, end_min + day * 1440
+                    if end_min * 60.0 <= self.now:
+                        continue
+                    self.env.process(self._station_outage_proc(station, start_min, end_min))
         self.env.process(self._demand_proc())
         self.env.process(self._washer_proc())
         self.env.process(self._sensor_proc())
@@ -298,11 +341,32 @@ class RangeSimulation:
     @property
     def facility_open(self) -> bool:
         h = self.scenario.hours
+        if self._session_inputs is not None:
+            return (not self.facility_closed
+                    and h.open_minute <= self.minute_of_day % 1440 < h.close_minute)
         return h.open_seconds <= self.now < h.close_seconds
 
     @property
     def facility_closed(self) -> bool:
-        return self.now >= self.scenario.hours.close_seconds
+        return self.now >= self.session_end_s
+
+    @property
+    def session_end_s(self) -> float:
+        """Final termination time; the legacy one-day endpoint is unchanged."""
+        days = self._session_inputs["days"] if self._session_inputs is not None else 1
+        return ((days - 1) * 1440 + self.scenario.hours.close_minute) * 60.0
+
+    @property
+    def session_progress(self) -> dict:
+        """RNG-neutral progress; daily opening is distinct from final termination."""
+        days = self._session_inputs["days"] if self._session_inputs is not None else 1
+        duration = self.session_end_s - self.scenario.hours.open_seconds
+        elapsed = min(duration, max(0.0, self.now - self.scenario.hours.open_seconds))
+        return {"days": days, "day_index": min(days - 1, int(self.minute_of_day // 1440)),
+                "minute_in_day": self.minute_of_day % 1440, "elapsed_s": elapsed,
+                "duration_s": duration, "fraction": elapsed / duration,
+                "facility_open": self.facility_open, "complete": self.facility_closed,
+                "session_end_s": self.session_end_s}
 
     def robot_or_none(self, robot_id: str) -> Optional[RobotStateSnapshot]:
         robot = self._robots.get(robot_id)
@@ -373,6 +437,10 @@ class RangeSimulation:
         """
         if zone_id not in self._zones:
             return False
+        if self._session_inputs is not None:
+            return self.facility_open and not any(
+                row["start_minute"] <= self.minute_of_day < row["end_minute"]
+                for row in self._session_inputs["collection_blocks"][zone_id])
         return self._joint_inputs is None or not any(
             row["start_minute"] <= self.minute_of_day < row["end_minute"]
             for row in self._joint_inputs["collection_blocks"][zone_id])
@@ -380,19 +448,63 @@ class RangeSimulation:
     def staff_work_snapshots(self) -> list[dict]:
         """Detached observed jobs only; future workload is never exposed here."""
         return [dict(job) for _, job in sorted(self._staff_jobs.items())
-                if job["available_minute"] <= self.minute_of_day]
+                if job["available_minute"] is not None and job["available_minute"] <= self.minute_of_day]
+
+    def admit_observation_job(self, job_id: str, observation_id: str, evidence_ref: str,
+                              captured_minute: int, deadline_minute: int) -> dict:
+        """Release one predeclared job from already captured synthetic evidence.
+
+        This only admits evidence into the existing runtime.  It assigns no
+        staff: the existing directive and SafetyShield remain mandatory.
+        Duplicate evidence is idempotent, even after completion; contradictory
+        retries and concurrent jobs for the same checkpoint/type fail closed.
+        """
+        if self._session_inputs is None:
+            raise ValueError("observation admission requires session_inputs")
+        request = validate_observation_admission(
+            job_id=job_id, observation_id=observation_id, evidence_ref=evidence_ref,
+            captured_minute=captured_minute, deadline_minute=deadline_minute,
+            open_minute=self.scenario.hours.open_minute, end_minute=int(self.session_end_s / 60))
+        existing = self._observation_jobs.get(observation_id)
+        if existing is not None:
+            if existing != request:
+                raise ValueError("observation_id conflicts with its admitted content")
+            return {"disposition": "duplicate", "job": deepcopy(self._staff_jobs[job_id])}
+        if captured_minute > self.minute_of_day:
+            raise ValueError("observation capture is in the future")
+        if self.facility_closed:
+            raise ValueError("session is complete; no new observation admission")
+        if job_id not in self._staff_jobs:
+            raise ValueError("unknown staff job slot")
+        job = self._staff_jobs[job_id]
+        if job["status"] != "UNOBSERVED":
+            raise ValueError("staff job slot has already been observed")
+        if any(other["checkpoint_id"] == job["checkpoint_id"]
+               and other["task_kind"] == job["task_kind"]
+               and other["status"] in {"PENDING", "ASSIGNED", "IN_PROGRESS"}
+               for other in self._staff_jobs.values()):
+            raise ValueError("an active job already exists for this checkpoint and task_kind")
+        job.update(status="PENDING", available_minute=self.minute_of_day,
+                   deadline_minute=deadline_minute, observation_id=observation_id,
+                   evidence_ref=evidence_ref, captured_minute=captured_minute)
+        self._observation_jobs[observation_id] = request
+        return {"disposition": "admitted", "job": deepcopy(job)}
 
     def staff_work_rejection(self, job_id: str) -> str | None:
         """Current deterministic admission for a shared-pool inspection job."""
         if type(job_id) is not str or job_id not in self._staff_jobs:
             return "unknown staff job"
         job = self._staff_jobs[job_id]
+        if job["available_minute"] is None:
+            return "staff job has not been observed yet"
         if job["available_minute"] > self.minute_of_day:
             return "staff job has not been observed yet"
         if job["status"] != "PENDING":
             return "staff job has already been assigned"
         if self.facility_closed:
             return "facility is closed; no new staff work"
+        if self._session_inputs is not None and not self.facility_open:
+            return "outside daily operating hours; no new staff work"
         active_course = sum(row["status"] in {"ASSIGNED", "IN_PROGRESS"}
                             for row in self._staff_jobs.values())
         active_assistance = self._human_staff.count - active_course
@@ -421,8 +533,9 @@ class RangeSimulation:
         includes pending observed jobs; no workload is dropped for remaining
         incomplete. Access denial is summed zone-seconds, not facility downtime.
         """
-        now = min(self.now, self.scenario.hours.close_seconds)
-        jobs = [job for job in self._staff_jobs.values() if job["available_minute"] * 60 <= now]
+        now = min(self.now, self.session_end_s)
+        jobs = [job for job in self._staff_jobs.values()
+                if job["available_minute"] is not None and job["available_minute"] * 60 <= now]
         busy_s = wait_s = late_s = 0.0
         for job in jobs:
             start = job["started_at_s"]
@@ -432,8 +545,9 @@ class RangeSimulation:
                 busy_s += max(0.0, min(now, finish if finish is not None else now) - start)
             late_s += max(0.0, min(now, finish if finish is not None else now) - job["deadline_minute"] * 60)
         denied = 0.0
-        if self._joint_inputs is not None:
-            for windows in self._joint_inputs["collection_blocks"].values():
+        external_inputs = self._session_inputs if self._session_inputs is not None else self._joint_inputs
+        if external_inputs is not None:
+            for windows in external_inputs["collection_blocks"].values():
                 denied += sum(max(0.0, min(now, row["end_minute"] * 60)
                                   - max(self.scenario.hours.open_seconds, row["start_minute"] * 60))
                               for row in windows)
@@ -594,7 +708,9 @@ class RangeSimulation:
                 raise RuntimeError("shared-staff admission and reservation disagreed")
             job.update(status="ASSIGNED", assigned_at_s=self.now)
             self.events.emit(self.now, EventKind.STAFF_WORK_ASSIGNED,
-                             job_id=directive.job_id, work_kind="INSPECTION_REPHOTOGRAPHY")
+                             job_id=directive.job_id,
+                             work_kind=job.get("task_kind", "INSPECTION_REPHOTOGRAPHY"),
+                             **({"task_kind": job["task_kind"]} if self._session_inputs is not None else {}))
             self.env.process(self._staff_work_proc(job, staff))
             return decision
 
@@ -652,6 +768,12 @@ class RangeSimulation:
     def advance(self, dt_s: float) -> None:
         """Advance simulated time by ``dt_s`` seconds and re-check invariants."""
         target = self.now + dt_s
+        if self._session_inputs is not None:
+            if not np.isfinite(dt_s) or dt_s <= 0:
+                raise ValueError("session advances must be positive and finite")
+            target = min(target, self.session_end_s)
+            if target <= self.now:
+                return
         self.env.run(until=target)
         # simpy stops slightly early if no event sits exactly at target;
         # run(until=t) guarantees now == t, so nothing more to do here.
@@ -1163,12 +1285,17 @@ class RangeSimulation:
     def _demand_proc(self) -> Generator:
         d = self.scenario.demand
         h = self.scenario.hours
-        while self.now < h.close_seconds:
+        while self.now < self.session_end_s:
             minute = self.minute_of_day
             rate = d.true_rate_at(minute)
-            self.metrics.open_minutes_elapsed += 1.0
+            if self._session_inputs is None or self.facility_open:
+                self.metrics.open_minutes_elapsed += 1.0
             open_zones = [z for z in sorted(self._zones) if self._zones[z].is_open]
-            if self._joint_inputs is not None:
+            if self._session_inputs is not None:
+                index = int(minute) - h.open_minute
+                requested = self._session_inputs["demand_by_minute"][index]
+                self._joint_demand_history.append({"minute": int(minute), "requested": requested})
+            elif self._joint_inputs is not None:
                 index = int(minute) - h.open_minute
                 requested = self._joint_inputs["demand_by_minute"][index] if open_zones else 0
                 self._joint_demand_history.append({"minute": int(minute), "requested": requested})
@@ -1183,12 +1310,18 @@ class RangeSimulation:
                 served = min(requested, available)
                 self.metrics.demand_balls_total += requested
                 if served > 0:
-                    weights = np.array(
-                        [self._zones[z].cfg.landing_weight for z in open_zones],
-                        dtype=float,
-                    )
-                    weights = weights / weights.sum()
-                    landed = self._rng_demand.multinomial(served, weights)
+                    if self._session_inputs is not None:
+                        targets = self._session_inputs["landing_zones_by_minute"][index][:served]
+                        landed = [targets.count(zone_id) for zone_id in open_zones]
+                        if sum(landed) != served:
+                            raise RuntimeError("session landing target is closed; frozen inputs disagree")
+                    else:
+                        weights = np.array(
+                            [self._zones[z].cfg.landing_weight for z in open_zones],
+                            dtype=float,
+                        )
+                        weights = weights / weights.sum()
+                        landed = self._rng_demand.multinomial(served, weights)
                     for zone_id, n in zip(open_zones, landed):
                         if n > 0:
                             self.ledger.move(
@@ -1308,7 +1441,8 @@ class RangeSimulation:
             if robot.assigned_zone == zone.zone_id:
                 self._interrupt_task(robot, "collection_access_blocked")
         yield self.env.timeout(max(0.0, end_minute * 60.0 - self.now))
-        self.events.emit(self.now, EventKind.COLLECTION_ACCESS_RESTORED, zone_id=zone.zone_id)
+        if self._session_inputs is None or self.collection_access_allowed(zone.zone_id):
+            self.events.emit(self.now, EventKind.COLLECTION_ACCESS_RESTORED, zone_id=zone.zone_id)
 
     def _staff_work_proc(self, job: dict, staff) -> Generator:
         """Nonpreemptive inspection labor in the existing robot-help pool."""
@@ -1316,12 +1450,14 @@ class RangeSimulation:
             yield staff
             job.update(status="IN_PROGRESS", started_at_s=self.now)
             self.events.emit(self.now, EventKind.STAFF_WORK_STARTED, job_id=job["job_id"],
-                             work_kind="INSPECTION_REPHOTOGRAPHY", hole_number=job["hole_number"],
-                             checkpoint_id=job["checkpoint_id"])
+                             work_kind=job.get("task_kind", "INSPECTION_REPHOTOGRAPHY"), hole_number=job["hole_number"],
+                             checkpoint_id=job["checkpoint_id"],
+                             **({"task_kind": job["task_kind"]} if self._session_inputs is not None else {}))
             yield self.env.timeout(job["duration_minutes"] * 60.0)
             job.update(status="COMPLETED", completed_at_s=self.now)
             self.events.emit(self.now, EventKind.STAFF_WORK_COMPLETED, job_id=job["job_id"],
-                             work_kind="INSPECTION_REPHOTOGRAPHY", repair_verified=False)
+                             work_kind=job.get("task_kind", "INSPECTION_REPHOTOGRAPHY"), repair_verified=False,
+                             **({"task_kind": job["task_kind"]} if self._session_inputs is not None else {}))
         finally:
             self._human_staff.release(staff)
 
