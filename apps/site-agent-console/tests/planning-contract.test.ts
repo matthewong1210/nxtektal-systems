@@ -94,6 +94,61 @@ describe("planning v1 contract examples", () => {
     }
   });
 
+  it("preserves verified task admission time verbatim, including microseconds", () => {
+    const snapshot = examples.success.findLast((e) => e.request.path === "/api/v1/planning")?.response.body.data as PlanningSnapshot;
+    for (const taskCreatedAt of ["2026-09-16T08:00:30Z", "2026-09-16T08:00:30.1Z", "2026-09-16T08:00:30.123456Z"]) {
+      const value = structuredClone(snapshot);
+      value.confirmations[0].task_created_at_utc = taskCreatedAt;
+      const parsed = parsePlanningSnapshot(value);
+      expect(parsed.confirmations[0].task_created_at_utc).toBe(taskCreatedAt);
+      expect(parsed.outcomes).toEqual(snapshot.outcomes);
+    }
+  });
+
+  it("keeps missing admission evidence null without inferring it from other timestamps", () => {
+    const snapshot = examples.success.findLast((e) => e.request.path === "/api/v1/planning")?.response.body.data as PlanningSnapshot;
+    for (const taskId of [null, "task_example_001"]) {
+      const value = structuredClone(snapshot);
+      value.confirmations[0].task_id = taskId;
+      value.confirmations[0].task_created_at_utc = null;
+      expect(parsePlanningSnapshot(value).confirmations[0].task_created_at_utc).toBeNull();
+
+      delete value.confirmations[0].task_created_at_utc;
+      const legacy = structuredClone(value);
+      expect(parsePlanningSnapshot(value).confirmations[0].task_created_at_utc).toBeNull();
+      expect(value).toEqual(legacy);
+      expect(value.confirmations[0]).not.toHaveProperty("task_created_at_utc");
+    }
+  });
+
+  it("rejects malformed admission timestamps and non-UTC representations", () => {
+    const snapshot = examples.success.findLast((e) => e.request.path === "/api/v1/planning")?.response.body.data as PlanningSnapshot;
+    for (const taskCreatedAt of [
+      0, true, {}, [], "", "2026-09-16", "2026-09-16T08:00:30", "2026-09-16T08:00:30+00:00",
+      "2026-09-16T08:00:30.1234567Z", "2026-02-30T08:00:30Z", "2026-09-16T24:00:00Z",
+      "2026-09-16T08:60:30Z", "0000-01-01T00:00:00Z",
+    ]) {
+      const value = structuredClone(snapshot);
+      const confirmation = value.confirmations[0] as unknown as Record<string, unknown>;
+      confirmation.task_created_at_utc = taskCreatedAt;
+      expect(() => parsePlanningSnapshot(value)).toThrow(ManagerApiError);
+    }
+  });
+
+  it("leaves confirmation mutation and request lookup receipts without read-projection fields", () => {
+    const exchanges = [
+      ...examples.success.filter((e) => e.request.method === "POST" && e.request.path === "/api/v1/planning/confirmations"),
+      ...examples["unknown-result"].filter((e) => e.request.method === "GET" && e.response.http_status === 200),
+    ];
+    expect(exchanges).toHaveLength(2);
+    for (const exchange of exchanges) {
+      const value = structuredClone(exchange.response.body.data);
+      const parsed = parseReceipt(value);
+      expect(parsed.record).not.toHaveProperty("task_created_at_utc");
+      expect(parsed).toEqual(value);
+    }
+  });
+
   it("parses every successful mutation receipt in the examples", () => {
     let receipts = 0;
     for (const exchanges of Object.values(examples)) {

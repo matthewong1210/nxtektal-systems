@@ -63,7 +63,7 @@ unreadable evidence or unknown commit outcome.
 | GET `/api/v1/planning` | none | Context, latest input, all plan versions, confirmations, outcomes |
 | POST `/api/v1/planning/inputs` | `InputRequest` | MutationReceipt with input record |
 | POST `/api/v1/planning/plans` | `PlanRequest` | MutationReceipt with evaluated plan |
-| POST `/api/v1/planning/confirmations` | `ConfirmationRequest` | MutationReceipt with confirmation and schedule/task links |
+| POST `/api/v1/planning/confirmations` | `ConfirmationRequest` | MutationReceipt with durable confirmation and frozen schedule link |
 | POST `/api/v1/planning/outcomes` | `OutcomeRequest` | MutationReceipt with result evidence |
 | GET `/api/v1/planning/requests/{request_id}` | none | MutationReceipt, or 404 `planning_request_not_found` |
 
@@ -195,7 +195,8 @@ The internal schedule operator is `planning-` plus the first 24 hex digits of
 the canonical SHA-256 digest of the original operator text; the original name
 remains in `confirmation.request.operator`. This preserves the legacy task
 wire vocabulary and is attribution only. Only the composition root can create
-a bound schedule. Read projection may add `schedule_status` and `task_id`.
+a bound schedule. GET snapshot confirmations add `schedule_status`, `task_id`
+and nullable `task_created_at_utc` as described below.
 A second request ID for the same exact plan version returns the existing
 confirmation as duplicate with the original committed `request_id` in its
 receipt; no alias record is appended. Query that original ID. If this duplicate
@@ -211,6 +212,55 @@ deadline. Confirmation a few seconds after that earliest time is permitted
 while the same admission window remains valid. The due time and original
 projection stay frozen; actual admission/results retain their actual times.
 No delayed admission may pass the conservative latest-start deadline.
+
+### Task admission time in the read projection
+
+`GET /api/v1/planning` emits `confirmations[].task_created_at_utc` as UTC text
+or null. Its only source is the associated Edge `TASK_CREATED.recorded_at_utc`,
+verified by `PlanningOperations._task_link()` against the frozen schedule and
+task identity, contents and admission window. The same verified link supplies
+`task_id`. The timestamp retains the original record's precision on every read
+and after restart. It is neither task request `issued_at_utc` nor planned due
+time, confirmation time or the current clock.
+
+Before actual admission, including a durable intent not yet materialized into a
+schedule, a pending, cancelled, rejected or missed schedule, the field is null.
+Association failure returns 503 `planning_unavailable` for the whole read;
+it is not downgraded to a successful null or a guessed timestamp. A verified
+historical admission time remains available after input expiry or task completion.
+
+This is a read-only additive field under `nxt-planning/v1`. The shared
+`ConfirmationRecord` wire schema allows omission for older responses and durable
+receipts. Updated snapshot parsers normalize an absent field to null, including
+when a legacy response already has a `task_id`; they must not infer the time.
+Supplied non-null values must satisfy `UtcTimestamp`. Older strict consumers
+that reject extra fields must update with this contract before using the new
+backend; the console parser supports additive fields. No data migration is
+required or allowed: persisted confirmations, journal bytes, record IDs and
+hashes remain unchanged. POST receipts and GET request-ID recovery receipts
+continue returning the original durable record without the new projection field.
+
+Illustrative projection fragments (other confirmation fields omitted here):
+
+```json
+{"schedule_status":"SCHEDULED","task_id":null,"task_created_at_utc":null}
+```
+
+```json
+{"schedule_status":"DISPATCHED","task_id":"task_example_001","task_created_at_utc":"2026-09-16T08:05:03.123456Z"}
+```
+
+An older response may instead contain
+`{"schedule_status":"DISPATCHED","task_id":"task_example_001"}`; its admission
+time remains unknown to that consumer and parses as null. The complete
+[success example](examples/success.json) includes the new admitted projection
+and unchanged durable confirmation receipt.
+
+This time is only a lower bound on an actual stage's `started_at_utc`.
+Admission does not establish that collection, unloading, washing or supply
+started; each stage remains unknown until explicit actual-result evidence is
+entered. Consumers may display this bound but must not automatically populate
+or save it as a stage start, derive durations from it, or infer ball quantities.
 
 At due time, validate version/input identity, expiry and all restrictions again
 inside scheduling admission. A revised input, closed zone, expired weather/work

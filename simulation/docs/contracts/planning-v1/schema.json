@@ -1271,6 +1271,17 @@
               "type": "null"
             }
           ]
+        },
+        "task_created_at_utc": {
+          "description": "GET snapshot projection only: verified associated Edge TASK_CREATED.recorded_at_utc; null before admission. Absent in legacy responses and durable receipts. A lower bound for actual stage starts, never proof that a stage began.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [

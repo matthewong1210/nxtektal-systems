@@ -143,3 +143,36 @@ def test_empty_snapshot_and_unknown_values_do_not_create_inventory_facts():
     assert incomplete["inventory_clean_balls"] is None and incomplete["demand"] is None
     assert incomplete["zones"] == []
     validator("#/$defs/InputRequest").validate(incomplete)
+
+
+def confirmation_projection():
+    example = json.loads((CONTRACT / "examples/success.json").read_text(encoding="utf-8"))
+    return example["exchanges"][-1]["response"]["body"]["data"]["confirmations"][0]
+
+
+def test_task_admission_read_field_accepts_new_and_legacy_shapes():
+    projected = confirmation_projection()
+    assert projected["task_created_at_utc"] == "2026-09-16T08:05:03.123456Z"
+    for timestamp in [None, "2026-09-16T08:05:03Z", projected["task_created_at_utc"]]:
+        validator("#/$defs/ConfirmationRecord").validate({**projected, "task_created_at_utc": timestamp})
+    del projected["task_created_at_utc"]
+    validator("#/$defs/ConfirmationRecord").validate(projected)
+    # Optional read fields never enter the original durable confirmation receipt.
+    example = json.loads((CONTRACT / "examples/success.json").read_text(encoding="utf-8"))
+    durable = next(e["response"]["body"]["data"]["record"] for e in example["exchanges"]
+                   if e["request"].get("schema_ref") == "#/$defs/ConfirmationRequest")
+    assert "task_created_at_utc" not in durable
+    validator("#/$defs/ConfirmationRecord").validate(durable)
+    with pytest.raises(ValidationError):
+        validator("#/$defs/ConfirmationRecord").validate({**projected, "invented_admission_time": None})
+
+
+@pytest.mark.parametrize("timestamp", [
+    0, True, {}, [], "", "2026-09-16T08:05:03+00:00",
+    "2026-09-16T08:05:03.1234567Z", "2026-02-30T08:05:03Z",
+])
+def test_task_admission_read_field_rejects_invalid_times(timestamp):
+    with pytest.raises(ValidationError):
+        validator("#/$defs/ConfirmationRecord").validate({
+            **confirmation_projection(), "task_created_at_utc": timestamp,
+        })
