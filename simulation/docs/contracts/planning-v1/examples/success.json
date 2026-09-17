@@ -1042,7 +1042,8 @@
                   "admission_reference": "confirmation_example_001"
                 },
                 "schedule_status": "DISPATCHED",
-                "task_id": "task_example_001"
+                "task_id": "task_example_001",
+                "task_created_at_utc": "2026-09-16T08:05:03.123456Z"
               }
             ],
             "outcomes": [

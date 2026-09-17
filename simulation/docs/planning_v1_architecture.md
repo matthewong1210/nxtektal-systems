@@ -64,3 +64,41 @@ root verifies deterministic planning replay and frozen schedule/task identity.
 No callback reads a file while inside the journal lock. Human operator text is
 retained verbatim as evidence; a stable internal token satisfies the legacy
 simulated TaskRequest issuer vocabulary without pretending to authenticate it.
+
+## Task admission time read projection (2026-09-17)
+
+Decision: **Proceed** within the existing composition/read boundary. Base:
+`21bb263b26e5740e5c92893f729ee05491fb5390`, reviewed local console fix;
+branch `codex/planning-task-admission-time-v1`, independent clean worktree.
+Search of the planning contract, projection, journal, schedule derivation and
+local branches identifies `PlanningOperations._task_link()` as the existing
+verified association owner. No new admission calculation or store is needed.
+
+Edge's immutable `TASK_CREATED.recorded_at_utc` owns the rehearsal admission
+time. The root reads a single verified journal prefix and reuses `_task_link()`
+to project nullable `task_created_at_utc` with `task_id` into GET snapshot
+confirmations. Shadow Ops still owns the original confirmation; its payload,
+canonical bytes, IDs, journal records and hashes are unchanged. POST and
+request-ID recovery receipts continue returning only the durable record.
+
+This is an additive optional read field in `nxt-planning/v1`: new snapshots
+emit it, old absent fields normalize to null in the updated console parser.
+Old strict parsers require a coordinated update. No record migration or
+recalculation occurs. An absent admission stays null; a mismatched association
+still makes the entire read unavailable. Never substitute due, confirmation or
+current time. Replay projects the same recorded timestamp independent of the
+read clock, including its original precision. It is only a lower bound for
+actual stage starts, never evidence that any collection or later stage began.
+
+The existing root imports are sufficient. No reverse dependency, new runtime,
+policy, RNG, clock, authentication or execution authority is added. Frontend
+changes are limited to the planning wire type/parser and their tests; scheduler
+health, controllers and components remain Claude's responsibility. The separate
+whole-course-sim-v2 and background experiments are outside this change; no
+18-hole simulation or physical execution connection is introduced.
+
+Verification plan: no-admission lifecycle cases, delayed admission distinct
+from plan/confirmation/read times, malformed linkage fail-closed reads, unchanged
+journal/anchor bytes and receipts, restart replay, strict schema/examples and
+legacy parser compatibility; focused packages, architecture/safety suite, full
+Python suite/config validation, and console typecheck/lint/tests/build/smoke.

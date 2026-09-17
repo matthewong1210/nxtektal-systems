@@ -212,6 +212,10 @@ export interface ConfirmationRecord {
   schedule: ScheduleCreationPayload;
   schedule_status?: ScheduleStatus | null;
   task_id?: string | null;
+  /** Verified Edge TASK_CREATED time: a lower bound on stage start, not stage-start
+   * evidence. Snapshot parsing maps legacy absence to null; durable receipts omit it.
+   * Never substitute a planned, confirmed, or current time. */
+  task_created_at_utc?: string | null;
 }
 
 export interface OutcomeRequest {
@@ -288,6 +292,12 @@ const text = (value: unknown): value is string => typeof value === "string" && v
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(text);
 const timestamp = (value: unknown): value is string =>
   typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/.test(value);
+const admissionTimestamp = (value: unknown): value is string => {
+  if (!timestamp(value) || Number(value.slice(0, 4)) === 0) return false;
+  const parsed = new Date(value);
+  // Check calendar validity without replacing or rounding the original UTC text.
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 19) === value.slice(0, 19);
+};
 const integer = (value: unknown, minimum: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= minimum;
 
@@ -295,8 +305,8 @@ const invalid = (detail: string) =>
   new ManagerApiError(200, { code: "invalid_planning_snapshot", detail });
 
 /** Validate the fields the UI reads. Unknown additive fields stay compatible;
- * a foreign schema, mode, or environment fails closed. Records keep their
- * server-provided values; nothing is defaulted. */
+ * a foreign schema, mode, or environment fails closed. Server-provided values
+ * stay intact; only absent legacy task admission time is normalized to null. */
 export function parsePlanningSnapshot(value: unknown): PlanningSnapshot {
   if (!object(value)) throw invalid("the planning view is not an object");
   if (value.schema !== PLANNING_SCHEMA) throw invalid(`expected ${PLANNING_SCHEMA}, got ${String(value.schema)}`);
@@ -337,7 +347,7 @@ export function parsePlanningSnapshot(value: unknown): PlanningSnapshot {
       throw invalid("a plan record is incomplete");
     }
   }
-  for (const confirmation of value.confirmations) {
+  const confirmations = value.confirmations.map((confirmation) => {
     if (
       !object(confirmation) ||
       !text(confirmation.confirmation_id) ||
@@ -349,13 +359,21 @@ export function parsePlanningSnapshot(value: unknown): PlanningSnapshot {
     ) {
       throw invalid("a confirmation record is incomplete");
     }
-  }
+    if (
+      "task_created_at_utc" in confirmation &&
+      confirmation.task_created_at_utc !== null &&
+      !admissionTimestamp(confirmation.task_created_at_utc)
+    ) {
+      throw invalid("task_created_at_utc is neither null nor RFC3339 UTC");
+    }
+    return { ...confirmation, task_created_at_utc: confirmation.task_created_at_utc ?? null };
+  });
   for (const outcome of value.outcomes) {
     if (!object(outcome) || !text(outcome.outcome_id) || !object(outcome.request) || !text(outcome.request.stage)) {
       throw invalid("an outcome record is incomplete");
     }
   }
-  return value as unknown as PlanningSnapshot;
+  return { ...value, confirmations } as unknown as PlanningSnapshot;
 }
 
 export function parseReceipt(value: unknown): MutationReceipt {

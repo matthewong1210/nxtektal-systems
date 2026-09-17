@@ -61,12 +61,19 @@ def test_http_complete_flow_uses_shared_schema_and_never_infers_inventory(runner
         assert status == 200
         validator('#/$defs/SuccessEnvelope').validate(confirmed)
         assert confirmed['data']['record']['request']['operator'] == '经理 陈'
+        assert 'task_created_at_utc' not in confirmed['data']['record']
+        status, pending = call(server, 'GET', '/api/v1/planning')
+        assert status == 200
+        validator('#/$defs/SuccessEnvelope').validate(pending)
+        assert pending['data']['confirmations'][0]['task_created_at_utc'] is None
         cycle(runtime, clock)
         status, state = call(server, 'GET', '/api/v1/planning')
         validator('#/$defs/SuccessEnvelope').validate(state)
         data = state['data']
         c = data['confirmations'][0]
         assert c['task_id'] and c['schedule_status'] == 'DISPATCHED'
+        admission = next(r for r in runtime.journal.read() if r.record_kind == TASK_CREATED)
+        assert c['task_created_at_utc'] == admission.recorded_at_utc
         assert execution_count(runtime.root) == 1
         assert next(iter(runtime.snapshot()['tasks'].values()))['state'] == 'SUCCEEDED'
         assert data['outcomes'] == []

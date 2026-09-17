@@ -124,7 +124,8 @@ class PlanningOperations:
         for c in result["confirmations"]:
             schedule = rows.get(c["schedule_id"])
             c["schedule_status"] = schedule["status"] if schedule else None
-            c["task_id"] = schedule["task_id"] if schedule else None
+            # Read projection only: actual admission evidence, not a stage start.
+            c["task_id"], c["task_created_at_utc"] = self._task_link(records, schedule)
         return result
 
     def _mutate(self, kind: str, payload: dict[str, Any], now: datetime) -> dict[str, Any]:
