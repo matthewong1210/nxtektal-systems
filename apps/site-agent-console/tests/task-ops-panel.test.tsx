@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DispatchView } from "../components/DispatchPanel";
+import type { SchedulerHealth } from "../lib/scheduler-health";
 import { INITIAL_TASK_OPS_VIEW, type TaskOpsView } from "../lib/task-ops";
 import { taskOpsFixture } from "./task-ops-fixtures";
 const actions = { schedule: async () => {}, cancel: async () => {}, respond: async () => {}, refresh: async () => {} };
@@ -47,5 +48,29 @@ describe("pilot task panel", () => {
     expect(html).toContain("No task evidence yet");
     expect(html).toContain("No notifications recorded");
     expect(html).toContain("No schedules yet");
+  });
+});
+
+describe("task panel with the shared scheduler health", () => {
+  const healthy: SchedulerHealth = { status: "fresh", scheduler: { state: "RUNNING", detail: null }, observedAtUtc: "2026-09-16T12:00:00Z", observedAtMs: 1_000_000, error: null };
+  const renderWith = (health: SchedulerHealth) => renderToStaticMarkup(<DispatchView view={view()} actions={actions} health={health} />);
+
+  it("labels an expired shared reading and disables task changes even though the raw snapshot says RUNNING", () => {
+    const html = renderWith({ ...healthy, status: "expired" });
+    expect(html).toContain("SCHEDULER CHECK EXPIRED");
+    expect(html).toContain("older than 15 seconds");
+    expect(html).toMatch(/<select[^>]*disabled=""/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Acknowledge<\/button>/);
+  });
+
+  it("labels an unverifiable reading the same way the planning panel does", () => {
+    const html = renderWith({ ...healthy, status: "unavailable", scheduler: null, error: "404" });
+    expect(html).toContain("TASK SERVICE UNAVAILABLE");
+  });
+
+  it("keeps the existing behaviour when the reading is fresh and RUNNING", () => {
+    const html = renderWith(healthy);
+    expect(html).toContain("SCHEDULER RUNNING");
+    expect(html).not.toMatch(/<select[^>]*disabled=""/);
   });
 });

@@ -25,6 +25,22 @@ task. Times are entered and shown in the site timezone from the planning
 context and transported as UTC. Operator names are attribution, not
 authentication.
 
+The planning panel and the task panel share one scheduler reading. The task
+panel's existing poller (`GET /api/v0/task-ops`, validated by the same parser)
+is mounted once in `components/PilotOperations.tsx`; its `scheduler.state/detail`
+becomes a freshness-labelled health value (`lib/scheduler-health.ts`) that the
+task panel displays and the planning controller uses as its write gate. A
+planning write is allowed only over a fresh RUNNING reading; FAILED, a failed
+read, an unverifiable route or a reading older than 15 seconds block new
+planning writes with the runner's own reason. A request with an unknown
+outcome keeps its ID and content and can still be queried and replayed by that
+ID; a recovered receipt is never treated as evidence that the scheduler is
+running. Nothing in the console restarts the runner.
+
+`happy-dom` is a development-only dependency used by
+`tests/planning-interaction.test.tsx` to mount the real panels and drive the
+real pollers under fake timers; it ships nothing to the static export.
+
 A minimal, decision-first Manager Console for the local fixture-backed
 Pilot Site Agent service. The console is a static Next.js export served
 same-origin by the Python service; it consumes only the versioned local

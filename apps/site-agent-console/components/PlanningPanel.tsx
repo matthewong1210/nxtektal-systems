@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createPlanningClient } from "../lib/planning";
 import { createPlanningActions, type PlanningActions } from "../lib/planning-actions";
 import {
@@ -12,6 +12,7 @@ import {
   type WriteState,
 } from "../lib/planning-state";
 import { confirmationFor, focusPlan } from "../lib/planning-view";
+import { schedulerAllowsWrites, schedulerHealthLabel, schedulerHealthReason, type SchedulerHealth } from "../lib/scheduler-health";
 import { formatSiteTime } from "../lib/site-time";
 import { InputForm, InputSummary } from "./planning/InputSection";
 import { OutcomeSection } from "./planning/OutcomeSection";
@@ -105,6 +106,27 @@ function WriteBanner({ write, view, actions }: { write: WriteState; view: Planni
   );
 }
 
+function SchedulerHealthBanner({ view, timeZone }: { view: PlanningViewState; timeZone: string }) {
+  const health = view.health;
+  const reason = schedulerHealthReason(health);
+  if (schedulerAllowsWrites(health) && reason === null) {
+    return (
+      <p className="fineprint planning-health" role="status">
+        <Badge tone="ok">{schedulerHealthLabel(health)}</Badge> Confirmed by the task service at {formatSiteTime(health.observedAtUtc, timeZone)} (site time); the task panel below
+        reads the same scheduler state.
+      </p>
+    );
+  }
+  return (
+    <div className="load-warning" role={health.status === "unknown" ? "status" : "alert"}>
+      <Badge tone={health.status === "unknown" ? "warn" : "bad"}>{schedulerHealthLabel(health)}</Badge> {reason}
+      {view.write?.status === "unknown"
+        ? " The request with an unknown outcome below keeps its ID and content; recovering it by that ID stays available and does not restart the scheduler."
+        : ""}
+    </div>
+  );
+}
+
 export function PlanningView({ view, actions }: { view: PlanningViewState; actions: PlanningActions }) {
   const data = view.data;
   const locked = !canWritePlanning(view);
@@ -143,6 +165,7 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
       ) : view.loading && data === null ? (
         <p className="empty-note">Loading the planning records…</p>
       ) : null}
+      <SchedulerHealthBanner view={view} timeZone={timeZone} />
       {view.write ? <WriteBanner write={view.write} view={view} actions={actions} /> : null}
       {data ? (
         <>
@@ -192,13 +215,22 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
   );
 }
 
-export function PlanningPanel() {
+export function PlanningPanel({ health, healthSource }: { health: SchedulerHealth; healthSource: () => SchedulerHealth }) {
   const [view, setView] = useState<PlanningViewState>(() => initialPlanningView());
-  const [controller] = useState(() => createPlanningController(client, setView));
+  const [controller] = useState(() => createPlanningController(client, setView, { health: healthSource }));
   useEffect(() => {
     controller.start();
     return () => controller.stop();
   }, [controller]);
+  useEffect(() => {
+    // A changed source prop is honoured without recreating the controller.
+    controller.setHealthSource(healthSource);
+  }, [controller, healthSource]);
+  useLayoutEffect(() => {
+    // The shared reading changed (task-ops poll): republish before paint so
+    // this panel and the task panel commit the same reading in one frame.
+    controller.notifyHealth();
+  }, [controller, health]);
   const context = view.data?.context ?? null;
   const actions = useMemo(() => createPlanningActions(controller, context), [controller, context]);
   return <PlanningView view={view} actions={actions} />;

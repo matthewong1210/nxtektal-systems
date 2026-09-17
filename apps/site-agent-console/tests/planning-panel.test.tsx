@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { PlanningView, type PlanningActions } from "../components/PlanningPanel";
 import type { ConfirmationRecord, InputRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
 import { initialPlanningView, type PlanningView as ViewState } from "../lib/planning-state";
+import type { SchedulerHealth } from "../lib/scheduler-health";
 
 const EXAMPLES = join(import.meta.dirname, "..", "..", "..", "simulation", "docs", "contracts", "planning-v1", "examples");
 type Exchange = {
@@ -35,10 +36,18 @@ const actions: PlanningActions = {
   acknowledgeWrite: () => {},
 };
 
+const healthy: SchedulerHealth = {
+  status: "fresh",
+  scheduler: { state: "RUNNING", detail: null },
+  observedAtUtc: "2026-09-16T08:20:00Z",
+  observedAtMs: 1_000_000,
+  error: null,
+};
 const view = (patch: Partial<ViewState> = {}): ViewState => ({
   ...initialPlanningView(),
   data: fullSnapshot,
   loading: false,
+  health: healthy,
   ...patch,
 });
 const render = (state: ViewState) => renderToStaticMarkup(<PlanningView view={state} actions={actions} />);
@@ -187,7 +196,7 @@ describe("planning panel", () => {
   });
 
   it("explains an older service without the planning route instead of showing stale data", () => {
-    const html = render({ ...initialPlanningView(), loading: false, unavailable: true, error: "not_found: unknown API path" });
+    const html = render({ ...initialPlanningView(), loading: false, unavailable: true, error: "not_found: unknown API path", health: healthy });
     expect(html).toContain("not available on this service");
     expect(html).not.toContain("STALE");
   });
@@ -198,5 +207,71 @@ describe("planning panel", () => {
       expect(html).not.toContain(">null<");
       expect(html).not.toContain("undefined");
     }
+  });
+});
+
+describe("shared scheduler health in the planning panel", () => {
+  const writeButtons = (html: string) =>
+    html.match(/<button[^>]*>(Record [A-Z]+|Correct this stage|Save revision \d+|Ask for the system suggestion|Apply adjustment|Restore the system suggestion|Confirm plan version \d+)<\/button>/g) ?? [];
+  const EXPECTED_WRITE_BUTTONS = writeButtons(render(view())).length;
+  const allDisabled = (html: string) => {
+    const found = writeButtons(html);
+    expect(found.length).toBe(EXPECTED_WRITE_BUTTONS);
+    return found.every((b) => b.includes("disabled"));
+  };
+
+  it("shows the confirmed RUNNING reading and its site-time check when writes are allowed", () => {
+    const html = render(view());
+    expect(html).toContain("SCHEDULER RUNNING");
+    expect(html).toContain("2026-09-16 16:20"); // 08:20Z in Asia/Shanghai
+    expect(html).toContain("the task panel below");
+    expect(writeButtons(html).some((b) => !b.includes("disabled"))).toBe(true);
+  });
+
+  it("blocks every write and names the runner's reason when the scheduler is FAILED", () => {
+    const html = render(view({ health: { ...healthy, scheduler: { state: "FAILED", detail: "planning_result_unknown: journal unreadable" } } }));
+    expect(html).toContain("SCHEDULER FAILED");
+    expect(html).toContain("journal unreadable");
+    expect(html).not.toMatch(/deliberate stop/i);
+    expect(html).toContain("reports the scheduler as FAILED");
+    expect(allDisabled(html)).toBe(true);
+    expect(html).not.toContain("STALE A refresh failed");
+  });
+
+  for (const [label, health, expected] of [
+    ["unconfirmed", { ...healthy, status: "unknown", scheduler: null, observedAtUtc: null, observedAtMs: null }, "SCHEDULER STATE UNCONFIRMED"],
+    ["stale", { ...healthy, status: "stale", error: "Failed to fetch" }, "SCHEDULER STATE STALE"],
+    ["expired", { ...healthy, status: "expired" }, "SCHEDULER CHECK EXPIRED"],
+    ["unavailable", { ...healthy, status: "unavailable", scheduler: null, error: "404" }, "TASK SERVICE UNAVAILABLE"],
+  ] as const) {
+    it(`blocks writes while the scheduler reading is ${label}`, () => {
+      const html = render(view({ health: health as SchedulerHealth }));
+      expect(html).toContain(expected);
+      expect(allDisabled(html)).toBe(true);
+    });
+  }
+
+  it("keeps the unknown-write recovery entry available while the scheduler is FAILED", () => {
+    const html = render(
+      view({
+        health: { ...healthy, scheduler: { state: "FAILED", detail: "stopped" } },
+        write: { status: "unknown", kind: "confirmations", requestId: "confirmations-abc", body: {} as never, detail: "fetch failed", recovering: false },
+      }),
+    );
+    expect(html).toContain("SCHEDULER FAILED");
+    expect(html).toContain("UNKNOWN OUTCOME");
+    expect(html).toContain("confirmations-abc");
+    expect(html).toContain("does not restart the scheduler");
+    expect(button(html, "Recover by request ID")).not.toContain("disabled");
+    expect(allDisabled(html)).toBe(true);
+  });
+});
+
+describe("scheduler health roles and the task panel's view of the same reading", () => {
+  it("announces the initial unconfirmed reading politely and failures assertively", () => {
+    const unconfirmed = render(view({ health: { ...healthy, status: "unknown", scheduler: null, observedAtUtc: null, observedAtMs: null } }));
+    expect(unconfirmed).toMatch(/<div class="load-warning" role="status">[^<]*<span class="badge badge-warn">SCHEDULER STATE UNCONFIRMED/);
+    const failed = render(view({ health: { ...healthy, scheduler: { state: "FAILED", detail: "stopped" } } }));
+    expect(failed).toMatch(/<div class="load-warning" role="alert">[^<]*<span class="badge badge-bad">SCHEDULER FAILED/);
   });
 });

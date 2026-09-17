@@ -1,11 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   INITIAL_TASK_OPS_VIEW, buildSchedule, canMutateTaskOps, createTaskOpsClient,
   createTaskOpsPoller, humanResponse, isAmbiguousMutation, localTimeToUtc,
   type HumanResponse, type ScheduleInput, type TaskNotification, type TaskOpsView,
 } from "../lib/task-ops";
+import {
+  createSchedulerHealthTracker,
+  schedulerAllowsWrites,
+  schedulerHealthLabel,
+  schedulerHealthReason,
+  UNKNOWN_SCHEDULER_HEALTH,
+  type SchedulerHealth,
+  type SchedulerHealthTracker,
+} from "../lib/scheduler-health";
 import { Badge, EmptyNote, KeyValue, Section, type Tone } from "./ui";
 
 const client = createTaskOpsClient((input, init) => fetch(input, init));
@@ -18,7 +27,7 @@ const statusTone = (status: string): Tone => {
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 const utcLabel = (value: string | null) => value ? value.replace("T", " ").replace(/\.\d+Z$/, " UTC").replace(/Z$/, " UTC") : "Not reported";
 
-type TaskOpsActions = {
+export type TaskOpsActions = {
   schedule: (input: ScheduleInput) => Promise<void>;
   cancel: (id: string, operator: string) => Promise<void>;
   respond: (id: string, kind: "acknowledge" | "resolve", input: HumanResponse) => Promise<void>;
@@ -167,12 +176,16 @@ function CancelSchedule({ id, disabled, cancel }: { id: string; disabled: boolea
   </form>;
 }
 
-export function DispatchView({ view, actions }: { view: TaskOpsView; actions: TaskOpsActions }) {
+export function DispatchView({ view, actions, health }: { view: TaskOpsView; actions: TaskOpsActions; health?: SchedulerHealth }) {
   const data = view.data;
-  const disabled = !canMutateTaskOps(view);
+  // With the shared reading, the task panel labels and gates on the same
+  // freshness-aware health as the planning panel; without it (standalone
+  // render) it keeps the raw snapshot semantics.
+  const healthBlock = health !== undefined && !schedulerAllowsWrites(health) ? schedulerHealthReason(health) : null;
+  const disabled = !canMutateTaskOps(view) || healthBlock !== null;
   const count = data?.notifications.filter((item) => item.status !== "RESOLVED").length ?? 0;
   return (
-    <Section title="Pilot task operations" aside={<><Badge tone="sim">SIMULATION</Badge>{data ? <Badge tone={statusTone(data.scheduler.state)}>{data.scheduler.state}</Badge> : null}</>}>
+    <Section title="Pilot task operations" aside={<><Badge tone="sim">SIMULATION</Badge>{health !== undefined ? <Badge tone={schedulerAllowsWrites(health) ? "ok" : health.status === "unknown" ? "warn" : "bad"}>{schedulerHealthLabel(health)}</Badge> : data ? <Badge tone={statusTone(data.scheduler.state)}>{data.scheduler.state}</Badge> : null}</>}>
       <p className="sim-note">Schedule a collection, follow its progress, and record staff handling in one place.</p>
       <p className="fineprint dispatch-boundary">Local simulation with protocol doubles. No physical robot or CE82A is connected. Advice acceptance below remains a separate workflow record.</p>
       {view.unavailable ? <div className="dispatch-service-note" role="status"><Badge tone="muted">UNAVAILABLE</Badge>
@@ -186,7 +199,7 @@ export function DispatchView({ view, actions }: { view: TaskOpsView; actions: Ta
           <span className="detail-text">{data.transport === "in_memory" ? "Local protocol double" : "MQTT protocol double"}</span>
           <button className="btn btn-quiet" type="button" onClick={() => void actions.refresh()} disabled={view.busy || view.loading}>Refresh tasks</button>
         </div>
-        {data.scheduler.state === "FAILED" ? <p className="form-error" role="alert">Scheduler failed. Changes are disabled. {data.scheduler.detail ?? "Inspect the service before continuing."}</p> : null}
+        {data.scheduler.state === "FAILED" ? <p className="form-error" role="alert">Scheduler failed. Changes are disabled. {data.scheduler.detail ?? "Inspect the service before continuing."}</p> : healthBlock !== null ? <p className="form-error" role="alert">Changes are disabled. {healthBlock}</p> : null}
         <div className="dispatch-device-list">{Object.values(data.devices).map((device) => <div className="dispatch-device" key={device.robot_id}>
           <strong>{device.robot_id}</strong><Badge tone={statusTone(device.as_read.connectivity)}>{device.as_read.connectivity}</Badge>
           <span>{device.last_reported_availability ?? "Availability unknown"}</span>
@@ -226,23 +239,34 @@ export function DispatchView({ view, actions }: { view: TaskOpsView; actions: Ta
   );
 }
 
-export function DispatchPanel() {
+/** The one task-ops poller for the page. Its validated view feeds the task
+ * panel and, through the health tracker, the planning panel's scheduler
+ * gate, so both panels always describe the same reading. */
+export function usePilotTaskOps(): { view: TaskOpsView; actions: TaskOpsActions; health: SchedulerHealth; tracker: SchedulerHealthTracker } {
   const [view, setView] = useState<TaskOpsView>(INITIAL_TASK_OPS_VIEW);
+  const [tracker] = useState(() => createSchedulerHealthTracker());
+  const [health, setHealth] = useState<SchedulerHealth>(UNKNOWN_SCHEDULER_HEALTH);
   const poller = useRef<ReturnType<typeof createTaskOpsPoller> | null>(null);
   useEffect(() => {
-    const controller = createTaskOpsPoller(client.read, setView);
+    const controller = createTaskOpsPoller(client.read, (next) => {
+      setView(next);
+      setHealth(tracker.observe(next));
+    });
     poller.current = controller;
     controller.start();
     return () => { controller.stop(); poller.current = null; };
+  }, [tracker]);
+  const actions = useMemo<TaskOpsActions>(() => {
+    const mutate = async (operation: () => Promise<unknown>) => {
+      if (!poller.current) throw new Error("The task view is not connected.");
+      await poller.current.mutate(operation);
+    };
+    return {
+      schedule: (input) => mutate(() => client.schedule(input)),
+      cancel: (id, operator) => mutate(() => client.cancel(id, operator)),
+      respond: (id, kind, input) => mutate(() => client.respond(id, kind, input)),
+      refresh: async () => { await poller.current?.refresh(); },
+    };
   }, []);
-  const mutate = async (operation: () => Promise<unknown>) => {
-    if (!poller.current) throw new Error("The task view is not connected.");
-    await poller.current.mutate(operation);
-  };
-  return <DispatchView view={view} actions={{
-    schedule: (input) => mutate(() => client.schedule(input)),
-    cancel: (id, operator) => mutate(() => client.cancel(id, operator)),
-    respond: (id, kind, input) => mutate(() => client.respond(id, kind, input)),
-    refresh: async () => { await poller.current?.refresh(); },
-  }} />;
+  return { view, actions, health, tracker };
 }

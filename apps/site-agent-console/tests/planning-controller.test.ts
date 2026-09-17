@@ -8,6 +8,7 @@ import {
   PLANNING_POLL_MS,
   type PlanningView,
 } from "../lib/planning-state";
+import { SCHEDULER_HEALTH_EXPIRY_MS, type SchedulerHealth } from "../lib/scheduler-health";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -60,7 +61,7 @@ const receipt = (requestId: string, disposition: "created" | "duplicate" = "crea
     record: { confirmation_id: "confirmation_example_001", plan_id: "plan_example_001", plan_version: 1 },
   }) as unknown as MutationReceipt;
 
-function harness() {
+function harnessWith(options: Parameters<typeof createPlanningController>[2]) {
   const snapshots: ReturnType<typeof deferred<PlanningSnapshot>>[] = [];
   const submits: ReturnType<typeof deferred<MutationReceipt>>[] = [];
   const lookups: ReturnType<typeof deferred<MutationReceipt>>[] = [];
@@ -82,7 +83,7 @@ function harness() {
     }),
   };
   const published: PlanningView[] = [];
-  const controller = createPlanningController(client, (view) => published.push(view));
+  const controller = createPlanningController(client, (view) => published.push(view), options);
   const last = () => published[published.length - 1];
   const ready = async () => {
     controller.start();
@@ -91,6 +92,15 @@ function harness() {
   };
   return { client, snapshots, submits, lookups, published, controller, last, ready };
 }
+/** Existing scenarios run over a fresh RUNNING scheduler reading. */
+const HEALTHY: SchedulerHealth = {
+  status: "fresh",
+  scheduler: { state: "RUNNING", detail: null },
+  observedAtUtc: "2026-09-16T08:00:00Z",
+  observedAtMs: 1_000_000,
+  error: null,
+};
+const harness = () => harnessWith({ health: () => HEALTHY, now: () => 1_000_000 });
 
 describe("planning controller", () => {
   it("loads the snapshot, enables writes, and polls without overlapping reads", async () => {
@@ -381,6 +391,103 @@ describe("recovery keeps UNKNOWN unless the service answers about the original r
     expect(h.last().write).toMatchObject({ status: "unknown", requestId: "confirmations-new-id", recovering: false });
     const held = h.last().write;
     expect(held?.status === "unknown" && held.body).toEqual(confirmation);
+    expect(canWritePlanning(h.last())).toBe(false);
+    h.controller.stop();
+  });
+});
+
+describe("planning writes follow the shared scheduler health", () => {
+  const fresh = (state: "RUNNING" | "FAILED", detail: string | null = null): SchedulerHealth => ({
+    status: "fresh",
+    scheduler: { state, detail },
+    observedAtUtc: "2026-09-16T08:00:00Z",
+    observedAtMs: 1_000_000,
+    error: null,
+  });
+
+  function healthHarness(initial: SchedulerHealth) {
+    let health = initial;
+    const h = harnessWith({ health: () => health, now: () => 1_000_000 });
+    return { ...h, setHealth: (next: SchedulerHealth) => { health = next; h.controller.notifyHealth(); } };
+  }
+
+  it("refuses new writes with the runner's reason while the scheduler is FAILED, without sending anything", async () => {
+    const h = healthHarness(fresh("FAILED", "planning_result_unknown: stopped after an unreadable write"));
+    await h.ready();
+    expect(h.last().health.scheduler?.state).toBe("FAILED");
+    expect(canWritePlanning(h.last())).toBe(false);
+    await expect(h.controller.submit("confirmations", confirmation)).rejects.toThrow(/stopped after an unreadable write/);
+    expect(h.client.submit).not.toHaveBeenCalled();
+    h.setHealth(fresh("RUNNING"));
+    expect(canWritePlanning(h.last())).toBe(true);
+    h.controller.stop();
+  });
+
+  it.each([
+    ["unconfirmed", { status: "unknown", scheduler: null, observedAtUtc: null, observedAtMs: null, error: null }, /not yet been confirmed/],
+    ["stale", { ...fresh("RUNNING"), status: "stale", error: "Failed to fetch" }, /could not be refreshed \(Failed to fetch\)/],
+    ["unavailable", { status: "unavailable", scheduler: null, observedAtUtc: null, observedAtMs: null, error: "404" }, /does not provide pilot task operations/],
+    ["already expired at publish", { ...fresh("RUNNING"), observedAtMs: 1_000_000 - SCHEDULER_HEALTH_EXPIRY_MS - 1 }, /older than 15 seconds/],
+  ] as const)("blocks writes with its own reason while the scheduler reading is %s", async (_label, health, reason) => {
+    const h = healthHarness(health as SchedulerHealth);
+    await h.ready();
+    expect(canWritePlanning(h.last())).toBe(false);
+    await expect(h.controller.submit("confirmations", confirmation)).rejects.toThrow(reason);
+    expect(h.client.submit).not.toHaveBeenCalled();
+    h.controller.stop();
+  });
+
+  it("expires a fresh reading as the clock advances, refuses the write at submit time, and republishes the expiry on its own timer", async () => {
+    vi.useFakeTimers();
+    let t = 1_000_000;
+    const health: SchedulerHealth = { ...fresh("RUNNING"), observedAtMs: 1_000_000 };
+    const h = harnessWith({ health: () => health, now: () => t, pollMs: 0 }); // no planning poll: only the expiry timer can republish
+    await h.ready();
+    expect(canWritePlanning(h.last())).toBe(true);
+    t += SCHEDULER_HEALTH_EXPIRY_MS + 1; // time passes; nothing republishes yet
+    await expect(h.controller.submit("confirmations", confirmation)).rejects.toThrow(/older than 15 seconds/);
+    expect(h.client.submit).not.toHaveBeenCalled();
+    // the controller's own expiry timer republishes so the rendered gate locks without any other event
+    const before = h.published.length;
+    await vi.advanceTimersByTimeAsync(SCHEDULER_HEALTH_EXPIRY_MS + 5);
+    expect(h.published.length).toBeGreaterThan(before);
+    expect(h.last().health.status).toBe("expired");
+    expect(canWritePlanning(h.last())).toBe(false);
+    h.controller.stop();
+  });
+
+  it("keeps the UNKNOWN request and its recovery entry while the scheduler is FAILED, and a recovered receipt does not change the health", async () => {
+    const h = healthHarness(fresh("RUNNING"));
+    await h.ready();
+    const pending = h.controller.submit("confirmations", confirmation);
+    await flush();
+    h.submits[0].reject(new TypeError("fetch failed"));
+    await flush();
+    h.snapshots[1].resolve(snapshot());
+    await expect(pending).rejects.toThrow("fetch failed");
+    h.setHealth(fresh("FAILED", "scheduler stopped"));
+    expect(h.last().write).toMatchObject({ status: "unknown", requestId: "confirmations-new-id" });
+    expect(canWritePlanning(h.last())).toBe(false);
+    // recovery stays available: the lookup is a read, the replay is judged by the service
+    const recovery = h.controller.recover();
+    await flush();
+    h.lookups[0].reject(new ManagerApiError(404, { code: "planning_request_not_found", detail: "absent" }));
+    await flush();
+    h.submits[1].reject(new ManagerApiError(503, { code: "planning_unavailable", detail: "scheduler is not running" }));
+    await flush();
+    h.snapshots[2].resolve(snapshot());
+    await expect(recovery).rejects.toThrow("planning_unavailable");
+    expect(h.last().write).toMatchObject({ status: "unknown", requestId: "confirmations-new-id", recovering: false });
+    expect(h.last().health.scheduler?.state).toBe("FAILED");
+    // a later successful lookup recovers the receipt but still does not restart the scheduler
+    const second = h.controller.recover();
+    await flush();
+    h.lookups[1].resolve(receipt("confirmations-new-id", "duplicate"));
+    await flush();
+    h.snapshots[3].resolve(snapshot());
+    await second;
+    expect(h.last().write?.status).toBe("committed");
+    expect(h.last().health.scheduler?.state).toBe("FAILED");
     expect(canWritePlanning(h.last())).toBe(false);
     h.controller.stop();
   });

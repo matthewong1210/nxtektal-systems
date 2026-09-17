@@ -30,6 +30,14 @@ import {
 } from "./actions";
 import { ManagerApiError } from "./api";
 import type { MutationReceipt, PlanningClient, PlanningRequestBody, PlanningSnapshot, WriteKind } from "./planning";
+import {
+  evaluateSchedulerHealth,
+  SCHEDULER_HEALTH_EXPIRY_MS,
+  schedulerAllowsWrites,
+  schedulerHealthReason,
+  UNKNOWN_SCHEDULER_HEALTH,
+  type SchedulerHealth,
+} from "./scheduler-health";
 import { isAmbiguousMutation } from "./task-ops";
 
 export const PLANNING_POLL_MS = 5_000;
@@ -52,6 +60,8 @@ export interface PlanningView extends ConsoleView<PlanningSnapshot> {
   write: WriteState | null;
   /** The service answered 404 for the planning route: an older runner. */
   unavailable: boolean;
+  /** Shared scheduler health from the task-ops poller, expiry evaluated at publish time. */
+  health: SchedulerHealth;
 }
 
 export interface PlanningController {
@@ -61,17 +71,23 @@ export interface PlanningController {
   submit(kind: WriteKind, body: PlanningRequestBody): Promise<MutationReceipt>;
   recover(): Promise<MutationReceipt>;
   acknowledgeWrite(): void;
+  /** Re-publish the view after the shared scheduler health changed. */
+  notifyHealth(): void;
+  /** Replace the shared health source (a prop may change); republishes. */
+  setHealthSource(source: () => SchedulerHealth): void;
 }
 
 export function initialPlanningView(): PlanningView {
-  return { ...initialConsoleView<PlanningSnapshot>(), write: null, unavailable: false };
+  return { ...initialConsoleView<PlanningSnapshot>(), write: null, unavailable: false, health: UNKNOWN_SCHEDULER_HEALTH };
 }
 
-/** Writes need a current, idle view and no write with an unknown outcome. */
+/** Writes need a current, idle view, no write with an unknown outcome, and a
+ * fresh RUNNING scheduler reading (evaluated when the view was published). */
 export const canWritePlanning = (view: PlanningView): boolean =>
   canMutateConsole(view) &&
   !view.unavailable &&
-  (view.write === null || view.write.status === "committed" || view.write.status === "rejected");
+  (view.write === null || view.write.status === "committed" || view.write.status === "rejected") &&
+  schedulerAllowsWrites(view.health);
 
 const describe = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -81,9 +97,13 @@ const codeOf = (cause: unknown): string =>
 export function createPlanningController(
   client: PlanningClient,
   publish: (view: PlanningView) => void,
-  options: { pollMs?: number } = {},
+  options: { pollMs?: number; health?: () => SchedulerHealth; now?: () => number } = {},
 ): PlanningController {
   const pollMs = options.pollMs ?? PLANNING_POLL_MS;
+  const now = options.now ?? (() => Date.now());
+  let healthSource: () => SchedulerHealth = options.health ?? (() => UNKNOWN_SCHEDULER_HEALTH);
+  const healthNow = (): SchedulerHealth => evaluateSchedulerHealth(healthSource(), now());
+  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let active = false;
   let base: ConsoleView<PlanningSnapshot> = initialConsoleView<PlanningSnapshot>();
   let write: WriteState | null = null;
@@ -91,9 +111,20 @@ export function createPlanningController(
   let lastReadFailure: unknown = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const view = (): PlanningView => ({ ...base, write, unavailable });
+  const view = (): PlanningView => ({ ...base, write, unavailable, health: healthNow() });
+  // A fresh reading expires by itself: republish at the expiry instant so the
+  // rendered gate locks even when no poll or write happens in between.
+  const armExpiry = (health: SchedulerHealth) => {
+    clearTimeout(expiryTimer);
+    if (!active || health.status !== "fresh" || health.observedAtMs === null) return;
+    const delay = Math.max(0, health.observedAtMs + SCHEDULER_HEALTH_EXPIRY_MS - now() + 1);
+    expiryTimer = setTimeout(() => emit(), delay);
+  };
   const emit = () => {
-    if (active) publish(view());
+    if (!active) return;
+    const next = view();
+    publish(next);
+    armExpiry(next.health);
   };
 
   const read = async (): Promise<PlanningSnapshot> => {
@@ -139,6 +170,7 @@ export function createPlanningController(
     stop() {
       active = false;
       clearTimeout(timer);
+      clearTimeout(expiryTimer);
       inner.stop();
     },
     async refresh() {
@@ -156,6 +188,9 @@ export function createPlanningController(
         throw new Error(
           "The last change has an unknown outcome. Recover it by its request ID before making another change.",
         );
+      }
+      if (!schedulerAllowsWrites(current.health)) {
+        throw new Error(`Planning writes are disabled: ${schedulerHealthReason(current.health)}`);
       }
       if (!canWritePlanning(current)) {
         throw new Error("Planning changes are disabled until the planning view is refreshed successfully.");
@@ -233,6 +268,13 @@ export function createPlanningController(
         write = null;
         emit();
       }
+    },
+    notifyHealth() {
+      emit();
+    },
+    setHealthSource(source) {
+      healthSource = source;
+      emit();
     },
   };
 }
