@@ -32,7 +32,6 @@ import { ManagerApiError } from "./api";
 import type { MutationReceipt, PlanningClient, PlanningRequestBody, PlanningSnapshot, WriteKind } from "./planning";
 import {
   evaluateSchedulerHealth,
-  SCHEDULER_HEALTH_EXPIRY_MS,
   schedulerAllowsWrites,
   schedulerHealthReason,
   UNKNOWN_SCHEDULER_HEALTH,
@@ -103,7 +102,6 @@ export function createPlanningController(
   const now = options.now ?? (() => Date.now());
   let healthSource: () => SchedulerHealth = options.health ?? (() => UNKNOWN_SCHEDULER_HEALTH);
   const healthNow = (): SchedulerHealth => evaluateSchedulerHealth(healthSource(), now());
-  let expiryTimer: ReturnType<typeof setTimeout> | undefined;
   let active = false;
   let base: ConsoleView<PlanningSnapshot> = initialConsoleView<PlanningSnapshot>();
   let write: WriteState | null = null;
@@ -112,19 +110,11 @@ export function createPlanningController(
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const view = (): PlanningView => ({ ...base, write, unavailable, health: healthNow() });
-  // A fresh reading expires by itself: republish at the expiry instant so the
-  // rendered gate locks even when no poll or write happens in between.
-  const armExpiry = (health: SchedulerHealth) => {
-    clearTimeout(expiryTimer);
-    if (!active || health.status !== "fresh" || health.observedAtMs === null) return;
-    const delay = Math.max(0, health.observedAtMs + SCHEDULER_HEALTH_EXPIRY_MS - now() + 1);
-    expiryTimer = setTimeout(() => emit(), delay);
-  };
+  // Expiry is owned by the shared health source (the task-ops hook): it calls
+  // notifyHealth() at the expiry instant so both panels flip together. Every
+  // publish and every submit still re-evaluates expiry against now().
   const emit = () => {
-    if (!active) return;
-    const next = view();
-    publish(next);
-    armExpiry(next.health);
+    if (active) publish(view());
   };
 
   const read = async (): Promise<PlanningSnapshot> => {
@@ -170,7 +160,6 @@ export function createPlanningController(
     stop() {
       active = false;
       clearTimeout(timer);
-      clearTimeout(expiryTimer);
       inner.stop();
     },
     async refresh() {

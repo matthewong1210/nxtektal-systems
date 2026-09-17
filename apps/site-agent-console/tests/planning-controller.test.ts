@@ -437,20 +437,20 @@ describe("planning writes follow the shared scheduler health", () => {
     h.controller.stop();
   });
 
-  it("expires a fresh reading as the clock advances, refuses the write at submit time, and republishes the expiry on its own timer", async () => {
+  it("expires a fresh reading as the clock advances: refused at submit time, and published as expired when the shared owner notifies", async () => {
     vi.useFakeTimers();
     let t = 1_000_000;
     const health: SchedulerHealth = { ...fresh("RUNNING"), observedAtMs: 1_000_000 };
-    const h = harnessWith({ health: () => health, now: () => t, pollMs: 0 }); // no planning poll: only the expiry timer can republish
+    const h = harnessWith({ health: () => health, now: () => t, pollMs: 0 }); // no planning poll and no private timer
     await h.ready();
     expect(canWritePlanning(h.last())).toBe(true);
-    t += SCHEDULER_HEALTH_EXPIRY_MS + 1; // time passes; nothing republishes yet
+    t += SCHEDULER_HEALTH_EXPIRY_MS + 1; // time passes; nothing republishes on its own
     await expect(h.controller.submit("confirmations", confirmation)).rejects.toThrow(/older than 15 seconds/);
     expect(h.client.submit).not.toHaveBeenCalled();
-    // the controller's own expiry timer republishes so the rendered gate locks without any other event
     const before = h.published.length;
     await vi.advanceTimersByTimeAsync(SCHEDULER_HEALTH_EXPIRY_MS + 5);
-    expect(h.published.length).toBeGreaterThan(before);
+    expect(h.published.length).toBe(before); // the controller owns no expiry timer
+    h.controller.notifyHealth(); // the shared owner's expiry timer notifies both panels
     expect(h.last().health.status).toBe("expired");
     expect(canWritePlanning(h.last())).toBe(false);
     h.controller.stop();

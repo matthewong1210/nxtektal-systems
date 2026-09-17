@@ -8,6 +8,7 @@ import {
 } from "../lib/task-ops";
 import {
   createSchedulerHealthTracker,
+  SCHEDULER_HEALTH_EXPIRY_MS,
   schedulerAllowsWrites,
   schedulerHealthLabel,
   schedulerHealthReason,
@@ -256,6 +257,16 @@ export function usePilotTaskOps(): { view: TaskOpsView; actions: TaskOpsActions;
     controller.start();
     return () => { controller.stop(); poller.current = null; };
   }, [tracker]);
+  useEffect(() => {
+    // The shared reading expires by itself. One timer, owned here with the
+    // poller, re-evaluates the same tracker at the expiry instant so the
+    // planning panel and the task panel flip together, and a successful read
+    // (a new health value) re-arms it. Cleared on unmount and on every change.
+    if (health.status !== "fresh" || health.observedAtMs === null) return;
+    const delay = Math.max(0, health.observedAtMs + SCHEDULER_HEALTH_EXPIRY_MS - Date.now() + 1);
+    const timer = setTimeout(() => setHealth(tracker.current()), delay);
+    return () => clearTimeout(timer);
+  }, [health, tracker]);
   const actions = useMemo<TaskOpsActions>(() => {
     const mutate = async (operation: () => Promise<unknown>) => {
       if (!poller.current) throw new Error("The task view is not connected.");

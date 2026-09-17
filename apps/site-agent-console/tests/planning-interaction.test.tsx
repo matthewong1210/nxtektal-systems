@@ -9,6 +9,7 @@ import { PilotOperations } from "../components/PilotOperations";
 import { API_SCHEMA, DISCLAIMER } from "../lib/api";
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
 import { PLANNING_POLL_MS } from "../lib/planning-state";
+import { SCHEDULER_HEALTH_EXPIRY_MS } from "../lib/scheduler-health";
 import { TASK_OPS_POLL_MS, type TaskOpsSnapshot } from "../lib/task-ops";
 import { taskOpsFixture } from "./task-ops-fixtures";
 
@@ -31,7 +32,7 @@ const confirmation: ConfirmationRecord = { ...record<ConfirmationRecord>("Confir
 const outcomeTemplate = record<OutcomeRecord>("OutcomeRequest");
 
 type PostMode = "ok" | "network" | "unavailable";
-type TaskOpsMode = "ok" | "network" | "missing";
+type TaskOpsMode = "ok" | "network" | "missing" | "hang";
 
 function scriptedService() {
   const state = {
@@ -39,6 +40,8 @@ function scriptedService() {
     outcomes: [] as OutcomeRecord[],
     postMode: "ok" as PostMode,
     taskOpsMode: "ok" as TaskOpsMode,
+    // a hung task-ops read: the request keeps waiting until the test releases it
+    hung: [] as ((response: Response) => void)[],
     reads: [] as string[],
     committed: new Map<string, OutcomeRecord>(),
     posts: [] as Record<string, unknown>[],
@@ -50,6 +53,9 @@ function scriptedService() {
       headers: { "Content-Type": "application/json" },
     });
   const taskOps = (): TaskOpsSnapshot => taskOpsFixture({ scheduler: { ...state.scheduler } });
+  const releaseHung = () => {
+    for (const resolve of state.hung.splice(0)) resolve(envelope(200, taskOps()));
+  };
   const planning = (): PlanningSnapshot => ({ ...emptySnapshot, latest_input: inputRecord, plans: [plan], confirmations: [confirmation], outcomes: [...state.outcomes] });
   const fetchImpl = async (input: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? "GET";
@@ -57,6 +63,7 @@ function scriptedService() {
     if (method === "GET" && input === "/api/v0/task-ops") {
       if (state.taskOpsMode === "network") throw new TypeError("fetch failed");
       if (state.taskOpsMode === "missing") return envelope(404, { code: "not_found", detail: "unknown API path" });
+      if (state.taskOpsMode === "hang") return new Promise<Response>((resolve) => { state.hung.push(resolve); });
       return envelope(200, taskOps());
     }
     if (method === "GET" && input === "/api/v1/planning") return envelope(200, planning());
@@ -92,7 +99,7 @@ function scriptedService() {
     state.outcomes.push(item);
     return item;
   };
-  return { state, fetchImpl, addOutcome };
+  return { state, fetchImpl, addOutcome, releaseHung };
 }
 
 let root: Root;
@@ -306,5 +313,71 @@ describe("one shared poller, honest stale and unavailable readings, and clean un
     await vi.advanceTimersByTimeAsync(3 * PLANNING_POLL_MS);
     expect(service.state.reads).toHaveLength(before);
     root = createRoot(container); // afterEach unmounts this empty root
+  });
+});
+
+describe("expiry of the shared reading reaches both panels at the same instant", () => {
+  const planningLabel = () => container.querySelector(".planning-health, .load-warning[role=alert]")?.textContent?.trim().slice(0, 40) ?? "";
+  const taskLabel = () =>
+    [...container.querySelectorAll('section[aria-label="Pilot task operations"] .panel-aside .badge')].map((b) => b.textContent?.trim()).join("|");
+
+  it("shows EXPIRED in the planning banner and the task panel together when a read keeps waiting, then RUNNING together once a read succeeds", async () => {
+    const service = scriptedService();
+    await mount(service);
+    expect(planningLabel()).toContain("SCHEDULER RUNNING");
+    expect(taskLabel()).toContain("SCHEDULER RUNNING");
+    // the next poll starts at +2 s and never answers (like a refresh GET that keeps waiting)
+    service.state.taskOpsMode = "hang";
+    await tick(TASK_OPS_POLL_MS + 50);
+    expect(service.state.hung).toHaveLength(1);
+    await tick(SCHEDULER_HEALTH_EXPIRY_MS - TASK_OPS_POLL_MS - 100); // just before expiry of the last successful read
+    expect(planningLabel()).toContain("SCHEDULER RUNNING");
+    expect(taskLabel()).toContain("SCHEDULER RUNNING");
+    await tick(200); // past expiry: both panels must flip together, without any publish
+    expect(planningLabel()).toContain("SCHEDULER CHECK EXPIRED");
+    expect(taskLabel()).toContain("SCHEDULER CHECK EXPIRED");
+    expect(buttonNamed("Record UNLOADED")?.disabled).toBe(true);
+    expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(true);
+    // the waiting read finally succeeds: both panels recover together
+    service.state.taskOpsMode = "ok";
+    service.releaseHung();
+    await tick(50);
+    expect(planningLabel()).toContain("SCHEDULER RUNNING");
+    expect(taskLabel()).toContain("SCHEDULER RUNNING");
+    expect(buttonNamed("Record UNLOADED")?.disabled).toBe(false);
+    expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("clears the expiry timer on unmount and re-arms it from the remounted instance's own reading", async () => {
+    const service = scriptedService();
+    await mount(service);
+    service.state.taskOpsMode = "hang";
+    await tick(TASK_OPS_POLL_MS + 50);
+    const readsBefore = service.state.reads.length;
+    await act(async () => {
+      root.unmount();
+    });
+    // remount 5 s after the first mount; its reads succeed again
+    service.state.taskOpsMode = "ok";
+    await tick(5_000 - TASK_OPS_POLL_MS - 50);
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<PilotOperations />);
+    });
+    await tick(50);
+    expect(service.state.reads.length).toBeGreaterThan(readsBefore);
+    expect(planningLabel()).toContain("SCHEDULER RUNNING");
+    expect(taskLabel()).toContain("SCHEDULER RUNNING");
+    // keep the remounted instance's later reads waiting so only its own timer can expire it
+    service.state.taskOpsMode = "hang";
+    await tick(TASK_OPS_POLL_MS + 50);
+    // the first instance's expiry instant passes: the remounted panels must not flip
+    await tick(SCHEDULER_HEALTH_EXPIRY_MS - 5_000 - TASK_OPS_POLL_MS + 100);
+    expect(planningLabel()).toContain("SCHEDULER RUNNING");
+    expect(taskLabel()).toContain("SCHEDULER RUNNING");
+    // the remounted instance's own expiry instant: both flip together
+    await tick(5_000);
+    expect(planningLabel()).toContain("SCHEDULER CHECK EXPIRED");
+    expect(taskLabel()).toContain("SCHEDULER CHECK EXPIRED");
   });
 });
