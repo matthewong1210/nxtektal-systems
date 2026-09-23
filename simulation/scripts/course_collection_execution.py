@@ -27,6 +27,13 @@ RECORD_KINDS = frozenset({"session", "binding", "binding_window", "request", "re
                           "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence", "replay_failure",
                           "committed_replay_failure"})
 TERMINALS = {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
+_OUTBOX_PHASE_ORDER = {
+    "collecting": 0,
+    "raw_collected": 1,
+    "returning": 2,
+    "unloading": 3,
+    None: 4,
+}
 _SCHEMA = json.loads((Path(__file__).resolve().parents[1] / "docs/contracts/collection-execution-v1/schema.json").read_text())
 
 
@@ -334,7 +341,7 @@ class CollectionExecutionStore:
     def _replay(self, records):
         state = dict(bindings={}, windows={}, requests={}, receipts={}, executions={}, accepted=set(), tick_sequence=0,
                      replay_digest=digest({"session": self.session_identity, "policy_id": self.policy_id, "arbiter": ARBITER}),
-                     pending_prepared=None, commits={}, outbox={}, confirmed={}, cursor=None, now_sim_t_s=0,
+                     pending_prepared=None, commits={}, outbox={}, confirmed={}, blocked_outbox=set(), cursor=None, now_sim_t_s=0,
                      request_high_water=digest([]), edge_without_commit=False, replay_plan=[], replay_failure=None)
         receipt_records = set()
         session = False
@@ -413,6 +420,11 @@ class CollectionExecutionStore:
                 self._seal_committed_replay_failure(state, p)
             elif kind == "outbox_confirmed":
                 _require(p["outbox_id"] in state["outbox"], "Edge confirmation without committed outbox")
+                _require(p["outbox_id"] not in state["blocked_outbox"],
+                         "blocked outbox cannot be confirmed during replay")
+                _require(p["outbox_id"] not in state["confirmed"] or
+                         state["confirmed"][p["outbox_id"]] == p["event_id"],
+                         "outbox event identity conflict during replay")
                 state["confirmed"][p["outbox_id"]] = p["event_id"]
                 r = state["executions"][state["outbox"][p["outbox_id"]]["execution_id"]]
                 if p["event_id"] not in r["edge_evidence"]["event_ids"]: r["edge_evidence"]["event_ids"].append(p["event_id"])
@@ -423,8 +435,26 @@ class CollectionExecutionStore:
                 r = state["executions"][p["execution_id"]]
                 event = TaskEvent.from_dict(p["edge_record"]["payload"]["event"])
                 unknown = event.reason_code == "interrupted_execution_unknown_outcome"
+                expected_relation = ("MATCHED" if (r["started_sim_t_s"] is None) == (event.kind.value == "FAILED")
+                                     else "START_EVIDENCE_CONFLICT")
+                _require(p.get("start_evidence_relation") == expected_relation,
+                         "restart start-evidence relation differs during replay")
+                expected_blocked = sorted(
+                    outbox_id for outbox_id, outbox in state["outbox"].items()
+                    if outbox["execution_id"] == p["execution_id"] and outbox_id not in state["confirmed"]
+                )
+                _require(p.get("blocked_outbox_ids") == expected_blocked,
+                         "restart blocked-outbox evidence differs during replay")
+                state["blocked_outbox"].update(expected_blocked)
                 terminals = sorted(set(r["edge_evidence"]["terminal_states"]) | {event.kind.value})
-                if len(terminals) > 1:
+                if expected_relation == "START_EVIDENCE_CONFLICT":
+                    _terminal(r, "INCONCLUSIVE", "REPLAY_MISMATCH", p["now_sim_t_s"])
+                    r["conflicts"]["replay_mismatch"] = True
+                    _protect(r, "ORPHANED_ACTIVITY")
+                    r["edge_evidence"].update(
+                        effective_state="CONFLICT", reason="unknown:replay_mismatch",
+                        verified=False, result_verification="CONFLICT")
+                elif len(terminals) > 1:
                     _terminal(r, "INCONCLUSIVE", "TERMINAL_CONFLICT", p["now_sim_t_s"])
                     r["conflicts"]["terminal_conflict"] = True
                     _protect(r, "TERMINAL_CONFLICT")
@@ -434,11 +464,14 @@ class CollectionExecutionStore:
                     if unknown:
                         for key in ("raw_quantity", "unload_quantity"): r[key].update(status="INCOMPLETE", balls=None)
                         r["runtime_evidence"]["event_sequence_complete"] = False
-                if unknown: _protect(r, "RESTART_UNKNOWN")
+                if expected_relation == "MATCHED":
+                    _protect(r, "RESTART_UNKNOWN" if unknown else "ORPHANED_ACTIVITY")
                 r["edge_evidence"]["terminal_states"] = terminals
                 r["edge_evidence"]["event_ids"].append(p["edge_record"]["record_id"])
                 state["now_sim_t_s"] = max(state["now_sim_t_s"], p["now_sim_t_s"])
             elif kind == "edge_evidence":
+                _require(p.get("outbox_id") not in state["blocked_outbox"],
+                         "blocked outbox cannot receive Edge evidence during replay")
                 r = state["executions"][p["execution_id"]]
                 terminals = sorted(set(r["edge_evidence"]["terminal_states"]) | set(p["terminal_states"]))
                 conflict = len(terminals) > 1
@@ -730,10 +763,13 @@ class CollectionExecutionStore:
             if (r["raw_quantity"]["balls"] or 0) > 0 and not (before["raw_quantity"]["balls"] or 0): kinds.append(("PROGRESS", "raw_collected"))
             if d["execution_id"] == eid and d["selected_action"]["name"] == "SendToHandoff" and result["safety_shield"]["allowed"]:
                 kinds.append(("PROGRESS", "returning"))
+            if (r["unload_quantity"]["balls"] or 0) > 0 and not (before["unload_quantity"]["balls"] or 0):
+                kinds.append(("PROGRESS", "unloading"))
             if r["state"] in TERMINALS and before["state"] not in TERMINALS: kinds.append((r["edge_evidence"]["effective_state"], None))
             for kind, phase in kinds:
                 item = dict(execution_id=eid, tick_sequence=prepared["tick_sequence"], event_kind=kind, phase=phase,
-                            reason=r["edge_evidence"]["reason"] if phase is None else None, task_id=r["task_id"], incarnation=r["incarnation"])
+                            reason=r["edge_evidence"]["reason"] if phase is None else None, task_id=r["task_id"], incarnation=r["incarnation"],
+                            device_protection=deepcopy(r["device_protection"]))
                 item["outbox_id"] = digest({"execution_id":eid, "tick_sequence":prepared["tick_sequence"], "event_kind":kind + (":" + phase if phase else "")})
                 outbox.append(item)
         body = dict(tick_sequence=prepared["tick_sequence"], prepared_digest=digest(prepared), result=primitive(result), executions=rows, outbox=outbox)
@@ -765,7 +801,20 @@ class CollectionExecutionStore:
 
     def committed_outbox(self, *, unconfirmed_only=False):
         s = self.replay()
-        return [deepcopy(v) for k,v in s["outbox"].items() if not unconfirmed_only or k not in s["confirmed"]]
+        values = [
+            deepcopy(value)
+            for outbox_id, value in s["outbox"].items()
+            if not unconfirmed_only
+            or outbox_id not in s["confirmed"] and outbox_id not in s["blocked_outbox"]
+        ]
+        return sorted(
+            values,
+            key=lambda value: (
+                value["tick_sequence"],
+                _OUTBOX_PHASE_ORDER[value["phase"]],
+                value["outbox_id"],
+            ),
+        )
 
     def confirm_outbox(self, outbox_id, event_id):
         def build(records):
@@ -773,6 +822,7 @@ class CollectionExecutionStore:
             _require(outbox_id in s["outbox"], "unknown committed outbox")
             if outbox_id in s["confirmed"]:
                 _require(s["confirmed"][outbox_id] == event_id, "outbox event identity conflict"); return []
+            _require(outbox_id not in s["blocked_outbox"], "blocked outbox cannot be confirmed")
             return [self._spec("outbox_confirmed", dict(outbox_id=outbox_id, event_id=event_id), s["now_sim_t_s"])]
         self.journal.append_via(build)
 
@@ -785,7 +835,18 @@ class CollectionExecutionStore:
             for event_id in event_ids: _validate(event_id,"Id")
             _require(now_sim_t_s >= s["now_sim_t_s"], "Edge evidence clock regression")
             payload=dict(execution_id=execution_id,terminal_states=terminal_states,event_ids=event_ids,now_sim_t_s=now_sim_t_s,outbox_id=outbox_id)
-            if any(r.record_kind == "edge_evidence" and primitive(r.payload) == payload for r in records): return []
+            prior = [primitive(r.payload) for r in records
+                     if r.record_kind == "edge_evidence" and
+                     (r.payload.get("outbox_id") == outbox_id if outbox_id is not None
+                      else primitive(r.payload) == payload)]
+            if prior:
+                _require(len(prior) == 1 and all(prior[0][key] == payload[key]
+                         for key in ("execution_id", "terminal_states", "event_ids", "outbox_id")),
+                         "outbox Edge evidence identity conflict")
+                return []
+            if outbox_id is not None and outbox_id in s["outbox"]:
+                _require(outbox_id not in s["blocked_outbox"],
+                         "blocked outbox cannot receive Edge evidence")
             return [self._spec("edge_evidence",payload,now_sim_t_s)]
         self.journal.append_via(build)
 
@@ -807,20 +868,32 @@ class CollectionExecutionStore:
             b = s["bindings"][r["binding_id"]]
             _require(event.task_id == r["task_id"] and event.incarnation == r["incarnation"] and event.robot_id == b["robot_id"]
                      and event.site_id == b["site_id"] and event.deployment_id == b["deployment_id"], "restart evidence identity mismatch")
-            _require((r["started_sim_t_s"] is None) == (event.kind.value == "FAILED"), "Edge restart differs from committed start evidence")
+            relation = ("MATCHED" if (r["started_sim_t_s"] is None) == (event.kind.value == "FAILED")
+                        else "START_EVIDENCE_CONFLICT")
+            blocked = sorted(
+                outbox_id for outbox_id, outbox in s["outbox"].items()
+                if outbox["execution_id"] == execution_id and outbox_id not in s["confirmed"]
+            )
+            payload = dict(
+                execution_id=execution_id,
+                now_sim_t_s=now_sim_t_s,
+                edge_record=evidence,
+                start_evidence_relation=relation,
+                blocked_outbox_ids=blocked,
+            )
             for record in records:
                 if record.record_kind == "device_restart" and record.payload["edge_record"]["record_id"] == evidence["record_id"]:
-                    _require(record.payload["execution_id"] == execution_id and primitive(record.payload["edge_record"]) == evidence, "restart evidence conflict")
+                    _require(primitive(record.payload) == payload, "restart evidence conflict")
                     return []
             _require(now_sim_t_s >= s["now_sim_t_s"], "restart evidence clock regression")
-            return [self._spec("device_restart", dict(execution_id=execution_id, now_sim_t_s=now_sim_t_s, edge_record=evidence), now_sim_t_s)]
+            return [self._spec("device_restart", payload, now_sim_t_s)]
         self.journal.append_via(build)
 
     def recovery_state(self):
         s = self.replay()
         status = ("REPLAY_MISMATCH" if s["replay_failure"] else "EDGE_WITHOUT_COMMIT" if s["edge_without_commit"] else "PREPARED_NO_COMMIT" if s["pending_prepared"]
                   else "COMMITTED_CURSOR_STALE" if s["tick_sequence"] and (s["cursor"] is None or s["cursor"]["tick_sequence"] != s["tick_sequence"])
-                  else "COMMITTED_OUTBOX_UNCONFIRMED" if set(s["outbox"]) - set(s["confirmed"]) else "NO_PREPARED")
+                  else "COMMITTED_OUTBOX_UNCONFIRMED" if set(s["outbox"]) - set(s["confirmed"]) - set(s["blocked_outbox"]) else "NO_PREPARED")
         eid = s["pending_prepared"]["decision"]["execution_id"] if s["pending_prepared"] else None
         permitted = s["pending_prepared"] is not None and (eid is None or s["executions"][eid]["state"] not in TERMINALS)
         return dict(status=status, replay_permitted=permitted, pending_prepared=s["pending_prepared"], tick_sequence=s["tick_sequence"], replay_digest=s["replay_digest"],
@@ -832,7 +905,7 @@ class CollectionExecutionStore:
         s = self.replay()
         _require(s["replay_failure"] is None, "session sealed by replay mismatch", "unavailable")
         _require(all(r["edge_evidence"]["accepted"] or r["state"] in ("MISSED","REJECTED") for r in s["executions"].values()), "durable Edge acceptance not yet recorded", "unavailable")
-        _require(not set(s["outbox"]) - set(s["confirmed"]), "committed outbox awaits durable Edge evidence", "unavailable")
+        _require(not set(s["outbox"]) - set(s["confirmed"]) - set(s["blocked_outbox"]), "committed outbox awaits durable Edge evidence", "unavailable")
         data = {k:self.session_identity[k] for k in SESSION_KEYS}
         data.update(schema="nxt-collection-executions/v1", environment="SIMULATION", session_state=session_state,
                     now_sim_t_s=s["now_sim_t_s"], simulation_time_utc=simulation_utc(self.session_identity, s["now_sim_t_s"]),

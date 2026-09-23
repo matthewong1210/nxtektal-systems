@@ -110,6 +110,7 @@ def restart(store, req, tmp_path, *, running, now=120):
     journal = JsonlJournal(tmp_path / "device.jsonl")
     record = journal.append(RecordSpec("task_event_persisted","DEVICE",event.reported_at_utc,{"event":event.to_dict()}))
     store.record_device_restart_outcome(req["execution_id"],record,now_sim_t_s=now)
+    return record
 
 
 def test_binding_is_content_addressed_and_reads_cycle_at_binding_time(api, tmp_path):
@@ -218,6 +219,104 @@ def test_running_priority_policy_convergence_and_complete_unload(api, tmp_path):
     assert conform(reopened) == conform(store)
 
 
+def test_committed_outbox_has_explicit_lifecycle_order_and_v3_protection(api, tmp_path):
+    store, _, req = setup(api, tmp_path)
+    tick(store, 60, snapshots={req["execution_id"]: assignment(req)})
+    runtime = view()
+    decision = store.arbitrate(UNLOAD, 120, runtime)
+    prepared = store.prepare_tick(
+        decision,
+        previous_cursor=store.replay()["tick_sequence"],
+        previous_digest=store.replay()["replay_digest"],
+    )
+    committed = store.commit_tick(
+        prepared,
+        now_sim_t_s=180,
+        runtime_snapshots={req["execution_id"]: assignment(req, terminal=True)},
+        safety_shield={"allowed": True, "reason": None},
+        post_state_digest="e" * 64,
+    )
+    store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
+
+    rows = store.committed_outbox(unconfirmed_only=True)
+    assert [(row["event_kind"], row["phase"]) for row in rows] == [
+        ("PROGRESS", "returning"),
+        ("PROGRESS", "unloading"),
+        ("SUCCEEDED", None),
+    ]
+    assert all(
+        row["device_protection"]
+        == {"protected": False, "reasons": [], "authorization_blocked": False}
+        for row in rows
+    )
+
+
+def test_safe_partial_outbox_carries_unprotected_failed_mapping(api, tmp_path):
+    store, _, req = setup(api, tmp_path)
+    tick(store, 60, snapshots={req["execution_id"]: assignment(req)})
+    decision = store.arbitrate(UNLOAD, 120, view())
+    prepared = store.prepare_tick(
+        decision,
+        previous_cursor=store.replay()["tick_sequence"],
+        previous_digest=store.replay()["replay_digest"],
+    )
+    committed = store.commit_tick(
+        prepared,
+        now_sim_t_s=180,
+        runtime_snapshots={
+            req["execution_id"]: assignment(
+                req, terminal=True, exit_reason="ZONE_EMPTY", balls=7
+            )
+        },
+        safety_shield={"allowed": True, "reason": None},
+        post_state_digest="d" * 64,
+    )
+    store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
+    terminal = store.committed_outbox(unconfirmed_only=True)[-1]
+    assert terminal["event_kind"] == "FAILED"
+    assert terminal["reason"] == "unknown:partial_execution"
+    assert terminal["device_protection"] == {
+        "protected": False,
+        "reasons": [],
+        "authorization_blocked": False,
+    }
+
+
+def test_outbox_edge_evidence_retry_reuses_identity_when_sim_clock_advanced(api, tmp_path):
+    store, _, req = setup(api, tmp_path)
+    decision = store.arbitrate(WAIT, 60, view())
+    prepared = store.prepare_tick(
+        decision,
+        previous_cursor=0,
+        previous_digest=store.replay()["replay_digest"],
+    )
+    committed = store.commit_tick(
+        prepared,
+        now_sim_t_s=120,
+        runtime_snapshots={req["execution_id"]: assignment(req)},
+        safety_shield={"allowed": True, "reason": None},
+        post_state_digest="f" * 64,
+    )
+    store.publish_cursor(1, committed["replay_digest"])
+    progress = store.committed_outbox(unconfirmed_only=True)[0]
+    store.record_edge_evidence(
+        req["execution_id"],
+        terminal_states=[],
+        event_ids=["persisted-edge-event"],
+        now_sim_t_s=120,
+        outbox_id=progress["outbox_id"],
+    )
+    before = store.journal.path.read_bytes()
+    store.record_edge_evidence(
+        req["execution_id"],
+        terminal_states=[],
+        event_ids=["persisted-edge-event"],
+        now_sim_t_s=180,
+        outbox_id=progress["outbox_id"],
+    )
+    assert store.journal.path.read_bytes() == before
+
+
 @pytest.mark.parametrize("exit_reason,balls,want", [("ZONE_EMPTY",7,"PARTIAL"), ("ZONE_EMPTY",0,"FAILED"), ("ROBOT_FAULT",7,"PARTIAL"), ("POLICY_PREEMPTED",7,"PARTIAL")])
 def test_non_success_and_protection_preserve_evidence(api, tmp_path, exit_reason, balls, want):
     store, _, req = setup(api, tmp_path)
@@ -259,6 +358,100 @@ def test_explicit_device_restart_differs_from_prefix_replay(api, tmp_path, runni
     r = conform(store)["executions"][0]
     assert r["state"] == ("INCONCLUSIVE" if running else "FAILED")
     assert r["reason"] == ("INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" if running else "NOT_STARTED_AFTER_RESTART")
+
+
+@pytest.mark.parametrize(
+    "v3_started,device_started",
+    [(True, False), (False, True)],
+)
+def test_restart_start_evidence_mismatch_is_preserved_conflict_and_blocks_old_outbox(
+    api, tmp_path, v3_started, device_started
+):
+    store, _, req = setup(api, tmp_path)
+    if v3_started:
+        decision = store.arbitrate(WAIT, 60, view())
+        prepared = store.prepare_tick(
+            decision,
+            previous_cursor=0,
+            previous_digest=store.replay()["replay_digest"],
+        )
+        committed = store.commit_tick(
+            prepared,
+            now_sim_t_s=120,
+            runtime_snapshots={req["execution_id"]: assignment(req)},
+            safety_shield={"allowed": True, "reason": None},
+            post_state_digest="c" * 64,
+        )
+        store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
+
+    record = restart(store, req, tmp_path, running=device_started, now=120)
+    before = store.journal.path.read_bytes()
+    store.record_device_restart_outcome(
+        req["execution_id"], record, now_sim_t_s=120
+    )
+    assert store.journal.path.read_bytes() == before
+
+    state = store.replay()
+    row = state["executions"][req["execution_id"]]
+    assert row["state"] == "INCONCLUSIVE"
+    assert row["reason"] == "REPLAY_MISMATCH"
+    assert row["conflicts"]["replay_mismatch"]
+    assert row["edge_evidence"]["effective_state"] == "CONFLICT"
+    assert row["edge_evidence"]["result_verification"] == "CONFLICT"
+    assert "ORPHANED_ACTIVITY" in row["device_protection"]["reasons"]
+    assert store.committed_outbox(unconfirmed_only=True) == []
+    blocked = store.committed_outbox(unconfirmed_only=False)
+    if blocked:
+        outbox_id = blocked[0]["outbox_id"]
+        with pytest.raises(api.CollectionExecutionError, match="blocked"):
+            store.confirm_outbox(outbox_id, "late-old-authorization")
+        with pytest.raises(api.CollectionExecutionError, match="blocked"):
+            store.record_edge_evidence(
+                req["execution_id"],
+                terminal_states=[],
+                event_ids=["late-old-authorization"],
+                now_sim_t_s=120,
+                outbox_id=outbox_id,
+            )
+    assert store.recovery_state()["status"] == "NO_PREPARED"
+    assert conform(store)["executions"][0]["state"] == "INCONCLUSIVE"
+
+
+@pytest.mark.parametrize("record_kind", ["outbox_confirmed", "edge_evidence"])
+def test_replay_rejects_manual_write_for_restart_blocked_outbox(
+    api, tmp_path, record_kind
+):
+    store, _, req = setup(api, tmp_path)
+    decision = store.arbitrate(WAIT, 60, view())
+    prepared = store.prepare_tick(
+        decision,
+        previous_cursor=0,
+        previous_digest=store.replay()["replay_digest"],
+    )
+    committed = store.commit_tick(
+        prepared,
+        now_sim_t_s=120,
+        runtime_snapshots={req["execution_id"]: assignment(req)},
+        safety_shield={"allowed": True, "reason": None},
+        post_state_digest="c" * 64,
+    )
+    store.publish_cursor(1, committed["replay_digest"])
+    restart(store, req, tmp_path, running=False, now=120)
+    outbox = store.committed_outbox(unconfirmed_only=False)[0]
+    payload = (
+        {"outbox_id": outbox["outbox_id"], "event_id": "late-old-authorization"}
+        if record_kind == "outbox_confirmed"
+        else {
+            "execution_id": req["execution_id"],
+            "terminal_states": [],
+            "event_ids": ["late-old-authorization"],
+            "now_sim_t_s": 120,
+            "outbox_id": outbox["outbox_id"],
+        }
+    )
+    store.journal.append(store._spec(record_kind, payload, 120))
+    with pytest.raises(api.CollectionExecutionError, match="blocked"):
+        store.replay()
 
 
 @pytest.mark.parametrize("fault", ["truncate", "rollback", "unknown_kind"])

@@ -14,7 +14,8 @@ ROBOT = SCRIPTS / "mock_robot_task_device.py"
 CLI = SCRIPTS / "edge_task_cli.py"
 TRANSPORT = SCRIPTS / "edge_task_transport.py"
 FIXTURE = SCRIPTS / "pilot_course_a_task_fixture.py"
-ALL_SCRIPTS = (GATEWAY, ROBOT, CLI, TRANSPORT, FIXTURE)
+SESSION_DEVICE = SCRIPTS / "course_session_task_device.py"
+ALL_SCRIPTS = (GATEWAY, ROBOT, CLI, TRANSPORT, FIXTURE, SESSION_DEVICE)
 CONFIG = SIMULATION_ROOT / "configs" / "edge_task" / "pilot-course-a.sim.example.json"
 BROKER_CONF = SIMULATION_ROOT / "deploy" / "edge-task-v0" / "mosquitto.loopback.conf"
 
@@ -24,6 +25,7 @@ ALLOWED_FIRST_PARTY = {
     CLI: {"nxt_edge_task", "scripts"},
     TRANSPORT: {"nxt_edge_task"},  # only the local-broker endpoint predicate and its error type
     FIXTURE: {"nxt_commissioning", "nxt_edge_task", "scripts"},
+    SESSION_DEVICE: {"nxt_edge_task", "scripts"},
 }
 
 BANNED_IMPORT_ROOTS = {
@@ -153,3 +155,30 @@ def test_task_request_is_the_only_edge_to_robot_message() -> None:
     assert publishes == ["topic"]
     assert "request_topic(" in text and "status_topic(" in text and "event_topic(" in text
     assert text.count("request_topic(") == 1
+
+
+def test_simulator_backed_session_device_cannot_reach_runtime_control() -> None:
+    tree = ast.parse(SESSION_DEVICE.read_text(encoding="utf-8"))
+    roots = _imports(SESSION_DEVICE)
+    assert not ({"nxt_range_ops", "nxt_sim"} & roots)
+    forbidden_attributes = {
+        "step",
+        "apply_directive",
+        "arm_collection_assignment",
+        "disarm_collection_assignment",
+    }
+    calls = {
+        node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert not (calls & forbidden_attributes)
+    text = SESSION_DEVICE.read_text(encoding="utf-8")
+    assert "RangeOpsEnv" not in text and "RangeSimulation" not in text
+    assert "MockRobotDevice" not in text and "accept_and_succeed" not in text
+
+
+def test_ordinary_v3_replay_has_no_device_process_start_path() -> None:
+    session = (SCRIPTS / "course_session_v3.py").read_text(encoding="utf-8")
+    assert "course_session_task_device" not in session
+    assert "RobotCore" not in session and ".on_start(" not in session
