@@ -506,6 +506,126 @@ describe("second review regressions: causal evidence and conflict overlays", () 
   });
 });
 
+describe("final review regressions: admission and terminal limits", () => {
+  function timeout(state: "PARTIAL" | "FAILED" | "INCONCLUSIVE" = "PARTIAL") {
+    const s = snapshot("partial-preempted"), r = s.executions[0];
+    s.now_sim_t_s = 900; s.simulation_time_utc = "2026-09-16T00:15:00Z";
+    r.actions.pop(); r.state = state; r.reason = "EXECUTION_TIMEOUT";
+    r.runtime_evidence.collection_exit_reason = "EXECUTION_TIMEOUT";
+    r.terminal_sim_t_s = r.execution_deadline_sim_t_s;
+    if (state === "FAILED") { r.raw_quantity.balls = 0; r.edge_evidence.reason = "unknown:execution_timeout"; }
+    if (state === "INCONCLUSIVE") {
+      Object.assign(r.raw_quantity, {status: "INCOMPLETE", balls: null, source_event_ids: [], event_digest: null});
+      Object.assign(r.edge_evidence, {effective_state: "INCONCLUSIVE", terminal_states: ["INCONCLUSIVE"],
+        verified: false, result_verification: "UNVERIFIED", reason: "unknown:execution_timeout"});
+      r.runtime_evidence.event_sequence_complete = false; r.conflicts.missing_events = true;
+      r.device_protection = {protected: true, authorization_blocked: true, reasons: ["ORPHANED_ACTIVITY"]};
+    }
+    return s;
+  }
+  function horizon(accepted = true) {
+    const s = snapshot("policy-missed"), r = s.executions[0];
+    s.session_end_sim_t_s = 779; s.bindings[0].session_end_sim_t_s = 779;
+    r.reason = "INSUFFICIENT_SESSION_HORIZON"; r.terminal_sim_t_s = 120; r.actions = [];
+    r.edge_evidence.accepted = accepted; r.edge_evidence.reason = "unknown:insufficient_session_horizon";
+    r.edge_evidence.effective_state = accepted ? "FAILED" : "REJECTED";
+    r.edge_evidence.terminal_states = [r.edge_evidence.effective_state];
+    return s;
+  }
+  it.each(["PARTIAL", "FAILED", "INCONCLUSIVE"] as const)("preserves valid %s timeout classification", (state) => {
+    expect(parseCollectionExecutions(timeout(state)).executions[0].state).toBe(state);
+  });
+  it.each(["PARTIAL", "FAILED", "INCONCLUSIVE"] as const)("requires retained Edge acceptance for started %s", (state) => {
+    const s = timeout(state); s.executions[0].edge_evidence.accepted = false;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("requires assignment-terminal evidence for a conclusive started zero failure", () => {
+    const s = timeout("FAILED"); s.executions[0].runtime_evidence.assignment_terminal = false;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("requires retained Edge acceptance beneath terminal conflict", () => {
+    const s = snapshot("terminal-conflict"); s.executions[0].edge_evidence.accepted = false;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("allows an incomplete timeout without conclusive assignment-terminal evidence", () => {
+    const s = timeout("INCONCLUSIVE"); s.executions[0].runtime_evidence.assignment_terminal = false;
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("INCONCLUSIVE");
+  });
+  it.each(["PARTIAL", "FAILED"] as const)("does not let timeout override %s quantity classification", (state) => {
+    const s = timeout(state); s.executions[0].raw_quantity.balls = state === "PARTIAL" ? 0 : 12;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["success", "running"])("rejects timeout exit on %s", (name) => {
+    const s = name === "success" ? snapshot() : running();
+    s.executions[0].runtime_evidence.collection_exit_reason = "EXECUTION_TIMEOUT";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("keeps restart outcomes valid without fabricated assignment-terminal evidence", () => {
+    for (const s of [snapshot("restart-unknown"), notStartedAfterRestart()]) {
+      expect(s.executions[0].runtime_evidence.assignment_terminal).toBe(false);
+      expect(parseCollectionExecutions(s)).toEqual(s);
+    }
+  });
+  it.each([
+    ["reason", "ZONE_EMPTY"], ["runtime_evidence.collection_exit_reason", "ZONE_EMPTY"],
+    ["runtime_evidence.collection_exit_reason", null], ["terminal_sim_t_s", 779], ["terminal_sim_t_s", 781],
+    ["reason", "TERMINAL_CONFLICT"], ["reason", "REPLAY_MISMATCH"],
+  ])("rejects contradictory timeout evidence at %s=%s", (path, value) => {
+    const s = timeout(); mutate(s.executions[0], path as string, value);
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("rejects timeout on an unstarted record", () => {
+    const s = snapshot("policy-missed"), r = s.executions[0];
+    r.reason = "EXECUTION_TIMEOUT"; r.runtime_evidence.collection_exit_reason = "EXECUTION_TIMEOUT";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["terminal", "replay"] as const)("preserves timeout beneath an evidenced %s conflict", (kind) => {
+    const s = timeout(), r = s.executions[0]; r.state = "INCONCLUSIVE";
+    r.reason = kind === "terminal" ? "TERMINAL_CONFLICT" : "REPLAY_MISMATCH";
+    r.conflicts.terminal_conflict = kind === "terminal"; r.conflicts.replay_mismatch = kind === "replay";
+    Object.assign(r.edge_evidence, {effective_state: "CONFLICT", verified: false, result_verification: "CONFLICT",
+      terminal_states: kind === "terminal" ? ["SUCCEEDED", "FAILED"] : ["FAILED"]});
+    r.device_protection = {protected: true, authorization_blocked: true,
+      reasons: [kind === "terminal" ? "TERMINAL_CONFLICT" : "ORPHANED_ACTIVITY"]};
+    expect(parseCollectionExecutions(s).executions[0].runtime_evidence.collection_exit_reason).toBe("EXECUTION_TIMEOUT");
+    r.terminal_sim_t_s = 779;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each([true, false])("preserves insufficient horizon with accepted=%s", (accepted) => {
+    const s = horizon(accepted); expect(parseCollectionExecutions(s)).toEqual(s);
+  });
+  it.each([780, 900])("rejects insufficient horizon when a complete window fits at terminal evaluation with end=%s", (end) => {
+    const s = horizon(); s.session_end_sim_t_s = end; s.bindings[0].session_end_sim_t_s = end;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("uses future eligibility when testing a no-start horizon", () => {
+    const s = horizon(); s.session_end_sim_t_s = 899; s.bindings[0].session_end_sim_t_s = 899;
+    s.requests[0].eligible_sim_t_s = 240; s.requests[0].due_at_utc = "2026-09-16T00:04:00Z";
+    s.executions[0].eligible_sim_t_s = 240;
+    expect(parseCollectionExecutions(s)).toEqual(s);
+    s.session_end_sim_t_s = 900; s.bindings[0].session_end_sim_t_s = 900;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each([
+    ["state", "FAILED"], ["runtime_evidence.assignment_terminal", true],
+    ["runtime_evidence.collection_exit_reason", "ZONE_EMPTY"], ["edge_evidence.reason", "unknown:other"],
+    ["reason", "ZONE_EMPTY"], ["raw_quantity.status", "INCOMPLETE"], ["unload_quantity.status", "INCOMPLETE"],
+  ])("rejects contradictory insufficient-horizon evidence at %s", (path, value) => {
+    const s = horizon(); mutate(s.executions[0], path as string, value);
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("rejects insufficient horizon carrying an original policy action", () => {
+    const s = horizon(); s.executions[0].actions = snapshot("policy-missed").executions[0].actions.slice(0, 1);
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("rejects a started partial relabeled as insufficient horizon", () => {
+    const s = timeout(); s.executions[0].reason = "INSUFFICIENT_SESSION_HORIZON";
+    s.executions[0].runtime_evidence.collection_exit_reason = null;
+    s.executions[0].edge_evidence.reason = "unknown:insufficient_session_horizon";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+});
+
 describe("collection execution GET-only client", () => {
   afterEach(() => vi.useRealTimers());
   it("exposes only read and sends an uncached same-origin GET", async () => {

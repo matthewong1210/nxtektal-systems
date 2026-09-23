@@ -197,7 +197,8 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
     requireEvidence(deadline === null && r.assignment_id === null && !runtime.assignment_accepted && !runtime.start_admitted);
   } else {
     requireEvidence(r.eligible_sim_t_s <= start && start < r.latest_start_sim_t_s && b.bound_at_sim_t_s <= start && start <= s.now_sim_t_s &&
-      deadline === start + r.max_execution_s && deadline <= s.session_end_sim_t_s && r.assignment_id !== null && runtime.assignment_accepted && runtime.start_admitted);
+      deadline === start + r.max_execution_s && deadline <= s.session_end_sim_t_s && r.assignment_id !== null &&
+      edge.accepted && runtime.assignment_accepted && runtime.start_admitted);
     const starts = r.actions.filter((a) => a.sim_t_s === start && a.selected_action.name === "AssignCollection");
     requireEvidence(starts.length === 1 && starts[0].selection === "WAIT_SLOT" && starts[0].safety_shield === "ACCEPTED");
   }
@@ -267,6 +268,10 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
         ["PARTIAL", "FAILED", "INCONCLUSIVE"].includes(r.state) && p.protected && p.authorization_blocked && p.reasons.includes(reason));
     }
   }
+  if (r.reason === "EXECUTION_TIMEOUT" || runtime.collection_exit_reason === "EXECUTION_TIMEOUT") {
+    requireEvidence((r.reason === "EXECUTION_TIMEOUT" || conflictOverlay) && runtime.collection_exit_reason === "EXECUTION_TIMEOUT" &&
+      start !== null && end !== null && end === deadline && ["PARTIAL", "FAILED", "INCONCLUSIVE"].includes(r.state));
+  }
   requireEvidence(raw.milestone === "RAW_COLLECTED_TO_ROBOT" && unload.milestone === "UNLOADED_TO_STATION" &&
     raw.destination_id === b.runtime_robot_id && unload.destination_id === b.handoff_station_id);
   for (const q of [raw, unload]) {
@@ -307,10 +312,16 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
     requireEvidence(["INCONCLUSIVE", "CONFLICT"].includes(edge.effective_state) && p.protected && (conflict || edge.result_verification === "UNVERIFIED"));
   } else if (r.state === "FAILED") requireEvidence(edge.effective_state === "FAILED" && raw.status !== "INCOMPLETE" &&
     unload.status !== "INCOMPLETE" && runtime.event_sequence_complete &&
-    (start === null ? raw.balls === null : raw.status === "COMPLETE" && raw.balls === 0));
+    (start === null ? raw.balls === null : raw.status === "COMPLETE" && raw.balls === 0 && runtime.assignment_terminal));
   if (Object.values(r.conflicts).some(Boolean)) requireEvidence(r.state === "INCONCLUSIVE" && p.protected);
   if (r.reason === "POLICY_SLOT_MISSED") requireEvidence(r.state === "MISSED" && start === null && end !== null && end >= r.latest_start_sim_t_s && edge.reason === "unknown:policy_slot_missed");
   if (r.reason === "SAFETY_REJECTED") requireEvidence(r.state === "REJECTED" && start === null && edge.reason === "unknown:safety_rejected" && r.actions.some((a) => a.safety_shield === "REJECTED"));
+  if (r.reason === "INSUFFICIENT_SESSION_HORIZON" || edge.reason === "unknown:insufficient_session_horizon") {
+    requireEvidence(r.reason === "INSUFFICIENT_SESSION_HORIZON" && edge.reason === "unknown:insufficient_session_horizon" &&
+      r.state === "MISSED" && start === null && end !== null && r.actions.length === 0 &&
+      !runtime.assignment_terminal && runtime.collection_exit_reason === null && raw.status === "NOT_REACHED" && unload.status === "NOT_REACHED" &&
+      Math.max(end, r.eligible_sim_t_s) + r.max_execution_s > s.session_end_sim_t_s);
+  }
   if (r.reason === "NOT_STARTED_AFTER_RESTART" || edge.reason === "not_started_after_restart") {
     requireEvidence(r.reason === "NOT_STARTED_AFTER_RESTART" && edge.reason === "not_started_after_restart" &&
       r.state === "FAILED" && start === null && edge.accepted && edge.effective_state === "FAILED" && edge.verified &&
