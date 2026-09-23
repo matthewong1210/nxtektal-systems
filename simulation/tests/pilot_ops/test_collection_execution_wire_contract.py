@@ -87,6 +87,16 @@ def relations(data):
     receipts = unique(data["receipts"], "request_id")
     executions = unique(data["executions"], "execution_id")
     assert sum(r["state"] == "RUNNING" for r in executions.values()) <= 1, "single running lease per session/round"
+    started_records = [r for r in executions.values() if r["started_sim_t_s"] is not None]
+    for index, record in enumerate(started_records):
+        start = record["started_sim_t_s"]
+        end = record["terminal_sim_t_s"] if record["terminal_sim_t_s"] is not None else math.inf
+        for other in started_records[index + 1:]:
+            if other["execution_id"] == record["execution_id"]:
+                continue
+            other_start = other["started_sim_t_s"]
+            other_end = other["terminal_sim_t_s"] if other["terminal_sim_t_s"] is not None else math.inf
+            assert max(start, other_start) >= min(end, other_end), "overlapping running lease intervals"
     assert requests.keys() == receipts.keys(), "orphan request or receipt"
     unique(data["receipts"], "execution_id")
     unique(data["receipts"], "attempt_id")
@@ -187,8 +197,10 @@ def relations(data):
                     assert action["sim_t_s"] == start, "WAIT_SLOT only starts a new attempt"
                 # A pending start cannot displace any already running lease.
                 for other in executions.values():
+                    if other["execution_id"] == record["execution_id"]:
+                        continue
                     other_start, other_end = other["started_sim_t_s"], other["terminal_sim_t_s"]
-                    active = other_start is not None and other_start < action["sim_t_s"] and (other_end is None or action["sim_t_s"] < other_end)
+                    active = other_start is not None and other_start <= action["sim_t_s"] and (other_end is None or action["sim_t_s"] < other_end)
                     assert not active, "running continuation precedes pending starts"
             elif action["selection"] == "RUNNING_CONTINUATION":
                 assert start is not None and start < action["sim_t_s"] < deadline
@@ -744,3 +756,47 @@ def test_final_review_binding_cannot_follow_its_execution_start(schema):
     rekey_single_snapshot(data)
     with pytest.raises(AssertionError):
         validate_snapshot(schema, data)
+
+
+def unique_terminal_snapshot(second_start=120):
+    data = snapshot()
+    binding = data["bindings"][0]
+    binding.update(task_id="task_" + "a" * 24, plan_id="plan-002",
+                   confirmation_id="confirmation-002", schedule_id="schedule-002")
+    data["requests"][0]["request_id"] = "request-002"
+    data["receipts"][0].update(attempt_id="attempt-002", sequence=2)
+    record = data["executions"][0]
+    record["assignment_id"] = "assignment-002"
+    record["started_sim_t_s"] = second_start
+    record["execution_deadline_sim_t_s"] = second_start + record["max_execution_s"]
+    record["actions"][0]["sim_t_s"] = second_start
+    for field in ("raw_quantity", "unload_quantity"):
+        record[field]["assignment_id"] = "assignment-002"
+    rekey_single_snapshot(data)
+    return data
+
+
+@pytest.mark.parametrize("second_start", [120, 180])
+def test_lease_rejects_overlapping_completed_attempts(schema, second_start):
+    first, second = snapshot(), unique_terminal_snapshot(second_start)
+    validate_snapshot(schema, first)
+    validate_snapshot(schema, second)
+    combined = copy.deepcopy(first)
+    for key in ("bindings", "requests", "receipts", "executions"):
+        combined[key].extend(second[key])
+    with pytest.raises(AssertionError, match="lease|running continuation"):
+        validate_snapshot(schema, combined)
+
+
+def test_lease_allows_exact_terminal_to_start_boundary(schema):
+    first, second = snapshot(), unique_terminal_snapshot(180)
+    # Both complete within their admitted windows; equality releases the lease.
+    first_record = first["executions"][0]
+    first_record["terminal_sim_t_s"] = 180
+    first_record["actions"][1]["sim_t_s"] = 180
+    validate_snapshot(schema, first)
+    validate_snapshot(schema, second)
+    combined = copy.deepcopy(first)
+    for key in ("bindings", "requests", "receipts", "executions"):
+        combined[key].extend(second[key])
+    validate_snapshot(schema, combined)

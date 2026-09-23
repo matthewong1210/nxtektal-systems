@@ -159,6 +159,11 @@ one-zone catalog: Wait 0, AssignCollection 1, SendToHandoff 2, SendToCharge 3.
 
 A pending proposal fills only an original Wait. Multiple requests may be
 PENDING, but v1 permits a single RUNNING execution lease per session/round.
+That restriction also applies to completed history: no two distinct attempts'
+half-open intervals [started_sim_t_s, terminal_sim_t_s) may overlap. A missing
+terminal keeps the lease open; a terminal exactly equal to the next start
+releases it without overlap. Simultaneous starts cannot evade the rule by
+both being displayed later as SUCCEEDED.
 A running attempt's needed continuation wins a Wait slot before any pending
 start; original non-Wait proposals still remain unchanged. Only when no
 running continuation needs that slot are eligible pending candidates sorted
