@@ -64,6 +64,18 @@ function addSecond(s: CollectionExecutionsSnapshot, start?: number) {
   s.bindings.push(b); s.requests.push(q); s.receipts.push(receipt); s.executions.push(r);
   return s;
 }
+function protectedExit(reason: "ROBOT_FAULT" | "ESTOP_LATCHED" | "HUMAN_ASSISTANCE_REQUIRED") {
+  const s = snapshot("partial-preempted"), r = s.executions[0];
+  r.actions.pop(); r.reason = reason; r.runtime_evidence.collection_exit_reason = reason;
+  r.device_protection = {protected: true, authorization_blocked: true, reasons: [reason]};
+  return s;
+}
+function notStartedAfterRestart() {
+  const s = snapshot("policy-missed"), r = s.executions[0];
+  r.state = "FAILED"; r.reason = "NOT_STARTED_AFTER_RESTART";
+  r.edge_evidence.reason = "not_started_after_restart";
+  return s;
+}
 
 describe("collection execution v1 read contract", () => {
   it.each(examples)("preserves the frozen %s snapshot exactly", (name) => {
@@ -291,6 +303,127 @@ describe("collection execution v1 read contract", () => {
       }
     };
     walk(snapshot(), []);
+  });
+});
+
+describe("review regressions: terminal evidence semantics", () => {
+  it.each([299, 300, 301])("enforces the exclusive pending latest-start at %s seconds", (now) => {
+    const s = pending(); s.now_sim_t_s = now;
+    s.simulation_time_utc = new Date(Date.parse(s.session_epoch_utc) + now * 1000).toISOString();
+    if (now < 300) expect(parseCollectionExecutions(s).executions[0].state).toBe("PENDING");
+    else expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each([779, 780, 781])("enforces the exclusive running deadline at %s seconds", (now) => {
+    const s = running(); s.now_sim_t_s = now;
+    s.simulation_time_utc = new Date(Date.parse(s.session_epoch_utc) + now * 1000).toISOString();
+    if (now < 780) expect(parseCollectionExecutions(s).executions[0].state).toBe("RUNNING");
+    else expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["PENDING", "RUNNING"])("rejects %s in an ended session before its own deadline", (state) => {
+    const s = state === "PENDING" ? pending() : running(); s.session_state = "ENDED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["PENDING", "RUNNING"])("retains %s in a paused session before its deadline", (state) => {
+    const s = state === "PENDING" ? pending() : running(); s.session_state = "PAUSED";
+    expect(parseCollectionExecutions(s).executions[0].state).toBe(state);
+  });
+  it.each([779, 780])("requires remaining pending execution horizon within session end %s", (horizon) => {
+    const s = pending(); s.session_end_sim_t_s = horizon; s.bindings[0].session_end_sim_t_s = horizon;
+    if (horizon === 780) expect(parseCollectionExecutions(s).executions[0].state).toBe("PENDING");
+    else expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("rejects a future-eligible pending task whose earliest possible completion exceeds the session horizon", () => {
+    const s = pending(), r = s.executions[0], q = s.requests[0];
+    s.session_end_sim_t_s = 900; s.bindings[0].session_end_sim_t_s = 900;
+    r.eligible_sim_t_s = q.eligible_sim_t_s = 240; r.latest_start_sim_t_s = q.latest_start_sim_t_s = 360;
+    q.due_at_utc = "2026-09-16T00:04:00Z"; q.expires_at_utc = "2026-09-16T00:06:00Z";
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("PENDING");
+    s.session_end_sim_t_s = 899; s.bindings[0].session_end_sim_t_s = 899;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("accepts a verified restart-before-start failure without quantity invention", () => {
+    const r = parseCollectionExecutions(notStartedAfterRestart()).executions[0];
+    expect(r.started_sim_t_s).toBeNull(); expect(r.state).toBe("FAILED"); expect(r.raw_quantity.balls).toBeNull();
+  });
+  it.each([
+    ["reason", "ZONE_EMPTY"], ["edge_evidence.reason", "unknown:other"], ["edge_evidence.accepted", false],
+    ["raw_quantity.status", "INCOMPLETE"], ["runtime_evidence.assignment_terminal", true],
+    ["runtime_evidence.collection_exit_reason", "ZONE_EMPTY"],
+  ])("rejects restart-before-start mismatch at %s", (path, value) => {
+    const s = notStartedAfterRestart(); mutate(s.executions[0], path, value);
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["v3", "edge", "both"])("rejects %s restart-before-start claims after an actual start", (source) => {
+    const s = protectedExit("ROBOT_FAULT"), r = s.executions[0];
+    r.state = "FAILED"; r.raw_quantity.balls = 0; r.runtime_evidence.collection_exit_reason = null;
+    r.reason = source === "edge" ? "ZONE_EMPTY" : "NOT_STARTED_AFTER_RESTART";
+    r.edge_evidence.reason = source === "v3" ? "unknown:other" : "not_started_after_restart";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each([
+    ["reason", "EVIDENCE_INCOMPLETE"], ["edge_evidence.reason", "unknown:other"], ["edge_evidence.accepted", false],
+    ["device_protection.reasons", ["ORPHANED_ACTIVITY"]], ["raw_quantity.status", "NOT_REACHED"],
+    ["unload_quantity.status", "NOT_REACHED"],
+  ])("rejects interrupted restart mismatch at %s", (path, value) => {
+    const s = snapshot("restart-unknown"); mutate(s.executions[0], path, value);
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("rejects interrupted V3 restart reason without a start even when Edge reason is changed", () => {
+    const s = pending(), r = s.executions[0];
+    r.state = "INCONCLUSIVE"; r.stage = "TERMINAL"; r.reason = "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME"; r.terminal_sim_t_s = 120;
+    Object.assign(r.edge_evidence, {effective_state: "INCONCLUSIVE", terminal_states: ["INCONCLUSIVE"],
+      reason: "unknown:other", verified: false, result_verification: "UNVERIFIED"});
+    r.device_protection = {protected: true, authorization_blocked: true, reasons: ["RESTART_UNKNOWN"]};
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("rejects a completed result hidden behind an interrupted V3 restart reason", () => {
+    const s = snapshot("partial-preempted"), r = s.executions[0]; r.actions.pop();
+    r.reason = "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME"; r.runtime_evidence.collection_exit_reason = null;
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  for (const reason of ["ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"] as const) {
+    it(`accepts protected ${reason} with matching runtime evidence`, () => {
+      expect(parseCollectionExecutions(protectedExit(reason)).executions[0].reason).toBe(reason);
+    });
+    it.each(["unprotected", "wrong-protection", "unblocked", "wrong-reason", "wrong-exit"])(`rejects ${reason} with %s`, (mutation) => {
+      const s = protectedExit(reason), r = s.executions[0];
+      if (mutation === "unprotected") r.device_protection = {protected: false, authorization_blocked: false, reasons: []};
+      if (mutation === "wrong-protection") r.device_protection.reasons = ["ORPHANED_ACTIVITY"];
+      if (mutation === "unblocked") r.device_protection.authorization_blocked = false;
+      if (mutation === "wrong-reason") r.reason = "ZONE_EMPTY";
+      if (mutation === "wrong-exit") r.runtime_evidence.collection_exit_reason = "ZONE_EMPTY";
+      expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+    });
+  }
+  it("rejects a preempting action hidden inside a success", () => {
+    const s = snapshot(); s.executions[0].actions[1] = snapshot("partial-preempted").executions[0].actions[1];
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["reason", "runtime_evidence.collection_exit_reason"])("rejects preemption with mismatched %s", (path) => {
+    const s = snapshot("partial-preempted"); mutate(s.executions[0], path, "ZONE_EMPTY");
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("requires an actual preemption action for preemption reason and exit evidence", () => {
+    const s = snapshot("partial-preempted"); s.executions[0].actions.pop();
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["reason", "runtime_evidence.collection_exit_reason"])("rejects isolated preemption claim in %s", (path) => {
+    const s = snapshot("partial-preempted"), r = s.executions[0];
+    r.actions.pop(); r.reason = "ZONE_EMPTY"; r.runtime_evidence.collection_exit_reason = "ZONE_EMPTY";
+    mutate(r, path, "POLICY_PREEMPTED");
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["PARTIAL", "FAILED", "INCONCLUSIVE"] as const)("preserves %s preemption classified by quantity evidence", (state) => {
+    const s = snapshot("partial-preempted"), r = s.executions[0]; r.state = state;
+    if (state === "FAILED") { r.raw_quantity.balls = 0; r.edge_evidence.reason = "unknown:policy_preempted"; }
+    if (state === "INCONCLUSIVE") {
+      r.raw_quantity.status = "INCOMPLETE"; r.raw_quantity.balls = null; r.runtime_evidence.event_sequence_complete = false;
+      Object.assign(r.edge_evidence, {effective_state: "INCONCLUSIVE", terminal_states: ["INCONCLUSIVE"],
+        reason: "unknown:policy_preempted", verified: false, result_verification: "UNVERIFIED"});
+      r.conflicts.missing_events = true;
+      r.device_protection = {protected: true, authorization_blocked: true, reasons: ["ORPHANED_ACTIVITY"]};
+    }
+    expect(parseCollectionExecutions(s).executions[0].state).toBe(state);
   });
 });
 

@@ -202,8 +202,12 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
   requireEvidence(nonterminal ? end === null && r.reason === null && r.stage !== "TERMINAL" :
     end !== null && end <= s.now_sim_t_s && end >= b.bound_at_sim_t_s && r.stage === "TERMINAL" && r.reason !== null && (start === null || start <= end));
   requireEvidence(r.success_display_allowed === (r.state === "SUCCEEDED") && (r.reason === "UNLOADED_ALL_COLLECTED_BALLS") === (r.state === "SUCCEEDED"));
-  if (r.state === "PENDING") requireEvidence(start === null && r.stage === "WAITING_FOR_POLICY_SLOT" && edge.accepted && edge.effective_state === "ACCEPTED");
-  if (r.state === "RUNNING") requireEvidence(start !== null && r.stage !== "WAITING_FOR_POLICY_SLOT" && edge.accepted && edge.effective_state === "RUNNING");
+  if (nonterminal) requireEvidence(s.session_state !== "ENDED");
+  if (r.state === "PENDING") requireEvidence(start === null && r.stage === "WAITING_FOR_POLICY_SLOT" && edge.accepted &&
+    edge.effective_state === "ACCEPTED" && s.now_sim_t_s < r.latest_start_sim_t_s &&
+    Math.max(s.now_sim_t_s, r.eligible_sim_t_s) + r.max_execution_s <= s.session_end_sim_t_s);
+  if (r.state === "RUNNING") requireEvidence(start !== null && r.stage !== "WAITING_FOR_POLICY_SLOT" && edge.accepted &&
+    edge.effective_state === "RUNNING" && deadline !== null && s.now_sim_t_s < deadline);
   let previous = -1;
   for (const a of r.actions) {
     requireEvidence(previous <= a.sim_t_s && b.bound_at_sim_t_s <= a.sim_t_s && a.sim_t_s <= s.now_sim_t_s && (end === null || a.sim_t_s <= end));
@@ -242,6 +246,17 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
       if (a.selection === "ORIGINAL_POLICY_CONVERGED") requireEvidence(start !== null && deadline !== null && start < a.sim_t_s && a.sim_t_s < deadline &&
         selected.name === "SendToHandoff" && selected.robot_id === b.runtime_robot_id && selected.target_id === null);
       if (a.selection === "POLICY_PREEMPTED") requireEvidence(start !== null && selected.name !== "Wait" && selected.robot_id === b.runtime_robot_id);
+    }
+  }
+  const preempted = r.actions.some((a) => a.selection === "POLICY_PREEMPTED");
+  if (preempted || r.reason === "POLICY_PREEMPTED" || runtime.collection_exit_reason === "POLICY_PREEMPTED") {
+    requireEvidence(preempted && r.reason === "POLICY_PREEMPTED" && runtime.collection_exit_reason === "POLICY_PREEMPTED" &&
+      ["PARTIAL", "FAILED", "INCONCLUSIVE"].includes(r.state));
+  }
+  for (const reason of ["ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"] as const) {
+    if (r.reason === reason || runtime.collection_exit_reason === reason) {
+      requireEvidence(r.reason === reason && runtime.collection_exit_reason === reason &&
+        ["PARTIAL", "FAILED", "INCONCLUSIVE"].includes(r.state) && p.protected && p.authorization_blocked && p.reasons.includes(reason));
     }
   }
   requireEvidence(raw.milestone === "RAW_COLLECTED_TO_ROBOT" && unload.milestone === "UNLOADED_TO_STATION" &&
@@ -287,7 +302,19 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
   if (Object.values(r.conflicts).some(Boolean)) requireEvidence(r.state === "INCONCLUSIVE" && p.protected);
   if (r.reason === "POLICY_SLOT_MISSED") requireEvidence(r.state === "MISSED" && start === null && end !== null && end >= r.latest_start_sim_t_s && edge.reason === "unknown:policy_slot_missed");
   if (r.reason === "SAFETY_REJECTED") requireEvidence(r.state === "REJECTED" && start === null && edge.reason === "unknown:safety_rejected" && r.actions.some((a) => a.safety_shield === "REJECTED"));
-  if (edge.reason === "interrupted_execution_unknown_outcome") requireEvidence(r.state === "INCONCLUSIVE" && start !== null && raw.balls === null && unload.balls === null);
+  if (r.reason === "NOT_STARTED_AFTER_RESTART" || edge.reason === "not_started_after_restart") {
+    requireEvidence(r.reason === "NOT_STARTED_AFTER_RESTART" && edge.reason === "not_started_after_restart" &&
+      r.state === "FAILED" && start === null && edge.accepted && edge.effective_state === "FAILED" && edge.verified &&
+      edge.result_verification === "VERIFIED" && !runtime.assignment_terminal && runtime.collection_exit_reason === null &&
+      raw.status === "NOT_REACHED" && unload.status === "NOT_REACHED");
+  }
+  if (r.reason === "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" || edge.reason === "interrupted_execution_unknown_outcome") {
+    requireEvidence(r.reason === "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" && edge.reason === "interrupted_execution_unknown_outcome" &&
+      r.state === "INCONCLUSIVE" && start !== null && edge.accepted && edge.effective_state === "INCONCLUSIVE" &&
+      !edge.verified && edge.result_verification === "UNVERIFIED" && p.protected && p.authorization_blocked &&
+      p.reasons.includes("RESTART_UNKNOWN") && raw.status === "INCOMPLETE" && unload.status === "INCOMPLETE" &&
+      raw.balls === null && unload.balls === null);
+  }
 }
 
 // JSON.parse checks syntax, then the token walk detects duplicate (including escaped) keys
