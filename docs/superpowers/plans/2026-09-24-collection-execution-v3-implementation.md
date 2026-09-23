@@ -63,12 +63,12 @@
 - `arbitrate(original_action, now_sim_t_s, runtime_view)` returns the selected catalog action and frozen reason while preserving non-`Wait` policy actions.
 - `snapshot()` and `request_result(request_id)` produce the exact Phase 3A schema without advancing the simulator.
 
-- [ ] Write failing tests for identity/binding freshness, single-station validation, duplicate/unknown/conflicting requests, deterministic pending order, running-continuation priority, exclusive latest-start miss, action decisions, null unknown evidence, Edge mapping, and terminal conflict.
-- [ ] Verify RED.
-- [ ] Implement canonical content IDs and the fixed per-tick `prepared -> one live step -> committed + Edge outbox -> cursor` protocol using durable records and verified replay.
-- [ ] Implement the frozen success predicate and all status/reason/Edge/protection mappings. Keep raw/unloaded/washed/supplied/Planning outcome stages separate.
-- [ ] Validate every public snapshot against `simulation/docs/contracts/collection-execution-v1/schema.json` in tests.
-- [ ] Run focused tests and commit `feat(collection-execution): persist v3 requests and results`.
+- [x] Write failing tests for identity/binding freshness, single-station validation, duplicate/unknown/conflicting requests, deterministic pending order, running-continuation priority, exclusive latest-start miss, action decisions, null unknown evidence, Edge mapping, and terminal conflict.
+- [x] Verify RED.
+- [x] Implement canonical content IDs and the fixed per-tick `prepared -> one live step -> committed + Edge outbox -> cursor` protocol using durable records and verified replay.
+- [x] Implement the frozen success predicate and all status/reason/Edge/protection mappings. Keep raw/unloaded/washed/supplied/Planning outcome stages separate.
+- [x] Validate every public snapshot against `simulation/docs/contracts/collection-execution-v1/schema.json` in tests.
+- [x] Run focused tests and commit `feat(collection-execution): persist v3 requests and results`.
 
 ---
 
