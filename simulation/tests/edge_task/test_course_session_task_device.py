@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
@@ -33,11 +34,11 @@ from tests.course_monitoring import test_course_collection_execution as executio
 NOW = datetime(2026, 9, 16, 0, 1, tzinfo=timezone.utc)
 
 
-def _started_core(tmp_path, *, initialize=True):
+def _started_core(tmp_path, *, initialize=True, behavior="simulator_backed"):
     config = load_config()
     robot = config.robot("picker-01")
     journal = JsonlJournal(tmp_path / "robot.jsonl", allowed_kinds=ROBOT_RECORD_KINDS)
-    core = RobotCore(config, robot, "simulator_backed")
+    core = RobotCore(config, robot, behavior)
     appended = journal.append_via(
         core.builder(
             lambda view: core.on_start(
@@ -149,6 +150,57 @@ def test_simulator_backed_advertises_but_tick_never_executes(tmp_path):
     assert core.tick(core.view, NOW) == []
     assert journal.path.read_bytes() == before
     assert not core.view.tasks[request.task_id].execution_started
+
+
+def test_mock_behavior_rejects_external_committed_progress_without_mutation(tmp_path):
+    config, _robot, journal, core = _started_core(
+        tmp_path, behavior="accept_and_succeed"
+    )
+    request = _request(config, core)
+    _accept(config, journal, core, request)
+    before_journal = journal.path.read_bytes()
+    before_view = deepcopy(core.view)
+
+    with pytest.raises(PreconditionFailed, match="simulator_backed"):
+        journal.append_via(
+            core.builder(
+                lambda view: core.on_committed_execution_event(
+                    view, _outbox(request), NOW
+                )
+            )
+        )
+
+    assert journal.path.read_bytes() == before_journal
+    assert core.view == before_view
+
+
+def test_mock_behavior_rejects_preaccepted_committed_terminal_without_mutation(
+    tmp_path,
+):
+    config, _robot, journal, core = _started_core(
+        tmp_path, behavior="accept_and_succeed"
+    )
+    request = _request(config, core)
+    rejected = _outbox(
+        request,
+        kind="REJECTED",
+        phase=None,
+        reason="unknown:policy_slot_missed",
+    )
+    before_journal = journal.path.read_bytes()
+    before_view = deepcopy(core.view)
+
+    with pytest.raises(PreconditionFailed, match="simulator_backed"):
+        journal.append_via(
+            core.builder(
+                lambda view: core.on_preaccepted_committed_terminal(
+                    view, request, rejected, NOW
+                )
+            )
+        )
+
+    assert journal.path.read_bytes() == before_journal
+    assert core.view == before_view
 
 
 def test_committed_progress_and_terminal_are_persisted_in_causal_order_and_idempotent(tmp_path):

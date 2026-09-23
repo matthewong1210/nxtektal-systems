@@ -1129,6 +1129,11 @@ class RobotCore:
     ) -> list[RecordSpec]:
         """Persist one exact V3 committed outbox item, never advance work."""
 
+        if self.behavior != "simulator_backed":
+            raise PreconditionFailed(
+                "external_committed_event_not_supported",
+                "external committed evidence requires simulator_backed behavior",
+            )
         task_id = committed_outbox.get("task_id") if isinstance(committed_outbox, Mapping) else None
         task = view.tasks.get(task_id) if type(task_id) is str else None
         if task is None:
@@ -1179,6 +1184,11 @@ class RobotCore:
     ) -> list[RecordSpec]:
         """Link a V3 pre-acceptance miss/rejection without inventing ACCEPTED."""
 
+        if self.behavior != "simulator_backed":
+            raise PreconditionFailed(
+                "external_committed_event_not_supported",
+                "external committed evidence requires simulator_backed behavior",
+            )
         if (
             request.site_id != self.config.site_id
             or request.deployment_id != self.config.deployment_id
