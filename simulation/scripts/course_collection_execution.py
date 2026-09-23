@@ -24,7 +24,7 @@ ARBITER = "WAIT_ONLY_NON_PREEMPTIVE_V1"
 SESSION_KEYS = ("series_id", "session_id", "round_id", "round_index", "engine_digest", "config_digest",
                 "session_epoch_utc", "control_interval_s", "session_end_sim_t_s")
 RECORD_KINDS = frozenset({"session", "binding", "binding_window", "request", "receipt", "accepted", "action_prepared",
-                          "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence"})
+                          "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence", "replay_failure"})
 TERMINALS = {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
 _SCHEMA = json.loads((Path(__file__).resolve().parents[1] / "docs/contracts/collection-execution-v1/schema.json").read_text())
 
@@ -322,11 +322,19 @@ class CollectionExecutionStore:
     def _spec(self, kind, payload, now):
         return RecordSpec(kind, "SIM_ENTRY", simulation_utc(self.session_identity, now), payload)
 
+    def initialize_session(self, now_sim_t_s=0):
+        """Fsync immutable identity even when no task has been bound."""
+        spec = self._spec("session", {"identity":self.session_identity, "policy_id":self.policy_id}, now_sim_t_s)
+        def build(records):
+            self._replay(records)
+            return [] if records else [spec]
+        self.journal.append_via(build)
+
     def _replay(self, records):
         state = dict(bindings={}, windows={}, requests={}, receipts={}, executions={}, accepted=set(), tick_sequence=0,
                      replay_digest=digest({"session": self.session_identity, "policy_id": self.policy_id, "arbiter": ARBITER}),
                      pending_prepared=None, commits={}, outbox={}, confirmed={}, cursor=None, now_sim_t_s=0,
-                     request_high_water=digest([]), edge_without_commit=False)
+                     request_high_water=digest([]), edge_without_commit=False, replay_plan=[], replay_failure=None)
         receipt_records = set()
         session = False
         for rec in records:
@@ -334,6 +342,8 @@ class CollectionExecutionStore:
             if kind == "session":
                 _require(not session and p == {"identity": self.session_identity, "policy_id": self.policy_id}, "session identity drift")
                 session = True
+                state["now_sim_t_s"] = (_utc(rec.recorded_at_utc) - _utc(self.session_identity["session_epoch_utc"])).total_seconds()
+                _require(state["now_sim_t_s"] >= 0, "session precedes epoch")
             else:
                 _require(session, "missing session identity")
             if kind == "binding":
@@ -375,6 +385,7 @@ class CollectionExecutionStore:
                 r["edge_evidence"].update(accepted=True, effective_state="ACCEPTED", verified=True, result_verification="VERIFIED")
                 r["edge_evidence"]["event_ids"].append(p["event_id"])
             elif kind == "action_prepared":
+                _require(state["replay_failure"] is None, "session sealed by replay mismatch")
                 _require(state["pending_prepared"] is None and p["tick_sequence"] == state["tick_sequence"] + 1
                          and p["previous_digest"] == state["replay_digest"] and p["previous_cursor"] == state["tick_sequence"]
                          and p["request_log_high_water_digest"] == state["request_high_water"], "invalid prepared predecessor")
@@ -383,6 +394,7 @@ class CollectionExecutionStore:
                 _require(state["pending_prepared"] is not None and p["prepared_digest"] == digest(state["pending_prepared"]), "commit without exact prepared intent")
                 expected = self._commit(state, state["pending_prepared"], p["result"])
                 _require(expected == p, "committed replay mismatch")
+                state["replay_plan"].append(dict(prepared=deepcopy(state["pending_prepared"]), committed=deepcopy(p)))
                 # Delivery/restart overlays must never mutate the immutable
                 # committed artifact that replay/digest verification consumes.
                 state["executions"] = deepcopy(p["executions"])
@@ -392,6 +404,8 @@ class CollectionExecutionStore:
                 state["now_sim_t_s"] = p["result"]["now_sim_t_s"]
                 state["pending_prepared"] = None
                 state["outbox"].update({v["outbox_id"]:v for v in p["outbox"]})
+            elif kind == "replay_failure":
+                self._seal_replay_failure(state, p)
             elif kind == "outbox_confirmed":
                 _require(p["outbox_id"] in state["outbox"], "Edge confirmation without committed outbox")
                 state["confirmed"][p["outbox_id"]] = p["event_id"]
@@ -440,6 +454,52 @@ class CollectionExecutionStore:
 
     def replay(self):
         return self._replay(self.journal.read())
+
+    def replay_plan(self):
+        """Detached ordered full intents/results from verified committed ticks."""
+        return deepcopy(self.replay()["replay_plan"])
+
+    def _seal_replay_failure(self, state, payload):
+        _require(set(payload) == {"prepared_digest", "now_sim_t_s", "observed_digest", "reason"}
+                 and payload["reason"] == "REPLAY_MISMATCH", "invalid replay failure")
+        _validate(payload["prepared_digest"], "Digest")
+        if payload["observed_digest"] is not None: _validate(payload["observed_digest"], "Digest")
+        simulation_utc(self.session_identity, payload["now_sim_t_s"])
+        _require(state["replay_failure"] is None, "replay failure already sealed")
+        pending = state["pending_prepared"]
+        _require(pending is not None and digest(pending) == payload["prepared_digest"], "failure does not match exact pending intent")
+        _require(payload["now_sim_t_s"] >= max(state["now_sim_t_s"], pending["decision"]["sim_t_s"]), "replay failure clock regression")
+        eid = pending["decision"]["execution_id"]
+        if eid is not None:
+            r = state["executions"][eid]
+            # This is evidence loss, not an Edge lifecycle event. Preserve its
+            # durable identities/terminal facts while invalidating trust.
+            edge = deepcopy(r["edge_evidence"])
+            protection = deepcopy(r["device_protection"])
+            _terminal(r, "INCONCLUSIVE", "REPLAY_MISMATCH", payload["now_sim_t_s"])
+            r["device_protection"] = protection
+            edge.update(effective_state="CONFLICT", verified=False, result_verification="CONFLICT", reason="unknown:replay_mismatch")
+            r["edge_evidence"] = edge
+            r["conflicts"]["replay_mismatch"] = True
+            r["runtime_evidence"]["event_sequence_complete"] = False
+            for key in ("raw_quantity", "unload_quantity"): r[key].update(status="INCOMPLETE", balls=None)
+            _protect(r, "ORPHANED_ACTIVITY")
+        state["replay_failure"] = deepcopy(payload)
+        state["pending_prepared"] = None
+        state["now_sim_t_s"] = payload["now_sim_t_s"]
+
+    def record_replay_failure(self, prepared_digest, *, now_sim_t_s, observed_digest=None):
+        """Irreversibly seal the exact pending intent; never emit Edge work."""
+        payload = dict(prepared_digest=prepared_digest, now_sim_t_s=now_sim_t_s,
+                       observed_digest=observed_digest, reason="REPLAY_MISMATCH")
+        def build(records):
+            state = self._replay(records)
+            if state["replay_failure"] is not None:
+                _require(state["replay_failure"] == payload, "replay failure content conflict")
+                return []
+            self._seal_replay_failure(state, payload)
+            return [self._spec("replay_failure", payload, now_sim_t_s)]
+        self.journal.append_via(build)
 
     def bind_confirmed_tasks(self, planning_snapshot, edge_records, session_identity, now_sim_t_s):
         _require(primitive(session_identity) == self.session_identity, "session identity conflict")
@@ -511,6 +571,7 @@ class CollectionExecutionStore:
 
     def arbitrate(self, original_action, now_sim_t_s, runtime_view):
         state = self.replay()
+        _require(state["replay_failure"] is None, "session sealed by replay mismatch")
         _validate(original_action, "Action")
         _require(now_sim_t_s >= state["now_sim_t_s"], "simulation clock regression")
         _require(all(runtime_view.get(k) == self.session_identity[k] for k in ("session_id", "round_id")), "runtime session drift")
@@ -556,6 +617,7 @@ class CollectionExecutionStore:
         result = {}
         def build(records):
             s = self._replay(records)
+            _require(s["replay_failure"] is None, "session sealed by replay mismatch")
             _require(s["pending_prepared"] is None, "uncommitted prepared action exists")
             _require(previous_cursor == s["tick_sequence"] and previous_digest == s["replay_digest"], "stale driver cursor/digest")
             _require(decision["request_log_high_water_digest"] == s["request_high_water"], "request prefix changed")
@@ -713,18 +775,19 @@ class CollectionExecutionStore:
 
     def recovery_state(self):
         s = self.replay()
-        status = ("EDGE_WITHOUT_COMMIT" if s["edge_without_commit"] else "PREPARED_NO_COMMIT" if s["pending_prepared"]
+        status = ("REPLAY_MISMATCH" if s["replay_failure"] else "EDGE_WITHOUT_COMMIT" if s["edge_without_commit"] else "PREPARED_NO_COMMIT" if s["pending_prepared"]
                   else "COMMITTED_CURSOR_STALE" if s["tick_sequence"] and (s["cursor"] is None or s["cursor"]["tick_sequence"] != s["tick_sequence"])
                   else "COMMITTED_OUTBOX_UNCONFIRMED" if set(s["outbox"]) - set(s["confirmed"]) else "NO_PREPARED")
         eid = s["pending_prepared"]["decision"]["execution_id"] if s["pending_prepared"] else None
         permitted = s["pending_prepared"] is not None and (eid is None or s["executions"][eid]["state"] not in TERMINALS)
         return dict(status=status, replay_permitted=permitted, pending_prepared=s["pending_prepared"], tick_sequence=s["tick_sequence"], replay_digest=s["replay_digest"],
-                    unconfirmed_outbox=self.committed_outbox(unconfirmed_only=True))
+                    unconfirmed_outbox=self.committed_outbox(unconfirmed_only=True), replay_failure=deepcopy(s["replay_failure"]))
 
     def snapshot(self, *, server_time_utc, session_state="ACTIVE"):
         """Pure read. Wall-clock read time is excluded from every persisted digest."""
         _utc(server_time_utc)
         s = self.replay()
+        _require(s["replay_failure"] is None, "session sealed by replay mismatch", "unavailable")
         _require(all(r["edge_evidence"]["accepted"] or r["state"] in ("MISSED","REJECTED") for r in s["executions"].values()), "durable Edge acceptance not yet recorded", "unavailable")
         _require(not set(s["outbox"]) - set(s["confirmed"]), "committed outbox awaits durable Edge evidence", "unavailable")
         data = {k:self.session_identity[k] for k in SESSION_KEYS}

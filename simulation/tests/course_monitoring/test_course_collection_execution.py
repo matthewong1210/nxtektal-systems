@@ -666,3 +666,137 @@ def test_running_continuation_requires_committed_native_phase(api,tmp_path,capac
     assert native["terminal_reason"] != "POLICY_PREEMPTED"
     assert last["result"]["runtime_snapshots"][req["execution_id"]] == native
     assert conform(store)["executions"][0]["state"] == ("RUNNING" if before_boundary else "SUCCEEDED")
+
+
+def test_initialize_empty_session_supports_first_policy_tick_and_reopen(api,tmp_path):
+    identity,_,_=inputs(tmp_path)
+    store=api.CollectionExecutionStore(tmp_path/"empty.jsonl",identity)
+    store.initialize_session(now_sim_t_s=60)
+    before=store.journal.path.read_bytes()
+    store.initialize_session()
+    assert store.journal.path.read_bytes() == before
+    assert conform(store)["now_sim_t_s"] == 60
+    c=tick(store,60,action=PAUSE)
+    assert not c["executions"] and not c["outbox"]
+    reopened=api.CollectionExecutionStore(store.journal.path,identity)
+    assert conform(reopened) == conform(store)
+    assert reopened.recovery_state()["tick_sequence"] == 1
+
+
+@pytest.mark.parametrize("initialize_first", [False,True])
+def test_initialize_session_preserves_both_binding_orders(api,tmp_path,initialize_first):
+    identity,planning,edge=inputs(tmp_path)
+    store=api.CollectionExecutionStore(tmp_path/"ordered.jsonl",identity)
+    if initialize_first:store.initialize_session()
+    bindings=store.bind_confirmed_tasks(planning,edge,identity,60)
+    store.initialize_session()
+    assert store.bind_confirmed_tasks(planning,edge,identity,60) == bindings
+    assert sum(r.record_kind == "session" for r in store.journal.read()) == 1
+    assert conform(store)["bindings"] == bindings
+
+
+@pytest.mark.parametrize("kind,payload", [("receipt",{}),("session",{"identity":{},"policy_id":"wrong"})])
+def test_initialize_rejects_malformed_existing_prefix(api,tmp_path,kind,payload):
+    identity,_,_=inputs(tmp_path)
+    store=api.CollectionExecutionStore(tmp_path/"bad.jsonl",identity)
+    store.journal.append(RecordSpec(kind,"SIM_ENTRY",identity["session_epoch_utc"],payload))
+    before=store.journal.path.read_bytes()
+    with pytest.raises(api.CollectionExecutionError):store.initialize_session()
+    assert store.journal.path.read_bytes() == before
+
+
+def test_replay_plan_is_ordered_detached_and_excludes_pending_policy_tick(api,tmp_path):
+    identity,_,_=inputs(tmp_path)
+    store=api.CollectionExecutionStore(tmp_path/"plan.jsonl",identity)
+    store.initialize_session()
+    commits=[tick(store,now,action=PAUSE) for now in (0,60,120)]
+    recovery=store.recovery_state()
+    pending=store.prepare_tick(store.arbitrate(WAIT,180,view()),previous_cursor=3,previous_digest=recovery["replay_digest"])
+    before=store.journal.path.read_bytes()
+    plan=store.replay_plan()
+    assert len(plan) == 3 and [p["committed"] for p in plan] == commits
+    for n,pair in enumerate(plan,1):
+        assert set(pair) == {"prepared","committed"}
+        assert pair["prepared"]["tick_sequence"] == pair["committed"]["tick_sequence"] == n
+        assert pair["prepared"]["decision"]["execution_id"] is None
+        assert digest(pair["prepared"]) == pair["committed"]["prepared_digest"]
+    plan[0]["prepared"]["decision"]["original_action"]["name"]="mutated"
+    plan[0]["committed"]["result"]["runtime_snapshots"]["fake"]={}
+    reopened=api.CollectionExecutionStore(store.journal.path,identity)
+    assert [p["committed"] for p in reopened.replay_plan()] == commits
+    assert reopened.replay_plan()[0]["prepared"]["decision"]["original_action"] == PAUSE
+    assert reopened.recovery_state()["pending_prepared"] == pending
+    assert store.journal.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("execution", ["none","unstarted","running","terminal"])
+def test_replay_failure_seals_exact_pending_without_edge_fabrication(api,tmp_path,execution):
+    if execution == "none":
+        identity,_,_=inputs(tmp_path)
+        store=api.CollectionExecutionStore(tmp_path/"failure.jsonl",identity)
+        store.initialize_session()
+        tick(store,0)
+        req=None
+    else:
+        store,_,req=setup(api,tmp_path)
+        if execution != "unstarted":tick(store,60,snapshots={req["execution_id"]:assignment(req)})
+    recovery=store.recovery_state()
+    now=120 if execution in ("running","terminal") else 60
+    decision=store.arbitrate(WAIT,now,view())
+    pending=store.prepare_tick(decision,previous_cursor=recovery["tick_sequence"],previous_digest=recovery["replay_digest"])
+    if execution == "terminal":restart(store,req,tmp_path,running=True,now=120)
+    prefix=store.replay_plan()
+    outbox=store.committed_outbox()
+    edge=deepcopy(store.replay()["executions"][req["execution_id"]]["edge_evidence"]) if req else None
+    before=store.journal.path.read_bytes()
+    with pytest.raises(api.CollectionExecutionError):store.record_replay_failure("f"*64,now_sim_t_s=180)
+    assert store.journal.path.read_bytes() == before
+    store.record_replay_failure(digest(pending),now_sim_t_s=180,observed_digest="e"*64)
+    sealed=store.journal.path.read_bytes()
+    store.record_replay_failure(digest(pending),now_sim_t_s=180,observed_digest="e"*64)
+    assert store.journal.path.read_bytes() == sealed
+    with pytest.raises(api.CollectionExecutionError):store.record_replay_failure(digest(pending),now_sim_t_s=180,observed_digest="d"*64)
+    reopened=api.CollectionExecutionStore(store.journal.path,store.session_identity)
+    status=reopened.recovery_state()
+    assert status["status"] == "REPLAY_MISMATCH" and not status["replay_permitted"]
+    assert status["pending_prepared"] is None
+    assert reopened.replay_plan() == prefix and reopened.committed_outbox() == outbox
+    assert reopened.recovery_state()["replay_digest"] == recovery["replay_digest"]
+    with pytest.raises(api.CollectionExecutionError):reopened.prepare_tick(decision,previous_cursor=recovery["tick_sequence"],previous_digest=recovery["replay_digest"])
+    with pytest.raises(api.CollectionExecutionError):reopened.commit_tick(pending,now_sim_t_s=180,runtime_snapshots={},safety_shield={"allowed":True,"reason":None},post_state_digest="a"*64)
+    with pytest.raises(api.CollectionExecutionError,match="unavailable"):conform(reopened)
+    rows=reopened.replay()["executions"]
+    if req:
+        r=rows[req["execution_id"]]
+        assert r["state"] == "INCONCLUSIVE" and r["reason"] == "REPLAY_MISMATCH"
+        assert r["terminal_sim_t_s"] == (120 if execution == "terminal" else 180)
+        assert r["conflicts"]["replay_mismatch"] and "ORPHANED_ACTIVITY" in r["device_protection"]["reasons"]
+        if execution != "terminal":assert r["device_protection"]["reasons"] == ["ORPHANED_ACTIVITY"]
+        assert r["device_protection"]["authorization_blocked"] and not r["success_display_allowed"]
+        for key in ("raw_quantity","unload_quantity"):assert r[key]["status"] == "INCOMPLETE" and r[key]["balls"] is None
+        assert r["edge_evidence"]["event_ids"] == edge["event_ids"]
+        assert r["edge_evidence"]["terminal_states"] == edge["terminal_states"]
+    else:assert not rows
+    assert store.journal.path.read_bytes() == sealed
+
+
+def test_replay_failure_rejects_nonpending_bad_digest_and_regressed_clock(api,tmp_path):
+    store,_,_=setup(api,tmp_path)
+    before=store.journal.path.read_bytes()
+    with pytest.raises(api.CollectionExecutionError):store.record_replay_failure("a"*64,now_sim_t_s=60)
+    assert store.journal.path.read_bytes() == before
+    status=store.recovery_state()
+    pending=store.prepare_tick(store.arbitrate(WAIT,60,view()),previous_cursor=0,previous_digest=status["replay_digest"])
+    before=store.journal.path.read_bytes()
+    for value in ("not-a-digest", 7):
+        with pytest.raises(api.CollectionExecutionError):store.record_replay_failure(value,now_sim_t_s=60)
+        with pytest.raises(api.CollectionExecutionError):store.record_replay_failure(digest(pending),now_sim_t_s=60,observed_digest=value)
+    with pytest.raises(api.CollectionExecutionError):store.record_replay_failure(digest(pending),now_sim_t_s=59)
+    assert store.journal.path.read_bytes() == before
+    store.record_replay_failure(digest(pending),now_sim_t_s=60)
+    status=store.recovery_state()
+    assert status["replay_failure"]["observed_digest"] is None
+    status["replay_failure"]["reason"]="mutated"
+    assert store.recovery_state()["replay_failure"]["reason"] == "REPLAY_MISMATCH"
+    with pytest.raises(api.CollectionExecutionError):store.record_replay_failure(digest(pending),now_sim_t_s=61)
+    with pytest.raises(api.CollectionExecutionError):store.arbitrate(WAIT,120,view())
