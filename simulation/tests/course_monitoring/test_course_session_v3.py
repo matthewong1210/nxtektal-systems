@@ -370,6 +370,64 @@ def test_runtime_status_committed_mismatch_is_read_only_but_run_seals(
     ] == "REPLAY_MISMATCH"
 
 
+@pytest.mark.parametrize(
+    ("drift", "message"),
+    [
+        ("policy", "committed policy prefix"),
+        ("simulator", "committed simulator result"),
+    ],
+)
+def test_execution_admission_seals_existing_committed_mismatch(
+    runner, tmp_path, monkeypatch, drift, message
+):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    store = session(runner, tmp_path, compiled=compiled).store
+    record_kinds_before = [row.record_kind for row in store.journal.read()]
+
+    with monkeypatch.context() as mismatch:
+        if drift == "policy":
+            def mismatched_policy(runtime):
+                robot_id = runtime.env.scenario.robot_ids[0]
+                return runtime._action(
+                    runtime.env.catalog.index_of(f"pause_robot({robot_id})")
+                )
+
+            mismatch.setattr(runner.V3Session, "_policy_action", mismatched_policy)
+        else:
+            mismatch.setattr(
+                runner.V3Session,
+                "_post_state_digest",
+                lambda _runtime, _executions: "d" * 64,
+            )
+
+        with pytest.raises(runner.ReplayMismatch, match=message):
+            with runner.execution_admission(tmp_path):
+                pytest.fail("mismatched prefix exposed authorization authority")
+
+    restored = session(runner, tmp_path, compiled=compiled).store
+    assert restored.recovery_state()["status"] == "REPLAY_MISMATCH"
+    assert [row.record_kind for row in restored.journal.read()] == [
+        *record_kinds_before,
+        "committed_replay_failure",
+    ]
+    with pytest.raises(runner.ReplayMismatch, match="sealed"):
+        with runner.execution_admission(tmp_path):
+            pytest.fail("sealed prefix exposed authorization authority")
+
+
+def test_execution_admission_does_not_initialize_a_missing_root(runner, tmp_path):
+    missing = tmp_path / "missing-session"
+
+    with pytest.raises(FileNotFoundError):
+        with runner.execution_admission(missing):
+            pytest.fail("missing session exposed authorization authority")
+
+    assert not missing.exists()
+
+
 def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(runner, tmp_path):
     v3 = session(runner, tmp_path)
     robot, zone = v3.env.scenario.robot_ids[0], v3.env.scenario.zone_ids[0]

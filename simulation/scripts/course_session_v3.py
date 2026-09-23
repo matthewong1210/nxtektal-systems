@@ -552,6 +552,12 @@ class V3Session:
             initialize_session=False, seal_mismatch=False
         )
 
+    def _admission_prefix_unlocked(self):
+        """Seal drift in an existing prefix without initializing a new one."""
+        return self._reconstruct_prefix_unlocked(
+            initialize_session=False, seal_mismatch=True
+        )
+
     def _recover_prefix_unlocked(self):
         """Initialize when needed and durably seal committed replay drift."""
         return self._reconstruct_prefix_unlocked(
@@ -725,17 +731,32 @@ def _validate_saved_runtime(saved, session, recovery):
         raise ValueError("persisted V3 state differs from the validated execution prefix")
 
 
-def _validated_read_runtime(root):
+def _existing_runtime(root):
     config, compiled, saved = _load_root(root, None)
     control = _read_control(root)
     session = V3Session(root, config, compiled)
-    _, recovery = session._verify_prefix_unlocked()
+    return session, saved, control
+
+
+def _validated_external_runtime(session, saved, control, recovery):
     if recovery["status"] in {"PREPARED_NO_COMMIT", "COMMITTED_CURSOR_STALE"}:
         raise ReplayMismatch("V3 session recovery is required before external access")
     if recovery["status"] not in {"NO_PREPARED", "COMMITTED_OUTBOX_UNCONFIRMED"}:
         raise ReplayMismatch("V3 session is not available for external access")
     _validate_saved_runtime(saved, session, recovery)
     return session, saved, control
+
+
+def _validated_read_runtime(root):
+    session, saved, control = _existing_runtime(root)
+    _, recovery = session._verify_prefix_unlocked()
+    return _validated_external_runtime(session, saved, control, recovery)
+
+
+def _validated_admission_runtime(root):
+    session, saved, control = _existing_runtime(root)
+    _, recovery = session._admission_prefix_unlocked()
+    return _validated_external_runtime(session, saved, control, recovery)
 
 
 def run(root, config=None, *, crash_hook=None):
@@ -811,7 +832,7 @@ def execution_admission(root):
     if root.is_symlink():
         raise ValueError("V3 session root must not be a symlink")
     with _lock(root / ".session.lock"):
-        session, _, _ = _validated_read_runtime(root)
+        session, _, _ = _validated_admission_runtime(root)
         yield ExecutionAdmission(
             store=session.store,
             identity=deepcopy(session.identity),
