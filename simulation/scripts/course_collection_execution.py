@@ -203,6 +203,13 @@ def _quantity(milestone, destination):
                 assignment_id=None, source_event_ids=[], event_digest=None, destination_id=destination)
 
 
+def _receipt(request, sequence, high_water):
+    return dict(schema="nxt-collection-execution-request-receipt/v1", environment="SIMULATION",
+                request_id=request["request_id"], request_digest=digest(request), binding_id=request["binding_id"],
+                execution_id=request["execution_id"], attempt_id="attempt-" + request["execution_id"],
+                sequence=sequence, request_log_high_water_digest=high_water, durable=True)
+
+
 def _execution(b, req, receipt, policy):
     r = {k: b[k] for k in ("binding_id", "session_id", "round_id", "task_id", "incarnation", "runtime_robot_id", "runtime_zone_id", "handoff_station_id", "max_execution_s")}
     r.update({k: req[k] for k in ("request_id", "execution_id", "eligible_sim_t_s", "latest_start_sim_t_s")})
@@ -257,9 +264,13 @@ def _runtime(r, snapshot, now, *, prefix_complete=True):
                 and len({v.get("event_id") for v in events}) == len(events)
                 and all(v.get("assignment_id") == e["assignment_id"] and v.get("execution_id") == r["execution_id"]
                         and v.get("robot_id") == r["runtime_robot_id"] and v.get("zone_id") == r["runtime_zone_id"] for v in events))
+    # Native collection exit is an immutable first boundary. Wire result cause
+    # additionally reflects any later abnormal assignment terminal.
+    terminal = e.get("terminal_reason")
+    causal = terminal if terminal and terminal != "UNLOADED_ALL_COLLECTED_BALLS" else e.get("collection_exit_reason")
     runtime = r["runtime_evidence"]
     runtime.update(start_admitted=True, assignment_accepted=True, assignment_terminal=e.get("terminal_reason") is not None,
-                   collection_exit_reason=e.get("collection_exit_reason"), event_sequence_complete=complete,
+                   collection_exit_reason=causal, event_sequence_complete=complete,
                    event_start_sequence=1 if events else None, event_end_sequence=len(events) if events else None,
                    event_digest=e.get("event_digest"), conservation_passed=e.get("ledger_conserved"), payload_parity_passed=e.get("robot_payload_parity"))
     for key, total in (("raw_quantity", "raw_collected_balls"), ("unload_quantity", "unloaded_balls")):
@@ -279,7 +290,6 @@ def _runtime(r, snapshot, now, *, prefix_complete=True):
         r["conflicts"]["missing_events"] = True
         for key in ("raw_quantity", "unload_quantity"):
             r[key].update(status="INCOMPLETE", balls=None)
-        causal = e.get("collection_exit_reason")
         reason = causal if causal in {"POLICY_PREEMPTED", "ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED", "EXECUTION_TIMEOUT"} else "EVIDENCE_INCOMPLETE"
         _terminal(r, "INCONCLUSIVE", reason, e.get("terminal_sim_t_s") if e.get("terminal_sim_t_s") is not None else now)
         return
@@ -292,7 +302,7 @@ def _runtime(r, snapshot, now, *, prefix_complete=True):
         success = (e["terminal_reason"] == "UNLOADED_ALL_COLLECTED_BALLS" and e["collection_exit_reason"] == "ROBOT_PAYLOAD_FULL"
                    and raw > 0 and unloaded == raw and e["terminal_sim_t_s"] <= r["execution_deadline_sim_t_s"]
                    and not any(r["conflicts"].values()) and not r["device_protection"]["protected"])
-        reason = "UNLOADED_ALL_COLLECTED_BALLS" if success else e["collection_exit_reason"] or e["terminal_reason"]
+        reason = "UNLOADED_ALL_COLLECTED_BALLS" if success else causal or terminal
         _terminal(r, "SUCCEEDED" if success else "PARTIAL" if raw > 0 else "FAILED", reason, e["terminal_sim_t_s"])
     else:
         r.update(state="RUNNING", stage="RAW_COLLECTED_TO_ROBOT" if raw else "TRAVEL_TO_COLLECTION")
@@ -314,6 +324,7 @@ class CollectionExecutionStore:
                      replay_digest=digest({"session": self.session_identity, "policy_id": self.policy_id, "arbiter": ARBITER}),
                      pending_prepared=None, commits={}, outbox={}, confirmed={}, cursor=None, now_sim_t_s=0,
                      request_high_water=digest([]), edge_without_commit=False)
+        receipt_records = set()
         session = False
         for rec in records:
             p, kind = primitive(rec.payload), rec.record_kind
@@ -334,17 +345,29 @@ class CollectionExecutionStore:
                 _require(p["binding_id"] in state["bindings"] and p["binding_id"] not in state["windows"], "orphan or repeated binding window")
                 state["windows"][p["binding_id"]] = p
             elif kind == "request":
+                _validate(p, "ExecutionRequest")
                 _require(p["request_id"] not in state["requests"], "duplicate request record")
+                b = state["bindings"].get(p["binding_id"])
+                _require(b is not None, "unknown request binding")
+                window = state["windows"][b["binding_id"]]
+                _require(all(p[k] == window[k] for k in ("due_at_utc", "expires_at_utc"))
+                         and p == make_request(b, p["request_id"], p["due_at_utc"], p["expires_at_utc"])
+                         and p["eligible_sim_t_s"] < p["latest_start_sim_t_s"], "request identity or clock mismatch")
+                _require(p["execution_id"] not in state["executions"], "duplicate logical execution")
                 state["requests"][p["request_id"]] = p
                 state["request_high_water"] = digest({"previous":state["request_high_water"], "request":p, "record_id":rec.record_id})
+                # A complete canonical request is the semantic commit. Receipt
+                # is deterministic readback, including after a request-only tail.
+                receipt = _receipt(p, len(state["requests"]), state["request_high_water"])
+                state["receipts"][p["request_id"]] = receipt
+                state["executions"][p["execution_id"]] = _execution(b, p, receipt, self.policy_id)
             elif kind == "receipt":
-                req = state["requests"].get(p["request_id"])
-                _require(req is not None and p["request_digest"] == digest(req) and p["request_log_high_water_digest"] == state["request_high_water"], "receipt/request mismatch")
-                _require(p["request_id"] not in state["receipts"] and p["execution_id"] not in state["executions"], "duplicate receipt")
-                state["receipts"][p["request_id"]] = p
-                state["executions"][p["execution_id"]] = _execution(state["bindings"][req["binding_id"]], req, p, self.policy_id)
+                _require(p == state["receipts"].get(p["request_id"]), "receipt/request mismatch")
+                _require(p["request_id"] not in receipt_records, "duplicate receipt")
+                receipt_records.add(p["request_id"])
             elif kind == "accepted":
                 r = state["executions"][p["execution_id"]]
+                _require(r["state"] not in TERMINALS, "acceptance after terminal execution")
                 state["accepted"].add(p["execution_id"])
                 r["edge_evidence"].update(accepted=True, effective_state="ACCEPTED", verified=True, result_verification="VERIFIED")
                 r["edge_evidence"]["event_ids"].append(p["event_id"])
@@ -376,14 +399,22 @@ class CollectionExecutionStore:
                 state["cursor"] = p
             elif kind == "device_restart":
                 r = state["executions"][p["execution_id"]]
-                if r["state"] not in TERMINALS:
-                    event = TaskEvent.from_dict(p["edge_record"]["payload"]["event"])
-                    unknown = event.reason_code == "interrupted_execution_unknown_outcome"
+                event = TaskEvent.from_dict(p["edge_record"]["payload"]["event"])
+                unknown = event.reason_code == "interrupted_execution_unknown_outcome"
+                terminals = sorted(set(r["edge_evidence"]["terminal_states"]) | {event.kind.value})
+                if len(terminals) > 1:
+                    _terminal(r, "INCONCLUSIVE", "TERMINAL_CONFLICT", p["now_sim_t_s"])
+                    r["conflicts"]["terminal_conflict"] = True
+                    _protect(r, "TERMINAL_CONFLICT")
+                    r["edge_evidence"].update(effective_state="CONFLICT", verified=False, result_verification="CONFLICT")
+                elif r["state"] not in TERMINALS:
                     _terminal(r, event.kind.value, "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" if unknown else "NOT_STARTED_AFTER_RESTART", p["now_sim_t_s"])
-                    r["edge_evidence"]["event_ids"].append(p["edge_record"]["record_id"])
                     if unknown:
                         for key in ("raw_quantity", "unload_quantity"): r[key].update(status="INCOMPLETE", balls=None)
                         r["runtime_evidence"]["event_sequence_complete"] = False
+                if unknown: _protect(r, "RESTART_UNKNOWN")
+                r["edge_evidence"]["terminal_states"] = terminals
+                r["edge_evidence"]["event_ids"].append(p["edge_record"]["record_id"])
                 state["now_sim_t_s"] = max(state["now_sim_t_s"], p["now_sim_t_s"])
             elif kind == "edge_evidence":
                 r = state["executions"][p["execution_id"]]
@@ -450,10 +481,7 @@ class CollectionExecutionStore:
             # importing its private helper; verifies receipt read-back below.
             record_id = "rec_" + digest(dict(sequence=len(records)+1, record_kind=spec.record_kind, origin=spec.origin, recorded_at_utc=spec.recorded_at_utc, payload=request))[:24]
             hwm = digest({"previous":state["request_high_water"], "request":request, "record_id":record_id})
-            receipt = dict(schema="nxt-collection-execution-request-receipt/v1", environment="SIMULATION", request_id=request["request_id"],
-                           request_digest=digest(request), binding_id=b["binding_id"], execution_id=request["execution_id"],
-                           attempt_id="attempt-" + request["execution_id"], sequence=len(state["requests"])+1,
-                           request_log_high_water_digest=hwm, durable=True)
+            receipt = _receipt(request, len(state["requests"])+1, hwm)
             result.update(receipt)
             return [spec, self._spec("receipt", receipt, now)]
         try:
@@ -474,6 +502,7 @@ class CollectionExecutionStore:
             if execution_id in state["accepted"]:
                 _require(event_id in state["executions"][execution_id]["edge_evidence"]["event_ids"], "acceptance conflict")
                 return []
+            _require(state["executions"][execution_id]["state"] not in TERMINALS, "acceptance after terminal execution")
             return [self._spec("accepted", dict(execution_id=execution_id, event_id=event_id), state["now_sim_t_s"])]
         self.journal.append_via(build)
 
@@ -546,6 +575,8 @@ class CollectionExecutionStore:
             action = {k:deepcopy(d[k]) for k in ("sim_t_s", "original_action", "selected_action", "selection", "eligible_pending")}
             shield = result["safety_shield"]
             action.update(safety_shield="ACCEPTED" if shield["allowed"] else "REJECTED", safety_reason=None if shield["allowed"] else shield["reason"])
+            if not shield["allowed"] and action["selection"] in ("ORIGINAL_POLICY_CONVERGED", "POLICY_PREEMPTED"):
+                action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
             _validate(action, "ActionDecision")
             r["actions"].append(action)
             if d["selection"] == "WAIT_SLOT" and not shield["allowed"]:
@@ -564,6 +595,11 @@ class CollectionExecutionStore:
                 prefix_complete = previous is None or snapshot.get("events",[])[:len(previous["events"])] == previous["events"]
                 _runtime(rows[eid], snapshot, now, prefix_complete=prefix_complete)
         for r in rows.values():
+            if r["state"] == "PENDING":
+                if max(now, r["eligible_sim_t_s"]) + r["max_execution_s"] > self.session_identity["session_end_sim_t_s"]:
+                    _terminal(r, "MISSED", "INSUFFICIENT_SESSION_HORIZON", now)
+                elif now >= r["latest_start_sim_t_s"]:
+                    _terminal(r, "MISSED", "POLICY_SLOT_MISSED", now)
             if r["state"] == "RUNNING" and (now >= r["execution_deadline_sim_t_s"] or result["runtime_snapshots"].get(r["execution_id"]) is None):
                 r["conflicts"]["missing_events"] = True
                 r["runtime_evidence"]["event_sequence_complete"] = False
@@ -655,7 +691,11 @@ class CollectionExecutionStore:
             _require(event.task_id == r["task_id"] and event.incarnation == r["incarnation"] and event.robot_id == b["robot_id"]
                      and event.site_id == b["site_id"] and event.deployment_id == b["deployment_id"], "restart evidence identity mismatch")
             _require((r["started_sim_t_s"] is None) == (event.kind.value == "FAILED"), "Edge restart differs from committed start evidence")
-            if s["executions"][execution_id]["state"] in TERMINALS: return []
+            for record in records:
+                if record.record_kind == "device_restart" and record.payload["edge_record"]["record_id"] == evidence["record_id"]:
+                    _require(record.payload["execution_id"] == execution_id and primitive(record.payload["edge_record"]) == evidence, "restart evidence conflict")
+                    return []
+            _require(now_sim_t_s >= s["now_sim_t_s"], "restart evidence clock regression")
             return [self._spec("device_restart", dict(execution_id=execution_id, now_sim_t_s=now_sim_t_s, edge_record=evidence), now_sim_t_s)]
         self.journal.append_via(build)
 

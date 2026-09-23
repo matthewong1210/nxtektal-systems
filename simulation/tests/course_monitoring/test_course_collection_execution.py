@@ -411,7 +411,7 @@ def test_unknown_quantity_preserves_causal_exit_and_protection(api,tmp_path,reas
     assert r["raw_quantity"]["balls"] is None
 
 
-def test_actual_task1_snapshot_unload_passes_frozen_oracle(api, tmp_path):
+def live_store(api, tmp_path):
     from nxt_range_ops.core import ledger
     from nxt_range_ops.core.skills import SkillOutcome, SkillOutcomeModel, SkillType
     from nxt_range_ops.env.range_ops_env import RangeOpsEnv
@@ -437,15 +437,140 @@ def test_actual_task1_snapshot_unload_passes_frozen_oracle(api, tmp_path):
     collect=dict(COLLECT,target_id="Z1",index=env.catalog.index_of("assign_collection(R1,Z1)"))
     unload=dict(UNLOAD,index=env.catalog.index_of("send_to_handoff(R1)"))
     runtime=view();runtime["catalog_actions"]=[WAIT,collect,unload]
-    for original in (WAIT,unload):
-        now=env.sim.now
-        d=store.arbitrate(original,now,runtime)
-        p=store.prepare_tick(d,previous_cursor=store.replay()["tick_sequence"],previous_digest=store.replay()["replay_digest"])
-        if d["selection"] == "WAIT_SLOT":
-            env.arm_collection_assignment(req["execution_id"],"R1","Z1","H1",now+660)
-        _,_,_,_,info=env.step(d["selected_action"]["index"])
-        c=store.commit_tick(p,now_sim_t_s=env.sim.now,runtime_snapshots={req["execution_id"]:env.collection_assignment_snapshot(req["execution_id"])},safety_shield=info["shield"],post_state_digest="a"*64)
-        store.publish_cursor(c["tick_sequence"],c["replay_digest"])
-        for entry in store.committed_outbox(unconfirmed_only=True):store.confirm_outbox(entry["outbox_id"],"e-"+entry["outbox_id"])
+    return env,store,req,runtime,unload
+
+
+def live_tick(env,store,req,runtime,original):
+    now=env.sim.now
+    d=store.arbitrate(original,now,runtime)
+    p=store.prepare_tick(d,previous_cursor=store.replay()["tick_sequence"],previous_digest=store.replay()["replay_digest"])
+    if d["selection"] == "WAIT_SLOT":
+        env.arm_collection_assignment(req["execution_id"],"R1","Z1","H1",now+660)
+    _,_,_,_,info=env.step(d["selected_action"]["index"])
+    c=store.commit_tick(p,now_sim_t_s=env.sim.now,runtime_snapshots={req["execution_id"]:env.collection_assignment_snapshot(req["execution_id"])},safety_shield=info["shield"],post_state_digest="a"*64)
+    store.publish_cursor(c["tick_sequence"],c["replay_digest"])
+    for entry in store.committed_outbox(unconfirmed_only=True):store.confirm_outbox(entry["outbox_id"],"e-"+entry["outbox_id"])
+    return c
+
+
+def test_actual_task1_snapshot_unload_passes_frozen_oracle(api, tmp_path):
+    env,store,req,runtime,unload=live_store(api,tmp_path)
+    for original in (WAIT,unload): live_tick(env,store,req,runtime,original)
     r=conform(store)["executions"][0]
     assert r["state"] == "SUCCEEDED" and r["raw_quantity"]["balls"] == 20 and r["unload_quantity"]["balls"] == 20
+
+
+def test_restart_unknown_overlays_unconfirmed_success_and_survives_late_delivery(api,tmp_path):
+    store,_,req=setup(api,tmp_path)
+    tick(store,60,snapshots={req["execution_id"]:assignment(req)})
+    p=store.prepare_tick(store.arbitrate(UNLOAD,120,view()),previous_cursor=1,previous_digest=store.replay()["replay_digest"])
+    c=store.commit_tick(p,now_sim_t_s=180,runtime_snapshots={req["execution_id"]:assignment(req,terminal=True)},safety_shield={"allowed":True,"reason":None},post_state_digest="a"*64)
+    assert c["executions"][req["execution_id"]]["state"] == "SUCCEEDED"
+    restart(store,req,tmp_path,running=True,now=180)
+    assert any(r.record_kind == "device_restart" for r in store.journal.read())
+    evidence=JsonlJournal(tmp_path/"device.jsonl").read()[-1]
+    before=store.journal.path.read_bytes()
+    store.record_device_restart_outcome(req["execution_id"],evidence,now_sim_t_s=180)
+    assert store.journal.path.read_bytes() == before
+    for entry in store.committed_outbox(unconfirmed_only=True):store.confirm_outbox(entry["outbox_id"],"late-"+entry["outbox_id"])
+    r=conform(store)["executions"][0]
+    assert r["state"] == "INCONCLUSIVE" and not r["success_display_allowed"]
+    assert r["conflicts"]["terminal_conflict"] and r["device_protection"]["authorization_blocked"]
+    assert set(r["edge_evidence"]["terminal_states"]) == {"SUCCEEDED","INCONCLUSIVE"}
+    assert r["edge_evidence"]["effective_state"] == r["edge_evidence"]["result_verification"] == "CONFLICT"
+    assert evidence.record_id in r["edge_evidence"]["event_ids"]
+    assert store.replay()["commits"][2] == c
+    reopened=api.CollectionExecutionStore(store.journal.path,store.session_identity)
+    assert conform(reopened) == conform(store)
+
+
+@pytest.mark.parametrize("cause",["POLICY_PREEMPTED","EXECUTION_TIMEOUT"])
+def test_actual_full_payload_keeps_later_terminal_cause(api,tmp_path,cause):
+    env,store,req,runtime,_=live_store(api,tmp_path)
+    live_tick(env,store,req,runtime,WAIT)
+    assert env.collection_assignment_snapshot(req["execution_id"])["collection_exit_reason"] == "ROBOT_PAYLOAD_FULL"
+    if cause == "POLICY_PREEMPTED":
+        action=dict(PAUSE,index=env.catalog.index_of("pause_robot(R1)"))
+        runtime["catalog_actions"].append(action)
+        last=live_tick(env,store,req,runtime,action)
+    else:
+        while env.sim.now < 720:last=live_tick(env,store,req,runtime,WAIT)
+    native=env.collection_assignment_snapshot(req["execution_id"])
+    assert native["collection_exit_reason"] == "ROBOT_PAYLOAD_FULL" and native["terminal_reason"] == cause
+    assert last["result"]["runtime_snapshots"][req["execution_id"]] == native
+    r=conform(store)["executions"][0]
+    assert r["state"] == "PARTIAL" and r["reason"] == r["runtime_evidence"]["collection_exit_reason"] == cause
+
+
+@pytest.mark.parametrize("horizon,now,reason",[(3600,240,"POLICY_SLOT_MISSED"),(950,240,"INSUFFICIENT_SESSION_HORIZON")])
+def test_nonwait_step_crosses_pending_gate_at_commit(api,tmp_path,horizon,now,reason):
+    identity,planning,edge=inputs(tmp_path)
+    identity["session_end_sim_t_s"]=horizon
+    store=api.CollectionExecutionStore(tmp_path/"execution.jsonl",identity)
+    b=store.bind_confirmed_tasks(planning,edge,identity,60)[0]
+    req=api.make_request(b,"r","2026-09-16T00:01:00Z","2026-09-16T00:05:00Z")
+    store.submit(req);store.record_acceptance(req["execution_id"],"accepted")
+    tick(store,now,action=PAUSE)
+    r=conform(store)["executions"][0]
+    assert r["state"] == "MISSED" and r["reason"] == reason and r["terminal_sim_t_s"] == 300
+    assert r["assignment_id"] is None and not r["actions"]
+
+
+def test_late_acceptance_cannot_regress_preacceptance_terminal(api,tmp_path):
+    identity,planning,edge=inputs(tmp_path)
+    identity["session_end_sim_t_s"]=700
+    store=api.CollectionExecutionStore(tmp_path/"execution.jsonl",identity)
+    b=store.bind_confirmed_tasks(planning,edge,identity,60)[0]
+    req=api.make_request(b,"r","2026-09-16T00:01:00Z","2026-09-16T00:05:00Z")
+    store.submit(req);tick(store,60)
+    before=store.journal.path.read_bytes()
+    with pytest.raises(api.CollectionExecutionError):store.record_acceptance(req["execution_id"],"late-accepted")
+    assert store.journal.path.read_bytes() == before
+    assert conform(store)["executions"][0]["edge_evidence"]["effective_state"] == "REJECTED"
+
+
+@pytest.mark.parametrize("recovery",["retry","query"])
+def test_complete_request_only_tail_recovers_without_second_attempt(api,tmp_path,monkeypatch,recovery):
+    identity,planning,edge=inputs(tmp_path)
+    store=api.CollectionExecutionStore(tmp_path/"execution.jsonl",identity)
+    b=store.bind_confirmed_tasks(planning,edge,identity,60)[0]
+    req=api.make_request(b,"r","2026-09-16T00:01:00Z","2026-09-16T00:05:00Z")
+    append=store.journal.append_via
+    expected={}
+    def interrupted(builder):
+        def request_only(records):
+            specs=builder(records)
+            expected.update(specs[1].payload)
+            return specs[:1]
+        append(request_only)
+        raise OSError("crash after complete request line")
+    monkeypatch.setattr(store.journal,"append_via",interrupted)
+    with pytest.raises(api.CollectionExecutionError,match="result_unknown"):store.submit(req)
+    monkeypatch.setattr(store.journal,"append_via",append)
+    assert store.journal.read()[-1].record_kind == "request"
+    before=store.journal.path.read_bytes()
+    recovered=store.submit(req) if recovery == "retry" else store.request_result("r")
+    assert recovered == expected
+    assert store.journal.path.read_bytes() == before
+    store.record_acceptance(req["execution_id"],"accepted")
+    tick(store,60,snapshots={req["execution_id"]:assignment(req)})
+    snap=conform(store)
+    assert len(snap["requests"]) == len(snap["receipts"]) == len(snap["executions"]) == 1
+    assert sum(r.record_kind == "request" for r in store.journal.read()) == 1
+
+
+def test_real_shield_rejected_reassignment_does_not_preempt(api,tmp_path):
+    env,store,req,runtime,_=live_store(api,tmp_path)
+    live_tick(env,store,req,runtime,WAIT)
+    env.sim._zones["Z2"].is_open=False
+    proposal={"name":"ReassignRobot","index":env.catalog.index_of("reassign_robot(R1,Z2)"),"robot_id":"R1","target_id":"Z2"}
+    runtime["catalog_actions"].append(proposal)
+    native=deepcopy(env.collection_assignment_snapshot(req["execution_id"]))
+    c=live_tick(env,store,req,runtime,proposal)
+    assert not c["result"]["safety_shield"]["allowed"]
+    assert env.collection_assignment_snapshot(req["execution_id"]) == native
+    r=conform(store)["executions"][0]
+    assert r["state"] == "RUNNING" and r["terminal_sim_t_s"] is None
+    action=r["actions"][-1]
+    assert action["selection"] == "ORIGINAL_POLICY_UNCHANGED" and action["safety_shield"] == "REJECTED"
+    assert action["original_action"] == action["selected_action"] == proposal and action["safety_reason"]

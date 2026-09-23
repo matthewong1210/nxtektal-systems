@@ -236,7 +236,8 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
     // Include the terminal-causing tick: an action cannot evade classification by ending its own lease.
     const duringLease = start !== null && start <= a.sim_t_s && (end === null || a.sim_t_s <= end);
     if (duringLease && a.original_action.name !== "Wait" && a.original_action.robot_id === b.runtime_robot_id) {
-      requireEvidence(a.selection === (a.original_action.name === "SendToHandoff" ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED"));
+      requireEvidence(a.selection === (a.safety_shield === "REJECTED" ? "ORIGINAL_POLICY_UNCHANGED" :
+        a.original_action.name === "SendToHandoff" ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED"));
     }
     if (a.selection === "WAIT_SLOT") {
       requireEvidence(a.original_action.name === "Wait" && a.eligible_pending[0]?.execution_id === r.execution_id &&
@@ -252,9 +253,9 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
         a.eligible_pending.every((c) => c.execution_id !== r.execution_id));
     } else {
       requireEvidence(sameAction(a.original_action, selected));
-      if (a.selection === "ORIGINAL_POLICY_CONVERGED") requireEvidence(start !== null && deadline !== null && start < a.sim_t_s && a.sim_t_s < deadline &&
+      if (a.selection === "ORIGINAL_POLICY_CONVERGED") requireEvidence(a.safety_shield === "ACCEPTED" && start !== null && deadline !== null && start < a.sim_t_s && a.sim_t_s < deadline &&
         selected.name === "SendToHandoff" && selected.robot_id === b.runtime_robot_id && selected.target_id === null);
-      if (a.selection === "POLICY_PREEMPTED") requireEvidence(duringLease && selected.name !== "Wait" && selected.robot_id === b.runtime_robot_id);
+      if (a.selection === "POLICY_PREEMPTED") requireEvidence(a.safety_shield === "ACCEPTED" && duringLease && selected.name !== "Wait" && selected.robot_id === b.runtime_robot_id);
     }
   }
   const preempted = r.actions.some((a) => a.selection === "POLICY_PREEMPTED");

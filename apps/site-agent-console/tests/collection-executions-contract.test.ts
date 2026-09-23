@@ -78,6 +78,15 @@ function notStartedAfterRestart() {
 }
 
 describe("collection execution v1 read contract", () => {
+  it.each(["PauseRobot", "SendToHandoff"] as const)("keeps shield-rejected %s as unchanged policy on a running lease", (name) => {
+    const s = running(), r = s.executions[0];
+    const proposal = {name, index: 2, robot_id: r.runtime_robot_id, target_id: null};
+    r.actions.push({sim_t_s: 480, original_action: proposal, selected_action: proposal,
+      selection: "ORIGINAL_POLICY_UNCHANGED", eligible_pending: [], safety_shield: "REJECTED", safety_reason: "unsafe"});
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("RUNNING");
+    r.actions.at(-1)!.selection = name === "SendToHandoff" ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
   it.each(examples)("preserves the frozen %s snapshot exactly", (name) => {
     const input = snapshot(name), before = structuredClone(input);
     expect(parseCollectionExecutions(input)).toEqual(before);
