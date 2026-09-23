@@ -208,13 +208,13 @@
             "latest_start_sim_t_s": 300,
             "started_sim_t_s": null,
             "execution_deadline_sim_t_s": null,
-            "terminal_sim_t_s": 60,
+            "terminal_sim_t_s": 120,
             "max_execution_s": 660,
             "arbiter_version": "WAIT_ONLY_NON_PREEMPTIVE_V1",
             "policy_id": "JointDispatchPolicy-v1",
             "actions": [
               {
-                "sim_t_s": 60,
+                "sim_t_s": 120,
                 "original_action": {
                   "name": "Wait",
                   "index": 0,
@@ -270,7 +270,7 @@
               "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
               "verified": true,
               "effective_state": "FAILED",
-              "reason": "safety_rejected",
+            "reason": "unknown:safety_rejected",
               "terminal_states": [
                 "FAILED"
               ],
@@ -278,7 +278,8 @@
                 "edge-accepted",
                 "edge-failed"
               ],
-              "accepted": true
+              "accepted": true,
+              "result_verification": "VERIFIED"
             },
             "raw_quantity": {
               "milestone": "RAW_COLLECTED_TO_ROBOT",
@@ -287,7 +288,8 @@
               "source": "RANGE_SIMULATION_BALL_LEDGER",
               "assignment_id": null,
               "source_event_ids": [],
-              "event_digest": null
+              "event_digest": null,
+              "destination_id": "R1"
             },
             "unload_quantity": {
               "milestone": "UNLOADED_TO_STATION",
@@ -296,7 +298,8 @@
               "source": "RANGE_SIMULATION_BALL_LEDGER",
               "assignment_id": null,
               "source_event_ids": [],
-              "event_digest": null
+              "event_digest": null,
+              "destination_id": "handoff-1"
             },
             "device_protection": {
               "protected": false,

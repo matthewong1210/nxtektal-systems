@@ -425,6 +425,9 @@
               "type": "null"
             }
           ]
+        },
+        "destination_id": {
+          "$ref": "#/$defs/Id"
         }
       },
       "required": [
@@ -434,7 +437,8 @@
         "source",
         "assignment_id",
         "source_event_ids",
-        "event_digest"
+        "event_digest",
+        "destination_id"
       ],
       "additionalProperties": false,
       "allOf": [
@@ -705,7 +709,9 @@
     "EdgeEvidence": {
       "type": "object",
       "properties": {
-        "accepted": { "type": "boolean" },
+        "accepted": {
+          "type": "boolean"
+        },
         "task_id": {
           "$ref": "#/$defs/Digest"
         },
@@ -725,14 +731,7 @@
           ]
         },
         "reason": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Text"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/EdgeReason"
         },
         "terminal_states": {
           "type": "array",
@@ -755,6 +754,13 @@
           "minItems": 0,
           "maxItems": 10000,
           "uniqueItems": true
+        },
+        "result_verification": {
+          "enum": [
+            "VERIFIED",
+            "UNVERIFIED",
+            "CONFLICT"
+          ]
         }
       },
       "required": [
@@ -764,9 +770,60 @@
         "effective_state",
         "reason",
         "terminal_states",
-        "event_ids"
+        "event_ids",
+        "result_verification"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "result_verification": {
+                "const": "VERIFIED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verified": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "verified": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "effective_state": {
+                "const": "CONFLICT"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result_verification": {
+                "const": "CONFLICT"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "result_verification": {
+                "not": {
+                  "const": "CONFLICT"
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "DeviceProtection": {
       "type": "object",
@@ -1314,6 +1371,42 @@
         "error"
       ],
       "additionalProperties": false
+    },
+    "EdgeReason": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "robot_faulted",
+            "estop_latched",
+            "energy_insufficient",
+            "capability_unavailable",
+            "cannot_continue",
+            "needs_manual_recharge",
+            "unsafe_return_unconfirmed",
+            "not_started_after_restart",
+            "interrupted_execution_unknown_outcome",
+            "robot_busy",
+            "task_expired",
+            "target_mismatch",
+            "site_mismatch",
+            "deployment_mismatch",
+            "simulation_env_mismatch",
+            "task_id_content_conflict",
+            "incarnation_mismatch",
+            "unsupported_task_type",
+            "unsupported_schema",
+            "invalid_request",
+            "unknown_zone"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^unknown:[A-Za-z0-9_.:-]{1,96}$"
+        }
+      ]
     }
   }
 }

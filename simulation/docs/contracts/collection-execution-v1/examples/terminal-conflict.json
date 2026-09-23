@@ -206,15 +206,15 @@
             "reason": "TERMINAL_CONFLICT",
             "eligible_sim_t_s": 60,
             "latest_start_sim_t_s": 300,
-            "started_sim_t_s": 60,
-            "execution_deadline_sim_t_s": 720,
+            "started_sim_t_s": 120,
+            "execution_deadline_sim_t_s": 780,
             "terminal_sim_t_s": 660,
             "max_execution_s": 660,
             "arbiter_version": "WAIT_ONLY_NON_PREEMPTIVE_V1",
             "policy_id": "JointDispatchPolicy-v1",
             "actions": [
               {
-                "sim_t_s": 60,
+                "sim_t_s": 120,
                 "original_action": {
                   "name": "Wait",
                   "index": 0,
@@ -259,13 +259,13 @@
                   "name": "SendToHandoff",
                   "index": 2,
                   "robot_id": "R1",
-                  "target_id": "handoff-1"
+                  "target_id": null
                 },
                 "selected_action": {
                   "name": "SendToHandoff",
                   "index": 2,
                   "robot_id": "R1",
-                  "target_id": "handoff-1"
+                  "target_id": null
                 },
                 "selection": "ORIGINAL_POLICY_CONVERGED",
                 "eligible_pending": [],
@@ -289,7 +289,7 @@
               "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
               "verified": false,
               "effective_state": "CONFLICT",
-              "reason": "terminal_conflict",
+            "reason": "unknown:terminal_conflict",
               "terminal_states": [
                 "SUCCEEDED",
                 "FAILED"
@@ -303,7 +303,8 @@
                 "edge-terminal",
                 "edge-conflicting-terminal"
               ],
-              "accepted": true
+              "accepted": true,
+              "result_verification": "CONFLICT"
             },
             "raw_quantity": {
               "milestone": "RAW_COLLECTED_TO_ROBOT",
@@ -314,7 +315,8 @@
               "source_event_ids": [
                 "collect-cycle-001"
               ],
-              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "destination_id": "R1"
             },
             "unload_quantity": {
               "milestone": "UNLOADED_TO_STATION",
@@ -325,7 +327,8 @@
               "source_event_ids": [
                 "unloaded-001"
               ],
-              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "destination_id": "handoff-1"
             },
             "device_protection": {
               "protected": true,

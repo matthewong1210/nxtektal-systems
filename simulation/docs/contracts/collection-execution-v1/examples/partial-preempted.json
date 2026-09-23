@@ -206,15 +206,15 @@
             "reason": "POLICY_PREEMPTED",
             "eligible_sim_t_s": 60,
             "latest_start_sim_t_s": 300,
-            "started_sim_t_s": 60,
-            "execution_deadline_sim_t_s": 720,
+            "started_sim_t_s": 120,
+            "execution_deadline_sim_t_s": 780,
             "terminal_sim_t_s": 240,
             "max_execution_s": 660,
             "arbiter_version": "WAIT_ONLY_NON_PREEMPTIVE_V1",
             "policy_id": "JointDispatchPolicy-v1",
             "actions": [
               {
-                "sim_t_s": 60,
+                "sim_t_s": 120,
                 "original_action": {
                   "name": "Wait",
                   "index": 0,
@@ -289,7 +289,7 @@
               "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
               "verified": true,
               "effective_state": "FAILED",
-              "reason": "partial_execution",
+            "reason": "unknown:partial_execution",
               "terminal_states": [
                 "FAILED"
               ],
@@ -301,7 +301,8 @@
                 "edge-unloading",
                 "edge-terminal"
               ],
-              "accepted": true
+              "accepted": true,
+              "result_verification": "VERIFIED"
             },
             "raw_quantity": {
               "milestone": "RAW_COLLECTED_TO_ROBOT",
@@ -312,7 +313,8 @@
               "source_event_ids": [
                 "collect-cycle-001"
               ],
-              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "destination_id": "R1"
             },
             "unload_quantity": {
               "milestone": "UNLOADED_TO_STATION",
@@ -321,7 +323,8 @@
               "source": "RANGE_SIMULATION_BALL_LEDGER",
               "assignment_id": "assignment-001",
               "source_event_ids": [],
-              "event_digest": null
+              "event_digest": null,
+              "destination_id": "handoff-1"
             },
             "device_protection": {
               "protected": false,

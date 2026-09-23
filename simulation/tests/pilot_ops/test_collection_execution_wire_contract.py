@@ -86,7 +86,12 @@ def relations(data):
     requests = unique(data["requests"], "request_id")
     receipts = unique(data["receipts"], "request_id")
     executions = unique(data["executions"], "execution_id")
+    assert requests.keys() == receipts.keys(), "orphan request or receipt"
+    unique(data["receipts"], "execution_id")
+    unique(data["receipts"], "attempt_id")
     unique(data["executions"], "attempt_id")
+    unique(data["executions"], "request_id")
+    assert {r["execution_id"] for r in receipts.values()} == executions.keys(), "orphan execution or receipt"
     seen_tasks = set()
     epoch = datetime.fromisoformat(data["session_epoch_utc"].replace("Z", "+00:00"))
     assert datetime.fromisoformat(data["simulation_time_utc"].replace("Z", "+00:00")) == epoch + timedelta(seconds=data["now_sim_t_s"])
@@ -121,6 +126,7 @@ def relations(data):
         binding = bindings[record["binding_id"]]
         receipt = receipts[record["request_id"]]
         assert record["execution_id"] == request["execution_id"] == receipt["execution_id"]
+        assert record["binding_id"] == request["binding_id"] == receipt["binding_id"]
         assert record["attempt_id"] == receipt["attempt_id"]
         for key in ("session_id", "round_id", "task_id", "incarnation", "runtime_robot_id", "runtime_zone_id", "handoff_station_id", "max_execution_s"):
             assert record[key] == binding[key], key
@@ -136,6 +142,14 @@ def relations(data):
             assert start <= data["now_sim_t_s"]
             assert record["assignment_id"] is not None
             assert record["runtime_evidence"]["assignment_accepted"]
+            starts = [a for a in record["actions"] if a["sim_t_s"] == start
+                      and a["selected_action"]["name"] == "AssignCollection"]
+            assert len(starts) == 1, "start requires one accepted collection action"
+            initial = starts[0]
+            assert initial["selection"] == "WAIT_SLOT"
+            assert initial["safety_shield"] == "ACCEPTED"
+            assert initial["selected_action"]["robot_id"] == binding["runtime_robot_id"]
+            assert initial["selected_action"]["target_id"] == binding["runtime_zone_id"]
         if record["state"] in ("PENDING", "RUNNING"):
             assert end is None and record["reason"] is None and record["stage"] != "TERMINAL"
         else:
@@ -148,6 +162,12 @@ def relations(data):
             assert previous <= action["sim_t_s"] <= data["now_sim_t_s"]
             previous = action["sim_t_s"]
             candidates = action["eligible_pending"]
+            unique(candidates, "execution_id")
+            for candidate in candidates:
+                assert candidate["eligible_sim_t_s"] <= action["sim_t_s"] < candidate["latest_start_sim_t_s"]
+                if candidate["execution_id"] == record["execution_id"]:
+                    for key in ("eligible_sim_t_s", "latest_start_sim_t_s"):
+                        assert candidate[key] == record[key]
             assert candidates == sorted(candidates, key=lambda x: (x["latest_start_sim_t_s"], x["eligible_sim_t_s"], x["execution_id"]))
             if action["selection"] == "WAIT_SLOT":
                 assert action["original_action"]["name"] == "Wait"
@@ -157,10 +177,12 @@ def relations(data):
             if action["selection"] == "ORIGINAL_POLICY_CONVERGED":
                 assert action["selected_action"]["name"] == "SendToHandoff"
                 assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
-                assert action["selected_action"]["target_id"] == binding["handoff_station_id"]
+                assert action["selected_action"]["target_id"] is None
         raw, unload = record["raw_quantity"], record["unload_quantity"]
         for quantity, milestone in ((raw, "RAW_COLLECTED_TO_ROBOT"), (unload, "UNLOADED_TO_STATION")):
             assert quantity["milestone"] == milestone
+            destination = binding["runtime_robot_id"] if milestone == "RAW_COLLECTED_TO_ROBOT" else binding["handoff_station_id"]
+            assert quantity["destination_id"] == destination
             if quantity["status"] == "COMPLETE":
                 assert quantity["source_event_ids"] and quantity["event_digest"] is not None
                 assert quantity["assignment_id"] == record["assignment_id"]
@@ -174,6 +196,27 @@ def relations(data):
         protection = record["device_protection"]
         assert protection["protected"] == bool(protection["reasons"])
         assert not protection["protected"] or protection["authorization_blocked"]
+        terminals = set(edge["terminal_states"])
+        conflict = len(terminals) > 1 or record["conflicts"]["terminal_conflict"] or record["conflicts"]["replay_mismatch"]
+        assert edge["verified"] == (edge["result_verification"] == "VERIFIED")
+        if conflict:
+            assert record["state"] == "INCONCLUSIVE"
+            assert edge["effective_state"] == "CONFLICT"
+            assert edge["result_verification"] == "CONFLICT"
+            assert not edge["verified"] and not record["success_display_allowed"]
+            assert protection["protected"] and protection["authorization_blocked"]
+            if len(terminals) > 1:
+                assert record["conflicts"]["terminal_conflict"]
+                assert "TERMINAL_CONFLICT" in protection["reasons"]
+        else:
+            assert edge["effective_state"] != "CONFLICT" and edge["result_verification"] != "CONFLICT"
+            if terminals:
+                assert terminals == {edge["effective_state"]}
+        if edge["effective_state"] in ("SUCCEEDED", "FAILED", "REJECTED"):
+            assert terminals == {edge["effective_state"]}
+            assert edge["result_verification"] == "VERIFIED"
+        if record["state"] == "INCONCLUSIVE" and not conflict:
+            assert edge["result_verification"] == "UNVERIFIED"
         if record["state"] in ("MISSED", "REJECTED"):
             assert edge["effective_state"] == ("FAILED" if edge["accepted"] else "REJECTED")
         if record["state"] == "PENDING":
@@ -188,13 +231,19 @@ def relations(data):
             assert runtime["start_admitted"] and runtime["assignment_accepted"]
             assert runtime["conservation_passed"] and runtime["payload_parity_passed"]
             assert runtime["assignment_terminal"] and runtime["event_sequence_complete"]
+            assert runtime["event_start_sequence"] is not None
+            assert runtime["event_end_sequence"] is not None
+            assert runtime["event_start_sequence"] <= runtime["event_end_sequence"]
+            assert runtime["event_digest"] is not None
             assert runtime["collection_exit_reason"] == "ROBOT_PAYLOAD_FULL"
             assert not any(record["conflicts"].values())
             assert not record["device_protection"]["protected"]
-            assert edge["effective_state"] == "SUCCEEDED" and edge["verified"]
+            assert edge["effective_state"] == "SUCCEEDED" and edge["verified"] and edge["accepted"]
         elif record["state"] == "PARTIAL":
-            assert edge["effective_state"] == "FAILED" and edge["reason"] == "partial_execution"
+            assert edge["effective_state"] == "FAILED" and edge["reason"] == "unknown:partial_execution"
             assert raw["status"] == "COMPLETE" and raw["balls"] > 0
+            assert unload["status"] != "INCOMPLETE"
+            assert runtime["event_sequence_complete"]
         elif record["state"] == "INCONCLUSIVE":
             assert edge["effective_state"] in ("INCONCLUSIVE", "CONFLICT")
             assert record["device_protection"]["protected"]
@@ -204,7 +253,7 @@ def relations(data):
             assert record["state"] == "INCONCLUSIVE"
             assert record["device_protection"]["protected"]
         if edge["effective_state"] == "CONFLICT":
-            assert record["conflicts"]["terminal_conflict"]
+            assert record["conflicts"]["terminal_conflict"] or record["conflicts"]["replay_mismatch"]
         if record["reason"] == "POLICY_SLOT_MISSED":
             assert start is None and end >= request["latest_start_sim_t_s"]
         if edge["reason"] == "interrupted_execution_unknown_outcome":
@@ -368,6 +417,7 @@ def test_post_acceptance_exits_are_edge_failed_not_rejected(schema, name):
     with pytest.raises(AssertionError):
         validate_snapshot(schema, data)
     edge["accepted"] = False
+    edge["terminal_states"] = ["REJECTED"]
     validate_snapshot(schema, data)
 
 
@@ -397,3 +447,97 @@ def test_identity_conflict_preserves_rejected_input_without_an_attempt():
     assert rejected["incarnation"] != data["bindings"][0]["incarnation"]
     assert fixture["bodies"][0]["body"]["error"]["code"] == "collection_execution_conflict"
     assert data["requests"] == data["receipts"] == data["executions"] == []
+
+
+@pytest.mark.parametrize(("path", "value"), [
+    (("edge_evidence", "terminal_states"), ["SUCCEEDED", "FAILED"]),
+    (("edge_evidence", "terminal_states"), ["FAILED"]),
+    (("edge_evidence", "accepted"), False),
+    (("runtime_evidence", "event_start_sequence"), None),
+    (("runtime_evidence", "event_end_sequence"), None),
+    (("runtime_evidence", "event_digest"), None),
+    (("actions", 0, "selected_action", "robot_id"), "R2"),
+    (("actions", 0, "selected_action", "target_id"), "OTHER_ZONE"),
+    (("actions", 0, "safety_shield"), "REJECTED"),
+    (("actions", 0, "eligible_pending", 2, "eligible_sim_t_s"), 180),
+    (("actions", 0, "eligible_pending", 0, "latest_start_sim_t_s"), 60),
+])
+def test_review_success_contradictions_are_rejected(schema, path, value):
+    data = snapshot()
+    target = data["executions"][0]
+    for part in path[:-1]:
+        target = target[part]
+    target[path[-1]] = value
+    with pytest.raises((ValidationError, AssertionError)):
+        validate_snapshot(schema, data)
+
+
+def test_review_orphan_receipt_is_rejected(schema):
+    data = snapshot()
+    orphan = copy.deepcopy(data["receipts"][0])
+    orphan["request_id"] = "orphan-request"
+    data["receipts"].append(orphan)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_review_partial_with_incomplete_unload_is_not_conclusive(schema):
+    data = snapshot("partial-preempted.json")
+    data["executions"][0]["unload_quantity"]["status"] = "INCOMPLETE"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_review_handoff_action_is_generic_and_destination_is_separate():
+    data = snapshot()
+    record, binding = data["executions"][0], data["bindings"][0]
+    handoff = record["actions"][1]
+    assert handoff["original_action"]["target_id"] is None
+    assert handoff["selected_action"]["target_id"] is None
+    assert record["raw_quantity"]["destination_id"] == binding["runtime_robot_id"]
+    assert record["unload_quantity"]["destination_id"] == binding["handoff_station_id"]
+
+
+def test_review_every_published_pending_candidate_is_currently_eligible():
+    for name in EXPECTED_EXAMPLES:
+        for record in snapshot(name)["executions"]:
+            for action in record["actions"]:
+                for candidate in action["eligible_pending"]:
+                    assert candidate["eligible_sim_t_s"] <= action["sim_t_s"] < candidate["latest_start_sim_t_s"]
+
+
+@pytest.mark.parametrize("collection", ["requests", "receipts", "executions"])
+def test_review_missing_reverse_link_is_rejected(schema, collection):
+    data = snapshot()
+    data[collection] = []
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize(("name", "field", "value"), [
+    ("success.json", "result_verification", "UNVERIFIED"),
+    ("terminal-conflict.json", "result_verification", "VERIFIED"),
+    ("terminal-conflict.json", "verified", True),
+    ("terminal-conflict.json", "effective_state", "SUCCEEDED"),
+])
+def test_review_edge_verification_must_match_result(schema, name, field, value):
+    data = snapshot(name)
+    data["executions"][0]["edge_evidence"][field] = value
+    with pytest.raises((ValidationError, AssertionError)):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("field", ["raw_quantity", "unload_quantity"])
+def test_review_quantity_destination_must_match_binding(schema, field):
+    data = snapshot()
+    data["executions"][0][field]["destination_id"] = "OTHER_DESTINATION"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_review_partial_edge_reason_is_normalized(schema):
+    data = snapshot("partial-preempted.json")
+    assert data["executions"][0]["edge_evidence"]["reason"] == "unknown:partial_execution"
+    data["executions"][0]["edge_evidence"]["reason"] = "partial_execution"
+    with pytest.raises((ValidationError, AssertionError)):
+        validate_snapshot(schema, data)

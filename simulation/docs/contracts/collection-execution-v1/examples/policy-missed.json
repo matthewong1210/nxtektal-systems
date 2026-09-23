@@ -240,11 +240,6 @@
                     "latest_start_sim_t_s": 300
                   },
                   {
-                    "execution_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-                    "eligible_sim_t_s": 120,
-                    "latest_start_sim_t_s": 300
-                  },
-                  {
                     "execution_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
                     "eligible_sim_t_s": 0,
                     "latest_start_sim_t_s": 360
@@ -390,7 +385,7 @@
               "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
               "verified": true,
               "effective_state": "FAILED",
-              "reason": "policy_slot_missed",
+            "reason": "unknown:policy_slot_missed",
               "terminal_states": [
                 "FAILED"
               ],
@@ -398,7 +393,8 @@
                 "edge-accepted",
                 "edge-failed"
               ],
-              "accepted": true
+              "accepted": true,
+              "result_verification": "VERIFIED"
             },
             "raw_quantity": {
               "milestone": "RAW_COLLECTED_TO_ROBOT",
@@ -407,7 +403,8 @@
               "source": "RANGE_SIMULATION_BALL_LEDGER",
               "assignment_id": null,
               "source_event_ids": [],
-              "event_digest": null
+              "event_digest": null,
+              "destination_id": "R1"
             },
             "unload_quantity": {
               "milestone": "UNLOADED_TO_STATION",
@@ -416,7 +413,8 @@
               "source": "RANGE_SIMULATION_BALL_LEDGER",
               "assignment_id": null,
               "source_event_ids": [],
-              "event_digest": null
+              "event_digest": null,
+              "destination_id": "handoff-1"
             },
             "device_protection": {
               "protected": false,

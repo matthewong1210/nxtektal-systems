@@ -70,6 +70,10 @@ every receipt and record references its original included request. Shared
 task/session/round/incarnation/runtime/timing fields agree exactly. No two
 requests may represent the same task/session/binding. V1 has one attempt per
 execution and no hidden retries. Missing or conflicting identities fail closed.
+Request, receipt and execution references are checked in both directions;
+orphan receipts, missing execution records and duplicate receipt execution or
+attempt identities are invalid. The original request ID, binding ID,
+execution ID and attempt ID agree across each linked group.
 
 ## Clocks and explicit maximum
 
@@ -105,20 +109,32 @@ against wall time.
 
 WAIT_ONLY_NON_PREEMPTIVE_V1 calls the unchanged JointDispatchPolicy once per
 tick. Persist original_action and selected_action; action.name is the existing
-directive class name, index is the bound ActionCatalog index, robot_id and
-target_id retain the relevant runtime target (station for handoff). These are
-evidence, not a new command API. The synthetic example uses a one-robot,
+directive class name, index is the bound ActionCatalog index, and robot_id
+retains the runtime robot. AssignCollection target_id is its runtime zone.
+The current generic SendToHandoff(robot_id) has target_id null: the catalog
+does not contain a station-specific action or station-specific index. These
+are evidence, not a new command API. The synthetic example uses a one-robot,
 one-zone catalog: Wait 0, AssignCollection 1, SendToHandoff 2, SendToCharge 3.
 
 A pending proposal fills only an original Wait. Eligible candidates are sorted
 by (latest_start_sim_t_s, eligible_sim_t_s, execution_id); only the first can
 consume that slot. The success example exercises all three tie-break keys.
+Every listed candidate must satisfy eligible <= action.sim_t_s < latest_start;
+future and expired requests do not belong in eligible_pending. The fixture
+starts at 120 seconds so every displayed candidate is eligible; its deadline
+is 780 seconds (120 + 660). A recorded actual start requires exactly one
+WAIT_SLOT AssignCollection at that tick for the bound robot and zone, with
+SafetyShield ACCEPTED. A rejected action cannot prove assignment start.
 At latest_start an unstarted request is MISSED without a late directive.
 Non-Wait original actions remain unchanged. A matching handoff is recorded as
 ORIGINAL_POLICY_CONVERGED; a different action for the leased robot explicitly
 preempts. Other robot/staff actions remain unchanged. Only selected actions
 pass once through ActionCatalog, RangeOpsEnv.step and final SafetyShield.
 Safety rejection does not create an accepted assignment or ledger movement.
+In Phase 3B a generic handoff may count as convergence only when the simulator's
+deterministically resolved station at that tick equals the bound station.
+Quantity destination evidence is retained separately; this contract does not
+claim a new station-specific catalog entry.
 
 ## Lifecycle and quantities
 
@@ -135,6 +151,11 @@ RANGE_SIMULATION_BALL_LEDGER provenance:
 - COMPLETE has integer balls, assignment ID, event IDs and digest.
 - INCOMPLETE has null balls: evidence is missing or conflicting.
 
+destination_id names the bound runtime robot for RAW_COLLECTED_TO_ROBOT and
+the bound station for UNLOADED_TO_STATION. For COMPLETE evidence it identifies
+the proven ledger destination. For NOT_REACHED or INCOMPLETE it only identifies
+the destination whose quantity is unavailable; it does not assert a transfer.
+
 Zero requires complete evidence proving zero transfer. Raw balls sum actual
 assignment-correlated COLLECT_CYCLE ledger moves from zone to robot; unload
 sums task-correlated UNLOADED moves from that robot into the bound station.
@@ -148,6 +169,10 @@ payload parity, complete event sequence and terminal, no identity/replay/event
 conflict and no unresolved protection. Its only reason is
 UNLOADED_ALL_COLLECTED_BALLS. success_display_allowed is true only for that
 verified success. Raw collection alone never implies success.
+Successful runtime event start/end sequences and digest must be present, with
+start sequence <= end sequence. Edge acceptance must also be true. A PARTIAL
+record cannot hide INCOMPLETE unload evidence or an incomplete runtime event
+sequence; those gaps require INCONCLUSIVE instead.
 
 ROBOT_PAYLOAD_FULL normally proceeds to unload. ZONE_EMPTY,
 COLLECTION_ACCESS_BLOCKED, POLICY_PREEMPTED, LOW_BATTERY, ROBOT_FAULT,
@@ -167,17 +192,29 @@ Edge keeps transport/task semantics and carries no quantity authority.
 Durable pending maps to ACCEPTED; actual accepted assignment maps to RUNNING,
 with collecting/raw_collected/returning/unloading progress. V3 SUCCEEDED maps
 to Edge SUCCEEDED only after complete equal unload. V3 PARTIAL maps to FAILED
-with partial_execution. FAILED maps to FAILED, INCONCLUSIVE maps to
+with unknown:partial_execution. FAILED maps to FAILED, INCONCLUSIVE maps to
 INCONCLUSIVE. Misses/rejections map to REJECTED only before Edge acceptance.
 After acceptance (edge_evidence.accepted=true), a policy-slot miss or final
 SafetyShield rejection maps to FAILED with its reason; Edge v1 does not allow
 ACCEPTED -> REJECTED. The V3 state still retains MISSED or REJECTED respectively.
+Edge reasons preserve the existing closed Edge v1 vocabulary. New reason
+tokens use its unknown: prefix, including unknown:policy_slot_missed and
+unknown:safety_rejected; the V3 reason remains its own enum.
 
 Conflicting terminals preserve all claims in terminal_states. Edge
 effective_state becomes CONFLICT while record.state becomes INCONCLUSIVE.
 success_display_allowed is false; device protection and authorization block
 remain set. A prior success never wins reconciliation. The terminal-conflict
 example retains complete simulator quantities as separate evidence.
+Any differing terminal claims force this conflict state even if an untrusted
+payload clears its conflict flag or claims success. Without conflict, terminal
+claims must agree with effective_state. result_verification is VERIFIED,
+UNVERIFIED or CONFLICT; verified is true exactly for VERIFIED. CONFLICT agrees
+with effective_state CONFLICT, V3 INCONCLUSIVE, success display disabled and
+protected/blocked authorization. A conclusive terminal has matching terminal
+claims and VERIFIED evidence. A restart-unknown outcome is UNVERIFIED, even
+when its transport message is readable; verified does not assert transport
+availability or clear device protection.
 
 Ordinary chunk replay emits no new Edge lifecycle and no new attempt.
 Completed same-incarnation device restart replays only its persisted terminal.
