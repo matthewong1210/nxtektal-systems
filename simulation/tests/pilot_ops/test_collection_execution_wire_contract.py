@@ -184,7 +184,7 @@ def relations(data):
             assert deadline == start + binding["max_execution_s"] <= data["session_end_sim_t_s"]
             assert start <= data["now_sim_t_s"]
             assert record["assignment_id"] is not None
-            assert runtime["assignment_accepted"] and runtime["start_admitted"]
+            assert edge["accepted"] and runtime["assignment_accepted"] and runtime["start_admitted"]
             starts = [a for a in record["actions"] if a["sim_t_s"] == start
                       and a["selected_action"]["name"] == "AssignCollection"]
             assert len(starts) == 1, "start requires one accepted collection action"
@@ -283,6 +283,11 @@ def relations(data):
                 assert record["state"] in ("PARTIAL", "FAILED", "INCONCLUSIVE")
                 assert protection["protected"] and protection["authorization_blocked"]
                 assert protected_reason in protection["reasons"]
+        if record["reason"] == "EXECUTION_TIMEOUT" or runtime["collection_exit_reason"] == "EXECUTION_TIMEOUT":
+            assert record["reason"] == "EXECUTION_TIMEOUT" or conflict_overlay
+            assert runtime["collection_exit_reason"] == "EXECUTION_TIMEOUT"
+            assert start is not None and end is not None and end == deadline
+            assert record["state"] in ("PARTIAL", "FAILED", "INCONCLUSIVE")
         raw, unload = record["raw_quantity"], record["unload_quantity"]
         for quantity, milestone in ((raw, "RAW_COLLECTED_TO_ROBOT"), (unload, "UNLOADED_TO_STATION")):
             assert quantity["milestone"] == milestone
@@ -371,6 +376,7 @@ def relations(data):
             assert runtime["event_sequence_complete"]
             if start is not None:
                 assert raw["status"] == "COMPLETE" and raw["balls"] == 0
+                assert runtime["assignment_terminal"]
             else:
                 assert raw["balls"] is None
         if any(record["conflicts"].values()):
@@ -385,6 +391,12 @@ def relations(data):
             assert record["state"] == "REJECTED" and start is None
             assert edge["reason"] == "unknown:safety_rejected"
             assert any(a["safety_shield"] == "REJECTED" for a in record["actions"])
+        if record["reason"] == "INSUFFICIENT_SESSION_HORIZON" or edge["reason"] == "unknown:insufficient_session_horizon":
+            assert record["reason"] == "INSUFFICIENT_SESSION_HORIZON" and edge["reason"] == "unknown:insufficient_session_horizon"
+            assert record["state"] == "MISSED" and start is None and end is not None
+            assert not record["actions"] and not runtime["assignment_terminal"] and runtime["collection_exit_reason"] is None
+            assert raw["status"] == unload["status"] == "NOT_REACHED"
+            assert max(end, record["eligible_sim_t_s"]) + record["max_execution_s"] > data["session_end_sim_t_s"]
         if record["reason"] == "NOT_STARTED_AFTER_RESTART" or edge["reason"] == "not_started_after_restart":
             assert record["reason"] == "NOT_STARTED_AFTER_RESTART" and edge["reason"] == "not_started_after_restart"
             assert record["state"] == "FAILED" and start is None and edge["accepted"]
@@ -1194,3 +1206,170 @@ def test_parity_asset_loaders_preserve_separate_object_keys(tmp_path, monkeypatc
         (tmp_path / "examples" / "probe.json").write_text(source, encoding="utf-8")
         value = example("probe.json")
     assert value == {"objects": [{"same": 1}, {"same": 2}], "same": 3}
+
+
+def timeout_case(state="PARTIAL"):
+    data = snapshot("partial-preempted.json")
+    data.update(now_sim_t_s=900, simulation_time_utc="2026-09-16T00:15:00Z")
+    record = data["executions"][0]
+    record["actions"].pop()
+    record.update(state=state, reason="EXECUTION_TIMEOUT", terminal_sim_t_s=780)
+    record["runtime_evidence"]["collection_exit_reason"] = "EXECUTION_TIMEOUT"
+    if state == "FAILED":
+        record["raw_quantity"]["balls"] = 0
+        record["edge_evidence"]["reason"] = "unknown:execution_timeout"
+    if state == "INCONCLUSIVE":
+        record["raw_quantity"].update(status="INCOMPLETE", balls=None, source_event_ids=[], event_digest=None)
+        record["edge_evidence"].update(effective_state=state, terminal_states=[state],
+                                      verified=False, result_verification="UNVERIFIED", reason="unknown:execution_timeout")
+        record["runtime_evidence"].update(event_sequence_complete=False, assignment_terminal=False)
+        record["conflicts"]["missing_events"] = True
+        record["device_protection"] = {"protected": True, "authorization_blocked": True, "reasons": ["ORPHANED_ACTIVITY"]}
+    return data
+
+
+def horizon_case(accepted=True):
+    data = snapshot("policy-missed.json")
+    data["session_end_sim_t_s"] = data["bindings"][0]["session_end_sim_t_s"] = 779
+    record = data["executions"][0]
+    record.update(reason="INSUFFICIENT_SESSION_HORIZON", terminal_sim_t_s=120, actions=[])
+    state = "FAILED" if accepted else "REJECTED"
+    record["edge_evidence"].update(accepted=accepted, reason="unknown:insufficient_session_horizon",
+                                  effective_state=state, terminal_states=[state])
+    rekey_single_snapshot(data)
+    return data
+
+
+@pytest.mark.parametrize("state", ["PARTIAL", "FAILED", "INCONCLUSIVE"])
+def test_terminal_limits_timeout_controls_retain_admission(schema, state):
+    data = timeout_case(state)
+    validate_snapshot(schema, data)
+    data["executions"][0]["edge_evidence"]["accepted"] = False
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_terminal_limits_started_failed_requires_assignment_terminal(schema):
+    data = timeout_case("FAILED")
+    data["executions"][0]["runtime_evidence"]["assignment_terminal"] = False
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_terminal_limits_conflict_retains_admission(schema):
+    data = snapshot("terminal-conflict.json")
+    data["executions"][0]["edge_evidence"]["accepted"] = False
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("kind", ["restart-before", "restart-unknown"])
+def test_terminal_limits_restart_does_not_fabricate_assignment_terminal(schema, kind):
+    data = parity_case(kind)
+    assert not data["executions"][0]["runtime_evidence"]["assignment_terminal"]
+    validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("changes", [
+    {"reason": "ZONE_EMPTY"}, {"runtime_evidence.collection_exit_reason": "ZONE_EMPTY"},
+    {"runtime_evidence.collection_exit_reason": None}, {"terminal_sim_t_s": 779},
+    {"terminal_sim_t_s": 781}, {"reason": "TERMINAL_CONFLICT"}, {"reason": "REPLAY_MISMATCH"},
+])
+def test_terminal_limits_timeout_rejects_contradictions(schema, changes):
+    data = timeout_case()
+    change_fields(data["executions"][0], changes)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize(("state", "balls"), [("PARTIAL", 0), ("FAILED", 12)])
+def test_terminal_limits_timeout_preserves_quantity_rules(schema, state, balls):
+    data = timeout_case(state)
+    data["executions"][0]["raw_quantity"]["balls"] = balls
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("kind", ["success", "running", "policy-missed"])
+def test_terminal_limits_timeout_requires_started_terminal_non_success(schema, kind):
+    data = parity_case(kind)
+    record = data["executions"][0]
+    record["runtime_evidence"]["collection_exit_reason"] = "EXECUTION_TIMEOUT"
+    if kind == "policy-missed":
+        record["reason"] = "EXECUTION_TIMEOUT"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("overlay", ["TERMINAL_CONFLICT", "REPLAY_MISMATCH"])
+def test_terminal_limits_timeout_conflict_overlay_keeps_exact_deadline(schema, overlay):
+    data = timeout_case()
+    record = data["executions"][0]
+    record.update(state="INCONCLUSIVE", reason=overlay)
+    terminal = overlay == "TERMINAL_CONFLICT"
+    record["conflicts"].update(terminal_conflict=terminal, replay_mismatch=not terminal)
+    record["edge_evidence"].update(effective_state="CONFLICT", verified=False, result_verification="CONFLICT",
+                                  terminal_states=["SUCCEEDED", "FAILED"] if terminal else ["FAILED"])
+    record["device_protection"] = {"protected": True, "authorization_blocked": True,
+                                   "reasons": ["TERMINAL_CONFLICT" if terminal else "ORPHANED_ACTIVITY"]}
+    validate_snapshot(schema, data)
+    record["terminal_sim_t_s"] = 779
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_terminal_limits_horizon_controls(schema, accepted):
+    validate_snapshot(schema, horizon_case(accepted))
+
+
+@pytest.mark.parametrize("end", [780, 900])
+def test_terminal_limits_horizon_rejects_sufficient_window(schema, end):
+    data = horizon_case()
+    data["session_end_sim_t_s"] = data["bindings"][0]["session_end_sim_t_s"] = end
+    rekey_single_snapshot(data)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_terminal_limits_horizon_uses_future_eligibility(schema):
+    data = horizon_case()
+    data["session_end_sim_t_s"] = data["bindings"][0]["session_end_sim_t_s"] = 899
+    data["requests"][0].update(eligible_sim_t_s=240, due_at_utc="2026-09-16T00:04:00Z")
+    data["executions"][0]["eligible_sim_t_s"] = 240
+    rekey_single_snapshot(data)
+    validate_snapshot(schema, data)
+    data["session_end_sim_t_s"] = data["bindings"][0]["session_end_sim_t_s"] = 900
+    rekey_single_snapshot(data)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("changes", [
+    {"state": "FAILED"}, {"runtime_evidence.assignment_terminal": True},
+    {"runtime_evidence.collection_exit_reason": "ZONE_EMPTY"}, {"edge_evidence.reason": "unknown:other"},
+    {"reason": "ZONE_EMPTY"}, {"raw_quantity.status": "INCOMPLETE"}, {"unload_quantity.status": "INCOMPLETE"},
+])
+def test_terminal_limits_horizon_rejects_contradictions(schema, changes):
+    data = horizon_case()
+    change_fields(data["executions"][0], changes)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_terminal_limits_horizon_rejects_policy_action(schema):
+    data = horizon_case()
+    data["executions"][0]["actions"] = snapshot("policy-missed.json")["executions"][0]["actions"][:1]
+    rekey_single_snapshot(data)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_terminal_limits_horizon_cannot_relabel_started_partial(schema):
+    data = timeout_case()
+    record = data["executions"][0]
+    record["reason"] = "INSUFFICIENT_SESSION_HORIZON"
+    record["runtime_evidence"]["collection_exit_reason"] = None
+    record["edge_evidence"]["reason"] = "unknown:insufficient_session_horizon"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
