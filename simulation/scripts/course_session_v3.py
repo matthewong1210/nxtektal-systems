@@ -457,24 +457,28 @@ class V3Session:
         self.store.record_replay_failure(
             execution_api.digest(prepared), now_sim_t_s=now, observed_digest=observed_digest)
 
-    def _raise_committed_mismatch(self, item, final_sim_t_s, message, observed, *, cause=None):
+    def _raise_committed_mismatch(
+        self, item, final_sim_t_s, message, observed, *, seal_mismatch,
+        cause=None,
+    ):
         prepared, committed = item["prepared"], item["committed"]
         observed_digest = execution_api.digest(_canonical_value({
             "message": message,
             "observed": observed,
         }))
-        self.store.record_committed_replay_failure(
-            prepared["tick_sequence"],
-            prepared_digest=execution_api.digest(prepared),
-            committed_digest=execution_api.digest(committed),
-            observed_digest=observed_digest,
-            now_sim_t_s=final_sim_t_s,
-        )
+        if seal_mismatch:
+            self.store.record_committed_replay_failure(
+                prepared["tick_sequence"],
+                prepared_digest=execution_api.digest(prepared),
+                committed_digest=execution_api.digest(committed),
+                observed_digest=observed_digest,
+                now_sim_t_s=final_sim_t_s,
+            )
         if cause is None:
             raise ReplayMismatch(message)
         raise ReplayMismatch(message) from cause
 
-    def _replay_committed(self):
+    def _replay_committed(self, *, seal_mismatch):
         plan = self.store.replay_plan()
         final_sim_t_s = (self.env.sim.now if not plan
                          else plan[-1]["committed"]["result"]["now_sim_t_s"])
@@ -487,18 +491,21 @@ class V3Session:
                     {"previous_tick_sequence": previous,
                      "prepared_tick_sequence": prepared["tick_sequence"],
                      "committed_tick_sequence": committed["tick_sequence"]},
+                    seal_mismatch=seal_mismatch,
                 )
             try:
                 original = self._policy_action()
             except Exception as exc:
                 self._raise_committed_mismatch(
                     item, final_sim_t_s, "committed policy prefix could not be reconstructed",
-                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc,
+                    seal_mismatch=seal_mismatch)
             if original != prepared["decision"]["original_action"]:
                 self._raise_committed_mismatch(
                     item, final_sim_t_s, "committed policy prefix differs during replay",
                     {"original_action": original,
                      "stored_original_action": prepared["decision"]["original_action"]},
+                    seal_mismatch=seal_mismatch,
                 )
             executions = list(committed["executions"].values())
             try:
@@ -506,23 +513,29 @@ class V3Session:
             except Exception as exc:
                 self._raise_committed_mismatch(
                     item, final_sim_t_s, "committed simulator action differs during replay",
-                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc,
+                    seal_mismatch=seal_mismatch)
             if observed != committed["result"]:
                 self._raise_committed_mismatch(
                     item, final_sim_t_s, "committed simulator result differs during replay",
                     {"result": observed, "stored_result": committed["result"]},
+                    seal_mismatch=seal_mismatch,
                 )
             try:
                 self._cleanup_rejected_arm(prepared, observed)
             except Exception as exc:
                 self._raise_committed_mismatch(
                     item, final_sim_t_s, "committed rejected-arm cleanup differs during replay",
-                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc,
+                    seal_mismatch=seal_mismatch)
             previous = prepared["tick_sequence"]
         return plan
 
-    def _reconstruct_prefix_unlocked(self):
-        self.store.initialize_session(now_sim_t_s=self.env.sim.now)
+    def _reconstruct_prefix_unlocked(self, *, initialize_session, seal_mismatch):
+        if initialize_session:
+            self.store.initialize_session(now_sim_t_s=self.env.sim.now)
+        elif not self.store.journal.read():
+            raise ReplayMismatch("V3 execution journal is not initialized")
         if self.step_count or self.env.sim.now != self.scenario.hours.open_seconds:
             raise ValueError("recovery requires a fresh V3 runtime")
         before = self.store.recovery_state()
@@ -530,11 +543,23 @@ class V3Session:
             raise ReplayMismatch("session was sealed by an earlier replay mismatch")
         if before["status"] == "EDGE_WITHOUT_COMMIT":
             raise ReplayMismatch("Edge evidence has no matching committed simulator tick")
-        plan = self._replay_committed()
+        plan = self._replay_committed(seal_mismatch=seal_mismatch)
         return plan, self.store.recovery_state()
 
+    def _verify_prefix_unlocked(self):
+        """Reconstruct an existing prefix without initialization or sealing."""
+        return self._reconstruct_prefix_unlocked(
+            initialize_session=False, seal_mismatch=False
+        )
+
+    def _recover_prefix_unlocked(self):
+        """Initialize when needed and durably seal committed replay drift."""
+        return self._reconstruct_prefix_unlocked(
+            initialize_session=True, seal_mismatch=True
+        )
+
     def _recover_unlocked(self):
-        plan, state = self._reconstruct_prefix_unlocked()
+        plan, state = self._recover_prefix_unlocked()
         if state["status"] == "PREPARED_NO_COMMIT":
             prepared = state["pending_prepared"]
             if not state["replay_permitted"]:
@@ -576,7 +601,8 @@ class V3Session:
                 self._raise_committed_mismatch(
                     {"prepared": prepared, "committed": committed}, result["now_sim_t_s"],
                     "committed rejected-arm cleanup failed during pending recovery",
-                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
+                    {"exception": type(exc).__name__, "detail": str(exc)},
+                    seal_mismatch=True, cause=exc)
             self.store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
             state = self.store.recovery_state()
         elif state["status"] == "COMMITTED_CURSOR_STALE":
@@ -623,7 +649,8 @@ class V3Session:
             self._raise_committed_mismatch(
                 {"prepared": prepared, "committed": committed}, result["now_sim_t_s"],
                 "committed rejected-arm cleanup failed during live execution",
-                {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
+                {"exception": type(exc).__name__, "detail": str(exc)},
+                seal_mismatch=True, cause=exc)
         self.store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
         self._crash(crash_hook, "after_cursor", committed)
         return committed
@@ -702,7 +729,7 @@ def _validated_read_runtime(root):
     config, compiled, saved = _load_root(root, None)
     control = _read_control(root)
     session = V3Session(root, config, compiled)
-    _, recovery = session._reconstruct_prefix_unlocked()
+    _, recovery = session._verify_prefix_unlocked()
     if recovery["status"] in {"PREPARED_NO_COMMIT", "COMMITTED_CURSOR_STALE"}:
         raise ReplayMismatch("V3 session recovery is required before external access")
     if recovery["status"] not in {"NO_PREPARED", "COMMITTED_OUTBOX_UNCONFIRMED"}:

@@ -309,6 +309,67 @@ def test_runtime_status_is_locked_detached_and_read_neutral(runner, tmp_path, mo
     assert durable_bytes() == paused_before
 
 
+@pytest.mark.parametrize(
+    ("drift", "message"),
+    [
+        ("policy", "committed policy prefix"),
+        ("simulator", "committed simulator result"),
+    ],
+)
+def test_runtime_status_committed_mismatch_is_read_only_but_run_seals(
+    runner, tmp_path, monkeypatch, drift, message
+):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+
+    state_path = tmp_path / "state.json"
+    journal_path = tmp_path / "collection-execution.jsonl"
+
+    def durable_bytes():
+        return {
+            str(path.relative_to(tmp_path)): path.read_bytes()
+            for path in sorted(tmp_path.rglob("*"))
+            if path.is_file()
+        }
+
+    state_before = state_path.read_bytes()
+    journal_before = journal_path.read_bytes()
+    root_before = durable_bytes()
+    if drift == "policy":
+        def mismatched_policy(session):
+            robot_id = session.env.scenario.robot_ids[0]
+            return session._action(
+                session.env.catalog.index_of(f"pause_robot({robot_id})")
+            )
+
+        monkeypatch.setattr(runner.V3Session, "_policy_action", mismatched_policy)
+    else:
+        monkeypatch.setattr(
+            runner.V3Session,
+            "_post_state_digest",
+            lambda _session, _executions: "d" * 64,
+        )
+
+    with pytest.raises(runner.ReplayMismatch, match=message):
+        runner.read_runtime_status(tmp_path, "picker-01")
+
+    assert state_path.read_bytes() == state_before
+    assert journal_path.read_bytes() == journal_before
+    assert durable_bytes() == root_before
+
+    with pytest.raises(runner.ReplayMismatch, match=message):
+        runner.run(tmp_path)
+
+    assert state_path.read_bytes() == state_before
+    assert journal_path.read_bytes() != journal_before
+    assert b'"record_kind":"committed_replay_failure"' in journal_path.read_bytes()
+    assert session(runner, tmp_path, compiled=compiled).store.recovery_state()[
+        "status"
+    ] == "REPLAY_MISMATCH"
+
+
 def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(runner, tmp_path):
     v3 = session(runner, tmp_path)
     robot, zone = v3.env.scenario.robot_ids[0], v3.env.scenario.zone_ids[0]
