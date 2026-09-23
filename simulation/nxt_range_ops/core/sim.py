@@ -676,6 +676,16 @@ class RangeSimulation:
             "ledger": self.ledger.counts(),
         }
 
+    def rng_state_snapshot(self) -> dict:
+        """Return detached named RNG state without advancing any generator."""
+        return {
+            "demand": deepcopy(self._rng_demand.bit_generator.state),
+            "skills": deepcopy(self._rng_skills.bit_generator.state),
+            "failures": deepcopy(self._rng_failures.bit_generator.state),
+            "sensors": deepcopy(self._rng_sensors.bit_generator.state),
+            "forecast": deepcopy(self._rng_forecast.bit_generator.state),
+        }
+
     # ------------------------------------------------------------------
     # Control interface
     # ------------------------------------------------------------------

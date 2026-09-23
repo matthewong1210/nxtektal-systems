@@ -379,6 +379,7 @@ class V3Session:
         observation, info = self.visible_policy_inputs()
         return _canonical_value({
             "state_summary": self.env.sim.state_summary(),
+            "simulator_rng_state": self.env.sim.rng_state_snapshot(),
             "legacy_events": self.env.sim.events.to_dicts(),
             "assignment_snapshots": self._all_assignment_snapshots(),
             "policy_inputs": {"observation": observation, "info": info},

@@ -298,7 +298,7 @@ def test_causal_digest_includes_visible_inputs_and_policy_state(runner, tmp_path
     evidence = v3._causal_post_state()
     initial_inventory = float(v3.obs["dispenser_inventory_frac"][0])
     assert set(evidence) == {
-        "state_summary", "legacy_events", "assignment_snapshots", "policy_inputs",
+        "state_summary", "simulator_rng_state", "legacy_events", "assignment_snapshots", "policy_inputs",
         "metrics", "joint_metrics", "staff_work_snapshots", "step_count", "policy_state",
     }
     assert set(evidence["policy_inputs"]) == {"observation", "info"}
@@ -316,6 +316,31 @@ def test_causal_digest_includes_visible_inputs_and_policy_state(runner, tmp_path
     v3.policy._previous_inventory = (float(v3.env.sim.now), 0.25)
     assert v3.runtime_digest() != sensed_digest
     assert evidence["policy_inputs"]["observation"]["dispenser_inventory_frac"][0] == initial_inventory
+
+
+@pytest.mark.parametrize(
+    "rng_name",
+    ("_rng_demand", "_rng_skills", "_rng_failures", "_rng_sensors", "_rng_forecast"),
+)
+def test_runtime_digest_commits_every_named_simulator_rng(runner, tmp_path, rng_name):
+    v3 = session(runner, tmp_path)
+    before = v3.runtime_digest()
+
+    getattr(v3.env.sim, rng_name).random()
+
+    assert v3.runtime_digest() != before
+
+
+def test_runtime_digest_is_rng_neutral(runner, tmp_path):
+    v3 = session(runner, tmp_path)
+    before = v3.env.sim.rng_state_snapshot()
+    assert set(before) == {"demand", "skills", "failures", "sensors", "forecast"}
+
+    first = v3.runtime_digest()
+    second = v3.runtime_digest()
+
+    assert first == second
+    assert v3.env.sim.rng_state_snapshot() == before
 
 
 def test_rejected_wait_slot_disarms_only_after_durable_commit(runner, tmp_path, monkeypatch):
