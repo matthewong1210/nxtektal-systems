@@ -1373,7 +1373,21 @@ class RangeSimulation:
                 self._assignment_event(robot, "UNLOADED_TO_STATION", balls=moved, station_id=station_id,
                                        source_location=robot_key, destination_location=station_key,
                                        payload_after=robot.payload_balls)
+                if moved > 0:
+                    self.events.emit(
+                        self.now,
+                        EventKind.UNLOADED,
+                        robot_id=robot.robot_id,
+                        station_id=station_id,
+                        balls=moved,
+                    )
                 evidence = self._robot_assignments.get(robot.robot_id)
+                if evidence is not None:
+                    # Keep the completed ledger transfer, but resolve its
+                    # energy-induced protection before any success terminal.
+                    self._check_battery_floor(robot)
+                    if robot.activity is RobotActivity.FAILED:
+                        return
                 if evidence is not None and robot.payload_balls == 0:
                     raw = evidence.quantity("RAW_COLLECTED_TO_ROBOT")
                     valid = evidence.snapshot()
@@ -1386,14 +1400,6 @@ class RangeSimulation:
                     else:
                         reason = "ROBOT_FAULT"
                     self._terminal_assignment(robot, reason)
-                if moved > 0:
-                    self.events.emit(
-                        self.now,
-                        EventKind.UNLOADED,
-                        robot_id=robot.robot_id,
-                        station_id=station_id,
-                        balls=moved,
-                    )
         self._set_activity(robot, RobotActivity.IDLE)
         self._check_battery_floor(robot)
 

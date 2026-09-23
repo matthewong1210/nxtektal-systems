@@ -333,3 +333,40 @@ def test_rejected_candidate_can_be_explicitly_disarmed_without_evidence():
     assert snapshot(env) is None
     with pytest.raises(ValueError, match="candidate"):
         env.disarm_collection_assignment("execution-1")
+
+
+@pytest.mark.parametrize("unload_energy_wh", [98.0, 99.0])
+def test_unload_reaching_battery_floor_preserves_transfer_and_terminalizes_low_battery(unload_energy_wh):
+    env = environment()
+    finish_collection(env)
+    robot = env.sim._robots[env.scenario.robot_ids[0]]
+    robot.cfg = robot.cfg.model_copy(update={
+        "battery_capacity_wh": robot.cfg.battery_capacity_wh.model_copy(update={"value": 100.0}),
+        "idle_power_w": robot.cfg.idle_power_w.model_copy(update={"value": 0.0}),
+    })
+    robot.battery_wh = 100.0
+    assert env.scenario.safety.hard_battery_floor_frac == 0.02
+
+    class DepletingUnloadSkills(FixedSkills):
+        def sample(self, request, rng):
+            if request.skill is SkillType.UNLOAD:
+                return SkillOutcome(True, 1, unload_energy_wh)
+            return super().sample(request, rng)
+
+    env.sim.skill_model = DepletingUnloadSkills()
+    step(env, "send_to_handoff")
+    evidence = snapshot(env)
+    assert evidence["terminal_reason"] == "LOW_BATTERY"
+    assert evidence["collection_exit_reason"] == "ROBOT_PAYLOAD_FULL"
+    assert evidence["raw_collected_balls"] == evidence["unloaded_balls"] == 20
+    assert evidence["ledger_conserved"] and evidence["robot_payload_parity"]
+    assert robot.payload_balls == env.sim.ledger.count(locations.robot_loc(robot.robot_id)) == 0
+    assert robot.activity is RobotActivity.FAILED
+    assert robot.battery_frac <= env.scenario.safety.hard_battery_floor_frac
+    assert robot.task_proc is None
+    assert sum(e["kind"] == "ASSIGNMENT_TERMINAL" for e in evidence["events"]) == 1
+    assert sum(e["balls"] for e in evidence["events"] if e["kind"] == "UNLOADED_TO_STATION") == 20
+    assert sum(e["payload"]["balls"] for e in env.sim.events.to_dicts() if e["kind"] == "unloaded") == 20
+    for _ in range(4):
+        step(env)
+    assert snapshot(env) == evidence
