@@ -25,6 +25,29 @@ EXPECTED_EXAMPLES = {
 FORMAT_CHECKER = FormatChecker()
 
 
+def strict_json_loads(source):
+    """Read fixture/schema JSON without erasing ambiguous claims; test-only."""
+    def exact_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError(f"nonfinite JSON constant: {value}")
+
+    def finite_float(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("nonfinite JSON number")
+        return parsed
+
+    return json.loads(source, object_pairs_hook=exact_object,
+                      parse_constant=reject_constant, parse_float=finite_float)
+
+
 @FORMAT_CHECKER.checks("date-time", raises=ValueError)
 def valid_utc(value):
     if not isinstance(value, str):
@@ -38,7 +61,7 @@ def valid_utc(value):
 def schema():
     path = CONTRACT / "schema.json"
     assert path.is_file(), "missing contract assets: schema.json"
-    return json.loads(path.read_text())
+    return strict_json_loads(path.read_text(encoding="utf-8"))
 
 
 def validator(schema, reference=None):
@@ -51,7 +74,7 @@ def validator(schema, reference=None):
 def example(name="success.json"):
     path = CONTRACT / "examples" / name
     assert path.is_file(), f"missing contract assets: {name}"
-    return json.loads(path.read_text())
+    return strict_json_loads(path.read_text(encoding="utf-8"))
 
 
 def snapshot(name="success.json"):
@@ -149,16 +172,18 @@ def relations(data):
         for key in ("eligible_sim_t_s", "latest_start_sim_t_s"):
             assert record[key] == request[key], key
         start, end, deadline = (record[key] for key in ("started_sim_t_s", "terminal_sim_t_s", "execution_deadline_sim_t_s"))
+        runtime, edge = record["runtime_evidence"], record["edge_evidence"]
+        protection = record["device_protection"]
         if start is None:
             assert deadline is None and record["assignment_id"] is None
-            assert not record["runtime_evidence"]["assignment_accepted"]
+            assert not runtime["assignment_accepted"] and not runtime["start_admitted"]
         else:
             assert request["eligible_sim_t_s"] <= start < request["latest_start_sim_t_s"]
             assert binding["bound_at_sim_t_s"] <= start
             assert deadline == start + binding["max_execution_s"] <= data["session_end_sim_t_s"]
             assert start <= data["now_sim_t_s"]
             assert record["assignment_id"] is not None
-            assert record["runtime_evidence"]["assignment_accepted"]
+            assert runtime["assignment_accepted"] and runtime["start_admitted"]
             starts = [a for a in record["actions"] if a["sim_t_s"] == start
                       and a["selected_action"]["name"] == "AssignCollection"]
             assert len(starts) == 1, "start requires one accepted collection action"
@@ -169,8 +194,10 @@ def relations(data):
             assert initial["selected_action"]["target_id"] == binding["runtime_zone_id"]
         if record["state"] in ("PENDING", "RUNNING"):
             assert end is None and record["reason"] is None and record["stage"] != "TERMINAL"
+            assert data["session_state"] != "ENDED"
         else:
             assert end is not None and end <= data["now_sim_t_s"]
+            assert binding["bound_at_sim_t_s"] <= end
             assert record["stage"] == "TERMINAL" and record["reason"] is not None
             if start is not None:
                 assert start <= end
@@ -178,14 +205,24 @@ def relations(data):
         for action in record["actions"]:
             assert previous <= action["sim_t_s"] <= data["now_sim_t_s"]
             assert binding["bound_at_sim_t_s"] <= action["sim_t_s"]
+            assert end is None or action["sim_t_s"] <= end
+            assert (action["safety_reason"] is None) == (action["safety_shield"] == "ACCEPTED")
+            for action_evidence in (action["original_action"], action["selected_action"]):
+                if action_evidence["name"] == "Wait":
+                    assert action_evidence["robot_id"] is None and action_evidence["target_id"] is None
+                if action_evidence["name"] == "SendToHandoff":
+                    assert action_evidence["robot_id"] is not None and action_evidence["target_id"] is None
             previous = action["sim_t_s"]
             candidates = action["eligible_pending"]
             unique(candidates, "execution_id")
             for candidate in candidates:
                 assert candidate["eligible_sim_t_s"] <= action["sim_t_s"] < candidate["latest_start_sim_t_s"]
-                if candidate["execution_id"] == record["execution_id"]:
+                included = executions.get(candidate["execution_id"])
+                if included is not None:
                     for key in ("eligible_sim_t_s", "latest_start_sim_t_s"):
-                        assert candidate[key] == record[key]
+                        assert candidate[key] == included[key]
+                    assert included["started_sim_t_s"] is None or action["sim_t_s"] <= included["started_sim_t_s"]
+                    assert included["terminal_sim_t_s"] is None or action["sim_t_s"] <= included["terminal_sim_t_s"]
             assert candidates == sorted(candidates, key=lambda x: (x["latest_start_sim_t_s"], x["eligible_sim_t_s"], x["execution_id"]))
             if action["selection"] == "WAIT_SLOT":
                 assert action["original_action"]["name"] == "Wait"
@@ -195,6 +232,8 @@ def relations(data):
                 assert action["selected_action"]["target_id"] == binding["runtime_zone_id"]
                 if start is not None:
                     assert action["sim_t_s"] == start, "WAIT_SLOT only starts a new attempt"
+                if action["safety_shield"] == "ACCEPTED":
+                    assert start == action["sim_t_s"]
                 # A pending start cannot displace any already running lease.
                 for other in executions.values():
                     if other["execution_id"] == record["execution_id"]:
@@ -214,14 +253,41 @@ def relations(data):
             else:
                 assert action["original_action"] == action["selected_action"]
             if action["selection"] == "ORIGINAL_POLICY_CONVERGED":
+                assert start is not None and start < action["sim_t_s"] < deadline
                 assert action["selected_action"]["name"] == "SendToHandoff"
                 assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
                 assert action["selected_action"]["target_id"] is None
+            if action["selection"] == "POLICY_PREEMPTED":
+                assert start is not None and start <= action["sim_t_s"] and action["selected_action"]["name"] != "Wait"
+                assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
+            original = action["original_action"]
+            if start is not None and action["sim_t_s"] >= start and original["name"] != "Wait" and original["robot_id"] == binding["runtime_robot_id"]:
+                expected = "ORIGINAL_POLICY_CONVERGED" if original["name"] == "SendToHandoff" else "POLICY_PREEMPTED"
+                assert action["selection"] == expected, "leased-robot policy action must classify its effect"
+        # Conflict overlays retain the causal runtime exit; they never rewrite
+        # a preemption/fault into success or discard its required protection.
+        flags = record["conflicts"]
+        conflict_overlay = record["state"] == "INCONCLUSIVE" and (
+            (record["reason"] == "TERMINAL_CONFLICT" and flags["terminal_conflict"])
+            or (record["reason"] == "REPLAY_MISMATCH" and flags["replay_mismatch"]))
+        preempted = any(a["selection"] == "POLICY_PREEMPTED" for a in record["actions"])
+        if preempted or record["reason"] == "POLICY_PREEMPTED" or runtime["collection_exit_reason"] == "POLICY_PREEMPTED":
+            assert preempted and runtime["collection_exit_reason"] == "POLICY_PREEMPTED"
+            assert record["reason"] == "POLICY_PREEMPTED" or conflict_overlay
+            assert record["state"] in ("PARTIAL", "FAILED", "INCONCLUSIVE")
+        for protected_reason in ("ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"):
+            if record["reason"] == protected_reason or runtime["collection_exit_reason"] == protected_reason:
+                assert runtime["collection_exit_reason"] == protected_reason
+                assert record["reason"] == protected_reason or conflict_overlay
+                assert record["state"] in ("PARTIAL", "FAILED", "INCONCLUSIVE")
+                assert protection["protected"] and protection["authorization_blocked"]
+                assert protected_reason in protection["reasons"]
         raw, unload = record["raw_quantity"], record["unload_quantity"]
         for quantity, milestone in ((raw, "RAW_COLLECTED_TO_ROBOT"), (unload, "UNLOADED_TO_STATION")):
             assert quantity["milestone"] == milestone
             destination = binding["runtime_robot_id"] if milestone == "RAW_COLLECTED_TO_ROBOT" else binding["handoff_station_id"]
             assert quantity["destination_id"] == destination
+            assert quantity["assignment_id"] is None or quantity["assignment_id"] == record["assignment_id"]
             if quantity["status"] == "COMPLETE":
                 assert quantity["source_event_ids"] and quantity["event_digest"] is not None
                 assert quantity["assignment_id"] == record["assignment_id"]
@@ -229,10 +295,12 @@ def relations(data):
                 assert quantity["balls"] is None
         if raw["status"] == unload["status"] == "COMPLETE":
             assert unload["balls"] <= raw["balls"]
-        runtime, edge = record["runtime_evidence"], record["edge_evidence"]
+        assert (runtime["event_start_sequence"] is None) == (runtime["event_end_sequence"] is None)
+        if runtime["event_start_sequence"] is not None:
+            assert runtime["event_start_sequence"] <= runtime["event_end_sequence"]
+            assert runtime["event_digest"] is not None
         assert edge["task_id"] == record["task_id"]
         assert record["success_display_allowed"] == (record["state"] == "SUCCEEDED")
-        protection = record["device_protection"]
         assert protection["protected"] == bool(protection["reasons"])
         assert not protection["protected"] or protection["authorization_blocked"]
         terminals = set(edge["terminal_states"])
@@ -257,11 +325,19 @@ def relations(data):
         if record["state"] == "INCONCLUSIVE" and not conflict:
             assert edge["result_verification"] == "UNVERIFIED"
         if record["state"] in ("MISSED", "REJECTED"):
+            assert start is None
             assert edge["effective_state"] == ("FAILED" if edge["accepted"] else "REJECTED")
+        if record["state"] in ("PENDING", "RUNNING"):
+            assert not terminals
         if record["state"] == "PENDING":
             assert start is None and edge["effective_state"] == "ACCEPTED"
+            assert record["stage"] == "WAITING_FOR_POLICY_SLOT" and edge["accepted"]
+            assert data["now_sim_t_s"] < record["latest_start_sim_t_s"]
+            assert max(data["now_sim_t_s"], record["eligible_sim_t_s"]) + record["max_execution_s"] <= data["session_end_sim_t_s"]
         if record["state"] == "RUNNING":
             assert start is not None and edge["effective_state"] == "RUNNING"
+            assert record["stage"] != "WAITING_FOR_POLICY_SLOT" and edge["accepted"]
+            assert data["now_sim_t_s"] < deadline
         if record["state"] == "SUCCEEDED":
             assert record["reason"] == "UNLOADED_ALL_COLLECTED_BALLS"
             assert raw["status"] == unload["status"] == "COMPLETE"
@@ -277,8 +353,10 @@ def relations(data):
             assert runtime["collection_exit_reason"] == "ROBOT_PAYLOAD_FULL"
             assert not any(record["conflicts"].values())
             assert not record["device_protection"]["protected"]
+            assert not protection["authorization_blocked"]
             assert edge["effective_state"] == "SUCCEEDED" and edge["verified"] and edge["accepted"]
         elif record["state"] == "PARTIAL":
+            assert start is not None and runtime["assignment_terminal"]
             assert edge["effective_state"] == "FAILED" and edge["reason"] == "unknown:partial_execution"
             assert raw["status"] == "COMPLETE" and raw["balls"] > 0
             assert unload["status"] != "INCOMPLETE"
@@ -288,16 +366,36 @@ def relations(data):
             assert record["device_protection"]["protected"]
         elif record["state"] == "FAILED":
             assert edge["effective_state"] == "FAILED"
+            assert raw["status"] != "INCOMPLETE" and unload["status"] != "INCOMPLETE"
+            assert runtime["event_sequence_complete"]
+            if start is not None:
+                assert raw["status"] == "COMPLETE" and raw["balls"] == 0
+            else:
+                assert raw["balls"] is None
         if any(record["conflicts"].values()):
             assert record["state"] == "INCONCLUSIVE"
             assert record["device_protection"]["protected"]
         if edge["effective_state"] == "CONFLICT":
             assert record["conflicts"]["terminal_conflict"] or record["conflicts"]["replay_mismatch"]
         if record["reason"] == "POLICY_SLOT_MISSED":
-            assert start is None and end >= request["latest_start_sim_t_s"]
-        if edge["reason"] == "interrupted_execution_unknown_outcome":
-            assert record["state"] == "INCONCLUSIVE" and start is not None
-            assert raw["balls"] is None and unload["balls"] is None
+            assert record["state"] == "MISSED" and start is None and end >= request["latest_start_sim_t_s"]
+            assert edge["reason"] == "unknown:policy_slot_missed"
+        if record["reason"] == "SAFETY_REJECTED":
+            assert record["state"] == "REJECTED" and start is None
+            assert edge["reason"] == "unknown:safety_rejected"
+            assert any(a["safety_shield"] == "REJECTED" for a in record["actions"])
+        if record["reason"] == "NOT_STARTED_AFTER_RESTART" or edge["reason"] == "not_started_after_restart":
+            assert record["reason"] == "NOT_STARTED_AFTER_RESTART" and edge["reason"] == "not_started_after_restart"
+            assert record["state"] == "FAILED" and start is None and edge["accepted"]
+            assert edge["effective_state"] == "FAILED" and edge["verified"] and edge["result_verification"] == "VERIFIED"
+            assert not runtime["assignment_terminal"] and runtime["collection_exit_reason"] is None
+            assert raw["status"] == unload["status"] == "NOT_REACHED"
+        if record["reason"] == "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" or edge["reason"] == "interrupted_execution_unknown_outcome":
+            assert record["reason"] == "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" and edge["reason"] == "interrupted_execution_unknown_outcome"
+            assert record["state"] == "INCONCLUSIVE" and start is not None and edge["accepted"]
+            assert edge["effective_state"] == "INCONCLUSIVE" and not edge["verified"] and edge["result_verification"] == "UNVERIFIED"
+            assert protection["protected"] and protection["authorization_blocked"] and "RESTART_UNKNOWN" in protection["reasons"]
+            assert raw["status"] == unload["status"] == "INCOMPLETE" and raw["balls"] is None and unload["balls"] is None
 
 
 def validate_snapshot(schema, data):
@@ -800,3 +898,275 @@ def test_lease_allows_exact_terminal_to_start_boundary(schema):
     for key in ("bindings", "requests", "receipts", "executions"):
         combined[key].extend(second[key])
     validate_snapshot(schema, combined)
+
+
+def parity_case(kind):
+    """Construct valid read evidence; this never runs or emulates an executor."""
+    if kind == "pending":
+        data = snapshot("policy-missed.json")
+        data.update(now_sim_t_s=120, simulation_time_utc="2026-09-16T00:02:00Z")
+        record = data["executions"][0]
+        record.update(state="PENDING", stage="WAITING_FOR_POLICY_SLOT", reason=None,
+                      terminal_sim_t_s=None, actions=[])
+        record["edge_evidence"].update(effective_state="ACCEPTED", reason=None, terminal_states=[])
+        return data
+    if kind == "running":
+        return active_snapshot()
+    if kind == "restart-before":
+        data = snapshot("policy-missed.json")
+        data["executions"][0].update(state="FAILED", reason="NOT_STARTED_AFTER_RESTART")
+        data["executions"][0]["edge_evidence"]["reason"] = "not_started_after_restart"
+        return data
+    if kind == "failed":
+        data = snapshot("partial-preempted.json")
+        data["executions"][0]["state"] = "FAILED"
+        data["executions"][0]["raw_quantity"]["balls"] = 0
+        data["executions"][0]["edge_evidence"]["reason"] = "unknown:policy_preempted"
+        return data
+    if kind in ("ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"):
+        data = snapshot("partial-preempted.json")
+        record = data["executions"][0]
+        record["actions"].pop()
+        record["reason"] = record["runtime_evidence"]["collection_exit_reason"] = kind
+        record["device_protection"] = {"protected": True, "authorization_blocked": True, "reasons": [kind]}
+        return data
+    return snapshot(kind + ".json")
+
+
+def change_fields(value, changes):
+    for path, replacement in changes.items():
+        parts = path.split(".")
+        target = value
+        for part in parts[:-1]:
+            target = target[int(part)] if isinstance(target, list) else target[part]
+        if isinstance(target, list):
+            target[int(parts[-1])] = replacement
+        else:
+            target[parts[-1]] = replacement
+
+
+@pytest.mark.parametrize(("kind", "changes"), [
+    ("failed", {"raw_quantity.balls": 12}),
+    ("failed", {"raw_quantity.status": "INCOMPLETE", "raw_quantity.balls": None}),
+    ("failed", {"raw_quantity.status": "NOT_REACHED", "raw_quantity.balls": None}),
+    ("failed", {"unload_quantity.status": "INCOMPLETE"}),
+    ("failed", {"runtime_evidence.event_sequence_complete": False}),
+    ("partial-preempted", {"runtime_evidence.start_admitted": False}),
+    ("partial-preempted", {"runtime_evidence.assignment_terminal": False}),
+    ("policy-missed", {"edge_evidence.reason": "unknown:wrong"}),
+    ("safety-rejected", {"edge_evidence.reason": "unknown:wrong"}),
+    ("safety-rejected", {"actions": []}),
+    ("safety-rejected", {"actions.0.safety_shield": "ACCEPTED", "actions.0.safety_reason": None}),
+    ("partial-preempted", {"unload_quantity.assignment_id": "wrong-assignment"}),
+    ("restart-unknown", {"raw_quantity.assignment_id": "wrong-assignment"}),
+    ("partial-preempted", {"runtime_evidence.event_start_sequence": None}),
+    ("partial-preempted", {"runtime_evidence.event_end_sequence": None}),
+    ("partial-preempted", {"runtime_evidence.event_start_sequence": 10}),
+    ("partial-preempted", {"runtime_evidence.event_digest": None}),
+    ("partial-preempted", {"actions.1.sim_t_s": 300}),
+    ("success", {"device_protection.authorization_blocked": True}),
+    ("pending", {"runtime_evidence.start_admitted": True}),
+    ("pending", {"edge_evidence.accepted": False}),
+    ("pending", {"stage": "COLLECTING"}),
+    ("running", {"stage": "WAITING_FOR_POLICY_SLOT"}),
+    ("success", {"actions.0.original_action.robot_id": "R1"}),
+    ("success", {"actions.0.safety_reason": "unexpected rejection detail"}),
+    ("partial-preempted", {"actions.1.selected_action.robot_id": "R2", "actions.1.original_action.robot_id": "R2"}),
+])
+def test_parity_rejects_contradictory_evidence(schema, kind, changes):
+    data = parity_case(kind)
+    validate_snapshot(schema, data)
+    change_fields(data["executions"][0], changes)
+    with pytest.raises((AssertionError, ValidationError)):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("kind", ["pending", "running", "restart-before", "failed",
+                                  "ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"])
+def test_parity_accepts_valid_control_cases(schema, kind):
+    validate_snapshot(schema, parity_case(kind))
+
+
+@pytest.mark.parametrize(("kind", "now", "valid"), [
+    ("pending", 299, True), ("pending", 300, False), ("pending", 301, False),
+    ("running", 779, True), ("running", 780, False), ("running", 781, False),
+])
+def test_parity_nonterminal_exclusive_time_boundaries(schema, kind, now, valid):
+    data = parity_case(kind)
+    data["now_sim_t_s"] = now
+    epoch = datetime.fromisoformat(data["session_epoch_utc"].replace("Z", "+00:00"))
+    data["simulation_time_utc"] = (epoch + timedelta(seconds=now)).isoformat().replace("+00:00", "Z")
+    if valid:
+        validate_snapshot(schema, data)
+    else:
+        with pytest.raises(AssertionError):
+            validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("kind", ["pending", "running"])
+def test_parity_nonterminal_ended_rejected_but_paused_valid(schema, kind):
+    data = parity_case(kind)
+    data["session_state"] = "PAUSED"
+    validate_snapshot(schema, data)
+    data["session_state"] = "ENDED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("future_eligible", [False, True])
+def test_parity_pending_requires_possible_execution_horizon(schema, future_eligible):
+    data = parity_case("pending")
+    horizon = 900 if future_eligible else 780
+    data["session_end_sim_t_s"] = data["bindings"][0]["session_end_sim_t_s"] = horizon
+    if future_eligible:
+        request, record = data["requests"][0], data["executions"][0]
+        request.update(eligible_sim_t_s=240, latest_start_sim_t_s=360,
+                       due_at_utc="2026-09-16T00:04:00Z", expires_at_utc="2026-09-16T00:06:00Z")
+        record.update(eligible_sim_t_s=240, latest_start_sim_t_s=360)
+    rekey_single_snapshot(data)
+    validate_snapshot(schema, data)
+    data["session_end_sim_t_s"] = data["bindings"][0]["session_end_sim_t_s"] = horizon - 1
+    rekey_single_snapshot(data)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize(("kind", "changes"), [
+    ("restart-before", {"reason": "ZONE_EMPTY"}),
+    ("restart-before", {"edge_evidence.reason": "unknown:other"}),
+    ("restart-before", {"edge_evidence.accepted": False}),
+    ("restart-before", {"raw_quantity.status": "INCOMPLETE"}),
+    ("restart-before", {"runtime_evidence.assignment_terminal": True}),
+    ("restart-before", {"runtime_evidence.collection_exit_reason": "ZONE_EMPTY"}),
+    ("restart-unknown", {"reason": "EVIDENCE_INCOMPLETE"}),
+    ("restart-unknown", {"edge_evidence.reason": "unknown:other"}),
+    ("restart-unknown", {"edge_evidence.accepted": False}),
+    ("restart-unknown", {"device_protection.reasons": ["ORPHANED_ACTIVITY"]}),
+    ("restart-unknown", {"raw_quantity.status": "NOT_REACHED"}),
+    ("restart-unknown", {"unload_quantity.status": "NOT_REACHED"}),
+])
+def test_parity_restart_claims_are_bidirectional(schema, kind, changes):
+    data = parity_case(kind)
+    change_fields(data["executions"][0], changes)
+    with pytest.raises((AssertionError, ValidationError)):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("reason", ["ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"])
+@pytest.mark.parametrize("mutation", ["unprotected", "wrong-protection", "unblocked", "wrong-reason", "wrong-exit"])
+def test_parity_protected_exits_retain_cause_and_protection(schema, reason, mutation):
+    data = parity_case(reason)
+    record = data["executions"][0]
+    if mutation == "unprotected":
+        record["device_protection"] = {"protected": False, "authorization_blocked": False, "reasons": []}
+    elif mutation == "wrong-protection":
+        record["device_protection"]["reasons"] = ["ORPHANED_ACTIVITY"]
+    elif mutation == "unblocked":
+        record["device_protection"]["authorization_blocked"] = False
+    elif mutation == "wrong-reason":
+        record["reason"] = "ZONE_EMPTY"
+    else:
+        record["runtime_evidence"]["collection_exit_reason"] = "ZONE_EMPTY"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("mutation", ["reason", "exit", "no-action", "isolated-reason", "isolated-exit"])
+def test_parity_preemption_claims_are_bidirectional(schema, mutation):
+    data = parity_case("partial-preempted")
+    record = data["executions"][0]
+    if mutation in ("no-action", "isolated-reason", "isolated-exit"):
+        record["actions"].pop()
+    if mutation == "reason":
+        record["reason"] = "ZONE_EMPTY"
+    if mutation == "exit":
+        record["runtime_evidence"]["collection_exit_reason"] = "ZONE_EMPTY"
+    if mutation == "isolated-reason":
+        record["runtime_evidence"]["collection_exit_reason"] = "ZONE_EMPTY"
+    if mutation == "isolated-exit":
+        record["reason"] = "ZONE_EMPTY"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("selection", ["POLICY_PREEMPTED", "ORIGINAL_POLICY_UNCHANGED"])
+def test_parity_success_cannot_hide_a_same_robot_preemption(schema, selection):
+    data = snapshot()
+    action = snapshot("partial-preempted.json")["executions"][0]["actions"][1]
+    action["selection"] = selection
+    data["executions"][0]["actions"][1] = action
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_parity_preemption_must_occur_during_its_lease(schema):
+    data = snapshot("partial-preempted.json")
+    record = data["executions"][0]
+    preemption = record["actions"].pop()
+    preemption["sim_t_s"] = 60
+    record["actions"].insert(0, preemption)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("state", ["PARTIAL", "FAILED", "INCONCLUSIVE"])
+def test_parity_preemption_preserves_quantity_classification(schema, state):
+    data = parity_case("failed" if state == "FAILED" else "partial-preempted")
+    record = data["executions"][0]
+    if state == "INCONCLUSIVE":
+        record["state"] = state
+        record["raw_quantity"].update(status="INCOMPLETE", balls=None)
+        record["runtime_evidence"]["event_sequence_complete"] = False
+        record["conflicts"]["missing_events"] = True
+        record["edge_evidence"].update(effective_state=state, terminal_states=[state],
+                                      reason="unknown:policy_preempted", verified=False, result_verification="UNVERIFIED")
+        record["device_protection"] = {"protected": True, "authorization_blocked": True, "reasons": ["ORPHANED_ACTIVITY"]}
+    validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("reason", ["POLICY_PREEMPTED", "ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"])
+@pytest.mark.parametrize("overlay", ["TERMINAL_CONFLICT", "REPLAY_MISMATCH"])
+def test_parity_conflict_overlay_preserves_causal_exit(schema, reason, overlay):
+    data = parity_case("partial-preempted" if reason == "POLICY_PREEMPTED" else reason)
+    record = data["executions"][0]
+    record.update(state="INCONCLUSIVE", reason=overlay)
+    record["edge_evidence"].update(effective_state="CONFLICT", reason="unknown:conflict",
+                                  terminal_states=["FAILED", "SUCCEEDED"], verified=False, result_verification="CONFLICT")
+    record["conflicts"]["terminal_conflict"] = True
+    record["conflicts"]["replay_mismatch"] = overlay == "REPLAY_MISMATCH"
+    reasons = ["TERMINAL_CONFLICT"] + ([] if reason == "POLICY_PREEMPTED" else [reason])
+    record["device_protection"] = {"protected": True, "authorization_blocked": True, "reasons": reasons}
+    validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("asset", ["schema", "example"])
+@pytest.mark.parametrize("source", [
+    '{"x": 1, "x": 2}', r'{"x": 1, "\u0078": 2}',
+    r'{"outer": [{"key": 1, "k\u0065y": 2}]}',
+    '{"x": NaN}', '{"x": Infinity}', '{"x": -Infinity}', '{"x": 1e999}',
+])
+def test_parity_asset_loaders_reject_ambiguous_json(tmp_path, monkeypatch, asset, source):
+    monkeypatch.setattr(__import__(__name__, fromlist=["CONTRACT"]), "CONTRACT", tmp_path)
+    if asset == "schema":
+        (tmp_path / "schema.json").write_text(source, encoding="utf-8")
+        load = schema.__wrapped__
+    else:
+        (tmp_path / "examples").mkdir()
+        (tmp_path / "examples" / "probe.json").write_text(source, encoding="utf-8")
+        load = lambda: example("probe.json")
+    with pytest.raises(ValueError):
+        load()
+
+
+@pytest.mark.parametrize("asset", ["schema", "example"])
+def test_parity_asset_loaders_preserve_separate_object_keys(tmp_path, monkeypatch, asset):
+    monkeypatch.setattr(__import__(__name__, fromlist=["CONTRACT"]), "CONTRACT", tmp_path)
+    source = '{"objects": [{"same": 1}, {"same": 2}], "same": 3}'
+    if asset == "schema":
+        (tmp_path / "schema.json").write_text(source, encoding="utf-8")
+        value = schema.__wrapped__()
+    else:
+        (tmp_path / "examples").mkdir()
+        (tmp_path / "examples" / "probe.json").write_text(source, encoding="utf-8")
+        value = example("probe.json")
+    assert value == {"objects": [{"same": 1}, {"same": 2}], "same": 3}
