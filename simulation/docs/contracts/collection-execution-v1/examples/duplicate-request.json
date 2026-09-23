@@ -1,5 +1,5 @@
 {
-  "description": "Same request ID and content returns the original receipt. A different ID for the same task/session/binding also returns that receipt, without an alias, another sequence or another attempt.",
+  "description": "Same request ID and content returns the original receipt. A different ID for the same task/session/binding also returns that receipt, without an alias, another sequence or another attempt. This attempt uses a running handoff continuation at 480s, after its 300s latest-start boundary but before its 780s deadline, ahead of an eligible pending start.",
   "bodies": [
     {
       "schema_ref": "#/$defs/ExecutionRequest",
@@ -8,8 +8,8 @@
         "environment": "SIMULATION",
         "kind": "EXECUTE_BOUND_COLLECTION",
         "request_id": "request-001",
-        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
-        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
         "session_id": "fixture-session-v3",
         "round_id": "round-001",
         "task_id": "task_555555555555555555555555",
@@ -27,9 +27,9 @@
         "schema": "nxt-collection-execution-request-receipt/v1",
         "environment": "SIMULATION",
         "request_id": "request-001",
-        "request_digest": "c0cbebff4e8a1aba99346d8131b2a28e883f47a064a3a5f3db2af9be08d61072",
-        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
-        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+        "request_digest": "a99cfb0dfd8d090f5358e00dba3f5446f7fbe695f8a338ddebc10bcabf5b7e86",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
         "attempt_id": "attempt-001",
         "sequence": 1,
         "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
@@ -43,8 +43,8 @@
         "environment": "SIMULATION",
         "kind": "EXECUTE_BOUND_COLLECTION",
         "request_id": "request-001",
-        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
-        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
         "session_id": "fixture-session-v3",
         "round_id": "round-001",
         "task_id": "task_555555555555555555555555",
@@ -62,9 +62,9 @@
         "schema": "nxt-collection-execution-request-receipt/v1",
         "environment": "SIMULATION",
         "request_id": "request-001",
-        "request_digest": "c0cbebff4e8a1aba99346d8131b2a28e883f47a064a3a5f3db2af9be08d61072",
-        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
-        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+        "request_digest": "a99cfb0dfd8d090f5358e00dba3f5446f7fbe695f8a338ddebc10bcabf5b7e86",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
         "attempt_id": "attempt-001",
         "sequence": 1,
         "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
@@ -78,8 +78,8 @@
         "environment": "SIMULATION",
         "kind": "EXECUTE_BOUND_COLLECTION",
         "request_id": "request-duplicate-002",
-        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
-        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
         "session_id": "fixture-session-v3",
         "round_id": "round-001",
         "task_id": "task_555555555555555555555555",
@@ -97,9 +97,9 @@
         "schema": "nxt-collection-execution-request-receipt/v1",
         "environment": "SIMULATION",
         "request_id": "request-001",
-        "request_digest": "c0cbebff4e8a1aba99346d8131b2a28e883f47a064a3a5f3db2af9be08d61072",
-        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
-        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+        "request_digest": "a99cfb0dfd8d090f5358e00dba3f5446f7fbe695f8a338ddebc10bcabf5b7e86",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
         "attempt_id": "attempt-001",
         "sequence": 1,
         "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
@@ -133,7 +133,7 @@
           {
             "schema": "nxt-collection-execution-binding/v1",
             "environment": "SIMULATION",
-            "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
+            "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
             "site_id": "synthetic-site",
             "deployment_id": "synthetic-sim",
             "commissioned_site_digest": "4444444444444444444444444444444444444444444444444444444444444444",
@@ -174,7 +174,10 @@
               },
               "derivation_rule": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
             },
-            "handoff_binding_mode": "SOLE_SCENARIO_STATION_V1"
+            "handoff_binding_mode": "SOLE_SCENARIO_STATION_V1",
+            "bound_at_sim_t_s": 60,
+            "bound_at_utc": "2026-09-16T00:01:00Z",
+            "task_created_at_utc": "2026-09-16T00:01:00Z"
           }
         ],
         "requests": [
@@ -183,8 +186,8 @@
             "environment": "SIMULATION",
             "kind": "EXECUTE_BOUND_COLLECTION",
             "request_id": "request-001",
-            "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
-            "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
+            "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
+            "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
             "session_id": "fixture-session-v3",
             "round_id": "round-001",
             "task_id": "task_555555555555555555555555",
@@ -201,9 +204,9 @@
             "schema": "nxt-collection-execution-request-receipt/v1",
             "environment": "SIMULATION",
             "request_id": "request-001",
-            "request_digest": "c0cbebff4e8a1aba99346d8131b2a28e883f47a064a3a5f3db2af9be08d61072",
-            "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
-            "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+            "request_digest": "a99cfb0dfd8d090f5358e00dba3f5446f7fbe695f8a338ddebc10bcabf5b7e86",
+            "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
+            "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
             "attempt_id": "attempt-001",
             "sequence": 1,
             "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
@@ -212,10 +215,10 @@
         ],
         "executions": [
           {
-            "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+            "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
             "attempt_id": "attempt-001",
             "request_id": "request-001",
-            "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
+            "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
             "session_id": "fixture-session-v3",
             "round_id": "round-001",
             "task_id": "task_555555555555555555555555",
@@ -253,7 +256,7 @@
                 "selection": "WAIT_SLOT",
                 "eligible_pending": [
                   {
-                    "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+                    "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
                     "eligible_sim_t_s": 60,
                     "latest_start_sim_t_s": 300
                   },
@@ -279,9 +282,9 @@
               {
                 "sim_t_s": 480,
                 "original_action": {
-                  "name": "SendToHandoff",
-                  "index": 2,
-                  "robot_id": "R1",
+                  "name": "Wait",
+                  "index": 0,
+                  "robot_id": null,
                   "target_id": null
                 },
                 "selected_action": {
@@ -290,8 +293,14 @@
                   "robot_id": "R1",
                   "target_id": null
                 },
-                "selection": "ORIGINAL_POLICY_CONVERGED",
-                "eligible_pending": [],
+                "selection": "RUNNING_CONTINUATION",
+                "eligible_pending": [
+                  {
+                    "execution_id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+                    "eligible_sim_t_s": 420,
+                    "latest_start_sim_t_s": 600
+                  }
+                ],
                 "safety_shield": "ACCEPTED",
                 "safety_reason": null
               }

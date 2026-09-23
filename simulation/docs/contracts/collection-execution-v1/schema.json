@@ -220,6 +220,15 @@
         },
         "handoff_binding_mode": {
           "const": "SOLE_SCENARIO_STATION_V1"
+        },
+        "bound_at_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "bound_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "task_created_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
         }
       },
       "required": [
@@ -252,7 +261,10 @@
         "handoff_station_id",
         "max_execution_s",
         "cycle_evidence",
-        "handoff_binding_mode"
+        "handoff_binding_mode",
+        "bound_at_sim_t_s",
+        "bound_at_utc",
+        "task_created_at_utc"
       ],
       "additionalProperties": false
     },
@@ -570,7 +582,8 @@
             "WAIT_SLOT",
             "ORIGINAL_POLICY_UNCHANGED",
             "ORIGINAL_POLICY_CONVERGED",
-            "POLICY_PREEMPTED"
+            "POLICY_PREEMPTED",
+            "RUNNING_CONTINUATION"
           ]
         },
         "eligible_pending": {

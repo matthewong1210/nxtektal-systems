@@ -90,6 +90,13 @@ orphan receipts, missing execution records and duplicate receipt execution or
 attempt identities are invalid. The original request ID, binding ID,
 execution ID and attempt ID agree across each linked group.
 
+The exact creation order is existing Planning confirmation/schedule ->
+verified TASK_CREATED -> downstream V3 binding -> durable execution request
+-> Edge ACCEPTED -> action. Planning v1 receives no new session or binding
+field, and confirmation is not required to reference a future Edge task or
+binding before due-time admission. The V3 composition verifies the complete
+chain after TASK_CREATED and before it accepts execution.
+
 ## Clocks and explicit maximum
 
 Simulation/business UTC is session_epoch_utc + sim_t_s. The frozen epoch is
@@ -106,6 +113,16 @@ max_execution_s has no fallback:
 ceil((travel + collect + return + unload) * 60 / control_interval_s)
     * control_interval_s
 ```
+
+Binding freezes bound_at_sim_t_s, its exact projected bound_at_utc, and the
+verified task_created_at_utc source timestamp. Require bound_at_utc =
+session_epoch_utc + bound_at_sim_t_s, task_created_at_utc <= bound_at_utc and
+observed_at_utc <= bound_at_utc <= valid_until_utc. Binding time cannot be in
+the snapshot's future or later than an action/start attributed to it. Evidence
+fresh at the session epoch but stale when bound is invalid. The fixture's
+TASK_CREATED and binding both occur at 60 seconds, before its 120-second start.
+The binding is immutable input to the subsequent durable request; wall-clock
+read timestamps do not determine this order.
 
 The fixture's 2 + 5 + 2 + 2 minutes at a 60-second interval yields exactly 660
 seconds. Wash and supply are excluded. Deadline equals actual start + maximum
@@ -153,6 +170,17 @@ starts at 120 seconds so every displayed candidate is eligible; its deadline
 is 780 seconds (120 + 660). A recorded actual start requires exactly one
 WAIT_SLOT AssignCollection at that tick for the bound robot and zone, with
 SafetyShield ACCEPTED. A rejected action cannot prove assignment start.
+WAIT_SLOT is reserved for a new pending start. RUNNING_CONTINUATION records
+an original Wait filled by the already running attempt's next collection or
+handoff action; it is checked against that attempt's start and execution
+deadline, not its expired latest-start boundary. Its selected robot/zone or
+generic handoff action must belong to the running attempt. eligible_pending
+may retain other eligible candidates to show that continuation outranked them;
+the running execution itself is not a pending candidate. No new start may take
+a held running lease, including a tick when that lease needs no directive.
+The duplicate-request example includes a continuation at 480 seconds, after
+latest-start 300 but before deadline 780, ahead of an eligible pending task.
+The success example independently retains unchanged original-policy handoff.
 At latest_start an unstarted request is MISSED without a late directive.
 Non-Wait original actions remain unchanged. A matching handoff is recorded as
 ORIGINAL_POLICY_CONVERGED; a different action for the leased robot explicitly
@@ -297,8 +325,10 @@ rules to ordinary chunk replay and do not implement a journal in Phase 3A.
 Future GET /api/v1/collection-executions reads snapshots.
 GET /api/v1/collection-executions/requests/{request_id} recovers receipts.
 Every POST/PUT/PATCH/DELETE in that namespace is 405. No browser endpoint
-creates, retries or controls execution. Existing Planning confirmation is
-unchanged and must already be session-bound before due-time admission.
+creates, retries or controls execution. The existing Planning confirmation and
+schedule are unchanged. After due-time admission creates verified TASK_CREATED,
+the downstream V3 binding is created and its execution request is durably
+recorded; only then may Edge ACCEPTED and an execution action follow.
 
 The existing nxt-site-agent/api/v0 success envelope is schema/disclaimer/data;
 error is schema/disclaimer/error with code/detail. The client is same-origin,

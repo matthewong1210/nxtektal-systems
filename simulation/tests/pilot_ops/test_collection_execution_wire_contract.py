@@ -86,6 +86,7 @@ def relations(data):
     requests = unique(data["requests"], "request_id")
     receipts = unique(data["receipts"], "request_id")
     executions = unique(data["executions"], "execution_id")
+    assert sum(r["state"] == "RUNNING" for r in executions.values()) <= 1, "single running lease per session/round"
     assert requests.keys() == receipts.keys(), "orphan request or receipt"
     unique(data["receipts"], "execution_id")
     unique(data["receipts"], "attempt_id")
@@ -103,7 +104,12 @@ def relations(data):
         evidence = binding["cycle_evidence"]
         observed = datetime.fromisoformat(evidence["observed_at_utc"].replace("Z", "+00:00"))
         valid = datetime.fromisoformat(evidence["valid_until_utc"].replace("Z", "+00:00"))
-        assert observed <= epoch < valid
+        bound = datetime.fromisoformat(binding["bound_at_utc"].replace("Z", "+00:00"))
+        created = datetime.fromisoformat(binding["task_created_at_utc"].replace("Z", "+00:00"))
+        assert bound == epoch + timedelta(seconds=binding["bound_at_sim_t_s"])
+        assert binding["bound_at_sim_t_s"] <= data["now_sim_t_s"]
+        assert created <= bound
+        assert observed <= bound <= valid
         total = sum(evidence["cycle_minutes"].values()) * 60
         assert binding["max_execution_s"] == math.ceil(total / binding["control_interval_s"]) * binding["control_interval_s"]
     for request in requests.values():
@@ -138,6 +144,7 @@ def relations(data):
             assert not record["runtime_evidence"]["assignment_accepted"]
         else:
             assert request["eligible_sim_t_s"] <= start < request["latest_start_sim_t_s"]
+            assert binding["bound_at_sim_t_s"] <= start
             assert deadline == start + binding["max_execution_s"] <= data["session_end_sim_t_s"]
             assert start <= data["now_sim_t_s"]
             assert record["assignment_id"] is not None
@@ -160,6 +167,7 @@ def relations(data):
         previous = -1
         for action in record["actions"]:
             assert previous <= action["sim_t_s"] <= data["now_sim_t_s"]
+            assert binding["bound_at_sim_t_s"] <= action["sim_t_s"]
             previous = action["sim_t_s"]
             candidates = action["eligible_pending"]
             unique(candidates, "execution_id")
@@ -172,6 +180,25 @@ def relations(data):
             if action["selection"] == "WAIT_SLOT":
                 assert action["original_action"]["name"] == "Wait"
                 assert candidates and candidates[0]["execution_id"] == record["execution_id"]
+                assert action["selected_action"]["name"] == "AssignCollection"
+                assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
+                assert action["selected_action"]["target_id"] == binding["runtime_zone_id"]
+                if start is not None:
+                    assert action["sim_t_s"] == start, "WAIT_SLOT only starts a new attempt"
+                # A pending start cannot displace any already running lease.
+                for other in executions.values():
+                    other_start, other_end = other["started_sim_t_s"], other["terminal_sim_t_s"]
+                    active = other_start is not None and other_start < action["sim_t_s"] and (other_end is None or action["sim_t_s"] < other_end)
+                    assert not active, "running continuation precedes pending starts"
+            elif action["selection"] == "RUNNING_CONTINUATION":
+                assert start is not None and start < action["sim_t_s"] < deadline
+                assert end is None or action["sim_t_s"] <= end
+                assert action["original_action"]["name"] == "Wait"
+                selected = action["selected_action"]
+                assert selected["name"] in ("AssignCollection", "SendToHandoff")
+                assert selected["robot_id"] == binding["runtime_robot_id"]
+                assert selected["target_id"] == (binding["runtime_zone_id"] if selected["name"] == "AssignCollection" else None)
+                assert all(c["execution_id"] != record["execution_id"] for c in candidates)
             else:
                 assert action["original_action"] == action["selected_action"]
             if action["selection"] == "ORIGINAL_POLICY_CONVERGED":
@@ -591,3 +618,129 @@ def test_source_task_id_and_full_content_digest_remain_distinct(schema):
     validator(schema, "#/$defs/Digest").validate(binding["task_content_digest"])
     with pytest.raises(ValidationError):
         validator(schema, "#/$defs/Digest").validate(binding["task_id"])
+
+
+def rekey_single_snapshot(data):
+    """Keep negative controls cross-linked when changing an immutable binding."""
+    binding, request, receipt, record = (data[key][0] for key in ("bindings", "requests", "receipts", "executions"))
+    previous_execution = record["execution_id"]
+    binding["binding_id"] = digest({k: v for k, v in binding.items() if k != "binding_id"})
+    for key in ("binding_id", "task_id", "task_content_digest", "session_id", "round_id", "incarnation"):
+        request[key] = binding[key]
+    request["execution_id"] = digest({k: request[k] for k in ("task_id", "task_content_digest", "session_id", "round_id", "binding_id")})
+    for key in ("request_id", "execution_id", "binding_id"):
+        receipt[key] = request[key]
+        record[key] = request[key]
+    receipt["request_digest"] = digest(request)
+    record["attempt_id"] = receipt["attempt_id"]
+    for key in ("task_id", "runtime_robot_id", "runtime_zone_id", "handoff_station_id"):
+        record[key] = binding[key]
+    record["edge_evidence"]["task_id"] = binding["task_id"]
+    for action in record["actions"]:
+        # This isolated fixture has only its own pending start.
+        action["eligible_pending"] = [
+            {**candidate, "execution_id": request["execution_id"]}
+            for candidate in action["eligible_pending"]
+            if candidate["execution_id"] == previous_execution
+        ]
+
+
+def active_snapshot():
+    data = snapshot()
+    record = data["executions"][0]
+    record.update(state="RUNNING", stage="TRAVEL_TO_UNLOAD", reason=None,
+                  terminal_sim_t_s=None, success_display_allowed=False)
+    record["actions"] = record["actions"][:1]
+    record["runtime_evidence"]["assignment_terminal"] = False
+    record["unload_quantity"].update(status="NOT_REACHED", balls=None,
+                                    source_event_ids=[], event_digest=None)
+    record["edge_evidence"].update(effective_state="RUNNING", result_verification="UNVERIFIED",
+                                   verified=False, terminal_states=[])
+    record["device_protection"] = {
+        "protected": True, "reasons": ["RUNTIME_ACTIVE"], "authorization_blocked": True,
+    }
+    return data
+
+
+def test_final_review_two_otherwise_valid_running_records_rejected(schema):
+    first, second = active_snapshot(), active_snapshot()
+    binding = second["bindings"][0]
+    binding.update(task_id="task_" + "a" * 24, plan_id="plan-002",
+                   confirmation_id="confirmation-002", schedule_id="schedule-002")
+    second["requests"][0]["request_id"] = "request-002"
+    second["receipts"][0].update(attempt_id="attempt-002", sequence=2)
+    second["executions"][0]["assignment_id"] = "assignment-002"
+    for field in ("raw_quantity", "unload_quantity"):
+        second["executions"][0][field]["assignment_id"] = "assignment-002"
+    rekey_single_snapshot(second)
+    # Both inputs independently satisfy all identity, timing and evidence rules.
+    validate_snapshot(schema, first)
+    validate_snapshot(schema, second)
+    combined = copy.deepcopy(first)
+    for key in ("bindings", "requests", "receipts", "executions"):
+        combined[key].extend(second[key])
+    with pytest.raises(AssertionError, match="running lease"):
+        validate_snapshot(schema, combined)
+
+
+def test_final_review_running_handoff_after_latest_start_is_valid(schema):
+    data = snapshot("duplicate-request.json")
+    record = data["executions"][0]
+    action = record["actions"][1]
+    assert action["selection"] == "RUNNING_CONTINUATION"
+    assert record["latest_start_sim_t_s"] < action["sim_t_s"] < record["execution_deadline_sim_t_s"]
+    assert action["eligible_pending"], "continuation outranks a currently eligible pending start"
+    validate_snapshot(schema, data)
+
+
+def test_final_review_pending_start_cannot_displace_running_continuation(schema):
+    data = snapshot("duplicate-request.json")
+    action = data["executions"][0]["actions"][1]
+    action["selection"] = "WAIT_SLOT"
+    action["selected_action"] = {"name": "AssignCollection", "index": 1, "robot_id": "R2", "target_id": "NEAR_LEFT"}
+    with pytest.raises((ValidationError, AssertionError)):
+        validate_snapshot(schema, data)
+
+
+def test_final_review_binding_carries_derived_clock_and_task_creation():
+    binding = snapshot()["bindings"][0]
+    assert binding["bound_at_sim_t_s"] == 60
+    assert binding["bound_at_utc"] == "2026-09-16T00:01:00Z"
+    assert binding["task_created_at_utc"] == "2026-09-16T00:01:00Z"
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("evidence_valid_until", "2026-09-16T00:00:30Z"),
+    ("bound_at_utc", "2026-09-16T00:02:00Z"),
+    ("task_created_at_utc", "2026-09-16T00:02:00Z"),
+])
+def test_final_review_binding_clock_and_freshness(schema, field, value):
+    data = snapshot()
+    binding = data["bindings"][0]
+    binding.update(bound_at_sim_t_s=60, bound_at_utc="2026-09-16T00:01:00Z",
+                   task_created_at_utc="2026-09-16T00:01:00Z")
+    if field == "evidence_valid_until":
+        binding["cycle_evidence"]["valid_until_utc"] = value
+    else:
+        binding[field] = value
+    rekey_single_snapshot(data)
+    # Call the relational oracle directly to isolate chronology from shape.
+    with pytest.raises(AssertionError):
+        relations(data)
+
+
+def test_final_review_freshness_uses_inclusive_binding_time_not_epoch(schema):
+    data = snapshot()
+    evidence = data["bindings"][0]["cycle_evidence"]
+    evidence["observed_at_utc"] = "2026-09-16T00:00:30Z"
+    evidence["valid_until_utc"] = "2026-09-16T00:01:00Z"
+    rekey_single_snapshot(data)
+    validate_snapshot(schema, data)
+
+
+def test_final_review_binding_cannot_follow_its_execution_start(schema):
+    data = snapshot()
+    data["bindings"][0].update(bound_at_sim_t_s=180, bound_at_utc="2026-09-16T00:03:00Z")
+    rekey_single_snapshot(data)
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
