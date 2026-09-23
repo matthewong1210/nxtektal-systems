@@ -217,11 +217,15 @@ At actual start:
 execution_deadline_sim_t_s = started_sim_t_s + max_execution_s
 ```
 
-The attempt may start only if that deadline is within `session_end_sim_t_s`.
-Otherwise it becomes `MISSED` with `INSUFFICIENT_SESSION_HORIZON` without an
-action.  Phase 3B must make the simulator-owned bounded assignment terminate at
-the deadline and emit terminal evidence; merely stopping attribution while the
-robot continues is not conforming.  No new task may use that device while a
+At an unstarted evaluation time `t`, a window exists only when
+`max(t, eligible_sim_t_s) + max_execution_s <= session_end_sim_t_s`.
+Otherwise the request becomes `MISSED` with
+`INSUFFICIENT_SESSION_HORIZON`, no assignment or action, and normalized Edge
+reason `unknown:insufficient_session_horizon`.  If Edge already accepted the
+request its projection is `FAILED`; otherwise it is `REJECTED`.  Phase 3B must
+make the simulator-owned bounded assignment terminate exactly at the deadline
+with `EXECUTION_TIMEOUT` evidence; merely stopping attribution while the robot
+continues is not conforming.  No new task may use that device while a
 late/orphaned runtime activity or unresolved protection remains.
 
 ## Wait-only non-preemptive arbitration v1
@@ -450,6 +454,7 @@ ball quantity semantics.
 | V3 `PARTIAL` with complete evidence | Edge `FAILED` with normalized v1 reason `unknown:partial_execution`; never `SUCCEEDED` |
 | V3 `INCONCLUSIVE` or unknown result | Edge `INCONCLUSIVE` |
 | V3 `REJECTED`, or a miss detected before Edge acceptance | Edge `REJECTED` with the preserved reason |
+| V3 `MISSED` for `INSUFFICIENT_SESSION_HORIZON` | Normalized reason `unknown:insufficient_session_horizon`; Edge is `FAILED` after acceptance and `REJECTED` before acceptance |
 | V3 `REJECTED` after Edge `ACCEPTED` (for example final `SafetyShield` rejection) | Edge `FAILED` with normalized v1 reason `unknown:safety_rejected`; the exact shield reason remains in V3 evidence, and Edge v1 does not permit `ACCEPTED -> REJECTED` |
 | V3 `MISSED` after Edge `ACCEPTED` while waiting for a policy slot | Edge `FAILED` with normalized reason `unknown:policy_slot_missed`; Edge v1 does not permit `ACCEPTED -> REJECTED` |
 | Conflicting Edge terminals/replay | Effective V3 projection becomes `INCONCLUSIVE`; authorization stays blocked and success is not displayed |

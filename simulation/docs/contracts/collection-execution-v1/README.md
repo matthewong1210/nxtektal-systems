@@ -125,11 +125,16 @@ The binding is immutable input to the subsequent durable request; wall-clock
 read timestamps do not determine this order.
 
 The fixture's 2 + 5 + 2 + 2 minutes at a 60-second interval yields exactly 660
-seconds. Wash and supply are excluded. Deadline equals actual start + maximum
-and must fit within session_end_sim_t_s, otherwise MISSED with
-INSUFFICIENT_SESSION_HORIZON and no action. Terminal cannot precede start;
-success cannot occur after deadline. Phase 3B must stop the runtime assignment
-at its deadline, not merely stop attribution.
+seconds. Wash and supply are excluded. Deadline equals actual start + maximum.
+At an unstarted evaluation time `t`,
+`max(t, eligible_sim_t_s) + max_execution_s` must fit within
+`session_end_sim_t_s`; otherwise the record is MISSED with
+INSUFFICIENT_SESSION_HORIZON, no assignment/action/runtime exit, and Edge
+reason `unknown:insufficient_session_horizon` (FAILED after acceptance,
+otherwise REJECTED). Terminal cannot precede start; success cannot occur after
+deadline. A started EXECUTION_TIMEOUT terminal occurs exactly at the deadline
+and retains its matching runtime exit. Phase 3B must stop the runtime
+assignment at its deadline, not merely stop attribution.
 
 server_time_utc is wall-clock read metadata; browser service freshness remains
 15 wall seconds. It never controls task ordering or outcome. ACTIVE/PAUSED/
@@ -260,9 +265,12 @@ INCONCLUSIVE. Misses/rejections map to REJECTED only before Edge acceptance.
 After acceptance (edge_evidence.accepted=true), a policy-slot miss or final
 SafetyShield rejection maps to FAILED with its reason; Edge v1 does not allow
 ACCEPTED -> REJECTED. The V3 state still retains MISSED or REJECTED respectively.
+An insufficient-horizon miss uses `unknown:insufficient_session_horizon` and
+maps to FAILED after acceptance or REJECTED before acceptance.
 Edge reasons preserve the existing closed Edge v1 vocabulary. New reason
 tokens use its unknown: prefix, including unknown:policy_slot_missed and
-unknown:safety_rejected; the V3 reason remains its own enum.
+unknown:safety_rejected and unknown:insufficient_session_horizon; the V3
+reason remains its own enum.
 
 Conflicting terminals preserve all claims in terminal_states. Edge
 effective_state becomes CONFLICT while record.state becomes INCONCLUSIVE.
