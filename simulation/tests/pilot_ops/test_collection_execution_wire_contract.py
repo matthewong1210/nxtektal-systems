@@ -371,7 +371,7 @@ def test_frozen_success_is_closed_loop_and_policy_preserved(schema):
     data = snapshot()
     validate_snapshot(schema, data)
     binding, record = data["bindings"][0], data["executions"][0]
-    assert (binding["robot_id"], binding["zone_id"], binding["runtime_robot_id"], binding["runtime_zone_id"], binding["handoff_station_id"]) == ("picker-01", "Z1", "R1", "NEAR_LEFT", "handoff-1")
+    assert (binding["robot_id"], binding["zone_id"], binding["runtime_robot_id"], binding["runtime_zone_id"], binding["handoff_station_id"]) == ("picker-01", "Z1", "R1", "NEAR_LEFT", "H1")
     assert binding["cycle_evidence"]["cycle_minutes"] == {"travel": 2, "collect": 5, "return": 2, "unload": 2}
     assert binding["control_interval_s"] == 60 and binding["max_execution_s"] == 660
     assert record["raw_quantity"]["balls"] == record["unload_quantity"]["balls"] == 44
@@ -541,3 +541,53 @@ def test_review_partial_edge_reason_is_normalized(schema):
     data["executions"][0]["edge_evidence"]["reason"] = "partial_execution"
     with pytest.raises((ValidationError, AssertionError)):
         validate_snapshot(schema, data)
+
+
+@pytest.mark.parametrize("task_id", [
+    "a" * 64, "task_" + "A" * 24, "task_" + "a" * 23,
+    "task_" + "a" * 25, "other_" + "a" * 24,
+])
+def test_source_edge_task_id_uses_existing_v1_shape(schema, task_id):
+    for definition, item in (
+        ("Binding", snapshot()["bindings"][0]),
+        ("ExecutionRequest", snapshot()["requests"][0]),
+        ("ExecutionRecord", snapshot()["executions"][0]),
+        ("EdgeEvidence", snapshot()["executions"][0]["edge_evidence"]),
+    ):
+        item["task_id"] = task_id
+        with pytest.raises(ValidationError):
+            validator(schema, f"#/$defs/{definition}").validate(item)
+
+
+def test_source_handoff_uses_sole_scenario_station_h1():
+    data = snapshot()
+    binding = data["bindings"][0]
+    assert binding["handoff_binding_mode"] == "SOLE_SCENARIO_STATION_V1"
+    assert binding["handoff_station_id"] == "H1"
+    assert data["executions"][0]["handoff_station_id"] == "H1"
+    assert data["executions"][0]["unload_quantity"]["destination_id"] == "H1"
+
+
+@pytest.mark.parametrize("mode", [None, "MULTI_STATION", "SOLE_SCENARIO_STATION_V2"])
+def test_source_handoff_binding_rejects_other_modes(schema, mode):
+    binding = snapshot()["bindings"][0]
+    binding["handoff_binding_mode"] = mode
+    with pytest.raises(ValidationError):
+        validator(schema, "#/$defs/Binding").validate(binding)
+
+
+def test_source_handoff_unload_cannot_claim_another_station(schema):
+    data = snapshot()
+    data["executions"][0]["unload_quantity"]["destination_id"] = "H2"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_source_task_id_and_full_content_digest_remain_distinct(schema):
+    binding = snapshot()["bindings"][0]
+    assert binding["task_id"] == "task_" + "5" * 24
+    assert binding["task_content_digest"] == "6" * 64
+    validator(schema, "#/$defs/TaskId").validate(binding["task_id"])
+    validator(schema, "#/$defs/Digest").validate(binding["task_content_digest"])
+    with pytest.raises(ValidationError):
+        validator(schema, "#/$defs/Digest").validate(binding["task_id"])

@@ -53,8 +53,23 @@ Binding includes site/deployment and commissioned source digest, Planning
 plan/version/confirmation, schedule, exact Edge task/content digest and target
 incarnation, session series/round/index/config/engine digests, the epoch and
 runtime robot/zone/station mapping. The mapping
-`picker-01/Z1 -> R1/NEAR_LEFT -> handoff-1` is a synthetic fixture, never an
+`picker-01/Z1 -> R1/NEAR_LEFT -> H1` is a synthetic fixture, never an
 inferred physical alias. No identity may silently cross a binding or round.
+
+Edge task_id preserves the existing derive_task_id format: task_ followed by
+24 lowercase hex characters. task_content_digest is the separate full
+64-character lowercase SHA-256 of the complete Edge task body; these fields
+are not interchangeable. Source task facts remain illustrative in these
+fixtures, while binding, execution and request hashes are recomputed from
+their exact published canonical bodies.
+
+Every v1 binding has handoff_binding_mode=SOLE_SCENARIO_STATION_V1. Before
+Edge ACCEPTED, the Phase 3B composition must verify the frozen scenario has
+exactly one handoff station and that its ID equals handoff_station_id. The
+existing one-station scenario and these fixtures use H1; zero stations,
+multiple stations or a mismatched H1 binding reject before acceptance. The
+mode is a contract restriction, not a claim that this topology check is
+implemented. Multi-station execution needs a separately versioned contract.
 
 Production binding_id is SHA-256 of the canonical binding body excluding
 binding_id. execution_id hashes the canonical object containing task_id,
@@ -105,6 +120,15 @@ ENDED session state is independent of service freshness. A future reused
 schedule form compares dates with fresh simulation UTC but checks write health
 against wall time.
 
+The same projected simulation UTC drives PlanningOperations, ScheduleService,
+the Edge gateway and simulated device lifecycle, including task expiry and
+Edge heartbeat receipt age, and business execution. Pausing simulation time
+therefore also pauses those lifecycle ages. Wall time only drives the outer
+15-second service-read health and process chunk budget; stale service reads
+remain distinct from paused simulation/Edge state. Preserve the current
+single-clock ScheduleService API: this design adds no second clock argument
+and mixes no wall timestamps into its lifecycle journal.
+
 ## Wait-only arbitration evidence
 
 WAIT_ONLY_NON_PREEMPTIVE_V1 calls the unchanged JointDispatchPolicy once per
@@ -116,7 +140,11 @@ does not contain a station-specific action or station-specific index. These
 are evidence, not a new command API. The synthetic example uses a one-robot,
 one-zone catalog: Wait 0, AssignCollection 1, SendToHandoff 2, SendToCharge 3.
 
-A pending proposal fills only an original Wait. Eligible candidates are sorted
+A pending proposal fills only an original Wait. Multiple requests may be
+PENDING, but v1 permits a single RUNNING execution lease per session/round.
+A running attempt's needed continuation wins a Wait slot before any pending
+start; original non-Wait proposals still remain unchanged. Only when no
+running continuation needs that slot are eligible pending candidates sorted
 by (latest_start_sim_t_s, eligible_sim_t_s, execution_id); only the first can
 consume that slot. The success example exercises all three tie-break keys.
 Every listed candidate must satisfy eligible <= action.sim_t_s < latest_start;
@@ -131,10 +159,11 @@ ORIGINAL_POLICY_CONVERGED; a different action for the leased robot explicitly
 preempts. Other robot/staff actions remain unchanged. Only selected actions
 pass once through ActionCatalog, RangeOpsEnv.step and final SafetyShield.
 Safety rejection does not create an accepted assignment or ledger movement.
-In Phase 3B a generic handoff may count as convergence only when the simulator's
-deterministically resolved station at that tick equals the bound station.
-Quantity destination evidence is retained separately; this contract does not
-claim a new station-specific catalog entry.
+In Phase 3B the pre-acceptance sole-station gate makes the generic handoff
+destination unambiguous: the simulator's station is the bound H1 in this
+scenario. Quantity destination evidence remains separate, and a complete
+unload must name that bound station. This contract does not claim a new
+station-specific catalog entry or a deployed topology/admission gate.
 
 ## Lifecycle and quantities
 
@@ -243,6 +272,27 @@ append/response gives collection_execution_result_unknown; query or retry the
 original ID. Exact replay includes bindings, high-water identity, policy,
 arbiter, original/selected actions, assignment events and terminals; mismatch
 fails closed.
+
+The per-tick transaction is also DESIGN ONLY. Under the session lock,
+ACTION_PREPARED means append and fsync tick_intent containing the previous
+committed cursor/digest, request-log high water, policy/arbiter identities,
+original/selected action and execution/assignment identity. Then call
+RangeOpsEnv.step once. ACTION_COMMITTED means append and fsync tick_commit
+with resulting events/state digest and a deterministic Edge-event outbox.
+Publish the disposable state/report cursor last. The simulated device reads
+only committed outbox entries, persists exact Edge event bytes in its own
+journal, then publishes. It never calls env.step.
+
+Before a durable intent, recompute without claiming an action occurred. With
+an intent but no commit, rebuild the committed prefix and replay the exact
+intent; inability to verify its deterministic result fails closed as
+INCONCLUSIVE with device protection. With a durable commit but missing cursor,
+repair the disposable cursor without another logical execution. An unconfirmed
+committed Edge event is redelivered with its same bytes and sequence, never a
+new attempt. Edge evidence lacking a matching committed tick is a conflict
+and blocks authorization. An intent alone cannot publish progress or terminal
+evidence. These crash rules do not downgrade actual device-process restart
+rules to ordinary chunk replay and do not implement a journal in Phase 3A.
 
 Future GET /api/v1/collection-executions reads snapshots.
 GET /api/v1/collection-executions/requests/{request_id} recovers receipts.

@@ -19,11 +19,11 @@
         "environment": "SIMULATION",
         "kind": "EXECUTE_BOUND_COLLECTION",
         "request_id": "request-001",
-        "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
-        "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+        "execution_id": "c95415c75f380bf22daee2a3c24bf51615f1f7dd62503d5e6a459eb506f7e137",
+        "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
         "session_id": "fixture-session-v3",
         "round_id": "round-001",
-        "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+        "task_id": "task_555555555555555555555555",
         "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
         "incarnation": "conflicting-incarnation",
         "due_at_utc": "2026-09-16T00:01:00Z",
@@ -59,7 +59,7 @@
           {
             "schema": "nxt-collection-execution-binding/v1",
             "environment": "SIMULATION",
-            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "binding_id": "64ca936f3c47bfd31c59ff7bf3a60c06617933cd1e58e18567712cf8287ea018",
             "site_id": "synthetic-site",
             "deployment_id": "synthetic-sim",
             "commissioned_site_digest": "4444444444444444444444444444444444444444444444444444444444444444",
@@ -67,7 +67,7 @@
             "plan_version": 1,
             "confirmation_id": "confirmation-001",
             "schedule_id": "schedule-001",
-            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "task_id": "task_555555555555555555555555",
             "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
             "incarnation": "fixture-incarnation-001",
             "robot_id": "picker-01",
@@ -83,7 +83,7 @@
             "session_end_sim_t_s": 3600,
             "runtime_robot_id": "R1",
             "runtime_zone_id": "NEAR_LEFT",
-            "handoff_station_id": "handoff-1",
+            "handoff_station_id": "H1",
             "max_execution_s": 660,
             "cycle_evidence": {
               "input_record_id": "input-001",
@@ -99,7 +99,8 @@
                 "unload": 2
               },
               "derivation_rule": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
-            }
+            },
+            "handoff_binding_mode": "SOLE_SCENARIO_STATION_V1"
           }
         ],
         "requests": [],

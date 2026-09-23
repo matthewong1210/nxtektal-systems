@@ -162,7 +162,7 @@
           "$ref": "#/$defs/Id"
         },
         "task_id": {
-          "$ref": "#/$defs/Digest"
+          "$ref": "#/$defs/TaskId"
         },
         "task_content_digest": {
           "$ref": "#/$defs/Digest"
@@ -217,6 +217,9 @@
         },
         "cycle_evidence": {
           "$ref": "#/$defs/CycleEvidence"
+        },
+        "handoff_binding_mode": {
+          "const": "SOLE_SCENARIO_STATION_V1"
         }
       },
       "required": [
@@ -248,7 +251,8 @@
         "runtime_zone_id",
         "handoff_station_id",
         "max_execution_s",
-        "cycle_evidence"
+        "cycle_evidence",
+        "handoff_binding_mode"
       ],
       "additionalProperties": false
     },
@@ -280,7 +284,7 @@
           "$ref": "#/$defs/Id"
         },
         "task_id": {
-          "$ref": "#/$defs/Digest"
+          "$ref": "#/$defs/TaskId"
         },
         "task_content_digest": {
           "$ref": "#/$defs/Digest"
@@ -713,7 +717,7 @@
           "type": "boolean"
         },
         "task_id": {
-          "$ref": "#/$defs/Digest"
+          "$ref": "#/$defs/TaskId"
         },
         "verified": {
           "type": "boolean"
@@ -911,7 +915,7 @@
           "$ref": "#/$defs/Id"
         },
         "task_id": {
-          "$ref": "#/$defs/Digest"
+          "$ref": "#/$defs/TaskId"
         },
         "incarnation": {
           "$ref": "#/$defs/Id"
@@ -1407,6 +1411,10 @@
           "pattern": "^unknown:[A-Za-z0-9_.:-]{1,96}$"
         }
       ]
+    },
+    "TaskId": {
+      "type": "string",
+      "pattern": "^task_[a-f0-9]{24}$"
     }
   }
 }
