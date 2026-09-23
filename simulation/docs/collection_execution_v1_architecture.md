@@ -59,7 +59,7 @@ carry per-task lineage, so their attribution remains unknown.
 | Fact or behavior | Owner | V3 use |
 |---|---|---|
 | Planning inputs, plan versions, confirmation and human outcome evidence | `nxt_pilot_ops` | Reuse unchanged Planning v1 records and confirmation workflow. |
-| Dated schedule, current device admission and Edge task lifecycle | `nxt_edge_task` / `ScheduleService` | Reuse unchanged Edge v1 admission and task identity. |
+| Dated schedule, current device admission and Edge task lifecycle | `nxt_edge_task` / `ScheduleService` | Reuse unchanged Edge v1 admission and task identity with the V3 simulated-runtime clock. |
 | Cross-owner verification | `PlanningOperations` composition root | Verify confirmation → frozen schedule → exact `TASK_CREATED` before making an execution request. |
 | Mutable simulated robot/zone/station state | `RangeSimulation` | Remains the only live simulation truth. |
 | Conserved ball location and count | `BallLedger` | Sole quantity authority. |
@@ -85,7 +85,8 @@ an actuator, or e-stop API.  This contract is not a physical execution bridge.
 - Planning v1, Edge Task v1, schedule v2 and Course Ops v1 bytes and meanings
   remain unchanged.
 - Collection execution uses the shared contracts in
-  `docs/contracts/collection-execution-v1/`.  Unknown versions fail closed.
+  `simulation/docs/contracts/collection-execution-v1/`.  Unknown versions fail
+  closed.
 - A V3 report may later produce a separate Course Ops version, but this
   contract does not change the saved Course Ops v1 projection.
 
@@ -94,7 +95,8 @@ an actuator, or e-stop API.  This contract is not a physical execution bridge.
 The following namespaces remain distinct and are all required:
 
 - Planning: `plan_id`, `plan_version`, `confirmation_id`.
-- Edge: `schedule_id`, `task_id`, `task_content_digest`, target
+- Edge: `schedule_id`, `task_id` (`task_` plus 24 lowercase hex), the separate
+  64-hex `task_content_digest`, target
   `incarnation`, Edge `robot_id` and commissioned `zone_id`.
 - Session: `series_id`, `session_id`, `round_id`, `round_index`,
   `engine_digest`, `config_digest`.
@@ -107,7 +109,19 @@ The immutable binding manifest explicitly maps the two existing identity
 spaces, for example `picker-01/Z1` to `R1/NEAR_LEFT`.  That example mapping is
 a labelled synthetic fixture, not a physical site fact or inferred alias.  A
 binding includes both source digests and the exact session/round; it is invalid
-for another round even if names happen to match.
+for another round even if names happen to match.  V1 records
+`handoff_binding_mode=SOLE_SCENARIO_STATION_V1`; the scenario must have exactly
+one station and its ID must equal `handoff_station_id`.
+
+Planning v1 is not given a new `binding_id` or session field.  Its existing
+confirmation still freezes the schedule, and `PlanningOperations` still proves
+`confirmation -> schedule -> TASK_CREATED`.  Only after that exact Edge task
+exists does the V3 composition root create the immutable downstream binding
+that adds session, round and runtime identities.  The task device may not emit
+`ACCEPTED` until it can verify that full chain and durably record the execution
+request.  Thus the existing confirmation path is reused and session-bound
+before execution acceptance without pretending that an old confirmation
+record contains a future bridge identifier.
 
 `binding_id` is the SHA-256 digest of the canonical binding body.
 `execution_id` is derived from the exact Edge task, V3 session/round and
@@ -148,9 +162,20 @@ seconds.  `Date.now()` continues to own that read-health expiry.  HTTP
 generated/read times and process wall-time chunk budgets cannot change task
 ordering, policy choice, simulator events or results.
 
-An ONLINE/fresh service and a PAUSED simulation are different facts.  A paused
-session may have a healthy connection while its simulation clock and execution
-remain stopped.  The future UI must show both states.
+A fresh scheduler-service reading and a `PAUSED` simulation are different
+facts.  A paused session may have a healthy service connection while its
+simulation clock and execution remain stopped.  The future UI must show both
+states.
+
+`PlanningOperations`, `ScheduleService`, the Edge gateway and the
+simulator-backed device all receive the same projected simulation UTC.  Edge
+heartbeat receipt age is therefore simulated-runtime freshness: advancing wall
+time while the session is paused cannot age, admit or miss an Edge task;
+advancing simulation time can.  This preserves the existing one-clock
+`ScheduleService` contract and does not mix wall timestamps into its journal.
+The separate 15-second browser/service-read health below remains wall-clock
+freshness and may become stale independently while Edge/session state stays
+`PAUSED`.
 
 The existing manual schedule form currently rejects dates against wall time.
 The confirmed execution path continues through Planning v1 and its bound
@@ -201,24 +226,37 @@ late/orphaned runtime activity or unresolved protection remains.
 2. The original proposal and selected action are both persisted.
 3. A pending execution action may replace only the original `Wait` action.
    It never replaces a non-`Wait` proposal.
-4. Eligible pending requests are ordered by the tuple
-   `(latest_start_sim_t_s, eligible_sim_t_s, execution_id)`.  Only the first
-   request can consume a `Wait` slot.
-5. When `now_sim_t_s >= latest_start_sim_t_s`, a request that never received a
+4. V1 permits multiple `PENDING` requests but holds one execution lease per
+   session/round, so at most one attempt is `RUNNING`.  A running attempt that
+   needs its next bounded directive has priority over every new start when the
+   original proposal is `Wait`.
+5. Only when there is no running continuation candidate are eligible pending
+   starts ordered by `(latest_start_sim_t_s, eligible_sim_t_s, execution_id)`.
+   Every candidate must satisfy
+   `eligible_sim_t_s <= now_sim_t_s < latest_start_sim_t_s`; only the first can
+   consume that `Wait` slot.
+6. When `now_sim_t_s >= latest_start_sim_t_s`, a request that never received a
    slot becomes terminal `MISSED`; no directive is issued later.
-6. While an execution runs, original policy actions for other robots or staff
+7. While an execution runs, original policy actions for other robots or staff
    remain selected unchanged.  The simulator may continue the collection
    process concurrently during the step.
-7. An original policy action that exactly advances this execution—such as
-   `SendToHandoff` for its robot after raw collection—is selected unchanged and
-   recorded as `ORIGINAL_POLICY_CONVERGED`.
-8. A different original non-`Wait` action for the leased robot remains the
+8. An original policy action that exactly advances this execution is selected
+   unchanged and recorded as `ORIGINAL_POLICY_CONVERGED`.
+9. Existing `ActionCatalog` handoff entries decode to
+   `SendToHandoff(robot_id, station_id=None)`; an action name or index therefore
+   does not prove a station.  Collection Execution v1 accepts only a scenario
+   with exactly one handoff station, and the binding must name that station.
+   Any zero/multiple-station topology or mismatched ID rejects before Edge
+   `ACCEPTED`.  The action evidence keeps a null target; the correlated
+   `UNLOADED`/ledger evidence records the actual destination.  A later
+   multi-station design requires a versioned station-specific action contract.
+10. A different original non-`Wait` action for the leased robot remains the
    selected action.  It explicitly preempts the execution.  The execution
    becomes `PARTIAL`, `FAILED`, or `INCONCLUSIVE` according to complete
    evidence; it is never silently reassigned.
-9. If the original proposal is `Wait` and the bounded task needs its next
+11. If the original proposal is `Wait` and the bounded task needs its next
    collection/handoff action, the execution proposal may fill that slot.
-10. The selected action is still decoded by `ActionCatalog`, passed once to
+12. The selected action is still decoded by `ActionCatalog`, passed once to
     `RangeOpsEnv.step()`, and checked by `SafetyShield` inside
     `apply_directive()`.  A mask or earlier admission check is not the final
     decision.
@@ -346,6 +384,43 @@ The replay digest includes the binding, request-log high-water identity,
 policy identity, arbiter version, original proposal, selected action,
 assignment events and terminal evidence.  A mismatch fails closed.
 
+### Per-tick commit and cross-process handoff
+
+The session driver owns a V3 append-only tick journal under the same session
+lock.  For each control tick it must use this order:
+
+1. append and fsync one `action_prepared` record containing the previous
+   committed cursor and digest, request-log high water, policy/arbiter
+   identities, original and selected actions, and any execution/assignment
+   identity;
+2. call `RangeOpsEnv.step()` once in that live process;
+3. collect the resulting simulator events and state digest, then append and
+   fsync the matching `action_committed` record, including a deterministic
+   Edge-event outbox; and
+4. publish the disposable state/report cursor last.
+
+The simulator-backed device never calls the environment.  It consumes only a
+committed outbox entry, persists the exact Edge event in its existing device
+journal, and then publishes it.  Stable `(execution_id, tick_sequence,
+event_kind)` identity makes redelivery byte-identical.
+
+The crash decision table is fixed:
+
+| Last durable boundary | Recovery |
+|---|---|
+| Before `action_prepared` | No action occurred; recompute the tick. |
+| Intent fsynced, no commit/outbox | Rebuild the committed prefix, apply that exact intent, verify its deterministic post-digest, then commit; if verification is impossible or differs, mark `INCONCLUSIVE` and protect the device. |
+| Commit fsynced, cursor absent/stale | Rebuild through the commit and repair only the disposable cursor; do not execute again. |
+| Commit fsynced, Edge event not confirmed | Device republishes the same persisted Edge event bytes/sequence; no new attempt or simulator action. |
+| Edge evidence without a matching committed tick | Treat as an evidence conflict: `INCONCLUSIVE`, authorization blocked. |
+
+No Edge progress or terminal may be published from a prepared record alone.
+Before replaying an uncommitted prepared action, recovery re-verifies the same
+incarnation and nonterminal Edge authorization.  A real device-process restart
+still follows the existing incarnation/restart rules below and cancels that
+replay; deterministic driver recovery cannot downgrade the restart to ordinary
+chunk recovery or reauthorize its old task.
+
 Normal chunk replay is not a device restart: it emits no new Edge request,
 acceptance, progress or terminal and performs no second logical execution.
 
@@ -363,9 +438,11 @@ ball quantity semantics.
 | travelling/unloading | `PROGRESS phase=returning` / `unloading`; still `RUNNING` |
 | V3 `SUCCEEDED` | Edge `SUCCEEDED` only after complete equal unload evidence |
 | V3 `FAILED` | Edge `FAILED` |
-| V3 `PARTIAL` with complete evidence | Edge `FAILED` with `partial_execution`; never `SUCCEEDED` |
+| V3 `PARTIAL` with complete evidence | Edge `FAILED` with normalized v1 reason `unknown:partial_execution`; never `SUCCEEDED` |
 | V3 `INCONCLUSIVE` or unknown result | Edge `INCONCLUSIVE` |
-| Pre-acceptance V3 rejection/miss | Edge `REJECTED` with the exact reason |
+| V3 `REJECTED`, or a miss detected before Edge acceptance | Edge `REJECTED` with the preserved reason |
+| V3 `REJECTED` after Edge `ACCEPTED` (for example final `SafetyShield` rejection) | Edge `FAILED` with normalized v1 reason `unknown:safety_rejected`; the exact shield reason remains in V3 evidence, and Edge v1 does not permit `ACCEPTED -> REJECTED` |
+| V3 `MISSED` after Edge `ACCEPTED` while waiting for a policy slot | Edge `FAILED` with normalized reason `unknown:policy_slot_missed`; Edge v1 does not permit `ACCEPTED -> REJECTED` |
 | Conflicting Edge terminals/replay | Effective V3 projection becomes `INCONCLUSIVE`; authorization stays blocked and success is not displayed |
 
 The GET projection retains both the V3 result and Edge verification fields so
@@ -392,7 +469,8 @@ successful HTTP read or session replay does not clear them.
 
 ## Shared wire contract and Manager API
 
-`docs/contracts/collection-execution-v1/schema.json` owns these wire shapes:
+`simulation/docs/contracts/collection-execution-v1/schema.json` owns these wire
+shapes:
 
 - `nxt-collection-execution-binding/v1`;
 - `nxt-collection-execution-request/v1`;
@@ -407,9 +485,10 @@ The future Manager API surface is read-only:
 - every POST/PUT/PATCH/DELETE in that namespace returns 405.
 
 No browser endpoint creates, retries or controls execution.  Planning
-confirmation continues through the existing Planning v1 route and must already
-be bound to the V3 session before the due-time admission gate can create the
-task.
+confirmation and due-time task admission continue through the existing
+Planning v1/Edge route.  The downstream V3 binding then attaches the verified
+confirmation/schedule/task chain to one session and round before the task
+device can accept or execute it; Planning v1 does not name that later binding.
 
 The TypeScript client is strict, same-origin, `cache: "no-store"`, GET-only and
 uses the existing Manager API envelope.  It rejects unknown fields, foreign
@@ -468,9 +547,11 @@ and contract tests.  The two owners do not edit the same file concurrently.
    `MISSED` at the exclusive latest-start boundary.
 3. **Deterministic pending order:** multiple eligible requests are selected by
    `(latest_start, eligible, execution_id)` independent of arrival/container
-   order.
+   order.  A running continuation beats every new start, and the single-running
+   lease makes multiple continuation candidates invalid.
 4. **Safety rejection:** Edge admission may exist, but current SafetyShield
-   rejection produces `REJECTED`, no assignment start and no ledger move.
+   rejection produces V3 `REJECTED` and post-acceptance Edge `FAILED`, with no
+   assignment start and no ledger move.
 5. **Full payload then unload:** `ROBOT_PAYLOAD_FULL` ends collection; only the
    later equal station unload makes the overall task successful.
 6. **Temporary empty zone:** zero complete raw quantity fails; positive
@@ -502,6 +583,12 @@ and contract tests.  The two owners do not edit the same file concurrently.
 18. **Schedule form reuse:** a simulated date is checked against the bound
     simulation UTC, not the browser wall date, while write health still needs a
     fresh wall-clock scheduler reading.
+19. **Bound handoff:** a zero/multiple-station scenario or wrong station ID is
+    rejected before acceptance.  In the one-station V1 topology, only
+    correlated unload evidence naming that bound station completes the task.
+20. **Crash boundaries:** every intent/step/commit/outbox boundary follows the
+    fixed recovery table; replay never emits a second lifecycle or logical ball
+    move, and unverifiable prefixes become protected `INCONCLUSIVE`.
 
 ## Explicitly unimplemented after Phase 3A
 
