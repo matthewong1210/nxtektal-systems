@@ -126,11 +126,11 @@
 - Existing Planning confirmation is unchanged. After `TASK_CREATED`, the binder durably creates the V3 request and sends it through the simulator-backed device.
 - `--out`, `--initialize`, `--advance`, and `--no-serve` provide a bounded reproducible local SIMULATION runner.
 
-- [ ] Write the failing end-to-end test: verified Planning confirmation -> due schedule -> `TASK_CREATED` -> V3 request -> original-policy Wait slot -> actual BallLedger collection -> original-policy matching handoff -> verified Edge terminal -> V3 SUCCEEDED.
-- [ ] Assert raw and unload are equal, positive, assignment-tagged actual ledger movements; generic handoff target remains null; no Planning outcome, wash, supply, or inventory inference is written.
-- [ ] Verify RED, implement the smallest composition, then run the test green.
-- [ ] Add integration cases for schedule-form simulation UTC and independent wall-clock service freshness.
-- [ ] Commit `feat(collection-execution): run planning tasks in v3 simulation`.
+- [x] Write the failing end-to-end test: verified Planning confirmation -> due schedule -> `TASK_CREATED` -> V3 request -> original-policy Wait slot -> actual BallLedger collection -> original-policy matching handoff -> verified Edge terminal -> V3 SUCCEEDED.
+- [x] Assert raw and unload are equal, positive, assignment-tagged actual ledger movements; generic handoff target remains null; no Planning outcome, wash, supply, or inventory inference is written.
+- [x] Verify RED, implement the smallest composition, then run the test green.
+- [x] Add integration cases for schedule-form simulation UTC and independent wall-clock service freshness.
+- [x] Commit `feat(collection-execution): run planning tasks in v3 simulation`.
 
 ---
 
