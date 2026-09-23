@@ -389,6 +389,16 @@ def test_invalid_edge_evidence_does_not_poison_verified_journal(api, tmp_path):
     conform(store)
 
 
+def test_terminal_evidence_cannot_borrow_a_progress_outbox(api,tmp_path):
+    store,_,req=setup(api,tmp_path)
+    tick(store,60,snapshots={req["execution_id"]:assignment(req)})
+    progress=store.committed_outbox()[0]
+    store.record_edge_evidence(req["execution_id"],terminal_states=["SUCCEEDED"],event_ids=["unmatched-terminal"],now_sim_t_s=120,outbox_id=progress["outbox_id"])
+    r=conform(store)["executions"][0]
+    assert r["state"] == "INCONCLUSIVE" and r["conflicts"]["replay_mismatch"]
+    assert r["edge_evidence"]["effective_state"] == "CONFLICT"
+
+
 @pytest.mark.parametrize("reason",["ROBOT_FAULT","ESTOP_LATCHED","HUMAN_ASSISTANCE_REQUIRED","POLICY_PREEMPTED"])
 def test_unknown_quantity_preserves_causal_exit_and_protection(api,tmp_path,reason):
     store,_,req=setup(api,tmp_path)

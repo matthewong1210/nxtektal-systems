@@ -389,7 +389,9 @@ class CollectionExecutionStore:
                 r = state["executions"][p["execution_id"]]
                 terminals = sorted(set(r["edge_evidence"]["terminal_states"]) | set(p["terminal_states"]))
                 conflict = len(terminals) > 1
-                orphan = p.get("outbox_id") not in state["outbox"]
+                outbox = state["outbox"].get(p.get("outbox_id"))
+                orphan = (outbox is None or outbox["execution_id"] != p["execution_id"]
+                          or any(kind != outbox["event_kind"] for kind in p["terminal_states"]))
                 if conflict or orphan:
                     r["conflicts"]["terminal_conflict" if conflict else "replay_mismatch"] = True
                     _terminal(r, "INCONCLUSIVE", "TERMINAL_CONFLICT" if conflict else "REPLAY_MISMATCH", p["now_sim_t_s"])
