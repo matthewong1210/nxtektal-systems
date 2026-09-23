@@ -536,7 +536,8 @@ class CollectionExecutionStore:
             elif original_action["name"] == "Wait" and now_sim_t_s < r["execution_deadline_sim_t_s"]:
                 action = runtime_view.get("continuations", {}).get(eid)
                 if action is not None:
-                    _require(action["name"] in ("AssignCollection", "SendToHandoff") and action["robot_id"] == r["runtime_robot_id"]
+                    expected = "AssignCollection" if r["runtime_evidence"]["collection_exit_reason"] is None else "SendToHandoff"
+                    _require(action["name"] == expected and action["robot_id"] == r["runtime_robot_id"]
                              and action["target_id"] == (r["runtime_zone_id"] if action["name"] == "AssignCollection" else None), "invalid continuation")
                     selected, selection = deepcopy(action), "RUNNING_CONTINUATION"
         elif original_action["name"] == "Wait" and pending and not any(r["device_protection"]["authorization_blocked"] for r in executions.values()):

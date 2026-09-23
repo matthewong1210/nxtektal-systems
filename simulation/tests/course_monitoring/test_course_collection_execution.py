@@ -206,7 +206,7 @@ def test_prepared_is_not_a_commit_and_cursor_cannot_lead(api, tmp_path):
 def test_running_priority_policy_convergence_and_complete_unload(api, tmp_path):
     store, _, req = setup(api, tmp_path)
     tick(store, 60, snapshots={req["execution_id"]: assignment(req)})
-    runtime = view(); runtime["continuations"][req["execution_id"]] = UNLOAD
+    runtime = view(); runtime["continuations"][req["execution_id"]] = COLLECT
     assert store.arbitrate(WAIT, 120, runtime)["selection"] == "RUNNING_CONTINUATION"
     assert store.arbitrate(UNLOAD, 120, runtime)["selection"] == "ORIGINAL_POLICY_CONVERGED"
     tick(store, 120, runtime, UNLOAD, {req["execution_id"]: assignment(req, terminal=True)})
@@ -375,7 +375,7 @@ def test_pending_order_and_running_lease_never_depend_on_request_arrival(api, tm
     assert d["execution_id"] == request["execution_id"]
     assert [c["latest_start_sim_t_s"] for c in d["eligible_pending"]] == [240,300]
     tick(store,60,snapshots={request["execution_id"]:assignment(request)})
-    runtime=view(); runtime["continuations"][request["execution_id"]]=UNLOAD
+    runtime=view(); runtime["continuations"][request["execution_id"]]=COLLECT
     assert store.arbitrate(WAIT,120,runtime)["selection"] == "RUNNING_CONTINUATION"
     conform(store)
 
@@ -639,3 +639,30 @@ def test_real_threshold_handoff_classifies_actual_tick_effect(api,tmp_path,capac
     assert r["actions"][-1]["selection"] == selection
     assert r["actions"][-1]["safety_shield"] == "ACCEPTED"
     assert conform(store)["executions"][0]["state"] == state
+
+
+@pytest.mark.parametrize("capacity", [40,20])
+def test_running_continuation_requires_committed_native_phase(api,tmp_path,capacity):
+    env,store,req,runtime,unload=live_store(api,tmp_path,capacity=capacity)
+    live_tick(env,store,req,runtime,WAIT)
+    native=deepcopy(env.collection_assignment_snapshot(req["execution_id"]))
+    collect=next(a for a in runtime["catalog_actions"] if a["name"] == "AssignCollection")
+    before_boundary=native["collection_exit_reason"] is None
+    assert before_boundary == (capacity == 40)
+    good,bad=(collect,unload) if before_boundary else (unload,collect)
+    runtime["continuations"][req["execution_id"]]=bad
+    before=store.journal.path.read_bytes()
+    now=env.sim.now
+    with pytest.raises(api.CollectionExecutionError,match="continuation"):
+        store.arbitrate(WAIT,now,runtime)
+    assert store.journal.path.read_bytes() == before and env.sim.now == now
+    assert env.collection_assignment_snapshot(req["execution_id"]) == native
+    assert store.recovery_state()["pending_prepared"] is None
+    runtime["continuations"][req["execution_id"]]=good
+    decision=store.arbitrate(WAIT,now,runtime)
+    assert decision["selection"] == "RUNNING_CONTINUATION" and decision["selected_action"] == good
+    last=live_tick(env,store,req,runtime,WAIT)
+    native=env.collection_assignment_snapshot(req["execution_id"])
+    assert native["terminal_reason"] != "POLICY_PREEMPTED"
+    assert last["result"]["runtime_snapshots"][req["execution_id"]] == native
+    assert conform(store)["executions"][0]["state"] == ("RUNNING" if before_boundary else "SUCCEEDED")
