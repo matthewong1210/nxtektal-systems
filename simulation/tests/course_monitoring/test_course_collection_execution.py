@@ -574,3 +574,44 @@ def test_real_shield_rejected_reassignment_does_not_preempt(api,tmp_path):
     action=r["actions"][-1]
     assert action["selection"] == "ORIGINAL_POLICY_UNCHANGED" and action["safety_shield"] == "REJECTED"
     assert action["original_action"] == action["selected_action"] == proposal and action["safety_reason"]
+
+
+@pytest.mark.parametrize("source", ["restart", "edge_conflict"])
+def test_later_conflict_preserves_real_timeout_timestamp(api,tmp_path,source):
+    env,store,req,runtime,_=live_store(api,tmp_path)
+    live_tick(env,store,req,runtime,WAIT)
+    while env.sim.now < 720:live_tick(env,store,req,runtime,WAIT)
+    native=deepcopy(env.collection_assignment_snapshot(req["execution_id"]))
+    assert native["terminal_sim_t_s"] == 720
+    if source == "restart":
+        restart(store,req,tmp_path,running=True,now=780)
+    else:
+        terminal=next(e for e in store.committed_outbox() if e["event_kind"] == "FAILED")
+        store.record_edge_evidence(req["execution_id"],terminal_states=["INCONCLUSIVE"],event_ids=["late-terminal"],now_sim_t_s=780,outbox_id=terminal["outbox_id"])
+    r=store.replay()["executions"][req["execution_id"]]
+    assert r["terminal_sim_t_s"] == 720
+    assert conform(store)["now_sim_t_s"] == 780
+    assert r["state"] == "INCONCLUSIVE" and r["reason"] == "TERMINAL_CONFLICT"
+    assert r["runtime_evidence"]["collection_exit_reason"] == "EXECUTION_TIMEOUT"
+    assert r["device_protection"]["authorization_blocked"]
+    assert env.collection_assignment_snapshot(req["execution_id"]) == native
+
+
+def test_actual_accepted_human_assistance_is_not_policy_preemption(api,tmp_path):
+    env,store,req,runtime,_=live_store(api,tmp_path)
+    live_tick(env,store,req,runtime,WAIT)
+    spec=next(s for s in env.catalog.specs if s.name.startswith("request_human_assistance(R1,"))
+    proposal=dict(name="RequestHumanAssistance",index=spec.index,robot_id="R1",target_id=None)
+    runtime["catalog_actions"].append(proposal)
+    last=live_tick(env,store,req,runtime,proposal)
+    native=env.collection_assignment_snapshot(req["execution_id"])
+    assert native["terminal_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
+    assert last["result"]["runtime_snapshots"][req["execution_id"]] == native
+    r=store.replay()["executions"][req["execution_id"]]
+    action=r["actions"][-1]
+    assert action["selection"] == "ORIGINAL_POLICY_UNCHANGED"
+    assert action["original_action"] == action["selected_action"] == proposal
+    assert action["safety_shield"] == "ACCEPTED"
+    assert r["reason"] == r["runtime_evidence"]["collection_exit_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
+    assert "HUMAN_ASSISTANCE_REQUIRED" in r["device_protection"]["reasons"]
+    assert conform(store)["executions"][0]["state"] == "PARTIAL"

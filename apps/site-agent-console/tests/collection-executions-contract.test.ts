@@ -78,6 +78,16 @@ function notStartedAfterRestart() {
 }
 
 describe("collection execution v1 read contract", () => {
+  it("keeps accepted human assistance causal protection distinct from preemption", () => {
+    const s = snapshot("partial-preempted"), r = s.executions[0], action = r.actions.at(-1)!;
+    r.reason = r.runtime_evidence.collection_exit_reason = "HUMAN_ASSISTANCE_REQUIRED";
+    r.device_protection = {protected: true, authorization_blocked: true, reasons: ["HUMAN_ASSISTANCE_REQUIRED"]};
+    action.selection = "ORIGINAL_POLICY_UNCHANGED";
+    action.original_action.name = action.selected_action.name = "RequestHumanAssistance";
+    expect(parseCollectionExecutions(s).executions[0].reason).toBe("HUMAN_ASSISTANCE_REQUIRED");
+    action.selection = "POLICY_PREEMPTED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
   it.each(["PauseRobot", "SendToHandoff"] as const)("keeps shield-rejected %s as unchanged policy on a running lease", (name) => {
     const s = running(), r = s.executions[0];
     const proposal = {name, index: 2, robot_id: r.runtime_robot_id, target_id: null};

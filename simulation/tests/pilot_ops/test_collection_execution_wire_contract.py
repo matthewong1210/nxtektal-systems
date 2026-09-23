@@ -265,9 +265,11 @@ def relations(data):
                 assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
             original = action["original_action"]
             if start is not None and action["sim_t_s"] >= start and original["name"] != "Wait" and original["robot_id"] == binding["runtime_robot_id"]:
-                expected = ("ORIGINAL_POLICY_UNCHANGED" if action["safety_shield"] == "REJECTED" else
+                expected = ("ORIGINAL_POLICY_UNCHANGED" if action["safety_shield"] == "REJECTED" or original["name"] == "RequestHumanAssistance" else
                             "ORIGINAL_POLICY_CONVERGED" if original["name"] == "SendToHandoff" else "POLICY_PREEMPTED")
                 assert action["selection"] == expected, "leased-robot policy action must classify its effect"
+                if action["safety_shield"] == "ACCEPTED" and original["name"] == "RequestHumanAssistance":
+                    assert runtime["collection_exit_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
         # Conflict overlays retain the causal runtime exit; they never rewrite
         # a preemption/fault into success or discard its required protection.
         flags = record["conflicts"]
@@ -825,6 +827,29 @@ def test_rejected_leased_robot_proposal_has_no_admitted_effect(schema, name):
         selection="ORIGINAL_POLICY_UNCHANGED", eligible_pending=[], safety_shield="REJECTED", safety_reason="unsafe"))
     validate_snapshot(schema, data)
     record["actions"][-1]["selection"] = "ORIGINAL_POLICY_CONVERGED" if name == "SendToHandoff" else "POLICY_PREEMPTED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_accepted_human_assistance_keeps_causal_protection_not_preemption(schema):
+    data = snapshot("partial-preempted.json")
+    record = data["executions"][0]
+    record["reason"] = record["runtime_evidence"]["collection_exit_reason"] = "HUMAN_ASSISTANCE_REQUIRED"
+    record["device_protection"].update(protected=True, authorization_blocked=True, reasons=["HUMAN_ASSISTANCE_REQUIRED"])
+    action = record["actions"][-1]
+    action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
+    action["original_action"]["name"] = action["selected_action"]["name"] = "RequestHumanAssistance"
+    validate_snapshot(schema, data)
+    action["selection"] = "POLICY_PREEMPTED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_accepted_human_assistance_cannot_claim_success(schema):
+    data = snapshot()
+    action = data["executions"][0]["actions"][1]
+    action["original_action"]["name"] = action["selected_action"]["name"] = "RequestHumanAssistance"
+    action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
     with pytest.raises(AssertionError):
         validate_snapshot(schema, data)
 

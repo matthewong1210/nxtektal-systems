@@ -232,7 +232,10 @@ def _protect(r, reason):
 
 
 def _terminal(r, state, reason, now):
-    r.update(state=state, stage="TERMINAL", reason=reason, terminal_sim_t_s=now, success_display_allowed=state == "SUCCEEDED")
+    # Delivery/conflict observations overlay a result; they cannot re-date an
+    # already established causal terminal (in particular an exact deadline).
+    terminal_time = r["terminal_sim_t_s"] if r["terminal_sim_t_s"] is not None else now
+    r.update(state=state, stage="TERMINAL", reason=reason, terminal_sim_t_s=terminal_time, success_display_allowed=state == "SUCCEEDED")
     edge = r["edge_evidence"]
     mapped = "FAILED" if state == "PARTIAL" or state in ("MISSED", "REJECTED") and edge["accepted"] else "REJECTED" if state == "MISSED" else state
     edge_reason = "unknown:partial_execution" if state == "PARTIAL" else {
@@ -528,7 +531,8 @@ class CollectionExecutionStore:
         if running:
             r = running[0]; eid = r["execution_id"]
             if original_action["name"] != "Wait" and original_action["robot_id"] == r["runtime_robot_id"]:
-                selection = "ORIGINAL_POLICY_CONVERGED" if original_action["name"] == "SendToHandoff" else "POLICY_PREEMPTED"
+                selection = ("ORIGINAL_POLICY_UNCHANGED" if original_action["name"] == "RequestHumanAssistance" else
+                             "ORIGINAL_POLICY_CONVERGED" if original_action["name"] == "SendToHandoff" else "POLICY_PREEMPTED")
             elif original_action["name"] == "Wait" and now_sim_t_s < r["execution_deadline_sim_t_s"]:
                 action = runtime_view.get("continuations", {}).get(eid)
                 if action is not None:
