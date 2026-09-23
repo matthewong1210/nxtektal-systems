@@ -24,7 +24,8 @@ ARBITER = "WAIT_ONLY_NON_PREEMPTIVE_V1"
 SESSION_KEYS = ("series_id", "session_id", "round_id", "round_index", "engine_digest", "config_digest",
                 "session_epoch_utc", "control_interval_s", "session_end_sim_t_s")
 RECORD_KINDS = frozenset({"session", "binding", "binding_window", "request", "receipt", "accepted", "action_prepared",
-                          "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence", "replay_failure"})
+                          "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence", "replay_failure",
+                          "committed_replay_failure"})
 TERMINALS = {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
 _SCHEMA = json.loads((Path(__file__).resolve().parents[1] / "docs/contracts/collection-execution-v1/schema.json").read_text())
 
@@ -346,6 +347,8 @@ class CollectionExecutionStore:
                 _require(state["now_sim_t_s"] >= 0, "session precedes epoch")
             else:
                 _require(session, "missing session identity")
+            if kind in ("binding", "request", "accepted"):
+                _require(state["replay_failure"] is None, "session sealed against new authorization")
             if kind == "binding":
                 b = p
                 _validate(b, "Binding")
@@ -406,6 +409,8 @@ class CollectionExecutionStore:
                 state["outbox"].update({v["outbox_id"]:v for v in p["outbox"]})
             elif kind == "replay_failure":
                 self._seal_replay_failure(state, p)
+            elif kind == "committed_replay_failure":
+                self._seal_committed_replay_failure(state, p)
             elif kind == "outbox_confirmed":
                 _require(p["outbox_id"] in state["outbox"], "Edge confirmation without committed outbox")
                 state["confirmed"][p["outbox_id"]] = p["event_id"]
@@ -469,7 +474,9 @@ class CollectionExecutionStore:
         pending = state["pending_prepared"]
         _require(pending is not None and digest(pending) == payload["prepared_digest"], "failure does not match exact pending intent")
         _require(payload["now_sim_t_s"] >= max(state["now_sim_t_s"], pending["decision"]["sim_t_s"]), "replay failure clock regression")
-        eid = pending["decision"]["execution_id"]
+        self._apply_replay_failure(state, payload, pending["decision"]["execution_id"])
+
+    def _apply_replay_failure(self, state, payload, eid):
         if eid is not None:
             r = state["executions"][eid]
             # This is evidence loss, not an Edge lifecycle event. Preserve its
@@ -501,6 +508,39 @@ class CollectionExecutionStore:
             return [self._spec("replay_failure", payload, now_sim_t_s)]
         self.journal.append_via(build)
 
+    def _validate_committed_replay_failure(self, payload):
+        _require(set(payload) == {"tick_sequence", "prepared_digest", "committed_digest", "observed_digest", "now_sim_t_s", "reason"}
+                 and payload["reason"] == "REPLAY_MISMATCH", "invalid committed replay failure")
+        _require(type(payload["tick_sequence"]) is int and payload["tick_sequence"] > 0, "invalid committed tick sequence")
+        for key in ("prepared_digest", "committed_digest", "observed_digest"): _validate(payload[key], "Digest")
+        simulation_utc(self.session_identity, payload["now_sim_t_s"])
+
+    def _seal_committed_replay_failure(self, state, payload):
+        self._validate_committed_replay_failure(payload)
+        _require(state["replay_failure"] is None, "replay failure already sealed")
+        sequence = payload["tick_sequence"]
+        _require(sequence <= len(state["replay_plan"]), "unknown committed tick")
+        pair = state["replay_plan"][sequence - 1]
+        _require(pair["prepared"]["tick_sequence"] == pair["committed"]["tick_sequence"] == sequence
+                 and digest(pair["prepared"]) == payload["prepared_digest"]
+                 and digest(pair["committed"]) == payload["committed_digest"], "failure does not match exact committed entry")
+        _require(payload["now_sim_t_s"] >= state["now_sim_t_s"], "committed replay failure clock regression")
+        self._apply_replay_failure(state, payload, pair["prepared"]["decision"]["execution_id"])
+
+    def record_committed_replay_failure(self, tick_sequence, *, prepared_digest, committed_digest, observed_digest, now_sim_t_s):
+        """Seal an exact verified prefix entry without rewriting its artifacts."""
+        payload = dict(tick_sequence=tick_sequence, prepared_digest=prepared_digest, committed_digest=committed_digest,
+                       observed_digest=observed_digest, now_sim_t_s=now_sim_t_s, reason="REPLAY_MISMATCH")
+        self._validate_committed_replay_failure(payload)
+        def build(records):
+            state = self._replay(records)
+            if state["replay_failure"] is not None:
+                _require(digest(state["replay_failure"]) == digest(payload), "replay failure content conflict")
+                return []
+            self._seal_committed_replay_failure(state, payload)
+            return [self._spec("committed_replay_failure", payload, now_sim_t_s)]
+        self.journal.append_via(build)
+
     def bind_confirmed_tasks(self, planning_snapshot, edge_records, session_identity, now_sim_t_s):
         _require(primitive(session_identity) == self.session_identity, "session identity conflict")
         bindings = bind_confirmed_tasks(planning_snapshot, edge_records, session_identity, now_sim_t_s)
@@ -511,6 +551,7 @@ class CollectionExecutionStore:
                 matches = [x for x in state["bindings"].values() if x["task_id"] == b["task_id"]]
                 _require(not matches or matches == [b], "task already bound differently")
                 if not matches:
+                    _require(state["replay_failure"] is None, "session sealed against new authorization")
                     specs.append(self._spec("binding", b, now_sim_t_s))
                     c = next(c for c in planning_snapshot["confirmations"] if c["confirmation_id"] == b["confirmation_id"])
                     specs.append(self._spec("binding_window", dict(binding_id=b["binding_id"], due_at_utc=c["schedule"]["due_at_utc"], expires_at_utc=c["schedule"]["expires_at_utc"]), now_sim_t_s))
@@ -527,6 +568,7 @@ class CollectionExecutionStore:
             if existing is not None:
                 _require(existing == request, "request ID content conflict")
                 result.update(state["receipts"][existing["request_id"]]); return []
+            _require(state["replay_failure"] is None, "session sealed against new authorization")
             _validate(request, "ExecutionRequest")
             b = state["bindings"].get(request["binding_id"])
             _require(b is not None, "unknown binding", "invalid_request")
@@ -565,6 +607,7 @@ class CollectionExecutionStore:
             if execution_id in state["accepted"]:
                 _require(event_id in state["executions"][execution_id]["edge_evidence"]["event_ids"], "acceptance conflict")
                 return []
+            _require(state["replay_failure"] is None, "session sealed against new authorization")
             _require(state["executions"][execution_id]["state"] not in TERMINALS, "acceptance after terminal execution")
             return [self._spec("accepted", dict(execution_id=execution_id, event_id=event_id), state["now_sim_t_s"])]
         self.journal.append_via(build)
