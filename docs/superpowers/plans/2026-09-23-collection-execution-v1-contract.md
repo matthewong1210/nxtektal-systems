@@ -20,12 +20,14 @@
 - `RAW_COLLECTED_TO_ROBOT` is a milestone, never unloaded/washed/supplied/inventory or a Planning v1 outcome.
 - Arbitration is `WAIT_ONLY_NON_PREEMPTIVE_V1`: an external proposal replaces only `Wait`; pending requests order by `(latest_start_sim_t_s, eligible_sim_t_s, execution_id)`.
 - V1 has one session-wide running lease: a running continuation wins a `Wait` slot before a new start; multiple pending requests remain ordered deterministically.
+- `RUNNING_CONTINUATION` is distinct from pending-start `WAIT_SLOT`: it uses the execution deadline, not the consumed latest-start boundary.
 - `max_execution_s` is the rounded-up control-interval multiple of confirmed `travel + collect + return + unload`; the frozen success value is 660 seconds.
 - PENDING/RUNNING are non-terminal. Missing/conflicting quantity evidence is null/`INCOMPLETE`, never zero.
 - PARTIAL never maps to Edge SUCCEEDED; terminal conflict is effective INCONCLUSIVE/CONFLICT and blocks success.
 - Simulation time owns business/execution deadlines. Existing 15-second browser health uses wall time; session PAUSED is independent.
 - The browser contract is GET-only and cannot confirm, start, retry, pause, resume or otherwise control execution.
 - Existing Planning confirmation remains the only confirmation path. The downstream V3 binding names and verifies it; Planning v1 does not gain or name a future binding ID.
+- Binding time is explicit simulation time/derived UTC after `TASK_CREATED`; cycle evidence must still be valid at that binding time.
 - V3 injects projected simulation UTC through Planning/Edge scheduling and device lifecycle; only outer service-read health uses the 15-second wall clock.
 - Phase 3B must add the intent/step/commit/outbox crash protocol; it is not implemented in 3A.
 - `MockRobotDevice` evidence is forbidden as quantity or execution-result evidence.

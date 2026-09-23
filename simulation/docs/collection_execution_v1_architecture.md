@@ -123,6 +123,13 @@ request.  Thus the existing confirmation path is reused and session-bound
 before execution acceptance without pretending that an old confirmation
 record contains a future bridge identifier.
 
+The binding also freezes `bound_at_sim_t_s` and its exact derived
+`bound_at_utc = session_epoch_utc + bound_at_sim_t_s`.  This time is no earlier
+than the verified `TASK_CREATED` evidence and precedes the execution request.
+Cycle evidence must satisfy
+`observed_at_utc <= bound_at_utc <= valid_until_utc`; checking freshness only at
+the session epoch or later request read is nonconforming.
+
 `binding_id` is the SHA-256 digest of the canonical binding body.
 `execution_id` is derived from the exact Edge task, V3 session/round and
 binding.  Paths, process IDs and wall-clock receipt times are excluded from
@@ -229,12 +236,14 @@ late/orphaned runtime activity or unresolved protection remains.
 4. V1 permits multiple `PENDING` requests but holds one execution lease per
    session/round, so at most one attempt is `RUNNING`.  A running attempt that
    needs its next bounded directive has priority over every new start when the
-   original proposal is `Wait`.
+   original proposal is `Wait`; that evidence uses selection
+   `RUNNING_CONTINUATION` and is bounded by the execution deadline, not the
+   already-consumed latest-start boundary.
 5. Only when there is no running continuation candidate are eligible pending
    starts ordered by `(latest_start_sim_t_s, eligible_sim_t_s, execution_id)`.
    Every candidate must satisfy
    `eligible_sim_t_s <= now_sim_t_s < latest_start_sim_t_s`; only the first can
-   consume that `Wait` slot.
+   consume that `Wait` slot, recorded as selection `WAIT_SLOT`.
 6. When `now_sim_t_s >= latest_start_sim_t_s`, a request that never received a
    slot becomes terminal `MISSED`; no directive is issued later.
 7. While an execution runs, original policy actions for other robots or staff
