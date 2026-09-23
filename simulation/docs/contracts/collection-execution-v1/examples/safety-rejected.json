@@ -1,0 +1,320 @@
+{
+  "description": "A selected Wait-slot proposal is rejected by final SafetyShield. No accepted assignment, actual start or ledger quantity is invented.",
+  "bodies": [
+    {
+      "schema_ref": "#/$defs/Binding",
+      "body": {
+        "schema": "nxt-collection-execution-binding/v1",
+        "environment": "SIMULATION",
+        "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+        "site_id": "synthetic-site",
+        "deployment_id": "synthetic-sim",
+        "commissioned_site_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+        "plan_id": "plan-001",
+        "plan_version": 1,
+        "confirmation_id": "confirmation-001",
+        "schedule_id": "schedule-001",
+        "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+        "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "incarnation": "fixture-incarnation-001",
+        "robot_id": "picker-01",
+        "zone_id": "Z1",
+        "series_id": "fixture-series",
+        "session_id": "fixture-session-v3",
+        "round_id": "round-001",
+        "round_index": 0,
+        "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "session_epoch_utc": "2026-09-16T00:00:00Z",
+        "control_interval_s": 60,
+        "session_end_sim_t_s": 3600,
+        "runtime_robot_id": "R1",
+        "runtime_zone_id": "NEAR_LEFT",
+        "handoff_station_id": "handoff-1",
+        "max_execution_s": 660,
+        "cycle_evidence": {
+          "input_record_id": "input-001",
+          "input_revision": 1,
+          "source_kind": "MANUAL_ESTIMATE",
+          "source_ref": "synthetic-cycle-fixture",
+          "observed_at_utc": "2026-09-16T00:00:00Z",
+          "valid_until_utc": "2026-09-16T01:00:00Z",
+          "cycle_minutes": {
+            "travel": 2,
+            "collect": 5,
+            "return": 2,
+            "unload": 2
+          },
+          "derivation_rule": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
+        }
+      }
+    },
+    {
+      "schema_ref": "#/$defs/ExecutionRequest",
+      "body": {
+        "schema": "nxt-collection-execution-request/v1",
+        "environment": "SIMULATION",
+        "kind": "EXECUTE_BOUND_COLLECTION",
+        "request_id": "request-001",
+        "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+        "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+        "session_id": "fixture-session-v3",
+        "round_id": "round-001",
+        "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+        "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "incarnation": "fixture-incarnation-001",
+        "due_at_utc": "2026-09-16T00:01:00Z",
+        "expires_at_utc": "2026-09-16T00:05:00Z",
+        "eligible_sim_t_s": 60,
+        "latest_start_sim_t_s": 300
+      }
+    },
+    {
+      "schema_ref": "#/$defs/RequestReceipt",
+      "body": {
+        "schema": "nxt-collection-execution-request-receipt/v1",
+        "environment": "SIMULATION",
+        "request_id": "request-001",
+        "request_digest": "d8f4318464ee63d04695bc724042ee9640f1aacd6046a93cf27cc670ed9b4a22",
+        "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+        "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+        "attempt_id": "attempt-001",
+        "sequence": 1,
+        "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+        "durable": true
+      }
+    }
+  ],
+  "snapshot": {
+    "schema_ref": "#/$defs/SuccessEnvelope",
+    "body": {
+      "schema": "nxt-site-agent/api/v0",
+      "disclaimer": "SIMULATION ONLY — synthetic design fixture; no physical action or implemented execution service.",
+      "data": {
+        "schema": "nxt-collection-executions/v1",
+        "environment": "SIMULATION",
+        "series_id": "fixture-series",
+        "session_id": "fixture-session-v3",
+        "round_id": "round-001",
+        "round_index": 0,
+        "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "session_epoch_utc": "2026-09-16T00:00:00Z",
+        "control_interval_s": 60,
+        "session_end_sim_t_s": 3600,
+        "session_state": "ACTIVE",
+        "now_sim_t_s": 660,
+        "simulation_time_utc": "2026-09-16T00:11:00Z",
+        "server_time_utc": "2026-09-23T01:00:00Z",
+        "replay_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "bindings": [
+          {
+            "schema": "nxt-collection-execution-binding/v1",
+            "environment": "SIMULATION",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "site_id": "synthetic-site",
+            "deployment_id": "synthetic-sim",
+            "commissioned_site_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+            "plan_id": "plan-001",
+            "plan_version": 1,
+            "confirmation_id": "confirmation-001",
+            "schedule_id": "schedule-001",
+            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "incarnation": "fixture-incarnation-001",
+            "robot_id": "picker-01",
+            "zone_id": "Z1",
+            "series_id": "fixture-series",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "round_index": 0,
+            "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+            "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "session_epoch_utc": "2026-09-16T00:00:00Z",
+            "control_interval_s": 60,
+            "session_end_sim_t_s": 3600,
+            "runtime_robot_id": "R1",
+            "runtime_zone_id": "NEAR_LEFT",
+            "handoff_station_id": "handoff-1",
+            "max_execution_s": 660,
+            "cycle_evidence": {
+              "input_record_id": "input-001",
+              "input_revision": 1,
+              "source_kind": "MANUAL_ESTIMATE",
+              "source_ref": "synthetic-cycle-fixture",
+              "observed_at_utc": "2026-09-16T00:00:00Z",
+              "valid_until_utc": "2026-09-16T01:00:00Z",
+              "cycle_minutes": {
+                "travel": 2,
+                "collect": 5,
+                "return": 2,
+                "unload": 2
+              },
+              "derivation_rule": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "schema": "nxt-collection-execution-request/v1",
+            "environment": "SIMULATION",
+            "kind": "EXECUTE_BOUND_COLLECTION",
+            "request_id": "request-001",
+            "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "incarnation": "fixture-incarnation-001",
+            "due_at_utc": "2026-09-16T00:01:00Z",
+            "expires_at_utc": "2026-09-16T00:05:00Z",
+            "eligible_sim_t_s": 60,
+            "latest_start_sim_t_s": 300
+          }
+        ],
+        "receipts": [
+          {
+            "schema": "nxt-collection-execution-request-receipt/v1",
+            "environment": "SIMULATION",
+            "request_id": "request-001",
+            "request_digest": "d8f4318464ee63d04695bc724042ee9640f1aacd6046a93cf27cc670ed9b4a22",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+            "attempt_id": "attempt-001",
+            "sequence": 1,
+            "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+            "durable": true
+          }
+        ],
+        "executions": [
+          {
+            "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+            "attempt_id": "attempt-001",
+            "request_id": "request-001",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "incarnation": "fixture-incarnation-001",
+            "runtime_robot_id": "R1",
+            "runtime_zone_id": "NEAR_LEFT",
+            "handoff_station_id": "handoff-1",
+            "assignment_id": null,
+            "state": "REJECTED",
+            "stage": "TERMINAL",
+            "reason": "SAFETY_REJECTED",
+            "eligible_sim_t_s": 60,
+            "latest_start_sim_t_s": 300,
+            "started_sim_t_s": null,
+            "execution_deadline_sim_t_s": null,
+            "terminal_sim_t_s": 60,
+            "max_execution_s": 660,
+            "arbiter_version": "WAIT_ONLY_NON_PREEMPTIVE_V1",
+            "policy_id": "JointDispatchPolicy-v1",
+            "actions": [
+              {
+                "sim_t_s": 60,
+                "original_action": {
+                  "name": "Wait",
+                  "index": 0,
+                  "robot_id": null,
+                  "target_id": null
+                },
+                "selected_action": {
+                  "name": "AssignCollection",
+                  "index": 1,
+                  "robot_id": "R1",
+                  "target_id": "NEAR_LEFT"
+                },
+                "selection": "WAIT_SLOT",
+                "eligible_pending": [
+                  {
+                    "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+                    "eligible_sim_t_s": 60,
+                    "latest_start_sim_t_s": 300
+                  },
+                  {
+                    "execution_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "eligible_sim_t_s": 60,
+                    "latest_start_sim_t_s": 300
+                  },
+                  {
+                    "execution_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "eligible_sim_t_s": 120,
+                    "latest_start_sim_t_s": 300
+                  },
+                  {
+                    "execution_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "eligible_sim_t_s": 0,
+                    "latest_start_sim_t_s": 360
+                  }
+                ],
+                "safety_shield": "REJECTED",
+                "safety_reason": "COLLECTION_ACCESS_BLOCKED"
+              }
+            ],
+            "runtime_evidence": {
+              "start_admitted": false,
+              "assignment_accepted": false,
+              "assignment_terminal": false,
+              "collection_exit_reason": null,
+              "event_sequence_complete": true,
+              "event_start_sequence": null,
+              "event_end_sequence": null,
+              "event_digest": null,
+              "conservation_passed": null,
+              "payload_parity_passed": null
+            },
+            "edge_evidence": {
+              "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+              "verified": true,
+              "effective_state": "FAILED",
+              "reason": "safety_rejected",
+              "terminal_states": [
+                "FAILED"
+              ],
+              "event_ids": [
+                "edge-accepted",
+                "edge-failed"
+              ],
+              "accepted": true
+            },
+            "raw_quantity": {
+              "milestone": "RAW_COLLECTED_TO_ROBOT",
+              "status": "NOT_REACHED",
+              "balls": null,
+              "source": "RANGE_SIMULATION_BALL_LEDGER",
+              "assignment_id": null,
+              "source_event_ids": [],
+              "event_digest": null
+            },
+            "unload_quantity": {
+              "milestone": "UNLOADED_TO_STATION",
+              "status": "NOT_REACHED",
+              "balls": null,
+              "source": "RANGE_SIMULATION_BALL_LEDGER",
+              "assignment_id": null,
+              "source_event_ids": [],
+              "event_digest": null
+            },
+            "device_protection": {
+              "protected": false,
+              "reasons": [],
+              "authorization_blocked": false
+            },
+            "conflicts": {
+              "missing_events": false,
+              "terminal_conflict": false,
+              "session_round_drift": false,
+              "incarnation_mismatch": false,
+              "replay_mismatch": false
+            },
+            "reconciliation": "NOT_PERFORMED",
+            "success_display_allowed": false
+          }
+        ]
+      }
+    }
+  }
+}

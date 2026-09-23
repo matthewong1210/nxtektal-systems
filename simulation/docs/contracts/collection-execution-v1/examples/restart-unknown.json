@@ -1,0 +1,254 @@
+{
+  "description": "Device restarted after actual start without a durable terminal. Unknown quantities stay null; old work cannot resume or be reauthorized. Ordinary chunk replay is not this restart.",
+  "bodies": [
+    {
+      "schema_ref": "#/$defs/ErrorEnvelope",
+      "body": {
+        "schema": "nxt-site-agent/api/v0",
+        "disclaimer": "SIMULATION ONLY — synthetic design fixture; no physical action or implemented execution service.",
+        "error": {
+          "code": "collection_execution_result_unknown",
+          "detail": "Query or retry only the original request ID; unknown result does not authorize a new attempt."
+        }
+      }
+    }
+  ],
+  "snapshot": {
+    "schema_ref": "#/$defs/SuccessEnvelope",
+    "body": {
+      "schema": "nxt-site-agent/api/v0",
+      "disclaimer": "SIMULATION ONLY — synthetic design fixture; no physical action or implemented execution service.",
+      "data": {
+        "schema": "nxt-collection-executions/v1",
+        "environment": "SIMULATION",
+        "series_id": "fixture-series",
+        "session_id": "fixture-session-v3",
+        "round_id": "round-001",
+        "round_index": 0,
+        "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "session_epoch_utc": "2026-09-16T00:00:00Z",
+        "control_interval_s": 60,
+        "session_end_sim_t_s": 3600,
+        "session_state": "ACTIVE",
+        "now_sim_t_s": 660,
+        "simulation_time_utc": "2026-09-16T00:11:00Z",
+        "server_time_utc": "2026-09-23T01:00:00Z",
+        "replay_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "bindings": [
+          {
+            "schema": "nxt-collection-execution-binding/v1",
+            "environment": "SIMULATION",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "site_id": "synthetic-site",
+            "deployment_id": "synthetic-sim",
+            "commissioned_site_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+            "plan_id": "plan-001",
+            "plan_version": 1,
+            "confirmation_id": "confirmation-001",
+            "schedule_id": "schedule-001",
+            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "incarnation": "fixture-incarnation-001",
+            "robot_id": "picker-01",
+            "zone_id": "Z1",
+            "series_id": "fixture-series",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "round_index": 0,
+            "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+            "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "session_epoch_utc": "2026-09-16T00:00:00Z",
+            "control_interval_s": 60,
+            "session_end_sim_t_s": 3600,
+            "runtime_robot_id": "R1",
+            "runtime_zone_id": "NEAR_LEFT",
+            "handoff_station_id": "handoff-1",
+            "max_execution_s": 660,
+            "cycle_evidence": {
+              "input_record_id": "input-001",
+              "input_revision": 1,
+              "source_kind": "MANUAL_ESTIMATE",
+              "source_ref": "synthetic-cycle-fixture",
+              "observed_at_utc": "2026-09-16T00:00:00Z",
+              "valid_until_utc": "2026-09-16T01:00:00Z",
+              "cycle_minutes": {
+                "travel": 2,
+                "collect": 5,
+                "return": 2,
+                "unload": 2
+              },
+              "derivation_rule": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
+            }
+          }
+        ],
+        "requests": [
+          {
+            "schema": "nxt-collection-execution-request/v1",
+            "environment": "SIMULATION",
+            "kind": "EXECUTE_BOUND_COLLECTION",
+            "request_id": "request-001",
+            "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "incarnation": "fixture-incarnation-001",
+            "due_at_utc": "2026-09-16T00:01:00Z",
+            "expires_at_utc": "2026-09-16T00:05:00Z",
+            "eligible_sim_t_s": 60,
+            "latest_start_sim_t_s": 300
+          }
+        ],
+        "receipts": [
+          {
+            "schema": "nxt-collection-execution-request-receipt/v1",
+            "environment": "SIMULATION",
+            "request_id": "request-001",
+            "request_digest": "d8f4318464ee63d04695bc724042ee9640f1aacd6046a93cf27cc670ed9b4a22",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+            "attempt_id": "attempt-001",
+            "sequence": 1,
+            "request_log_high_water_digest": "9999999999999999999999999999999999999999999999999999999999999999",
+            "durable": true
+          }
+        ],
+        "executions": [
+          {
+            "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+            "attempt_id": "attempt-001",
+            "request_id": "request-001",
+            "binding_id": "4c387499930602dbed6a51e5c21d8a2ca7d73539ea6235cd6200adff2e77f1b6",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+            "incarnation": "fixture-incarnation-001",
+            "runtime_robot_id": "R1",
+            "runtime_zone_id": "NEAR_LEFT",
+            "handoff_station_id": "handoff-1",
+            "assignment_id": "assignment-001",
+            "state": "INCONCLUSIVE",
+            "stage": "TERMINAL",
+            "reason": "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME",
+            "eligible_sim_t_s": 60,
+            "latest_start_sim_t_s": 300,
+            "started_sim_t_s": 60,
+            "execution_deadline_sim_t_s": 720,
+            "terminal_sim_t_s": 240,
+            "max_execution_s": 660,
+            "arbiter_version": "WAIT_ONLY_NON_PREEMPTIVE_V1",
+            "policy_id": "JointDispatchPolicy-v1",
+            "actions": [
+              {
+                "sim_t_s": 60,
+                "original_action": {
+                  "name": "Wait",
+                  "index": 0,
+                  "robot_id": null,
+                  "target_id": null
+                },
+                "selected_action": {
+                  "name": "AssignCollection",
+                  "index": 1,
+                  "robot_id": "R1",
+                  "target_id": "NEAR_LEFT"
+                },
+                "selection": "WAIT_SLOT",
+                "eligible_pending": [
+                  {
+                    "execution_id": "bdf0264407e9e5f8e571b974662e95374f5f43af6591c7446a6736c07e28ce1e",
+                    "eligible_sim_t_s": 60,
+                    "latest_start_sim_t_s": 300
+                  },
+                  {
+                    "execution_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                    "eligible_sim_t_s": 60,
+                    "latest_start_sim_t_s": 300
+                  },
+                  {
+                    "execution_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                    "eligible_sim_t_s": 120,
+                    "latest_start_sim_t_s": 300
+                  },
+                  {
+                    "execution_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                    "eligible_sim_t_s": 0,
+                    "latest_start_sim_t_s": 360
+                  }
+                ],
+                "safety_shield": "ACCEPTED",
+                "safety_reason": null
+              }
+            ],
+            "runtime_evidence": {
+              "start_admitted": true,
+              "assignment_accepted": true,
+              "assignment_terminal": false,
+              "collection_exit_reason": null,
+              "event_sequence_complete": false,
+              "event_start_sequence": 1,
+              "event_end_sequence": 9,
+              "event_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "conservation_passed": null,
+              "payload_parity_passed": null
+            },
+            "edge_evidence": {
+              "task_id": "5555555555555555555555555555555555555555555555555555555555555555",
+              "verified": true,
+              "effective_state": "INCONCLUSIVE",
+              "reason": "interrupted_execution_unknown_outcome",
+              "terminal_states": [
+                "INCONCLUSIVE"
+              ],
+              "event_ids": [
+                "edge-accepted",
+                "edge-collecting",
+                "edge-raw",
+                "edge-returning",
+                "edge-unloading",
+                "edge-terminal"
+              ],
+              "accepted": true
+            },
+            "raw_quantity": {
+              "milestone": "RAW_COLLECTED_TO_ROBOT",
+              "status": "INCOMPLETE",
+              "balls": null,
+              "source": "RANGE_SIMULATION_BALL_LEDGER",
+              "assignment_id": "assignment-001",
+              "source_event_ids": [],
+              "event_digest": null
+            },
+            "unload_quantity": {
+              "milestone": "UNLOADED_TO_STATION",
+              "status": "INCOMPLETE",
+              "balls": null,
+              "source": "RANGE_SIMULATION_BALL_LEDGER",
+              "assignment_id": "assignment-001",
+              "source_event_ids": [],
+              "event_digest": null
+            },
+            "device_protection": {
+              "protected": true,
+              "reasons": [
+                "RESTART_UNKNOWN"
+              ],
+              "authorization_blocked": true
+            },
+            "conflicts": {
+              "missing_events": true,
+              "terminal_conflict": false,
+              "session_round_drift": false,
+              "incarnation_mismatch": false,
+              "replay_mismatch": false
+            },
+            "reconciliation": "NOT_PERFORMED",
+            "success_display_allowed": false
+          }
+        ]
+      }
+    }
+  }
+}
