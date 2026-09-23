@@ -41,12 +41,12 @@
 - `arm_collection_assignment(execution_id, robot_id, zone_id, handoff_station_id, execution_deadline_sim_t_s)` records a one-shot candidate; only a final-shield-accepted matching `AssignCollection` consumes it.
 - `collection_assignment_snapshot(execution_id)` returns detached deterministic evidence with simulator-owned assignment/event IDs.
 
-- [ ] Write failing tests for accepted collection/handoff, final shield rejection, full/empty/access-closed exits, policy preemption, battery/fault/e-stop/assistance, exact timeout/session end, wrong station, conservation, deterministic replay, and V3-disabled legacy bytes.
-- [ ] Verify RED with `tests/range_ops/test_collection_execution_assignment.py`.
-- [ ] Add an immutable independent event log containing `ASSIGNMENT_STARTED`, `RAW_COLLECTED_TO_ROBOT`, `COLLECTION_EXIT`, `UNLOADED_TO_STATION`, and `ASSIGNMENT_TERMINAL`; derive IDs without RNG.
-- [ ] Emit transfer quantities only from the actual return value of `BallLedger.move()`. Keep legacy `EventLog`, action catalog/order, observations, and ledger API unchanged.
-- [ ] Interrupt the active assignment at the exact SimPy execution deadline and terminalize once for every frozen exit reason. Prove no motion after e-stop and no move after the access boundary.
-- [ ] Run the focused range-ops tests and commit `feat(range-ops): record collection assignment evidence`.
+- [x] Write failing tests for accepted collection/handoff, final shield rejection, full/empty/access-closed exits, policy preemption, battery/fault/e-stop/assistance, exact timeout/session end, wrong station, conservation, deterministic replay, and V3-disabled legacy bytes.
+- [x] Verify RED with `tests/range_ops/test_collection_execution_assignment.py`.
+- [x] Add an immutable independent event log containing `ASSIGNMENT_STARTED`, `RAW_COLLECTED_TO_ROBOT`, `COLLECTION_EXIT`, `UNLOADED_TO_STATION`, and `ASSIGNMENT_TERMINAL`; derive IDs without RNG.
+- [x] Emit transfer quantities only from the actual return value of `BallLedger.move()`. Keep legacy `EventLog`, action catalog/order, observations, and ledger API unchanged.
+- [x] Interrupt the active assignment at the exact SimPy execution deadline and terminalize once for every frozen exit reason. Prove no motion after e-stop and no move after the access boundary.
+- [x] Run the focused range-ops tests and commit `feat(range-ops): record collection assignment evidence`.
 
 ---
 
