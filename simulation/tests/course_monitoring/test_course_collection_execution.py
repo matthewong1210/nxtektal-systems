@@ -121,6 +121,92 @@ def test_binding_is_content_addressed_and_reads_cycle_at_binding_time(api, tmp_p
     assert conform(store)["executions"][0]["raw_quantity"]["balls"] is None
 
 
+def test_binding_accepts_planning_seconds_and_keeps_its_frozen_window(api, tmp_path):
+    identity, planning, records = inputs(tmp_path / "fixture")
+    schedule = planning["confirmations"][0]["schedule"]
+    schedule["due_at_utc"] = "2026-09-16T00:01:00Z"
+    schedule["expires_at_utc"] = "2026-09-16T00:05:00Z"
+    planning["plans"][0]["selection"]["start_at_utc"] = schedule["due_at_utc"]
+    source_task = TaskRequest.from_dict(records[0].to_dict()["payload"]["request"])
+    task = TaskRequest.build(
+        site_id=source_task.site_id, deployment_id=source_task.deployment_id,
+        simulation_env_id=source_task.simulation_env_id,
+        target_robot_id=source_task.target_robot_id,
+        target_incarnation=source_task.target_incarnation,
+        task_type=source_task.task_type, zone_id=source_task.zone_id,
+        issued_at_utc="2026-09-16T00:01:00.000000Z",
+        expires_at_utc="2026-09-16T00:05:00.000000Z",
+        progress_window_s=source_task.progress_window_s,
+        issued_by=source_task.issued_by,
+    )
+    planning["confirmations"][0].update(
+        task_id=task.task_id,
+        task_created_at_utc="2026-09-16T00:01:00.000000Z",
+    )
+    edge = JsonlJournal(tmp_path / "normalized-edge.jsonl")
+    edge.append(RecordSpec(
+        "task_created", "EDGE", "2026-09-16T00:01:00.000000Z",
+        {"task_id": task.task_id, "schedule_id": "schedule-001", "request": task.to_dict()},
+    ))
+    records = edge.read()
+    store = api.CollectionExecutionStore(tmp_path / "execution.jsonl", identity)
+
+    binding = store.bind_confirmed_tasks(planning, records, identity, 60)[0]
+    window = store.replay()["windows"][binding["binding_id"]]
+    assert window == {
+        "binding_id": binding["binding_id"],
+        "due_at_utc": "2026-09-16T00:01:00Z",
+        "expires_at_utc": "2026-09-16T00:05:00Z",
+    }
+    request = api.make_request(
+        binding, "planning-normalized", window["due_at_utc"], window["expires_at_utc"]
+    )
+    assert store.submit(request)["request_id"] == "planning-normalized"
+
+
+@pytest.mark.parametrize(
+    ("field", "different"),
+    [
+        ("due_at_utc", "2026-09-16T00:01:01Z"),
+        ("expires_at_utc", "2026-09-16T00:05:01Z"),
+    ],
+)
+def test_binding_rejects_a_different_planning_task_instant(
+    api, tmp_path, field, different
+):
+    identity, planning, records = inputs(tmp_path / "fixture")
+    schedule = planning["confirmations"][0]["schedule"]
+    schedule["due_at_utc"] = "2026-09-16T00:01:00Z"
+    schedule["expires_at_utc"] = "2026-09-16T00:05:00Z"
+    schedule[field] = different
+    planning["plans"][0]["selection"]["start_at_utc"] = schedule["due_at_utc"]
+    source_task = TaskRequest.from_dict(records[0].to_dict()["payload"]["request"])
+    task = TaskRequest.build(
+        site_id=source_task.site_id, deployment_id=source_task.deployment_id,
+        simulation_env_id=source_task.simulation_env_id,
+        target_robot_id=source_task.target_robot_id,
+        target_incarnation=source_task.target_incarnation,
+        task_type=source_task.task_type, zone_id=source_task.zone_id,
+        issued_at_utc="2026-09-16T00:01:00.000000Z",
+        expires_at_utc="2026-09-16T00:05:00.000000Z",
+        progress_window_s=source_task.progress_window_s,
+        issued_by=source_task.issued_by,
+    )
+    planning["confirmations"][0].update(
+        task_id=task.task_id,
+        task_created_at_utc="2026-09-16T00:01:00.000000Z",
+    )
+    edge = JsonlJournal(tmp_path / "normalized-edge.jsonl")
+    edge.append(RecordSpec(
+        "task_created", "EDGE", "2026-09-16T00:01:00.000000Z",
+        {"task_id": task.task_id, "schedule_id": "schedule-001", "request": task.to_dict()},
+    ))
+    records = edge.read()
+
+    with pytest.raises(api.CollectionExecutionError, match="frozen confirmation"):
+        api.bind_confirmed_tasks(planning, records, identity, 60)
+
+
 @pytest.mark.parametrize("fault", ["stale", "future", "stations", "wrong_station", "wrong_round", "task_missing", "task_duplicate", "input_revision", "mapping_duplicate", "content"])
 def test_binding_rejects_ambiguous_or_stale_chain(api, tmp_path, fault):
     identity, planning, records = inputs(tmp_path)

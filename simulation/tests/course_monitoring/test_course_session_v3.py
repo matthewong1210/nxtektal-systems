@@ -264,6 +264,51 @@ def test_pause_is_business_state_not_wall_read_health(runner, tmp_path, monkeypa
     assert snapshot["simulation_time_utc"] == simulation_utc(active, before)
 
 
+def test_runtime_status_is_locked_detached_and_read_neutral(runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    state = runner.run(tmp_path, cfg)
+
+    def durable_bytes():
+        return {
+            str(path.relative_to(tmp_path)): path.read_bytes()
+            for path in sorted(tmp_path.rglob("*"))
+            if path.is_file()
+        }
+
+    before = durable_bytes()
+    first = runner.read_runtime_status(tmp_path, "picker-01")
+    second = runner.read_runtime_status(tmp_path, "picker-01")
+
+    assert first == second == {
+        "session_id": cfg["session_id"],
+        "round_id": cfg["round_id"],
+        "robot_id": "picker-01",
+        "simulation_time_utc": simulation_utc(state, state["now_sim_t_s"]),
+        "session_state": "ACTIVE",
+        "activity": "IDLE",
+        "payload_balls": 0,
+        "paused": False,
+        "faulted": False,
+        "estop_latched": False,
+        "awaiting_human": False,
+    }
+    assert durable_bytes() == before
+    assert read_record(tmp_path / "state.json")["replay_digest"] == state["replay_digest"]
+    with pytest.raises(ValueError, match="binding"):
+        runner.read_runtime_status(tmp_path, "unknown-robot")
+    assert durable_bytes() == before
+
+    runner.set_paused(tmp_path, True)
+    paused_before = durable_bytes()
+    paused = runner.read_runtime_status(tmp_path, "picker-01")
+    assert paused["session_state"] == "PAUSED"
+    assert paused["paused"] is True
+    assert paused["simulation_time_utc"] == first["simulation_time_utc"]
+    assert durable_bytes() == paused_before
+
+
 def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(runner, tmp_path):
     v3 = session(runner, tmp_path)
     robot, zone = v3.env.scenario.robot_ids[0], v3.env.scenario.zone_ids[0]

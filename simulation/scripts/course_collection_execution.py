@@ -152,9 +152,21 @@ def bind_confirmed_tasks(planning_snapshot, edge_records, session_identity, now_
         _require(rec["payload"].get("schedule_id") == c["schedule_id"] and task.task_id == c["task_id"], "task/schedule identity mismatch")
         for key, expected in {"site_id": s["site_id"], "deployment_id": s["deployment_id"],
                               "target_robot_id": schedule["robot_id"], "zone_id": schedule["zone_id"],
-                              "issued_at_utc": schedule["due_at_utc"], "expires_at_utc": schedule["expires_at_utc"],
                               "task_type": "COLLECT_BALLS_ZONE", "issued_by": "SIMULATION_TEST_ENTRY:" + schedule["operator"]}.items():
             _require(getattr(task, key) == expected, "task differs from frozen confirmation: " + key)
+        # Planning v1 preserves the manager's valid RFC3339 spelling while
+        # ScheduleService canonicalizes the admitted TaskRequest to
+        # microseconds.  These are clock instants, not content aliases: only
+        # semantic UTC equality is compatible, and the frozen Planning strings
+        # remain the binding/request window below.
+        for task_key, schedule_key in (
+            ("issued_at_utc", "due_at_utc"),
+            ("expires_at_utc", "expires_at_utc"),
+        ):
+            _require(
+                _utc(getattr(task, task_key)) == _utc(schedule[schedule_key]),
+                "task differs from frozen confirmation: " + task_key,
+            )
         _require(schedule["admission_reference"] == c["confirmation_id"], "confirmation link mismatch")
         created = rec["recorded_at_utc"]
         _require(_utc(task.issued_at_utc) <= _utc(created) < _utc(task.expires_at_utc) and _utc(created) <= _utc(bound), "binding precedes valid task creation")

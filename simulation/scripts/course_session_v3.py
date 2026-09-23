@@ -805,6 +805,59 @@ def read_execution_snapshot(root, *, server_time_utc):
             server_time_utc=server_time_utc, session_state=session_state)
 
 
+def read_runtime_status(root, robot_id):
+    """Return the detached simulator facts required by the Edge status owner.
+
+    This reader owns no live runtime reference.  It verifies and reconstructs
+    the durable prefix under the session lock, then returns only the declared
+    Edge/runtime binding and protection facts.  It never advances beyond that
+    prefix or writes a heartbeat, policy decision, or simulator result.
+    """
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    if type(robot_id) is not str:
+        raise ValueError("robot binding requires a string robot_id")
+    with _lock(root / ".session.lock"):
+        session, _saved, control = _validated_read_runtime(root)
+        bindings = [
+            row for row in session.identity["runtime_bindings"]
+            if row["robot_id"] == robot_id
+        ]
+        if len(bindings) != 1:
+            raise ValueError("robot binding is missing or ambiguous")
+        runtime_robot_id = bindings[0]["runtime_robot_id"]
+        robots = [
+            row.to_dict() for row in session.env.sim.robot_snapshots()
+            if row.robot_id == runtime_robot_id
+        ]
+        if len(robots) != 1:
+            raise ReplayMismatch("bound runtime robot is missing or ambiguous")
+        robot = robots[0]
+        paused = control["paused"]
+        session_state = (
+            "PAUSED" if paused else
+            "ENDED" if session.env.sim.facility_closed else
+            "ACTIVE"
+        )
+        activity = robot["activity"].upper()
+        return {
+            "session_id": session.identity["session_id"],
+            "round_id": session.identity["round_id"],
+            "robot_id": robot_id,
+            "simulation_time_utc": execution_api.simulation_utc(
+                session.identity, session.env.sim.now
+            ),
+            "session_state": session_state,
+            "activity": activity,
+            "payload_balls": robot["payload_balls"],
+            "paused": paused,
+            "faulted": robot["health"] == "failed" or activity == "FAILED",
+            "estop_latched": robot["estop_latched"],
+            "awaiting_human": robot["awaiting_human"],
+        }
+
+
 def status(root):
     root = Path(root)
     state = read_record(root / "state.json")
