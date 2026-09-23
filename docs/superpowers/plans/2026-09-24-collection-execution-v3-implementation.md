@@ -85,11 +85,11 @@
 - `run(root, config)` performs deterministic verified prefix replay before live continuation and refuses unknown/torn/inconsistent prefixes.
 - `course_session_series_v3.run()` creates bounded V3 rounds without changing V2 roots or schemas.
 
-- [ ] Write failing tests for V3 identity, finite endpoints, one-policy/one-step behavior, no-op preservation of non-`Wait`, PAUSED versus healthy state, exact simulation UTC, replay digest equality, and all four crash boundaries.
-- [ ] Verify RED.
-- [ ] Implement V3 session composition by reusing stable V2 helpers without editing V2 persisted schemas or replay code.
-- [ ] Ensure replay reconstructs state through public `env.step()` calls and never emits a second logical transfer or Edge lifecycle.
-- [ ] Run focused V2 and V3 course-session tests and commit `feat(course-session): add replayable v3 execution driver`.
+- [x] Write failing tests for V3 identity, finite endpoints, one-policy/one-step behavior, no-op preservation of non-`Wait`, PAUSED versus healthy state, exact simulation UTC, replay digest equality, and all four crash boundaries.
+- [x] Verify RED.
+- [x] Implement V3 session composition by reusing stable V2 helpers without editing V2 persisted schemas or replay code.
+- [x] Ensure replay reconstructs state through public `env.step()` calls and never emits a second logical transfer or Edge lifecycle.
+- [x] Run focused V2 and V3 course-session tests and commit `feat(course-session): add replayable v3 execution driver`.
 
 ---
 
