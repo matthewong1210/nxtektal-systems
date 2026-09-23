@@ -8,6 +8,8 @@ import hashlib
 from pathlib import Path
 
 from scripts.course_session_v3 import DEFAULT_CONFIG as SESSION_DEFAULT_CONFIG
+from scripts.course_session_v3 import SCHEMA as SESSION_SCHEMA
+from scripts.course_session_v3 import build_identity as build_session_identity
 from scripts.course_session_v3 import engine_fingerprint as session_engine_fingerprint
 from scripts.course_session_v3 import run as run_session
 from scripts.course_session_v3 import validate_config as validate_session_config
@@ -21,6 +23,20 @@ DEFAULT_CONFIG = {
     "series_id": SESSION_DEFAULT_CONFIG["series_id"],
     "max_rounds": 3,
     "session_config": deepcopy(SESSION_DEFAULT_CONFIG),
+}
+_CHILD_STATUSES = {
+    "INITIALIZED", "CHUNK_COMPLETE", "TIME_BUDGET", "DISK_LIMIT",
+    "PAUSED", "OUTBOX_PENDING", "SESSION_COMPLETE",
+}
+_PARENT_STATUSES = {
+    "INITIALIZED", "ROUND_INITIALIZED", "ROUND_COMPLETE", "SERIES_COMPLETE",
+    *{"CHILD_" + status for status in _CHILD_STATUSES - {"SESSION_COMPLETE"}},
+}
+_CHILD_STATE_FIELDS = {
+    "schema", "environment", "series_id", "session_id", "round_id", "round_index",
+    "engine_digest", "config_digest", "session_epoch_utc", "control_interval_s",
+    "session_end_sim_t_s", "status", "step", "now_sim_t_s", "simulation_time_utc",
+    "replay_digest", "compiled_digest", "unconfirmed_outbox",
 }
 
 
@@ -90,7 +106,33 @@ def _state(config):
     }
 
 
-def _validate_state(value, config):
+def _read_child(root, expected, *, completed):
+    try:
+        child_config = validate_session_config(read_json(root / "config.json"))
+        compiled = read_record(root / "compiled.json")
+        identity = read_record(root / "identity.json")
+        child_state = read_record(root / "state.json")
+        if child_config != expected or identity != build_session_identity(expected, compiled):
+            raise ValueError("child identity/config mismatch")
+        if (type(child_state) is not dict or set(child_state) != _CHILD_STATE_FIELDS
+                or child_state["schema"] != SESSION_SCHEMA
+                or child_state["environment"] != "SIMULATION"
+                or child_state["status"] not in _CHILD_STATUSES
+                or child_state["compiled_digest"] != digest(compiled)
+                or any(child_state[key] != identity[key] for key in (
+                    "series_id", "session_id", "round_id", "round_index", "engine_digest",
+                    "config_digest", "session_epoch_utc", "control_interval_s",
+                    "session_end_sim_t_s"))):
+            raise ValueError("child state identity/status mismatch")
+        if completed and child_state["status"] != "SESSION_COMPLETE":
+            raise ValueError("completed child is not complete")
+        return child_state
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError("completed V3 child evidence is missing or changed" if completed
+                         else "current V3 child evidence is missing or changed") from exc
+
+
+def _validate_state(value, config, root=None):
     fields = {"schema", "environment", "series_id", "config_digest", "engine_digest",
               "status", "current", "history", "completed_rounds", "max_rounds"}
     if type(value) is not dict or set(value) != fields:
@@ -101,6 +143,8 @@ def _validate_state(value, config):
             or value["engine_digest"] != engine_fingerprint()
             or value["max_rounds"] != config["max_rounds"]):
         raise ValueError("V3 series identity/config/engine changed")
+    if value["status"] not in _PARENT_STATUSES:
+        raise ValueError("invalid V3 series status")
     if (type(value["completed_rounds"]) is not int
             or not 0 <= value["completed_rounds"] <= config["max_rounds"]
             or type(value["history"]) is not list
@@ -118,17 +162,51 @@ def _validate_state(value, config):
                 or row["status"] != "SESSION_COMPLETE"
                 or row["child_config_digest"] != digest(expected)):
             raise ValueError("completed V3 round identity changed")
+        if root is not None:
+            child_state = _read_child(Path(root) / row["directory"], expected, completed=True)
+            if digest(child_state) != row["child_state_digest"]:
+                raise ValueError("completed V3 child state digest changed")
     current = value["current"]
-    if current is not None:
+    completed = value["completed_rounds"]
+    if current is None:
+        if completed != 0 or value["status"] != "INITIALIZED":
+            raise ValueError("invalid V3 current/completed relationship")
+    else:
         if (type(current) is not dict
                 or set(current) != {"round_index", "session_id", "round_id", "directory", "status"}
-                or not 0 <= current["round_index"] < config["max_rounds"]):
+                or not 0 <= current["round_index"] < config["max_rounds"]
+                or current["status"] not in _CHILD_STATUSES):
             raise ValueError("invalid current V3 round")
         expected = _round_config(config, current["round_index"])
         if (current["session_id"] != expected["session_id"]
                 or current["round_id"] != expected["round_id"]
                 or current["directory"] != _round_name(current["round_index"])):
             raise ValueError("current V3 round identity changed")
+        expected_index = completed - 1 if current["status"] == "SESSION_COMPLETE" else completed
+        if current["round_index"] != expected_index:
+            raise ValueError("invalid V3 current/completed relationship")
+        if current["status"] == "SESSION_COMPLETE":
+            if (not value["history"]
+                    or any(current[key] != value["history"][-1][key]
+                           for key in ("round_index", "session_id", "round_id", "directory", "status"))):
+                raise ValueError("completed current round differs from V3 history")
+        elif root is not None:
+            child_root = Path(root) / current["directory"]
+            if child_root.exists():
+                _read_child(child_root, expected, completed=False)
+            elif current["status"] != "INITIALIZED":
+                raise ValueError("current V3 child evidence is missing or changed")
+    if completed == config["max_rounds"]:
+        if current is None or current["status"] != "SESSION_COMPLETE" or value["status"] != "SERIES_COMPLETE":
+            raise ValueError("invalid completed V3 series status")
+    elif current is not None and current["status"] == "SESSION_COMPLETE":
+        if value["status"] != "ROUND_COMPLETE":
+            raise ValueError("invalid completed V3 round status")
+    elif current is not None:
+        expected_status = ("ROUND_INITIALIZED" if current["status"] == "INITIALIZED"
+                           else "CHILD_" + current["status"])
+        if value["status"] != expected_status:
+            raise ValueError("invalid current V3 child/parent status")
     return value
 
 
@@ -152,7 +230,7 @@ def run(root, config=None):
             if config is not None and validate_config(config) != stored:
                 raise ValueError("existing V3 series configuration is immutable")
             config = stored
-            state = _validate_state(read_record(state_path), config)
+            state = _validate_state(read_record(state_path), config, root)
         else:
             if any(path.name != ".series.lock" for path in root.iterdir()):
                 raise ValueError("new V3 series requires an empty directory")
@@ -210,7 +288,7 @@ def run(root, config=None):
 def status(root):
     root = Path(root)
     config = validate_config(read_json(root / "config.json"))
-    state = _validate_state(read_record(root / "state.json"), config)
+    state = _validate_state(read_record(root / "state.json"), config, root)
     return {**state, "status": "PAUSED"} if _control(root)["paused"] else state
 
 

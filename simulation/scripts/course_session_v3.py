@@ -6,8 +6,10 @@ evidence; RangeSimulation and BallLedger remain the runtime truth owners.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -17,6 +19,8 @@ import math
 from pathlib import Path
 import re
 import time
+
+import numpy as np
 
 from nxt_range_ops.config.models import RangeOpsScenario
 from nxt_range_ops.env.range_ops_env import RangeOpsEnv
@@ -55,6 +59,19 @@ DEFAULT_CONFIG = {
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _BINDING_KEYS = {"robot_id", "zone_id", "runtime_robot_id", "runtime_zone_id", "handoff_station_id"}
 _TERMINAL_EXECUTIONS = {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
+_STATE_IDENTITY_KEYS = (
+    "schema", "environment", "series_id", "session_id", "round_id", "round_index",
+    "engine_digest", "config_digest", "session_epoch_utc", "control_interval_s",
+    "session_end_sim_t_s",
+)
+_STATE_FIELDS = set(_STATE_IDENTITY_KEYS) | {
+    "status", "step", "now_sim_t_s", "simulation_time_utc", "replay_digest",
+    "compiled_digest", "unconfirmed_outbox",
+}
+_STATE_STATUSES = {
+    "INITIALIZED", "CHUNK_COMPLETE", "TIME_BUDGET", "DISK_LIMIT",
+    "PAUSED", "OUTBOX_PENDING", "SESSION_COMPLETE",
+}
 
 
 class ReplayMismatch(ValueError):
@@ -63,6 +80,15 @@ class ReplayMismatch(ValueError):
 
 class OutboxPending(ValueError):
     """A committed device outbox must be handled by the device owner."""
+
+
+@dataclass(frozen=True)
+class ExecutionAdmission:
+    """Writable execution evidence exposed only while the V3 root lock is held."""
+
+    store: CollectionExecutionStore
+    identity: dict
+    now_sim_t_s: float
 
 
 def _identifier(value, name):
@@ -215,10 +241,40 @@ def _wall_utc():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _canonical_value(value):
+    """Detach JSON evidence, including numpy and mapping facade values."""
+    if isinstance(value, Mapping):
+        result = {}
+        for raw_key, item in value.items():
+            if isinstance(raw_key, str):
+                key = raw_key
+            elif isinstance(raw_key, (int, np.integer)) and not isinstance(raw_key, (bool, np.bool_)):
+                key = str(int(raw_key))
+            else:
+                raise ValueError("causal evidence mapping keys must be strings or integers")
+            if key in result:
+                raise ValueError("causal evidence mapping key collision")
+            result[key] = _canonical_value(item)
+        return result
+    if isinstance(value, np.ndarray):
+        return _canonical_value(value.tolist())
+    if isinstance(value, np.generic):
+        return _canonical_value(value.item())
+    if isinstance(value, (list, tuple)):
+        return [_canonical_value(item) for item in value]
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("causal evidence must contain finite numbers")
+        return value
+    raise ValueError(f"unsupported causal evidence value: {type(value).__name__}")
+
+
 class V3Session:
     """One V3 runtime. Public advance/recover acquire the root session lock."""
 
-    def __init__(self, root, config, compiled, *, store=None, policy=None):
+    def __init__(self, root, config, compiled):
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.config = validate_config(config)
@@ -230,14 +286,15 @@ class V3Session:
         self.obs, self.info = self.env.reset(seed=self.config["seed"])
         if self.env.sim.session_end_s != self.identity["session_end_sim_t_s"]:
             raise ValueError("compiled runtime endpoint differs from V3 identity")
-        self.store = store or CollectionExecutionStore(
+        self.store = CollectionExecutionStore(
             self.root / "collection-execution.jsonl", self.identity, policy_id=POLICY_ID)
         self.execution_api = execution_api
-        self.policy = policy or JointDispatchPolicy(
+        self.policy = JointDispatchPolicy(
             self.scenario, self.env.catalog, candidate_catalog()[1], seed=self.config["seed"])
         self.policy.reset()
         self.step_count = 0
         self._recovered = False
+        self._known_execution_ids = set()
 
     def visible_policy_inputs(self):
         return policy_inputs(self.obs, self.info)
@@ -295,31 +352,55 @@ class V3Session:
         return snapshot
 
     def _assignment_snapshots(self, executions):
+        self._known_execution_ids.update(row["execution_id"] for row in executions)
+        return self._all_assignment_snapshots()
+
+    def _all_assignment_snapshots(self):
         result = {}
-        for row in executions:
-            snapshot = self.env.collection_assignment_snapshot(row["execution_id"])
+        for execution_id in sorted(self._known_execution_ids):
+            snapshot = self.env.collection_assignment_snapshot(execution_id)
             if snapshot is not None:
-                result[row["execution_id"]] = snapshot
+                result[execution_id] = snapshot
         return result
 
-    def runtime_digest(self):
-        execution_ids = set()
-        for item in self.store.replay_plan():
-            execution_ids.update(item["committed"]["executions"])
-        return digest({
-            "runtime": self.env.sim.state_summary(),
-            "events": self.env.sim.events.to_dicts(),
-            "assignments": {eid: self.env.collection_assignment_snapshot(eid)
-                            for eid in sorted(execution_ids)
-                            if self.env.collection_assignment_snapshot(eid) is not None},
+    def _policy_state(self):
+        rng = getattr(self.policy, "rng", None)
+        catalog = getattr(self.policy, "catalog", None)
+        return _canonical_value({
+            "candidate": self.policy.candidate,
+            "version": self.policy.version,
+            "name": self.policy.name,
+            "previous_inventory": self.policy._previous_inventory,
+            "visible_catalog_staff_names": sorted(catalog._staff_names),
+            "rng_state": None if rng is None else rng.bit_generator.state,
         })
 
-    def _post_state_digest(self, executions):
-        return digest({
-            "runtime": self.env.sim.state_summary(),
-            "events": self.env.sim.events.to_dicts(),
-            "assignments": self._assignment_snapshots(executions),
+    def _causal_post_state(self):
+        observation, info = self.visible_policy_inputs()
+        return _canonical_value({
+            "state_summary": self.env.sim.state_summary(),
+            "legacy_events": self.env.sim.events.to_dicts(),
+            "assignment_snapshots": self._all_assignment_snapshots(),
+            "policy_inputs": {"observation": observation, "info": info},
+            "metrics": self.env.sim.metrics.to_dict(),
+            "joint_metrics": self.env.sim.joint_metrics,
+            "staff_work_snapshots": self.env.sim.staff_work_snapshots(),
+            "step_count": self.step_count,
+            "policy_state": self._policy_state(),
         })
+
+    def _remember_replay_executions(self):
+        for item in self.store.replay_plan():
+            self._known_execution_ids.update(item["committed"]["executions"])
+
+    def runtime_digest(self):
+        self._remember_replay_executions()
+        return digest(self._causal_post_state())
+
+    def _post_state_digest(self, executions):
+        for row in executions:
+            self._known_execution_ids.add(row["execution_id"])
+        return digest(self._causal_post_state())
 
     @staticmethod
     def _crash(hook, boundary, payload):
@@ -340,7 +421,6 @@ class V3Session:
         if selected != self._action(selected["index"]):
             raise ReplayMismatch("prepared selected action differs from the V3 catalog")
         execution_id = decision["execution_id"]
-        armed = False
         if decision["selection"] == "WAIT_SLOT":
             row = self._execution_row(executions, execution_id)
             # A committed replay row may already be terminal because this very
@@ -351,12 +431,9 @@ class V3Session:
             self.env.arm_collection_assignment(
                 execution_id, row["runtime_robot_id"], row["runtime_zone_id"],
                 row["handoff_station_id"], decision["sim_t_s"] + row["max_execution_s"])
-            armed = True
         self.obs, _, terminated, truncated, self.info = self.env.step(selected["index"])
         self.step_count += 1
         shield = {key: self.info["shield"][key] for key in ("allowed", "reason")}
-        if armed and not shield["allowed"]:
-            self.env.disarm_collection_assignment(execution_id)
         if truncated and not terminated:
             raise ReplayMismatch("runtime truncated before the finite V3 endpoint")
         result = {
@@ -368,39 +445,95 @@ class V3Session:
         self._crash(crash_hook, "after_step", result)
         return result
 
+    def _cleanup_rejected_arm(self, prepared, result):
+        decision = prepared["decision"]
+        if decision["selection"] == "WAIT_SLOT" and not result["safety_shield"]["allowed"]:
+            self.env.disarm_collection_assignment(decision["execution_id"])
+
     def _record_pending_failure(self, prepared, observed):
-        observed_digest = execution_api.digest(observed)
+        observed_digest = execution_api.digest(_canonical_value(observed))
         now = max(self.env.sim.now, prepared["decision"]["sim_t_s"])
         self.store.record_replay_failure(
             execution_api.digest(prepared), now_sim_t_s=now, observed_digest=observed_digest)
 
+    def _raise_committed_mismatch(self, item, final_sim_t_s, message, observed, *, cause=None):
+        prepared, committed = item["prepared"], item["committed"]
+        observed_digest = execution_api.digest(_canonical_value({
+            "message": message,
+            "observed": observed,
+        }))
+        self.store.record_committed_replay_failure(
+            prepared["tick_sequence"],
+            prepared_digest=execution_api.digest(prepared),
+            committed_digest=execution_api.digest(committed),
+            observed_digest=observed_digest,
+            now_sim_t_s=final_sim_t_s,
+        )
+        if cause is None:
+            raise ReplayMismatch(message)
+        raise ReplayMismatch(message) from cause
+
     def _replay_committed(self):
         plan = self.store.replay_plan()
+        final_sim_t_s = (self.env.sim.now if not plan
+                         else plan[-1]["committed"]["result"]["now_sim_t_s"])
         previous = 0
         for item in plan:
             prepared, committed = item["prepared"], item["committed"]
             if prepared["tick_sequence"] != previous + 1 or committed["tick_sequence"] != prepared["tick_sequence"]:
-                raise ReplayMismatch("replay plan tick sequence is not contiguous")
-            original = self._policy_action()
+                self._raise_committed_mismatch(
+                    item, final_sim_t_s, "replay plan tick sequence is not contiguous",
+                    {"previous_tick_sequence": previous,
+                     "prepared_tick_sequence": prepared["tick_sequence"],
+                     "committed_tick_sequence": committed["tick_sequence"]},
+                )
+            try:
+                original = self._policy_action()
+            except Exception as exc:
+                self._raise_committed_mismatch(
+                    item, final_sim_t_s, "committed policy prefix could not be reconstructed",
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
             if original != prepared["decision"]["original_action"]:
-                raise ReplayMismatch("committed policy prefix differs during replay")
+                self._raise_committed_mismatch(
+                    item, final_sim_t_s, "committed policy prefix differs during replay",
+                    {"original_action": original,
+                     "stored_original_action": prepared["decision"]["original_action"]},
+                )
             executions = list(committed["executions"].values())
-            observed = self._apply_prepared(prepared, executions)
+            try:
+                observed = self._apply_prepared(prepared, executions)
+            except Exception as exc:
+                self._raise_committed_mismatch(
+                    item, final_sim_t_s, "committed simulator action differs during replay",
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
             if observed != committed["result"]:
-                raise ReplayMismatch("committed simulator result differs during replay")
+                self._raise_committed_mismatch(
+                    item, final_sim_t_s, "committed simulator result differs during replay",
+                    {"result": observed, "stored_result": committed["result"]},
+                )
+            try:
+                self._cleanup_rejected_arm(prepared, observed)
+            except Exception as exc:
+                self._raise_committed_mismatch(
+                    item, final_sim_t_s, "committed rejected-arm cleanup differs during replay",
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
             previous = prepared["tick_sequence"]
         return plan
 
-    def _recover_unlocked(self):
+    def _reconstruct_prefix_unlocked(self):
         self.store.initialize_session(now_sim_t_s=self.env.sim.now)
         if self.step_count or self.env.sim.now != self.scenario.hours.open_seconds:
             raise ValueError("recovery requires a fresh V3 runtime")
-        plan = self._replay_committed()
-        state = self.store.recovery_state()
-        if state["status"] == "REPLAY_MISMATCH":
+        before = self.store.recovery_state()
+        if before["status"] == "REPLAY_MISMATCH":
             raise ReplayMismatch("session was sealed by an earlier replay mismatch")
-        if state["status"] == "EDGE_WITHOUT_COMMIT":
+        if before["status"] == "EDGE_WITHOUT_COMMIT":
             raise ReplayMismatch("Edge evidence has no matching committed simulator tick")
+        plan = self._replay_committed()
+        return plan, self.store.recovery_state()
+
+    def _recover_unlocked(self):
+        plan, state = self._reconstruct_prefix_unlocked()
         if state["status"] == "PREPARED_NO_COMMIT":
             prepared = state["pending_prepared"]
             if not state["replay_permitted"]:
@@ -436,6 +569,13 @@ class V3Session:
                 except CollectionExecutionError:
                     pass
                 raise ReplayMismatch("prepared simulator result could not be verified") from exc
+            try:
+                self._cleanup_rejected_arm(prepared, result)
+            except Exception as exc:
+                self._raise_committed_mismatch(
+                    {"prepared": prepared, "committed": committed}, result["now_sim_t_s"],
+                    "committed rejected-arm cleanup failed during pending recovery",
+                    {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
             self.store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
             state = self.store.recovery_state()
         elif state["status"] == "COMMITTED_CURSOR_STALE":
@@ -476,6 +616,13 @@ class V3Session:
         result = self._apply_prepared(prepared, projection["executions"], crash_hook=crash_hook)
         committed = self.store.commit_tick(prepared, **result)
         self._crash(crash_hook, "after_commit", committed)
+        try:
+            self._cleanup_rejected_arm(prepared, result)
+        except Exception as exc:
+            self._raise_committed_mismatch(
+                {"prepared": prepared, "committed": committed}, result["now_sim_t_s"],
+                "committed rejected-arm cleanup failed during live execution",
+                {"exception": type(exc).__name__, "detail": str(exc)}, cause=exc)
         self.store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
         self._crash(crash_hook, "after_cursor", committed)
         return committed
@@ -487,10 +634,7 @@ class V3Session:
 
 def _state(session, status):
     recovery = session.store.recovery_state()
-    result = {key: deepcopy(session.identity[key]) for key in (
-        "schema", "environment", "series_id", "session_id", "round_id", "round_index",
-        "engine_digest", "config_digest", "session_epoch_utc", "control_interval_s",
-        "session_end_sim_t_s")}
+    result = {key: deepcopy(session.identity[key]) for key in _STATE_IDENTITY_KEYS}
     result.update(
         status=status, step=recovery["tick_sequence"], now_sim_t_s=session.env.sim.now,
         simulation_time_utc=execution_api.simulation_utc(session.identity, session.env.sim.now),
@@ -510,11 +654,60 @@ def _load_root(root, config):
     if identity != expected:
         raise ValueError("session engine/config/identity changed; preserve evidence and create a new V3 root")
     state = read_record(root / "state.json")
-    if (state.get("schema") != SCHEMA or state.get("config_digest") != digest(stored)
-            or state.get("compiled_digest") != digest(compiled)
-            or state.get("engine_digest") != identity["engine_digest"]):
-        raise ValueError("compiled scenario or V3 cursor identity changed")
+    if (type(state) is not dict or set(state) != _STATE_FIELDS
+            or any(state[key] != identity[key] for key in _STATE_IDENTITY_KEYS)
+            or state["compiled_digest"] != digest(compiled)):
+        raise ValueError("compiled scenario or persisted V3 state identity changed")
+    now = state["now_sim_t_s"]
+    if (state["status"] not in _STATE_STATUSES
+            or type(state["step"]) is not int or state["step"] < 0
+            or type(now) not in (int, float) or not math.isfinite(now)
+            or not 0 <= now <= identity["session_end_sim_t_s"]
+            or state["simulation_time_utc"] != execution_api.simulation_utc(identity, now)
+            or type(state["replay_digest"]) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", state["replay_digest"]) is None
+            or type(state["unconfirmed_outbox"]) is not int
+            or state["unconfirmed_outbox"] < 0):
+        raise ValueError("invalid persisted V3 state")
     return stored, compiled, state
+
+
+def _read_control(root):
+    control = read_json(root / "control.json")
+    if type(control) is not dict or set(control) != {"paused"} or type(control["paused"]) is not bool:
+        raise ValueError("invalid V3 pause control")
+    return control
+
+
+def _validate_saved_runtime(saved, session, recovery):
+    if saved.get("status") not in _STATE_STATUSES:
+        raise ValueError("invalid persisted V3 session status")
+    expected = {
+        "step": recovery["tick_sequence"],
+        "now_sim_t_s": session.env.sim.now,
+        "simulation_time_utc": execution_api.simulation_utc(
+            session.identity, session.env.sim.now),
+        "replay_digest": recovery["replay_digest"],
+    }
+    current_unconfirmed = len(recovery["unconfirmed_outbox"])
+    saved_unconfirmed = saved.get("unconfirmed_outbox")
+    if (any(saved.get(key) != value for key, value in expected.items())
+            or type(saved_unconfirmed) is not int
+            or not current_unconfirmed <= saved_unconfirmed):
+        raise ValueError("persisted V3 state differs from the validated execution prefix")
+
+
+def _validated_read_runtime(root):
+    config, compiled, saved = _load_root(root, None)
+    control = _read_control(root)
+    session = V3Session(root, config, compiled)
+    _, recovery = session._reconstruct_prefix_unlocked()
+    if recovery["status"] in {"PREPARED_NO_COMMIT", "COMMITTED_CURSOR_STALE"}:
+        raise ReplayMismatch("V3 session recovery is required before external access")
+    if recovery["status"] not in {"NO_PREPARED", "COMMITTED_OUTBOX_UNCONFIRMED"}:
+        raise ReplayMismatch("V3 session is not available for external access")
+    _validate_saved_runtime(saved, session, recovery)
+    return session, saved, control
 
 
 def run(root, config=None, *, crash_hook=None):
@@ -541,9 +734,7 @@ def run(root, config=None, *, crash_hook=None):
             session.store.initialize_session(now_sim_t_s=session.env.sim.now)
             saved = _state(session, "INITIALIZED")
             write_record(state_path, saved)
-        control = read_json(root / "control.json")
-        if type(control) is not dict or set(control) != {"paused"} or type(control["paused"]) is not bool:
-            raise ValueError("invalid V3 pause control")
+        control = _read_control(root)
         if control["paused"]:
             return {**saved, "status": "PAUSED"}
         session = V3Session(root, config, compiled)
@@ -585,10 +776,32 @@ def run(root, config=None, *, crash_hook=None):
         return state
 
 
-def open_store(root):
+@contextmanager
+def execution_admission(root):
+    """Hold the V3 session lock across Task 5 evidence admission writes."""
     root = Path(root)
-    identity = read_record(root / "identity.json")
-    return CollectionExecutionStore(root / "collection-execution.jsonl", identity, policy_id=POLICY_ID)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        session, _, _ = _validated_read_runtime(root)
+        yield ExecutionAdmission(
+            store=session.store,
+            identity=deepcopy(session.identity),
+            now_sim_t_s=session.env.sim.now,
+        )
+
+
+def read_execution_snapshot(root, *, server_time_utc):
+    """Return one validated read-only projection without exposing its store."""
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        session, saved, control = _validated_read_runtime(root)
+        session_state = ("PAUSED" if control["paused"] else
+                         "ENDED" if saved["status"] == "SESSION_COMPLETE" else "ACTIVE")
+        return session.store.snapshot(
+            server_time_utc=server_time_utc, session_state=session_state)
 
 
 def status(root):

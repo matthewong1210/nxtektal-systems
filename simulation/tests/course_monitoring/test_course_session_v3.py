@@ -4,6 +4,8 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import fcntl
+import inspect
+import json
 from pathlib import Path
 
 import pytest
@@ -12,7 +14,7 @@ from nxt_edge_task.contracts import TaskRequest
 from nxt_edge_task.journal import JsonlJournal, RecordSpec
 from nxt_range_ops.scenarios.generators import make_scenario
 from scripts.course_collection_execution import simulation_utc
-from scripts.joint_learning import atomic_json, read_record
+from scripts.joint_learning import atomic_json, read_record, write_record
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +25,7 @@ def iso(epoch: str, seconds: int) -> str:
     return value.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def compiled_fixture(*, end_minute: int = 12) -> dict:
+def compiled_fixture(*, end_minute: int = 12, collection_blocked: bool = False) -> dict:
     base = make_scenario("normal_weekday")
     scenario = base.model_copy(update={
         "name": "v3_session_test",
@@ -32,6 +34,10 @@ def compiled_fixture(*, end_minute: int = 12) -> dict:
         "initial_dispenser_frac": 1.0,
     })
     length = end_minute - 1
+    blocks = {zone_id: [] for zone_id in scenario.zone_ids}
+    if collection_blocked:
+        blocks = {zone_id: [{"start_minute": 1, "end_minute": end_minute}]
+                  for zone_id in scenario.zone_ids}
     return {
         "schema": "nxt-course-session-scenario/v1",
         "environment": "SIMULATION",
@@ -42,7 +48,7 @@ def compiled_fixture(*, end_minute: int = 12) -> dict:
             "days": 1,
             "demand_by_minute": [0] * length,
             "landing_zones_by_minute": [[] for _ in range(length)],
-            "collection_blocks": {zone_id: [] for zone_id in scenario.zone_ids},
+            "collection_blocks": blocks,
             "staff_job_slots": [],
         },
     }
@@ -90,10 +96,10 @@ def config(runner, compiled: dict, **updates) -> dict:
     return value
 
 
-def session(runner, tmp_path, *, compiled=None, policy=None):
+def session(runner, tmp_path, *, compiled=None):
     compiled = compiled or compiled_fixture()
     cfg = config(runner, compiled)
-    return runner.V3Session(tmp_path, cfg, compiled, policy=policy)
+    return runner.V3Session(tmp_path, cfg, compiled)
 
 
 class FixedPolicy:
@@ -176,6 +182,12 @@ def accepted_request(v3, tmp_path, *, cycle_minutes=None):
     return request
 
 
+def candidate_execution(v3, request):
+    robot_id = v3.identity["runtime_bindings"][0]["runtime_robot_id"]
+    candidate = v3.env.sim._assignment_candidates.get(robot_id)
+    return None if candidate is None else candidate.execution_id
+
+
 def test_v3_identity_clock_and_exact_finite_endpoint(runner, tmp_path):
     compiled = compiled_fixture(end_minute=4)
     v3 = session(runner, tmp_path, compiled=compiled)
@@ -196,24 +208,30 @@ def test_v3_identity_clock_and_exact_finite_endpoint(runner, tmp_path):
 def test_advance_calls_policy_and_public_step_once_and_preserves_nonwait(runner, tmp_path, monkeypatch):
     compiled = compiled_fixture()
     probe = runner.V3Session(tmp_path, config(runner, compiled), compiled)
-    pause = probe.env.catalog.index_of(f"pause_robot({probe.env.scenario.robot_ids[0]})")
-    policy = FixedPolicy(pause)
-    probe.policy = policy
-    calls = 0
+    probe.obs["robot_battery"][0] = 0.0
+    policy_calls = 0
+    step_calls = 0
+    act = probe.policy.act
     step = probe.env.step
 
+    def counted_policy(obs, info):
+        nonlocal policy_calls
+        policy_calls += 1
+        return act(obs, info)
+
     def counted(action):
-        nonlocal calls
-        calls += 1
+        nonlocal step_calls
+        step_calls += 1
         return step(action)
 
+    monkeypatch.setattr(probe.policy, "act", counted_policy)
     monkeypatch.setattr(probe.env, "step", counted)
     committed = probe.advance()
     decision = probe.store.replay_plan()[-1]["prepared"]["decision"]
-    assert policy.calls == calls == 1
+    assert policy_calls == step_calls == 1
     assert decision["selection"] == "ORIGINAL_POLICY_UNCHANGED"
     assert decision["original_action"] == decision["selected_action"]
-    assert decision["selected_action"]["index"] == pause
+    assert decision["selected_action"]["name"] != "Wait"
     assert committed["result"]["now_sim_t_s"] == 120
 
 
@@ -226,6 +244,7 @@ def test_no_requests_matches_direct_original_policy_trajectory(runner, tmp_path)
         obs, info = second.visible_policy_inputs()
         action = int(second.policy.act(obs, info))
         second.obs, _, _, _, second.info = second.env.step(action)
+        second.step_count += 1
     assert first.runtime_digest() == second.runtime_digest()
 
 
@@ -238,8 +257,8 @@ def test_pause_is_business_state_not_wall_read_health(runner, tmp_path, monkeypa
     atomic_json(tmp_path / "control.json", {"paused": True})
     paused = runner.run(tmp_path)
     assert paused["status"] == "PAUSED" and paused["now_sim_t_s"] == before
-    snapshot = runner.open_store(tmp_path).snapshot(
-        server_time_utc="2030-01-01T00:00:00Z", session_state="PAUSED")
+    snapshot = runner.read_execution_snapshot(
+        tmp_path, server_time_utc="2030-01-01T00:00:00Z")
     assert snapshot["session_state"] == "PAUSED"
     assert snapshot["server_time_utc"] == "2030-01-01T00:00:00Z"
     assert snapshot["simulation_time_utc"] == simulation_utc(active, before)
@@ -261,6 +280,128 @@ def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(run
     assert continuation["robot_id"] == robot and continuation["target_id"] is None
 
 
+def test_policy_provenance_has_no_public_injection_path(runner, tmp_path):
+    compiled = compiled_fixture()
+    assert "policy" not in inspect.signature(runner.V3Session).parameters
+    with pytest.raises(TypeError, match="policy"):
+        runner.V3Session(
+            tmp_path / "forged", config(runner, compiled), compiled,
+            policy=FixedPolicy(0),
+        )
+    v3 = session(runner, tmp_path / "fixed", compiled=compiled)
+    assert type(v3.policy).__name__ == "JointDispatchPolicy"
+    assert v3.store.policy_id == runner.POLICY_ID
+
+
+def test_causal_digest_includes_visible_inputs_and_policy_state(runner, tmp_path):
+    v3 = session(runner, tmp_path)
+    evidence = v3._causal_post_state()
+    initial_inventory = float(v3.obs["dispenser_inventory_frac"][0])
+    assert set(evidence) == {
+        "state_summary", "legacy_events", "assignment_snapshots", "policy_inputs",
+        "metrics", "joint_metrics", "staff_work_snapshots", "step_count", "policy_state",
+    }
+    assert set(evidence["policy_inputs"]) == {"observation", "info"}
+    assert isinstance(evidence["policy_inputs"]["info"]["action_mask"], dict)
+    assert evidence["policy_state"]["candidate"]["candidate_id"] == "balanced"
+    assert evidence["policy_state"]["version"] == "joint-dispatch/v0"
+    assert evidence["policy_state"]["name"] == "balanced"
+    assert evidence["policy_state"]["rng_state"] is not None
+    json.dumps(evidence, sort_keys=True, allow_nan=False)
+
+    original = v3.runtime_digest()
+    v3.obs["dispenser_inventory_frac"][0] -= 0.125
+    assert v3.runtime_digest() != original
+    sensed_digest = v3.runtime_digest()
+    v3.policy._previous_inventory = (float(v3.env.sim.now), 0.25)
+    assert v3.runtime_digest() != sensed_digest
+    assert evidence["policy_inputs"]["observation"]["dispenser_inventory_frac"][0] == initial_inventory
+
+
+def test_rejected_wait_slot_disarms_only_after_durable_commit(runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(collection_blocked=True)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    request = accepted_request(v3, tmp_path)
+    disarmed = []
+    commit = v3.store.commit_tick
+    disarm = v3.env.disarm_collection_assignment
+
+    def observe_disarm(execution_id):
+        disarmed.append(execution_id)
+        return disarm(execution_id)
+
+    def observe_commit(prepared, **result):
+        assert candidate_execution(v3, request) == request["execution_id"]
+        assert disarmed == []
+        return commit(prepared, **result)
+
+    monkeypatch.setattr(v3.env, "disarm_collection_assignment", observe_disarm)
+    monkeypatch.setattr(v3.store, "commit_tick", observe_commit)
+    committed = v3.advance()
+
+    assert committed["result"]["safety_shield"]["allowed"] is False
+    assert disarmed == [request["execution_id"]]
+    assert candidate_execution(v3, request) is None
+
+
+def test_commit_failure_leaves_rejected_candidate_armed(runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(collection_blocked=True)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    request = accepted_request(v3, tmp_path)
+    disarmed = []
+    disarm = v3.env.disarm_collection_assignment
+
+    def observe_disarm(execution_id):
+        disarmed.append(execution_id)
+        return disarm(execution_id)
+
+    def fail_commit(prepared, **result):
+        assert candidate_execution(v3, request) == request["execution_id"]
+        raise OSError("commit failed")
+
+    monkeypatch.setattr(v3.env, "disarm_collection_assignment", observe_disarm)
+    monkeypatch.setattr(v3.store, "commit_tick", fail_commit)
+    with pytest.raises(OSError, match="commit failed"):
+        v3.advance()
+
+    assert disarmed == []
+    assert candidate_execution(v3, request) == request["execution_id"]
+    assert v3.store.recovery_state()["status"] == "PREPARED_NO_COMMIT"
+
+
+def test_after_commit_crash_replay_performs_rejected_candidate_cleanup(runner, tmp_path):
+    compiled = compiled_fixture(collection_blocked=True)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    request = accepted_request(v3, tmp_path)
+    with pytest.raises(Crash, match="after_commit"):
+        v3.advance(crash_hook=crash_at("after_commit"))
+
+    assert v3.store.recovery_state()["status"] == "COMMITTED_CURSOR_STALE"
+    assert candidate_execution(v3, request) == request["execution_id"]
+    recovered = session(runner, tmp_path, compiled=compiled)
+    recovered.recover()
+    assert candidate_execution(recovered, request) is None
+    assert len(recovered.store.replay_plan()) == 1
+
+
+def test_after_step_recovery_commits_then_cleans_rejected_candidate(runner, tmp_path):
+    compiled = compiled_fixture(collection_blocked=True)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    request = accepted_request(v3, tmp_path)
+    with pytest.raises(Crash, match="after_step"):
+        v3.advance(crash_hook=crash_at("after_step"))
+
+    assert v3.env.sim.now == 120
+    assert candidate_execution(v3, request) == request["execution_id"]
+    assert v3.store.recovery_state()["status"] == "PREPARED_NO_COMMIT"
+    assert v3.store.replay_plan() == []
+    recovered = session(runner, tmp_path, compiled=compiled)
+    recovered.recover()
+    assert candidate_execution(recovered, request) is None
+    assert len(recovered.store.replay_plan()) == 1
+    assert recovered.store.recovery_state()["status"] == "COMMITTED_OUTBOX_UNCONFIRMED"
+
+
 @pytest.mark.parametrize("boundary, expected", [
     ("before_prepare", "NO_PREPARED"),
     ("after_prepare", "PREPARED_NO_COMMIT"),
@@ -269,8 +410,16 @@ def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(run
 ])
 def test_crash_boundaries_recover_without_duplicate_commit(runner, tmp_path, boundary, expected):
     v3 = session(runner, tmp_path)
+    before = (v3.env.sim.now, v3.step_count, len(v3.env.sim.events.to_dicts()))
     with pytest.raises(Crash, match=boundary):
         v3.advance(crash_hook=crash_at(boundary))
+    after = (v3.env.sim.now, v3.step_count, len(v3.env.sim.events.to_dicts()))
+    if boundary == "after_step":
+        assert after[0] == before[0] + v3.config["control_interval_s"]
+        assert after[1] == before[1] + 1
+        assert after[2] > before[2]
+    elif boundary == "after_prepare":
+        assert after == before
     assert v3.store.recovery_state()["status"] == expected
     recovered = session(runner, tmp_path)
     recovered.recover()
@@ -280,14 +429,15 @@ def test_crash_boundaries_recover_without_duplicate_commit(runner, tmp_path, bou
 
 
 def test_committed_outbox_unconfirmed_is_replayed_not_confirmed_or_restarted(runner, tmp_path):
-    v3 = session(runner, tmp_path, policy=FixedPolicy(0))
+    compiled = compiled_fixture(collection_blocked=True)
+    v3 = session(runner, tmp_path, compiled=compiled)
     accepted_request(v3, tmp_path)
     with pytest.raises(Crash, match="after_cursor"):
         v3.advance(crash_hook=crash_at("after_cursor"))
     state = v3.store.recovery_state()
     assert state["status"] == "COMMITTED_OUTBOX_UNCONFIRMED" and state["unconfirmed_outbox"]
     before = deepcopy(state["unconfirmed_outbox"])
-    recovered = session(runner, tmp_path, policy=FixedPolicy(0))
+    recovered = session(runner, tmp_path, compiled=compiled)
     recovered.recover()
     after = recovered.store.recovery_state()
     assert after["status"] == "COMMITTED_OUTBOX_UNCONFIRMED"
@@ -319,16 +469,66 @@ def test_replay_digest_matches_and_never_writes_second_logical_tick(runner, tmp_
     assert second.runtime_digest() == digest
     assert second.store.replay_plan() == plan
     assert second.env.sim.now == first.env.sim.now
+    assert second.store.recovery_state()["replay_failure"] is None
 
 
 def test_committed_prefix_result_drift_fails_closed(runner, tmp_path, monkeypatch):
     first = session(runner, tmp_path)
     first.advance()
+    plan = first.store.replay_plan()
     second = session(runner, tmp_path)
     monkeypatch.setattr(second, "_post_state_digest", lambda executions: "d" * 64)
     with pytest.raises(runner.ReplayMismatch, match="committed simulator result"):
         second.recover()
-    assert len(second.store.replay_plan()) == 1
+    failure = second.store.recovery_state()["replay_failure"]
+    assert second.store.recovery_state()["status"] == "REPLAY_MISMATCH"
+    assert failure["tick_sequence"] == 1
+    assert failure["prepared_digest"] == runner.execution_api.digest(plan[0]["prepared"])
+    assert failure["committed_digest"] == runner.execution_api.digest(plan[0]["committed"])
+    assert failure["now_sim_t_s"] == plan[-1]["committed"]["result"]["now_sim_t_s"]
+    with pytest.raises(runner.CollectionExecutionError, match="sealed"):
+        second.store.snapshot(server_time_utc="2030-01-01T00:00:00Z")
+    with pytest.raises(runner.CollectionExecutionError, match="sealed"):
+        second.store.arbitrate(
+            {"name": "Wait", "index": 0, "robot_id": None, "target_id": None},
+            failure["now_sim_t_s"], second.runtime_view([]),
+        )
+    with pytest.raises(runner.ReplayMismatch, match="sealed"):
+        session(runner, tmp_path).recover()
+
+
+def test_committed_policy_mismatch_is_durably_sealed(runner, tmp_path):
+    first = session(runner, tmp_path)
+    first.advance()
+    bad = session(runner, tmp_path)
+    pause = bad.env.catalog.index_of(f"pause_robot({bad.env.scenario.robot_ids[0]})")
+    bad.policy = FixedPolicy(pause)
+    with pytest.raises(runner.ReplayMismatch, match="policy prefix"):
+        bad.recover()
+    state = bad.store.recovery_state()
+    assert state["status"] == "REPLAY_MISMATCH"
+    assert state["replay_failure"]["observed_digest"] is not None
+
+
+def test_committed_selected_action_mismatch_is_durably_sealed(runner, tmp_path, monkeypatch):
+    first = session(runner, tmp_path)
+    first.advance()
+    bad = session(runner, tmp_path)
+    action = bad._action
+    calls = 0
+
+    def drift_after_original(index):
+        nonlocal calls
+        calls += 1
+        value = action(index)
+        if calls > 1:
+            value["target_id"] = "drifted-target"
+        return value
+
+    monkeypatch.setattr(bad, "_action", drift_after_original)
+    with pytest.raises(runner.ReplayMismatch, match="simulator action"):
+        bad.recover()
+    assert bad.store.recovery_state()["status"] == "REPLAY_MISMATCH"
 
 
 def test_torn_and_drifted_prefixes_fail_loud(runner, tmp_path, monkeypatch):
@@ -365,6 +565,71 @@ def test_run_lock_immutable_identity_and_cursor_last(runner, tmp_path, monkeypat
             runner.run(tmp_path)
 
 
+def test_execution_admission_holds_session_lock_and_returns_no_step_authority(
+        runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    state = runner.run(tmp_path, cfg)
+
+    with runner.execution_admission(tmp_path) as admission:
+        assert set(vars(admission)) == {"store", "identity", "now_sim_t_s"}
+        assert admission.now_sim_t_s == state["now_sim_t_s"]
+        assert admission.identity == read_record(tmp_path / "identity.json")
+        admission.identity["session_id"] = "detached-copy"
+        assert read_record(tmp_path / "identity.json")["session_id"] == cfg["session_id"]
+        assert len(admission.store.replay_plan()) == state["step"]
+        with pytest.raises(ValueError, match="another worker"):
+            with runner.execution_admission(tmp_path):
+                pass
+    assert not hasattr(runner, "open_store")
+
+
+def test_execution_admission_rejects_tampered_identity(runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    identity = read_record(tmp_path / "identity.json")
+    identity["session_id"] = "tampered-session"
+    write_record(tmp_path / "identity.json", identity)
+    with pytest.raises(ValueError, match="identity changed"):
+        with runner.execution_admission(tmp_path):
+            pass
+
+
+def test_execution_admission_rejects_tampered_state_identity(runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    state = read_record(tmp_path / "state.json")
+    state["session_id"] = "tampered-session"
+    write_record(tmp_path / "state.json", state)
+    with pytest.raises(ValueError, match="state identity"):
+        with runner.execution_admission(tmp_path):
+            pass
+
+
+def test_read_snapshot_accepts_device_confirmation_after_saved_outbox_cursor(
+        runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(collection_blocked=True)
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    v3.recover()
+    accepted_request(v3, tmp_path)
+    v3.advance()
+    write_record(tmp_path / "state.json", runner._state(v3, "OUTBOX_PENDING"))
+    confirm_outbox(v3)
+
+    snapshot = runner.read_execution_snapshot(
+        tmp_path, server_time_utc="2030-01-01T00:00:00Z")
+    assert snapshot["session_state"] == "ACTIVE"
+    assert snapshot["executions"][0]["state"] == "REJECTED"
+
+
 def test_series_v2_is_bounded_and_creates_only_v3_children(runner, series_runner, tmp_path, monkeypatch):
     compiled = compiled_fixture(end_minute=3)
     child = config(runner, compiled, advance_steps=10)
@@ -381,6 +646,76 @@ def test_series_v2_is_bounded_and_creates_only_v3_children(runner, series_runner
     for row in done["history"]:
         assert read_record(tmp_path / row["directory"] / "state.json")["schema"] == "nxt-whole-course-session/v3"
     assert one["completed_rounds"] <= two["completed_rounds"] <= done["completed_rounds"]
+
+
+def test_series_rejects_current_round_skip_and_unknown_status(
+        runner, series_runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(end_minute=3)
+    child = config(runner, compiled, advance_steps=10)
+    parent = deepcopy(series_runner.DEFAULT_CONFIG)
+    parent.update(series_id="validated-series", max_rounds=3, session_config=child)
+    parent["session_config"]["series_id"] = "validated-series"
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    one = series_runner.run(tmp_path, parent)
+    assert one["completed_rounds"] == 1
+
+    skipped = deepcopy(one)
+    next_config = series_runner._round_config(parent, 1)
+    skipped["current"] = {
+        "round_index": 1, "session_id": next_config["session_id"],
+        "round_id": next_config["round_id"], "directory": "round-0000000001",
+        "status": "SESSION_COMPLETE",
+    }
+    write_record(tmp_path / "state.json", skipped)
+    with pytest.raises(ValueError, match="current.*relationship"):
+        series_runner.status(tmp_path)
+
+    unknown = deepcopy(one)
+    unknown["status"] = "ALIEN"
+    write_record(tmp_path / "state.json", unknown)
+    with pytest.raises(ValueError, match="status"):
+        series_runner.status(tmp_path)
+
+
+@pytest.mark.parametrize("mutation", ["alter_state", "delete_identity"])
+def test_series_rejects_altered_or_deleted_completed_child_evidence(
+        runner, series_runner, tmp_path, monkeypatch, mutation):
+    compiled = compiled_fixture(end_minute=3)
+    child = config(runner, compiled, advance_steps=10)
+    parent = deepcopy(series_runner.DEFAULT_CONFIG)
+    parent.update(series_id="child-evidence-series", max_rounds=1, session_config=child)
+    parent["session_config"]["series_id"] = "child-evidence-series"
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    done = series_runner.run(tmp_path, parent)
+    child_root = tmp_path / done["history"][0]["directory"]
+    if mutation == "alter_state":
+        state = read_record(child_root / "state.json")
+        state["status"] = "CHUNK_COMPLETE"
+        write_record(child_root / "state.json", state)
+    else:
+        (child_root / "identity.json").unlink()
+    with pytest.raises(ValueError, match="completed V3 child"):
+        series_runner.status(tmp_path)
+
+
+def test_series_reconciles_child_complete_parent_stale_idempotently(
+        runner, series_runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(end_minute=3)
+    child = config(runner, compiled, advance_steps=1)
+    parent = deepcopy(series_runner.DEFAULT_CONFIG)
+    parent.update(series_id="reconcile-series", max_rounds=1, session_config=child)
+    parent["session_config"]["series_id"] = "reconcile-series"
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+
+    partial = series_runner.run(tmp_path, parent)
+    assert partial["completed_rounds"] == 0
+    child_root = tmp_path / partial["current"]["directory"]
+    assert runner.run(child_root)["status"] == "SESSION_COMPLETE"
+    reconciled = series_runner.run(tmp_path)
+    repeated = series_runner.run(tmp_path)
+    assert reconciled["completed_rounds"] == 1
+    assert reconciled["history"] == repeated["history"]
+    assert reconciled["status"] == repeated["status"] == "SERIES_COMPLETE"
 
 
 def test_v2_roots_and_contracts_remain_distinct():
