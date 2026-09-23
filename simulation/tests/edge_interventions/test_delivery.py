@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from nxt_edge_interventions import DELIVERED, EXHAUSTED, UNKNOWN
 from tests.edge_interventions.conftest import InterventionHarness, run_until
 from tests.edge_task.conftest import run_until as edge_run_until
@@ -100,6 +102,78 @@ def test_torn_batch_between_case_and_intent_is_repaired_on_restart(stack: Interv
     assert stack.edge.task(task_id)["state"] == "BLOCKED_AWAITING_HUMAN"
 
 
+@pytest.mark.parametrize("resolve_before_restart", [False, True])
+def test_durable_escalation_repairs_its_missing_intent_once(stack: InterventionHarness, resolve_before_restart: bool) -> None:
+    from nxt_edge_interventions import reconcile
+    from scripts.edge_intervention_service_v0 import _to_spec, edge_snapshot
+
+    stack.edge.start_all()
+    stack.start_service()
+    stack.step(2)
+    stack.edge.crash_robot("picker-01")
+    run_until(stack, lambda: len(stack.cases("DEVICE_UNREACHABLE")) == 1, max_rounds=40)
+    case = stack.cases("DEVICE_UNREACHABLE")[0]
+    assert case.severity == "WARNING"
+    assert stack.ack(case.case_id)["status"] == "recorded"
+    task_id = stack.edge.create()["task_id"]
+    specs = reconcile(stack.view(), edge_snapshot(stack.edge.config, stack.edge.edge_journal()), stack.clock())
+    assert [s.record_kind for s in specs] == ["case_escalated", "notification_intended"]
+    expected = specs[1]
+    # Only the first complete line survives the append; the original anchor
+    # may lag this durable suffix, as permitted by the shared journal contract.
+    stack.journal().append(_to_spec(specs[0]))
+    stack.crash_service()
+    if resolve_before_restart:
+        assert stack.resolve(case.case_id)["status"] == "recorded"
+    edge_before = stack.edge.edge_journal_path.read_bytes()
+    stack.step(3, edge=False, robots=False, service=False)
+    stack.start_service()
+    stack.step(3, edge=False, robots=False)
+    notices = stack.notifications(case.case_id)
+    assert [n.intent for n in notices] == ["OPENED", "ESCALATION"]
+    assert notices[1].state == DELIVERED and notices[1].payload["evidence"]["open_task_id"] == task_id
+    repaired = next(r for r in stack.records() if r.record_kind == "notification_intended" and r.payload["intent"] == "ESCALATION")
+    assert repaired.payload == expected.payload
+    assert repaired.recorded_at_utc == expected.recorded_at_utc
+    assert stack.receiver.unique_received() == 2
+    stack.crash_service()
+    stack.start_service()
+    stack.step(3, edge=False, robots=False)
+    assert stack.kinds().count("case_escalated") == 1
+    assert len(stack.notifications(case.case_id)) == 2
+    assert stack.receiver.unique_received() == 2
+    assert stack.edge.edge_journal_path.read_bytes() == edge_before
+
+
+def test_missing_opening_intent_is_repaired_before_new_escalation(stack: InterventionHarness) -> None:
+    from nxt_edge_interventions import reconcile
+    from scripts.edge_intervention_service_v0 import _to_spec, edge_snapshot
+
+    stack.edge.start_all()
+    stack.start_service()
+    stack.step(2)
+    stack.edge.crash_robot("picker-01")
+    run_until(stack, lambda: stack.edge.device("picker-01")["connectivity"] == "OFFLINE", max_rounds=40)
+    # Remove the already observed opening batch and replay only its case line.
+    from tests.edge_task.conftest import Harness
+
+    records = stack.records()
+    index = next(i for i, r in enumerate(records) if r.record_kind == "case_opened")
+    expected = records[index + 1]
+    Harness._tear(stack.journal_path, index + 1, keep_anchor=False)
+    stack.crash_service()
+    stack.edge.create()
+    specs = reconcile(stack.view(), edge_snapshot(stack.edge.config, stack.edge.edge_journal()), stack.clock())
+    assert [s.record_kind for s in specs] == ["notification_intended"]
+    assert specs[0].payload == expected.payload
+    stack.journal().append(_to_spec(specs[0]))
+    stack.start_service()
+    stack.step(3, edge=False, robots=False)
+    notices = stack.notifications()
+    assert [(n.intent, n.ordinal, n.severity) for n in notices] == [("OPENED", 0, "WARNING"), ("ESCALATION", 1, "CRITICAL")]
+    assert len({n.notification_id for n in notices}) == 2
+
+
 def test_crash_after_attempt_before_send_retries_same_id_once_delivered(stack: InterventionHarness) -> None:
     """The attempt line is durable, the request never left: after restart it is retried under the same id."""
 
@@ -148,3 +222,139 @@ def test_crash_after_receiver_persisted_before_result_is_journaled_never_fakes_o
     live = stack.view().notifications[notification.notification_id]
     assert live.attempts == 2 and live.receipt_id == stack.receiver.ledger.receipts[notification.notification_id]
     assert stack.receiver.unique_received() == 1 and stack.receiver.duplicate_attempts() == 1
+
+
+def test_result_persistence_failure_fail_stops_without_undoing_the_receiver_record(stack: InterventionHarness) -> None:
+    """A send that already reached the receiver remains evidence when the local result append fails."""
+
+    from scripts.edge_intervention_service_v0 import InterventionService, ServiceFailStop
+
+    class FailSixthAppend:
+        def __init__(self, journal) -> None:
+            self.journal = journal
+            self.calls = 0
+
+        def append_via(self, builder):
+            self.calls += 1
+            if self.calls == 6:
+                raise OSError("simulated durable result write failure")
+            return self.journal.append_via(builder)
+
+    stack.edge.start_all("help_needs_manual_recharge")
+    stack.edge.step(2)
+    task_id = stack.edge.create()["task_id"]
+    edge_run_until(stack.edge, lambda: stack.edge.task(task_id)["state"] == "BLOCKED_AWAITING_HUMAN")
+    journal = FailSixthAppend(stack.journal())
+    service = InterventionService(
+        stack.config,
+        stack.edge.config,
+        journal,
+        stack.edge.edge_journal(),
+        stack.receiver,
+        clock=stack.clock,
+        emit=stack.events.append,
+    )
+    stack.service = service
+    service.start()
+
+    with pytest.raises(ServiceFailStop) as caught:
+        service.tick()
+
+    assert isinstance(caught.value.__cause__, OSError)
+    assert "simulated durable result write failure" in str(caught.value)
+    notification = stack.notifications()[0]
+    assert notification.state == "ATTEMPTING" and notification.attempts == 1
+    assert stack.receiver.unique_received() == 1
+    assert len(stack.receiver.deliveries) == 1
+    assert "notification_result" not in stack.kinds()
+    # Once failed, another tick cannot append or send anything else.
+    records_before = [record.record_id for record in stack.records()]
+    service.tick()
+    assert [record.record_id for record in stack.records()] == records_before
+    assert stack.receiver.unique_received() == 1 and len(stack.receiver.deliveries) == 1
+
+
+def _persist_escalation_without_intent(stack: InterventionHarness):
+    from nxt_edge_interventions import reconcile
+    from scripts.edge_intervention_service_v0 import _to_spec, edge_snapshot
+
+    stack.edge.start_all()
+    stack.start_service()
+    stack.step(2)
+    stack.edge.crash_robot("picker-01")
+    run_until(stack, lambda: len(stack.cases("DEVICE_UNREACHABLE")) == 1, max_rounds=40)
+    case = stack.cases("DEVICE_UNREACHABLE")[0]
+    assert case.severity == "WARNING"
+    stack.crash_service()
+    stack.step(10, edge=False, robots=False, service=False)
+    stack.edge.create()
+    specs = reconcile(stack.view(), edge_snapshot(stack.edge.config, stack.edge.edge_journal()), stack.clock())
+    assert [s.record_kind for s in specs] == ["case_escalated", "notification_intended"]
+    stack.journal().append(_to_spec(specs[0]))
+    return case.case_id, specs[1]
+
+
+def test_recovered_older_escalation_does_not_move_the_reminder_clock_backwards(stack: InterventionHarness) -> None:
+    from datetime import timedelta
+    from nxt_edge_interventions import decide_tick
+    from nxt_edge_interventions.cases import attempt_spec, result_spec
+    from nxt_edge_interventions.contracts import RESULT_DELIVERED, utc_text
+    from scripts.edge_intervention_service_v0 import _to_spec
+
+    case_id, expected = _persist_escalation_without_intent(stack)
+    # Simulate the pre-fix service continuing after the torn escalation: it
+    # failed to repair the intent, but kept recording bounded reminders.
+    for _ in range(stack.config.max_reminders):
+        stack.step(31, edge=False, robots=False, service=False)
+        specs = [s for s in decide_tick(stack.view(), stack.clock()) if s.record_kind == "notification_intended"]
+        assert [s.payload["intent"] for s in specs] == ["REMINDER"]
+        record = stack.journal().append(_to_spec(specs[0]))
+        notification_id = record.payload["notification_id"]
+        notification = stack.view().notifications[notification_id]
+        stack.journal().append(_to_spec(attempt_spec(notification, stack.clock())))
+        notification = stack.view().notifications[notification_id]
+        stack.journal().append(_to_spec(result_spec(notification, RESULT_DELIVERED, stack.clock(), receipt_id="historical-receipt", detail="receipt")))
+    last_reminder_at = stack.view().cases[case_id].last_intent_at
+    assert stack.view().cases[case_id].reminders_sent == 2
+    stack.start_service()
+    stack.step(5, edge=False, robots=False)
+    escalation = next(n for n in stack.notifications(case_id) if n.intent == "ESCALATION")
+    assert utc_text(escalation.intended_at) == expected.recorded_at_utc
+    assert stack.view().cases[case_id].last_intent_at == last_reminder_at
+    assert "reminders_exhausted" not in stack.kinds()
+    stack.step(26, edge=False, robots=False)
+    exhausted = [r for r in stack.records() if r.record_kind == "reminders_exhausted"]
+    assert len(exhausted) == 1
+    assert exhausted[0].recorded_at_utc == utc_text(last_reminder_at + timedelta(seconds=stack.config.reminder_interval_s))
+    assert [n.intent for n in stack.notifications(case_id)] == ["OPENED", "REMINDER", "REMINDER", "ESCALATION"]
+
+
+def test_pending_escalation_is_persisted_before_reminders_when_edge_snapshot_is_unreadable(stack: InterventionHarness, monkeypatch) -> None:
+    import scripts.edge_intervention_service_v0 as service_module
+
+    case_id, expected = _persist_escalation_without_intent(stack)
+    # OPENED is 31 seconds old and would permit a reminder. ESCALATION is only
+    # 21 seconds old, so recovery must move the reminder deadline forward first.
+    stack.step(21, edge=False, robots=False, service=False)
+    edge_before = stack.edge.edge_journal_path.read_bytes()
+    stack.start_service()
+
+    def unavailable(*_args):
+        raise OSError("transient Edge journal read failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(service_module, "edge_snapshot", unavailable)
+        stack.step(3, edge=False, robots=False)
+    assert any(e["event"] == "edge_snapshot_unavailable" for e in stack.events)
+    notices = stack.notifications(case_id)
+    assert [(n.intent, n.ordinal) for n in notices] == [("OPENED", 0), ("ESCALATION", 1)]
+    assert notices[1].notification_id == expected.payload["notification_id"]
+    assert notices[1].state == DELIVERED and stack.receiver.unique_received() == 2
+    assert not stack.view().pending_intents
+    # Once the snapshot is readable and the actual interval expires, the next
+    # reminder follows the recovered escalation with a fresh ordinal.
+    stack.step(7, edge=False, robots=False)
+    notices = stack.notifications(case_id)
+    assert [(n.intent, n.ordinal) for n in notices] == [("OPENED", 0), ("ESCALATION", 1), ("REMINDER", 2)]
+    assert stack.receiver.unique_received() == 3
+    assert stack.edge.edge_journal_path.read_bytes() == edge_before

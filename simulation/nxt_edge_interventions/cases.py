@@ -216,6 +216,10 @@ class InterventionView:
     config: InterventionConfig
     cases: dict[str, CaseView] = field(default_factory=dict)
     notifications: dict[str, NotificationView] = field(default_factory=dict)
+    # Derived from durable case events, removed when their intent is replayed.
+    # V0 has one opening and at most one severity rise per case. Keep the event's
+    # payload/time/ordinal so a torn batch repairs the original notification.
+    pending_intents: dict[tuple[str, str], RecordSpec] = field(default_factory=dict)
     applied_count: int = 0
     last_record_id: str | None = None
     started_at: datetime | None = None
@@ -273,6 +277,7 @@ class InterventionView:
             )
             case.evidence_history.append({"at_utc": record.recorded_at_utc, "evidence_key": case.evidence_key, "record_id": record.record_id})
             self.cases[case.case_id] = case
+            self.pending_intents[(case.case_id, INTENT_OPENED)] = _intent_specs(self, case, INTENT_OPENED, when, severity=case.severity, evidence=case.evidence)[0]
         elif kind == CASE_EVIDENCE_ADDED:
             case = self.cases[payload["case_id"]]
             case.evidence = _thaw(payload["evidence"])
@@ -282,7 +287,9 @@ class InterventionView:
             case = self.cases[payload["case_id"]]
             case.severity = payload["severity"]
             case.evidence = _thaw(payload["evidence"])
+            case.evidence_key = _thaw(payload["evidence_key"])
             case.evidence_history.append({"at_utc": record.recorded_at_utc, "evidence_key": _thaw(payload["evidence_key"]), "record_id": record.record_id, "escalated_to": payload["severity"]})
+            self.pending_intents[(case.case_id, INTENT_ESCALATION)] = _intent_specs(self, case, INTENT_ESCALATION, when, severity=case.severity, evidence=case.evidence)[0]
         elif kind == CASE_CONDITION_CLEARED:
             self.cases[payload["case_id"]].condition_active = False
         elif kind == CASE_CONDITION_RETURNED:
@@ -317,9 +324,10 @@ class InterventionView:
                 payload=_thaw(payload["payload"]),
             )
             self.notifications[notification.notification_id] = notification
+            self.pending_intents.pop((notification.case_id, notification.intent), None)
             case = self.cases[notification.case_id]
             case.notification_ids.append(notification.notification_id)
-            case.last_intent_at = when
+            case.last_intent_at = max(case.last_intent_at, when) if case.last_intent_at is not None else when
             if notification.intent == INTENT_REMINDER:
                 case.reminders_sent += 1
         elif kind == NOTIFICATION_ATTEMPTED:
@@ -460,7 +468,7 @@ def observe(snapshot: EdgeSnapshot) -> list[_Observed]:
                     subject_id=robot_id,
                     robot_id=robot_id,
                     severity=CRITICAL if open_task is not None else WARNING,
-                    evidence_key=[device["connectivity_since_utc"]],
+                    evidence_key=[device["connectivity_since_utc"]] + ([] if open_task is None else [open_task["task_id"]]),
                     evidence={
                         "robot_id": robot_id,
                         "offline_since_utc": device["connectivity_since_utc"],
@@ -537,6 +545,11 @@ def reconcile(view: InterventionView, snapshot: EdgeSnapshot, now: datetime) -> 
       cleared on the open case; the case stays until a human resolves it.
     """
 
+    if view.pending_intents:
+        # Complete durable obligations before deriving newer evidence/ordinals.
+        # Human ack/resolve does not cancel an already committed escalation.
+        return list(view.pending_intents.values())
+
     specs: list[RecordSpec] = []
     observed = observe(snapshot)
     seen_open: set[str] = set()
@@ -544,7 +557,7 @@ def reconcile(view: InterventionView, snapshot: EdgeSnapshot, now: datetime) -> 
         existing = view.open_case_for(item.kind, item.subject_kind, item.subject_id)
         if existing is None:
             previous = view.latest_case_for(item.kind, item.subject_kind, item.subject_id)
-            if previous is not None and previous.is_resolved and previous.evidence_key == item.evidence_key:
+            if previous is not None and previous.is_resolved and _same_evidence(previous, item):
                 # Same evidence the human already resolved: not a recurrence.
                 continue
             case_id = case_identity(item.kind, item.subject_kind, item.subject_id, item.evidence_key)
@@ -596,15 +609,21 @@ def reconcile(view: InterventionView, snapshot: EdgeSnapshot, now: datetime) -> 
     for case in view.cases.values():
         if case.is_resolved:
             continue
-        if not case.notification_ids:
-            # The case line was durable but its OPENED intent was not (a torn
-            # batch, a crash between the two): the request for help is never
-            # lost, the intent is written now under the same ordinal.
-            specs.extend(_intent_specs(view, case, INTENT_OPENED, now, severity=case.severity, evidence=case.evidence))
         if case.case_id in seen_open or not case.condition_active:
             continue
         specs.append(_spec(CASE_CONDITION_CLEARED, "EDGE", now, {"case_id": case.case_id, "edge_last_record_id": snapshot.edge["last_record_id"]}))
     return specs
+
+
+def _same_evidence(case: CaseView, item: _Observed) -> bool:
+    if item.kind == CaseKind.DEVICE_UNREACHABLE.value:
+        # Pre-fix PR B records keyed only on the offline transition, but
+        # already carried open_task_id in evidence. Losing task occupancy in
+        # the same offline episode is not recurrence; a different new task is.
+        same_episode = case.evidence["offline_since_utc"] == item.evidence["offline_since_utc"]
+        observed_task = item.evidence["open_task_id"]
+        return same_episode and (observed_task is None or observed_task == case.evidence["open_task_id"])
+    return case.evidence_key == item.evidence_key
 
 
 def _copy_case(case: CaseView, **changes: Any) -> CaseView:

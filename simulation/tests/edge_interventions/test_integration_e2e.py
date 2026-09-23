@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -71,8 +72,11 @@ class InterventionStack(Stack):
         self._spawn("receiver", args)
         _wait_port(self.receiver_port)
 
-    def start_service(self) -> None:
-        self._spawn("service", ["scripts/edge_intervention_service_v0.py", "--edge-config", str(self.config_path), "--config", str(self.intervention_config_path), "--evidence-root", str(self.root)])
+    def start_service(self, *, name: str = "service", max_seconds: float | None = None) -> None:
+        args = ["scripts/edge_intervention_service_v0.py", "--edge-config", str(self.config_path), "--config", str(self.intervention_config_path), "--evidence-root", str(self.root)]
+        if max_seconds is not None:
+            args += ["--max-seconds", str(max_seconds)]
+        self._spawn(name, args)
 
     def kill(self, name: str) -> None:
         """Abrupt loss: no clean disconnect, no farewell message."""
@@ -270,6 +274,95 @@ def test_lost_receipt_service_restart_and_receiver_restart_keep_one_unique_recei
     assert status == 400 and "receipt_id" not in body
     assert sum(1 for r in stack.receiver_records() if r.record_kind == "notification_refused") == 1
     assert stack.task_state(task_id) == ("BLOCKED_AWAITING_HUMAN", None)
+
+
+def test_one_dispatcher_per_persistent_service_identity_with_crash_recovery(stack: InterventionStack) -> None:
+    """Two real service processes cannot spend one notification budget concurrently."""
+
+    _start_all(stack, "help_needs_manual_recharge", drop_responses=1)
+    _blocked_task(stack)
+    view = stack.wait_view(
+        lambda current: any(
+            notification.intent == "OPENED"
+            and notification.attempts == 1
+            and notification.last_result == "unknown"
+            for notification in current.notifications.values()
+        )
+    )
+    opened = next(notification for notification in view.notifications.values() if notification.intent == "OPENED")
+    first = stack.procs["service"]
+    first.send_signal(signal.SIGSTOP)
+    try:
+        records_before = [record.record_id for record in stack.intervention_records()]
+        receiver_before = [record.record_id for record in stack.receiver_records()]
+
+        stack.start_service(name="service-contender", max_seconds=10)
+        contender_code = stack.wait_exit("service-contender", timeout=5)
+        assert contender_code == 2
+        assert [record.record_id for record in stack.intervention_records()] == records_before
+        assert [record.record_id for record in stack.receiver_records()] == receiver_before
+        assert stack.attempts(opened.notification_id) == 1
+        assert stack.received_ids() == [opened.notification_id]
+
+        # The service-lifetime lock is separate from the journal append lock:
+        # read-only views and valid human records remain available.
+        code, listing = stack.cli("list")
+        assert code == 0 and opened.case_id in listing["cases"]
+        code, acked = stack.cli("ack", "--case", opened.case_id, "--operator", "lock-test", "--note", "taking the case")
+        assert code == 0 and acked["human_state"] == ACKNOWLEDGED
+        code, resolved = stack.cli("resolve", "--case", opened.case_id, "--operator", "lock-test", "--resolution", "human disposition only")
+        assert code == 0 and resolved["human_state"] == RESOLVED
+    finally:
+        first.send_signal(signal.SIGCONT)
+
+    # The original dispatcher continues normally. Its retry is legitimate:
+    # one notification id, two persisted attempts, one unique receiver row.
+    view = stack.wait_view(lambda current: current.notifications[opened.notification_id].state == DELIVERED, timeout_s=20)
+    delivered = view.notifications[opened.notification_id]
+    assert delivered.attempts == 2
+    assert stack.attempts(opened.notification_id) == 2
+    assert stack.received_ids() == [opened.notification_id]
+    assert stack.duplicate_attempts(opened.notification_id) == 1
+
+    # Abrupt process loss releases only the runtime qualification. A new
+    # instance uses the same journal and ids without deleting any evidence.
+    started_before = sum(1 for record in stack.intervention_records() if record.record_kind == "intervention_service_started")
+    stack.kill("service")
+    stack.start_service()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        started_after = sum(1 for record in stack.intervention_records() if record.record_kind == "intervention_service_started")
+        if started_after == started_before + 1:
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError(f"replacement service did not start; logs: {stack._tail()}")
+    assert stack.procs["service"].poll() is None
+    assert stack.attempts(opened.notification_id) == 2
+    assert stack.received_ids() == [opened.notification_id]
+
+
+def test_service_process_exits_two_on_journal_failure_without_delivery_side_effects(stack: InterventionStack) -> None:
+    """The real service process fail-stops at its journal boundary, preserving the cause."""
+
+    stack.start_receiver()
+    journal_path = stack.root / "interventions" / stack.config["site_id"] / stack.config["deployment_id"] / "edge_interventions_journal.jsonl"
+    journal_path.parent.mkdir(parents=True, exist_ok=True)
+    journal_path.write_bytes(b'{"truncated"')
+    journal_before = journal_path.read_bytes()
+    receiver_before = [record.record_id for record in stack.receiver_records()]
+
+    stack.start_service(name="failing-service", max_seconds=5)
+    code = stack.wait_exit("failing-service", timeout=5)
+    log = stack.logs["failing-service"].read_text(encoding="utf-8")
+
+    assert code == 2
+    assert '"event": "fail_stop"' in log
+    assert "journal append failed" in log
+    assert "JournalIntegrityError" in log
+    assert "last record is not newline-terminated" in log
+    assert journal_path.read_bytes() == journal_before
+    assert [record.record_id for record in stack.receiver_records()] == receiver_before
 
 
 def test_lost_device_with_open_task_over_real_broker_keeps_last_valid_data_and_unknown_marker(stack: InterventionStack) -> None:

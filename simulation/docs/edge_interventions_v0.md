@@ -51,6 +51,16 @@ rehearsal in `.agent/context/source-of-truth.md`.
 The receiver never reads Edge or intervention storage; its duplicate
 detection is rebuilt from its own journal on restart.
 
+The service also holds a process-lifetime, non-blocking POSIX lock in
+`edge_interventions_service.lock` beside its journal. The lock is runtime
+qualification, not evidence and not the journal's per-append lock: only one
+dispatcher may use one persistent interventions journal, while `list`,
+`show`, `ack`, and `resolve` continue to use the journal normally. A second
+service exits non-zero before `intervention_service_started`, an attempt, or
+a send. Process exit or abrupt loss releases the kernel lock; the next
+service resumes from the unchanged journal without deleting the lock file,
+resetting a budget, or generating replacement ids.
+
 ## Three state families, kept apart
 
 | Family | Owner | Values | Changed by |
@@ -93,16 +103,34 @@ device as healthy, parked, idle, or at zero battery.
 - After `RESOLVED`, identical evidence never reopens the case. Different
   evidence for the same subject opens a new case that names the old one in
   `recurrence_of` and notifies again.
+  For an offline device, identity includes the offline transition and any
+  open task id: a new task after a resolved task-free warning raises a new
+  critical case. Within the same offline transition, a task ending after a
+  resolved critical case does not create a warning recurrence. For a pre-fix
+  time-only offline case, that terminal-task rule is compatibility behavior:
+  removing task occupancy within the same offline episode is not new warning
+  evidence. A different new task or a new offline transition can create a
+  recurrence. Pre-fix PR B records retain their case ids; the recorded offline
+  time and open task id distinguish unchanged evidence from recurrence.
 - `notification_id = ntf_<digest(case_id, intent, ordinal)>` is stable
   across retries and restarts; every attempt of one intent carries the same
-  id, and the receiver deduplicates on it.
+  id, and the receiver deduplicates on it. When replay recovers a torn
+  escalation from an old journal after later reminders were already recorded,
+  the reconstructed escalation may reuse a reminder ordinal; `intent` remains
+  part of the digest, so notification ids stay unique and their delivery
+  budgets stay separate.
 
 ## Delivery
 
-1. The case and its `OPENED` intent are appended in one batch. If the
-   batch is torn after the case line (crash between event and intent), the
-   next start repairs it: a case with no notification gets its `OPENED`
-   intent written, so the request for help is not lost.
+1. Opening/escalation events and their notification intents are appended in
+   one batch. If only the event line survives a crash, replay reconstructs
+   its missing intent with the original id, ordinal, time, and payload.
+   The service persists these intents before reading the Edge snapshot or
+   scheduling reminders, including when the snapshot is temporarily
+   unreadable. Repeated restarts do not duplicate them. Later `ack`/`resolve`
+   records do not cancel notification obligations already committed by a
+   case event. The payload's `human_state` is the state at the event time,
+   not the current human disposition or any task/authorization state.
 2. `notification_attempted` is journaled before the HTTP call;
    `notification_result` (`delivered`, `unknown`, `failed`) after it. A
    crash between the two leaves the notification `ATTEMPTING`; after the
@@ -122,14 +150,26 @@ device as healthy, parked, idle, or at zero battery.
    `environment.kind = SIMULATION`, matching site and deployment), or `400`
    with an error and a `notification_refused` line. An invalid message never
    becomes a receipt.
+6. The sender validates the actual URL against the configured loopback
+   literal, disables environment proxies, and refuses HTTP redirects.
+   Redirect responses are failed attempts under the existing retry budget;
+   no request is sent to the redirect target.
+7. An expected interventions-journal append failure is a fail-stop: the
+   service reports the original error, exits 2, and performs no later append
+   or send. A receiver record already persisted before a local result-write
+   failure remains valid evidence; it is not treated as revoked or erased.
 
 ## Reminders
 
 While a case is `OPEN` and unacknowledged, a `REMINDER` notification is
 intended every `reminder_interval_s`, at most `max_reminders` times, then
 `reminders_exhausted`. An `ACKNOWLEDGED` case is not reminded but stays in
-`list`/`show` with its condition; a `RESOLVED` case is quiet. Reminders and
-escalations are separate notification ids with their own attempt budgets;
+`list`/`show` with its condition. A `RESOLVED` case gets no new reminders;
+all already committed notification intents—including `OPENED`, `ESCALATION`,
+and `REMINDER`, whether originally complete or reconstructed during recovery—
+still follow their bounded delivery attempts. Recovering an older intent does
+not move the reminder clock backwards past a later recorded intent.
+Reminders and escalations are separate notification ids with their own attempt budgets;
 the total attempt bound for one case is
 `(1 + reminders + escalations) × notify_max_attempts`.
 
@@ -147,6 +187,13 @@ clear a conflict, reopen a gate, write a task result, or create a task; the
 architecture guard pins that the three scripts never import the executor,
 never mention task creation or task-traffic publication, and the service
 writes only its own journal.
+
+For each case, `list` and `show` also report a `processing` object scoped to
+notification-intent persistence. It lists the case records already persisted
+and, when replay can derive it exactly, the missing intent still awaiting
+service recovery. An indeterminate derivation is shown as `unknown` with its
+reason. These view commands never repair the journal, send a notification, or
+append an operator action.
 
 ## Configuration
 
@@ -167,6 +214,17 @@ task summary (`blocking_event`, the `ASSISTANCE_REQUIRED` event that blocked
 the task) and a `schema` constructor parameter on the shared `JsonlJournal`
 class whose default is unchanged; PR A evidence written before PR B reads
 identically. Older readers of the task summary ignore the new field.
+
+The offline-identity and intent-recovery fixes are pre-merge changes to
+PR B's unreleased v1 journal semantics. The fixed code reads pre-fix PR B
+journals without rewriting their records or case ids. On its first tick,
+an open critical offline case with the old time-only key gains one
+`case_evidence_added` record to include its already recorded task id; it
+gets no extra notification, and subsequent ticks/restarts add nothing for
+unchanged evidence. A case already resolved before the fixed service starts
+stays quiet for unchanged evidence without that normalization record.
+Pre-fix PR B code is not a supported reader of journals written by the fixed
+code. These compatibility limits do not change PR A's journal contract.
 
 ## Commands (run from `simulation/`, SIMULATION only)
 
@@ -215,8 +273,17 @@ point `--evidence-root` at a fresh directory for a clean rehearsal.
 | 3. Repeated evidence does not multiply | `test_flow.py::test_repeated_assistance_evidence_does_not_reopen_or_renotify`, `::test_case_survives_service_restart_and_is_not_reopened`; e2e as above |
 | 4. Lost receipt retried under one id, received once | `test_delivery.py::test_lost_receipt_is_retried_under_the_same_id_and_received_once`; `test_integration_e2e.py::test_lost_receipt_service_restart_and_receiver_restart_keep_one_unique_receipt` |
 | 5. Event persisted, intent/delivery interrupted by a restart: no loss, no fake success | `test_delivery.py::test_torn_batch_between_case_and_intent_is_repaired_on_restart`, `::test_crash_after_attempt_before_send_retries_same_id_once_delivered`, `::test_crash_after_receiver_persisted_before_result_is_journaled_never_fakes_or_loses_delivery` |
+| Torn escalation (including later resolve) and opening repair before new escalation | `test_delivery.py::test_durable_escalation_repairs_its_missing_intent_once` (both resolve parameters), `::test_missing_opening_intent_is_repaired_before_new_escalation` |
+| Recovered intent does not move the reminder clock backwards; unreadable Edge snapshot cannot delay repair behind reminders | `test_delivery.py::test_recovered_older_escalation_does_not_move_the_reminder_clock_backwards`, `::test_pending_escalation_is_persisted_before_reminders_when_edge_snapshot_is_unreadable` |
 | Unreachable / refusing receiver: bounded retries, never delivery | `test_delivery.py::test_unreachable_receiver_bounds_retries_and_never_reports_delivery`, `::test_refusing_receiver_records_failed_attempts` |
-| 6. Reminders, acknowledged silence, escalation, real recurrence not deduplicated | `test_reminders.py` (all five) |
+| HTTP destination remains loopback: actual URL validation, no environment proxy or redirect, valid receipts still accepted | `test_http_transport.py::test_transport_validates_the_url_it_will_send_to`, `::test_environment_proxy_cannot_change_the_socket_destination`, `::test_redirect_is_refused_without_a_second_request`, `::test_loopback_receipt_still_means_delivered` |
+| One dispatcher per persistent service identity; CLI remains available; crash releases qualification | `test_integration_e2e.py::test_one_dispatcher_per_persistent_service_identity_with_crash_recovery` |
+| Journal failure exits 2 with no later side effect; an already received notification is not undone | `test_integration_e2e.py::test_service_process_exits_two_on_journal_failure_without_delivery_side_effects`; `test_delivery.py::test_result_persistence_failure_fail_stops_without_undoing_the_receiver_record` |
+| CLI exposes a torn case/intent batch without repairing or acting | `test_cli_recovery.py::test_list_and_show_expose_incomplete_batch_without_writing_or_acting`, `::test_processing_summary_marks_unreliable_pending_derivation_unknown` |
+| 6. Bounded reminders, acknowledged/resolved silence, committed reminder delivery, escalation with synchronized evidence | `test_reminders.py::test_unacknowledged_case_is_reminded_at_the_interval_then_stops_at_the_cap`, `::test_acknowledged_case_gets_no_reminders_but_stays_visible`, `::test_resolved_case_with_unchanged_evidence_is_not_reopened`, `::test_resolve_does_not_cancel_an_already_committed_reminder`, `::test_escalation_notifies_even_when_acknowledged_and_is_not_deduplicated` |
+| Condition clears and returns on an unresolved case | `test_cases.py::test_unresolved_case_records_when_its_condition_returns` |
+| New offline episode or new task after resolve notifies; unchanged evidence and task completion stay quiet | `test_reminders.py::test_real_recurrence_after_resolution_opens_a_new_case_naming_the_old_one`, `::test_resolved_case_with_unchanged_evidence_is_not_reopened`, `::test_new_task_on_resolved_offline_warning_opens_a_critical_recurrence`, `::test_resolved_critical_offline_case_stays_quiet_when_task_ends_but_not_for_a_new_task` |
+| Pre-fix PR B journals: resolve before first fixed-service tick stays quiet; open critical key normalizes once without notifying | `test_reminders.py::test_legacy_resolved_offline_identity_stays_quiet_on_restart` (both task parameters), `::test_legacy_open_critical_case_normalizes_its_key_once_without_notifying` |
 | 7. Ack/resolve leave task result, gate, execution count unchanged | `test_flow.py::test_acknowledgement_is_recorded_without_touching_task_or_device_state`; `test_human_actions.py::test_ack_then_resolve_change_only_human_state`, `::test_resolve_requires_acknowledgement_and_valid_operator`, `::test_cli_entry_points_round_trip_and_never_touch_the_edge_journal`; `test_cases.py::test_evidence_conflict_opens_a_critical_case_and_resolution_does_not_reopen_authorization`; e2e as above |
 | 8. Lost device keeps last valid data plus an unknown marker, never "parked" | `test_cases.py::test_lost_robot_with_open_task_opens_a_critical_case_with_last_valid_data_and_unknown_markers`; `test_integration_e2e.py::test_lost_device_with_open_task_over_real_broker_keeps_last_valid_data_and_unknown_marker`; `test_contracts.py::test_templates_mark_unknown_values_and_never_claim_a_stop` |
 | Retry exhaustion and evidence conflicts open cases | `test_cases.py::test_exhausted_republish_budget_opens_a_result_unconfirmed_case`, `::test_session_regression_opens_a_device_conflict_case` |

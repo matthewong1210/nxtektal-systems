@@ -22,11 +22,13 @@ authorization gate.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import signal
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -61,6 +63,37 @@ class ServiceFailStop(RuntimeError):
     """The service can no longer make durable progress; stop loudly."""
 
 
+class ServiceAlreadyRunning(RuntimeError):
+    """Another dispatcher owns this intervention journal's runtime lock."""
+
+
+class ServiceRunLock:
+    """Non-blocking process-lifetime qualification, separate from journal locks."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._handle = None
+
+    def __enter__(self) -> "ServiceRunLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+b")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.close()
+            raise ServiceAlreadyRunning(
+                f"an intervention dispatcher already owns runtime lock {self.path}"
+            ) from exc
+        self._handle = handle
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:  # noqa: ANN001
+        if self._handle is not None:
+            fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
+            self._handle.close()
+            self._handle = None
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -75,6 +108,12 @@ def intervention_journal_path(config: InterventionConfig, root: Path) -> Path:
 
 def intervention_journal(config: InterventionConfig, root: Path) -> JsonlJournal:
     return JsonlJournal(intervention_journal_path(config, root), allowed_kinds=INTERVENTION_RECORD_KINDS, schema=INTERVENTION_JOURNAL_SCHEMA)
+
+
+def service_run_lock_path(config: InterventionConfig, root: Path) -> Path:
+    """One dispatcher qualification for one persistent intervention journal."""
+
+    return intervention_journal_path(config, root).with_name("edge_interventions_service.lock")
 
 
 def _to_spec(spec) -> RecordSpec:
@@ -94,20 +133,31 @@ def edge_snapshot(edge_config: EdgeTaskConfig, edge_journal: JsonlJournal) -> Ed
     )
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # Even a loopback redirect is not the configured receiver.
+
+
 class HttpNotificationTransport:
     """POSTs one notification to the loopback receiver; classifies the outcome."""
 
     def __init__(self, url: str, timeout_s: float, host: str) -> None:
         if not is_loopback_literal(host):
             raise InterventionError("invalid_config", "receiver host must be a loopback literal")
+        endpoint = urllib.parse.urlsplit(url)
+        if endpoint.scheme != "http" or endpoint.hostname != host or endpoint.username is not None or endpoint.password is not None:
+            raise InterventionError("invalid_config", "receiver URL must be HTTP at the configured loopback literal, without credentials")
         self.url = url
         self.timeout_s = timeout_s
+        # A per-transport opener neither trusts environment proxies nor follows
+        # Location headers beyond the configured loopback endpoint.
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
     def send(self, payload: dict[str, Any]) -> tuple[str, str | None, str]:
         body = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
         request = urllib.request.Request(self.url, data=body, method="POST", headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_s) as response:  # noqa: S310 (loopback literal enforced above)
+            with self.opener.open(request, timeout=self.timeout_s) as response:
                 answer = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             return RESULT_FAILED, None, f"http {exc.code}"
@@ -155,8 +205,9 @@ class InterventionService:
         try:
             appended = self.journal.append_via(self._builder(decide))
         except (JournalIntegrityError, PreconditionFailed, InterventionError, OSError) as exc:
-            self._fail_stop(ServiceFailStop(f"journal append failed: {exc}"))
-            raise
+            failure = ServiceFailStop(f"journal append failed: {type(exc).__name__}: {exc}")
+            self._fail_stop(failure)
+            raise failure from exc
         self.core.absorb(appended)
         return appended
 
@@ -177,12 +228,17 @@ class InterventionService:
     def tick(self) -> None:
         if self.failure is not None:
             return
+        # These obligations are already durable in our journal. Repair them
+        # before reading fresh Edge evidence or assigning reminder ordinals.
+        appended = self._append(lambda view: list(view.pending_intents.values()))
+        for record in appended:
+            self.emit({"event": record.record_kind, "sequence": record.sequence, **_summary(record)})
         now = self.clock()
         try:
             snapshot = edge_snapshot(self.edge_config, self.edge_journal)
         except (JournalIntegrityError, InterventionError, OSError) as exc:
-            # The Edge evidence is unreadable: no case can be derived from it,
-            # and nothing already recorded is touched.
+            # No new case/evidence can be derived from an unreadable snapshot.
+            # Delivery of already committed notification obligations continues.
             self.emit({"event": "edge_snapshot_unavailable", "reason": str(exc)[:300]})
             snapshot = None
         if snapshot is not None:
@@ -272,8 +328,12 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _stop)
     signal.signal(signal.SIGTERM, _stop)
     try:
-        service.start()
-        code = service.run(max_seconds=args.max_seconds)
+        with ServiceRunLock(service_run_lock_path(config, args.evidence_root)):
+            service.start()
+            code = service.run(max_seconds=args.max_seconds)
+    except ServiceAlreadyRunning as exc:
+        _json_line({"event": "intervention_service_already_running", "reason": str(exc)})
+        code = 2
     except ServiceFailStop:
         code = 2
     if stop["requested"]:

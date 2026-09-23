@@ -43,17 +43,88 @@ def _to_spec(spec) -> RecordSpec:
     return RecordSpec(record_kind=spec.record_kind, origin=spec.origin, recorded_at_utc=spec.recorded_at_utc, payload=dict(spec.payload))
 
 
+def _processing_summary(view, records, case_id: str) -> dict[str, Any]:
+    """Describe durable records and any exact intent that replay must repair."""
+
+    persisted = [
+        {
+            "record_id": record.record_id,
+            "record_kind": record.record_kind,
+            "recorded_at_utc": record.recorded_at_utc,
+        }
+        for record in records
+        if record.payload.get("case_id") == case_id
+    ]
+    inferred: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    sources = {"OPENED": "case_opened", "ESCALATION": "case_escalated"}
+    for (pending_case_id, intent), spec in view.pending_intents.items():
+        if pending_case_id != case_id:
+            continue
+        payload = spec.payload
+        if spec.record_kind != "notification_intended":
+            unknown.append(f"record kind is {spec.record_kind!r}, not 'notification_intended'")
+            continue
+        if payload.get("case_id") != case_id or payload.get("intent") != intent:
+            unknown.append("pending intent identity does not match the persisted case event")
+            continue
+        notification_id = payload.get("notification_id")
+        if not isinstance(notification_id, str) or not notification_id:
+            unknown.append("notification_id is unavailable")
+            continue
+        derived_from = sources.get(intent)
+        if derived_from is None:
+            unknown.append(f"intent {intent!r} has no durable-event derivation rule")
+            continue
+        inferred.append(
+            {
+                "derived_from": derived_from,
+                "record_kind": spec.record_kind,
+                "recorded_at_utc": spec.recorded_at_utc,
+                "intent": intent,
+                "notification_id": notification_id,
+            }
+        )
+
+    if unknown:
+        status = "unknown"
+        reason = "pending recovery detected but exact notification intent could not be derived: " + "; ".join(unknown)
+    elif inferred:
+        status = "pending_recovery"
+        reason = "persisted case event has no matching notification_intended record"
+    else:
+        status = "intent_records_complete"
+        reason = "all notification intents implied by persisted case events are persisted"
+    return {
+        "scope": "notification_intent_persistence",
+        "status": status,
+        "reason": reason,
+        "persisted_records": persisted,
+        "inferred_pending_records": inferred,
+    }
+
+
 def list_view(journal: JsonlJournal, config: InterventionConfig) -> dict[str, Any]:
-    view = derive_view(config, journal.read())
-    return {"disclaimer": DISCLAIMER, **view.snapshot()}
+    records = journal.read()
+    view = derive_view(config, records)
+    snapshot = view.snapshot()
+    for case_id, case in snapshot["cases"].items():
+        case["processing"] = _processing_summary(view, records, case_id)
+    return {"disclaimer": DISCLAIMER, **snapshot}
 
 
 def show_view(journal: JsonlJournal, config: InterventionConfig, case_id: str) -> dict[str, Any] | None:
-    view = derive_view(config, journal.read())
+    records = journal.read()
+    view = derive_view(config, records)
     case = view.cases.get(case_id)
     if case is None:
         return None
-    return {"disclaimer": DISCLAIMER, **case.summary(), "notifications": [n.summary() for n in view.notifications_for(case_id)]}
+    return {
+        "disclaimer": DISCLAIMER,
+        **case.summary(),
+        "notifications": [n.summary() for n in view.notifications_for(case_id)],
+        "processing": _processing_summary(view, records, case_id),
+    }
 
 
 def operator_action(journal: JsonlJournal, config: InterventionConfig, action: str, case_id: str, operator: str, text: str, *, now: datetime) -> dict[str, Any]:

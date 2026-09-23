@@ -87,3 +87,30 @@ def test_session_regression_opens_a_device_conflict_case(stack: InterventionHarn
     case = stack.cases("EVIDENCE_CONFLICT")[0]
     assert case.subject_kind == "device" and case.evidence["detail"] == "session_regression"
     assert stack.notifications(case.case_id)[0].severity == CRITICAL
+
+
+def test_unresolved_case_records_when_its_condition_returns(stack: InterventionHarness) -> None:
+    stack.edge.start_all()
+    stack.start_service()
+    stack.step(2)
+    stack.edge.crash_robot("picker-01")
+    run_until(stack, lambda: len(stack.cases("DEVICE_UNREACHABLE")) == 1, max_rounds=40)
+    case = stack.cases("DEVICE_UNREACHABLE")[0]
+    first_evidence_key = case.evidence_key
+    assert stack.ack(case.case_id)["status"] == "recorded"  # suppress reminders while the condition changes
+
+    stack.edge.start_robot("picker-01")
+    run_until(stack, lambda: not stack.view().cases[case.case_id].condition_active, max_rounds=20)
+    assert stack.kinds().count("case_condition_cleared") == 1
+
+    stack.edge.crash_robot("picker-01")
+    run_until(stack, lambda: stack.kinds().count("case_condition_returned") == 1, max_rounds=40)
+    returned = next(r for r in stack.records() if r.record_kind == "case_condition_returned")
+    live = stack.view().cases[case.case_id]
+    assert returned.payload["case_id"] == case.case_id
+    assert live.condition_active is True
+    assert live.evidence_key == list(returned.payload["evidence_key"])
+    assert live.evidence_key != first_evidence_key
+    assert live.evidence_history[-1]["record_id"] == returned.record_id
+    assert len(stack.cases("DEVICE_UNREACHABLE")) == 1
+    assert [n.intent for n in stack.notifications(case.case_id)] == ["OPENED"]
