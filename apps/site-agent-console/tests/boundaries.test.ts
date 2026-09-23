@@ -91,6 +91,7 @@ describe("console boundaries", () => {
         expect(
           path === "/api/v0" ||
             path.startsWith("/api/v0/") ||
+            path === "/api/v1/collection-executions" ||
             path === "/api/v1/course-ops" ||
             path.startsWith("/api/v1/course-ops/") ||
             path === "/api/v1/planning" ||
