@@ -427,6 +427,85 @@ describe("review regressions: terminal evidence semantics", () => {
   });
 });
 
+describe("second review regressions: causal evidence and conflict overlays", () => {
+  it.each(["SendToCharge", "ReassignRobot", "PauseRobot", "ResumeRobot", "RequestHumanAssistance", "AssignCollection"] as const)(
+    "rejects own-robot %s disguised as unchanged policy during a successful lease", (name) => {
+      const s = snapshot(), a = s.executions[0].actions[1];
+      a.original_action.name = name; a.selected_action.name = name; a.selection = "ORIGINAL_POLICY_UNCHANGED";
+      expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+    });
+  it("requires matching handoff evidence to be identified as convergence", () => {
+    const s = snapshot(); s.executions[0].actions[1].selection = "ORIGINAL_POLICY_UNCHANGED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("preserves unchanged non-Wait actions for another robot during the lease", () => {
+    const s = snapshot(), a = structuredClone(s.executions[0].actions[1]);
+    a.sim_t_s = 240; a.selection = "ORIGINAL_POLICY_UNCHANGED";
+    a.original_action = {name: "SendToCharge", index: 7, robot_id: "R2", target_id: null};
+    a.selected_action = structuredClone(a.original_action); s.executions[0].actions.splice(1, 0, a);
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("SUCCEEDED");
+  });
+  it("rejects unchanged policy disguising the action that terminates its own lease", () => {
+    const s = snapshot("partial-preempted"); s.executions[0].actions[1].selection = "ORIGINAL_POLICY_UNCHANGED";
+    s.executions[0].reason = "ZONE_EMPTY"; s.executions[0].runtime_evidence.collection_exit_reason = "ZONE_EMPTY";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  function overlay(s: CollectionExecutionsSnapshot, kind: "terminal" | "replay") {
+    const r = s.executions[0]; r.state = "INCONCLUSIVE";
+    r.reason = kind === "terminal" ? "TERMINAL_CONFLICT" : "REPLAY_MISMATCH";
+    Object.assign(r.edge_evidence, {effective_state: "CONFLICT", verified: false, result_verification: "CONFLICT",
+      reason: `unknown:${kind}_conflict`, terminal_states: kind === "terminal" ? ["SUCCEEDED", "FAILED"] : ["FAILED"]});
+    r.conflicts.terminal_conflict = kind === "terminal"; r.conflicts.replay_mismatch = kind === "replay";
+    r.device_protection.protected = true; r.device_protection.authorization_blocked = true;
+    r.device_protection.reasons.push(kind === "terminal" ? "TERMINAL_CONFLICT" : "ORPHANED_ACTIVITY");
+    return s;
+  }
+  for (const exit of ["POLICY_PREEMPTED", "ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"] as const) {
+    for (const kind of ["terminal", "replay"] as const) {
+      it(`preserves ${exit} causal evidence beneath a ${kind} conflict overlay`, () => {
+        const s = overlay(exit === "POLICY_PREEMPTED" ? snapshot("partial-preempted") : protectedExit(exit), kind);
+        const r = parseCollectionExecutions(s).executions[0];
+        expect(r.runtime_evidence.collection_exit_reason).toBe(exit); expect(r.state).toBe("INCONCLUSIVE");
+        expect(r.success_display_allowed).toBe(false); expect(r.raw_quantity.balls).toBe(12);
+      });
+    }
+    it(`rejects an unsupported conflict reason over ${exit}`, () => {
+      const s = exit === "POLICY_PREEMPTED" ? snapshot("partial-preempted") : protectedExit(exit);
+      s.executions[0].reason = "TERMINAL_CONFLICT";
+      expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+    });
+    it(`keeps the underlying ${exit} evidence required under conflict`, () => {
+      const s = overlay(exit === "POLICY_PREEMPTED" ? snapshot("partial-preempted") : protectedExit(exit), "terminal");
+      if (exit === "POLICY_PREEMPTED") s.executions[0].runtime_evidence.collection_exit_reason = null;
+      else s.executions[0].device_protection.reasons = ["TERMINAL_CONFLICT"];
+      expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+    });
+  }
+  it.each(["NOT_REACHED", "INCOMPLETE"] as const)("rejects started FAILED when raw evidence is %s/null", (status) => {
+    const s = protectedExit("ROBOT_FAULT"), r = s.executions[0]; r.state = "FAILED";
+    r.edge_evidence.reason = "robot_faulted";
+    Object.assign(r.raw_quantity, {status, balls: null, source_event_ids: [], event_digest: null});
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("requires the causal preemption action even with a terminal conflict overlay", () => {
+    const s = overlay(snapshot("partial-preempted"), "terminal"); s.executions[0].actions.pop();
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each([
+    ["edge_evidence.effective_state", "INCONCLUSIVE"], ["edge_evidence.result_verification", "UNVERIFIED"],
+    ["device_protection.authorization_blocked", false], ["conflicts.terminal_conflict", false],
+    ["success_display_allowed", true],
+  ])("does not let a causal exit bypass conflict validation at %s", (path, value) => {
+    const s = overlay(protectedExit("ROBOT_FAULT"), "terminal"); mutate(s.executions[0], path as string, value);
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("accepts started FAILED only when complete raw evidence proves zero", () => {
+    const s = protectedExit("ROBOT_FAULT"), r = s.executions[0]; r.state = "FAILED";
+    r.edge_evidence.reason = "robot_faulted"; r.raw_quantity.balls = 0;
+    expect(parseCollectionExecutions(s).executions[0].raw_quantity.balls).toBe(0);
+  });
+});
+
 describe("collection execution GET-only client", () => {
   afterEach(() => vi.useRealTimers());
   it("exposes only read and sends an uncached same-origin GET", async () => {

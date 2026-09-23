@@ -190,6 +190,9 @@ export function parseCollectionExecutions(value: unknown): CollectionExecutionsS
 function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsSnapshot) {
   const start = r.started_sim_t_s, end = r.terminal_sim_t_s, deadline = r.execution_deadline_sim_t_s;
   const runtime = r.runtime_evidence, edge = r.edge_evidence, raw = r.raw_quantity, unload = r.unload_quantity, p = r.device_protection;
+  // A conflict projection may replace the display reason while retaining the causal runtime exit.
+  const conflictOverlay = r.state === "INCONCLUSIVE" &&
+    ((r.reason === "TERMINAL_CONFLICT" && r.conflicts.terminal_conflict) || (r.reason === "REPLAY_MISMATCH" && r.conflicts.replay_mismatch));
   if (start === null) {
     requireEvidence(deadline === null && r.assignment_id === null && !runtime.assignment_accepted && !runtime.start_admitted);
   } else {
@@ -229,6 +232,11 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
       }
     }
     const selected = a.selected_action;
+    // Include the terminal-causing tick: an action cannot evade classification by ending its own lease.
+    const duringLease = start !== null && start <= a.sim_t_s && (end === null || a.sim_t_s <= end);
+    if (duringLease && a.original_action.name !== "Wait" && a.original_action.robot_id === b.runtime_robot_id) {
+      requireEvidence(a.selection === (a.original_action.name === "SendToHandoff" ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED"));
+    }
     if (a.selection === "WAIT_SLOT") {
       requireEvidence(a.original_action.name === "Wait" && a.eligible_pending[0]?.execution_id === r.execution_id &&
         selected.name === "AssignCollection" && selected.robot_id === b.runtime_robot_id && selected.target_id === b.runtime_zone_id &&
@@ -245,17 +253,17 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
       requireEvidence(sameAction(a.original_action, selected));
       if (a.selection === "ORIGINAL_POLICY_CONVERGED") requireEvidence(start !== null && deadline !== null && start < a.sim_t_s && a.sim_t_s < deadline &&
         selected.name === "SendToHandoff" && selected.robot_id === b.runtime_robot_id && selected.target_id === null);
-      if (a.selection === "POLICY_PREEMPTED") requireEvidence(start !== null && selected.name !== "Wait" && selected.robot_id === b.runtime_robot_id);
+      if (a.selection === "POLICY_PREEMPTED") requireEvidence(duringLease && selected.name !== "Wait" && selected.robot_id === b.runtime_robot_id);
     }
   }
   const preempted = r.actions.some((a) => a.selection === "POLICY_PREEMPTED");
   if (preempted || r.reason === "POLICY_PREEMPTED" || runtime.collection_exit_reason === "POLICY_PREEMPTED") {
-    requireEvidence(preempted && r.reason === "POLICY_PREEMPTED" && runtime.collection_exit_reason === "POLICY_PREEMPTED" &&
+    requireEvidence(preempted && (r.reason === "POLICY_PREEMPTED" || conflictOverlay) && runtime.collection_exit_reason === "POLICY_PREEMPTED" &&
       ["PARTIAL", "FAILED", "INCONCLUSIVE"].includes(r.state));
   }
   for (const reason of ["ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"] as const) {
     if (r.reason === reason || runtime.collection_exit_reason === reason) {
-      requireEvidence(r.reason === reason && runtime.collection_exit_reason === reason &&
+      requireEvidence((r.reason === reason || conflictOverlay) && runtime.collection_exit_reason === reason &&
         ["PARTIAL", "FAILED", "INCONCLUSIVE"].includes(r.state) && p.protected && p.authorization_blocked && p.reasons.includes(reason));
     }
   }
@@ -298,7 +306,8 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
   } else if (r.state === "INCONCLUSIVE") {
     requireEvidence(["INCONCLUSIVE", "CONFLICT"].includes(edge.effective_state) && p.protected && (conflict || edge.result_verification === "UNVERIFIED"));
   } else if (r.state === "FAILED") requireEvidence(edge.effective_state === "FAILED" && raw.status !== "INCOMPLETE" &&
-    unload.status !== "INCOMPLETE" && runtime.event_sequence_complete && (raw.balls === null || raw.balls === 0));
+    unload.status !== "INCOMPLETE" && runtime.event_sequence_complete &&
+    (start === null ? raw.balls === null : raw.status === "COMPLETE" && raw.balls === 0));
   if (Object.values(r.conflicts).some(Boolean)) requireEvidence(r.state === "INCONCLUSIVE" && p.protected);
   if (r.reason === "POLICY_SLOT_MISSED") requireEvidence(r.state === "MISSED" && start === null && end !== null && end >= r.latest_start_sim_t_s && edge.reason === "unknown:policy_slot_missed");
   if (r.reason === "SAFETY_REJECTED") requireEvidence(r.state === "REJECTED" && start === null && edge.reason === "unknown:safety_rejected" && r.actions.some((a) => a.safety_shield === "REJECTED"));
