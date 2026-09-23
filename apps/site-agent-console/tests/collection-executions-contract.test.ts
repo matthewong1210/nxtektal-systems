@@ -78,6 +78,18 @@ function notStartedAfterRestart() {
 }
 
 describe("collection execution v1 read contract", () => {
+  it("classifies early handoff preemption only at the causal terminal tick", () => {
+    const s = snapshot("partial-preempted"), r = s.executions[0], action = r.actions.at(-1)!;
+    action.original_action.name = action.selected_action.name = "SendToHandoff";
+    const earlier = structuredClone(action);
+    earlier.sim_t_s = 180; earlier.selection = "ORIGINAL_POLICY_CONVERGED";
+    r.actions.splice(1, 0, earlier);
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("PARTIAL");
+    action.selection = "ORIGINAL_POLICY_CONVERGED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+    action.selection = "POLICY_PREEMPTED"; earlier.selection = "POLICY_PREEMPTED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
   it("keeps accepted human assistance causal protection distinct from preemption", () => {
     const s = snapshot("partial-preempted"), r = s.executions[0], action = r.actions.at(-1)!;
     r.reason = r.runtime_evidence.collection_exit_reason = "HUMAN_ASSISTANCE_REQUIRED";

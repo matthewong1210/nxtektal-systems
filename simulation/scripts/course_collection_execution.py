@@ -581,6 +581,13 @@ class CollectionExecutionStore:
             action.update(safety_shield="ACCEPTED" if shield["allowed"] else "REJECTED", safety_reason=None if shield["allowed"] else shield["reason"])
             if not shield["allowed"] and action["selection"] in ("ORIGINAL_POLICY_CONVERGED", "POLICY_PREEMPTED"):
                 action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
+            elif shield["allowed"] and action["selection"] == "ORIGINAL_POLICY_CONVERGED":
+                native = result["runtime_snapshots"].get(eid) or {}
+                # A threshold handoff before the collection boundary can end
+                # this assignment. Classify its actual same-tick effect, not
+                # the prepared proposal or a later unrelated terminal.
+                if native.get("terminal_reason") == "POLICY_PREEMPTED" and native.get("terminal_sim_t_s") == d["sim_t_s"]:
+                    action["selection"] = "POLICY_PREEMPTED"
             _validate(action, "ActionDecision")
             r["actions"].append(action)
             if d["selection"] == "WAIT_SLOT" and not shield["allowed"]:

@@ -265,8 +265,9 @@ def relations(data):
                 assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
             original = action["original_action"]
             if start is not None and action["sim_t_s"] >= start and original["name"] != "Wait" and original["robot_id"] == binding["runtime_robot_id"]:
+                terminal_preemption = runtime["collection_exit_reason"] == "POLICY_PREEMPTED" and action["sim_t_s"] == end
                 expected = ("ORIGINAL_POLICY_UNCHANGED" if action["safety_shield"] == "REJECTED" or original["name"] == "RequestHumanAssistance" else
-                            "ORIGINAL_POLICY_CONVERGED" if original["name"] == "SendToHandoff" else "POLICY_PREEMPTED")
+                            "ORIGINAL_POLICY_CONVERGED" if original["name"] == "SendToHandoff" and not terminal_preemption else "POLICY_PREEMPTED")
                 assert action["selection"] == expected, "leased-robot policy action must classify its effect"
                 if action["safety_shield"] == "ACCEPTED" and original["name"] == "RequestHumanAssistance":
                     assert runtime["collection_exit_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
@@ -850,6 +851,24 @@ def test_accepted_human_assistance_cannot_claim_success(schema):
     action = data["executions"][0]["actions"][1]
     action["original_action"]["name"] = action["selected_action"]["name"] = "RequestHumanAssistance"
     action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_early_handoff_is_preemption_only_at_causal_terminal_tick(schema):
+    data = snapshot("partial-preempted.json")
+    record = data["executions"][0]
+    action = record["actions"][-1]
+    action["original_action"]["name"] = action["selected_action"]["name"] = "SendToHandoff"
+    earlier = copy.deepcopy(action)
+    earlier.update(sim_t_s=180, selection="ORIGINAL_POLICY_CONVERGED")
+    record["actions"].insert(1, earlier)
+    validate_snapshot(schema, data)
+    action["selection"] = "ORIGINAL_POLICY_CONVERGED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+    action["selection"] = "POLICY_PREEMPTED"
+    earlier["selection"] = "POLICY_PREEMPTED"
     with pytest.raises(AssertionError):
         validate_snapshot(schema, data)
 

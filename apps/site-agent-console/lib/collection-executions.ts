@@ -236,8 +236,9 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
     // Include the terminal-causing tick: an action cannot evade classification by ending its own lease.
     const duringLease = start !== null && start <= a.sim_t_s && (end === null || a.sim_t_s <= end);
     if (duringLease && a.original_action.name !== "Wait" && a.original_action.robot_id === b.runtime_robot_id) {
+      const terminalPreemption = runtime.collection_exit_reason === "POLICY_PREEMPTED" && a.sim_t_s === end;
       requireEvidence(a.selection === (a.safety_shield === "REJECTED" || a.original_action.name === "RequestHumanAssistance" ? "ORIGINAL_POLICY_UNCHANGED" :
-        a.original_action.name === "SendToHandoff" ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED"));
+        a.original_action.name === "SendToHandoff" && !terminalPreemption ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED"));
       if (a.safety_shield === "ACCEPTED" && a.original_action.name === "RequestHumanAssistance")
         requireEvidence(runtime.collection_exit_reason === "HUMAN_ASSISTANCE_REQUIRED");
     }

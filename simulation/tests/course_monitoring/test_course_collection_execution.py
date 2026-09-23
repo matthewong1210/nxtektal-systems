@@ -411,7 +411,7 @@ def test_unknown_quantity_preserves_causal_exit_and_protection(api,tmp_path,reas
     assert r["raw_quantity"]["balls"] is None
 
 
-def live_store(api, tmp_path):
+def live_store(api, tmp_path, *, capacity=20):
     from nxt_range_ops.core import ledger
     from nxt_range_ops.core.skills import SkillOutcome, SkillOutcomeModel, SkillType
     from nxt_range_ops.env.range_ops_env import RangeOpsEnv
@@ -422,7 +422,7 @@ def live_store(api, tmp_path):
     identity,planning,edge=inputs(tmp_path)
     identity["runtime_bindings"][0]["runtime_zone_id"]="Z1"
     base=make_scenario("normal_weekday")
-    scenario=base.model_copy(update={"robots":[base.robots[0].model_copy(update={"payload_capacity_balls":20})],
+    scenario=base.model_copy(update={"robots":[base.robots[0].model_copy(update={"payload_capacity_balls":capacity})],
         "hours":base.hours.model_copy(update={"open_minute":0,"close_minute":60}),
         "episode":base.episode.model_copy(update={"control_interval_s":60}),
         "skills":base.skills.model_copy(update={"collect_cycle_balls":7})})
@@ -615,3 +615,27 @@ def test_actual_accepted_human_assistance_is_not_policy_preemption(api,tmp_path)
     assert r["reason"] == r["runtime_evidence"]["collection_exit_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
     assert "HUMAN_ASSISTANCE_REQUIRED" in r["device_protection"]["reasons"]
     assert conform(store)["executions"][0]["state"] == "PARTIAL"
+
+
+@pytest.mark.parametrize("capacity,balls,selection,state", [
+    (40,35,"POLICY_PREEMPTED","PARTIAL"), (20,20,"ORIGINAL_POLICY_CONVERGED","SUCCEEDED")])
+def test_real_threshold_handoff_classifies_actual_tick_effect(api,tmp_path,capacity,balls,selection,state):
+    from nxt_range_ops.policies.joint_dispatch import JointDispatchPolicy, candidate_catalog
+    env,store,req,runtime,unload=live_store(api,tmp_path,capacity=capacity)
+    live_tick(env,store,req,runtime,WAIT)
+    before=env.collection_assignment_snapshot(req["execution_id"])
+    assert before["raw_collected_balls"] == balls
+    assert before["collection_exit_reason"] == (None if capacity == 40 else "ROBOT_PAYLOAD_FULL")
+    policy=JointDispatchPolicy(env.scenario,env.catalog,candidate_catalog()[0])
+    assert policy.act(*env.refresh_observation_info()) == unload["index"]
+    last=live_tick(env,store,req,runtime,unload)
+    native=env.collection_assignment_snapshot(req["execution_id"])
+    assert native["terminal_reason"] == ("POLICY_PREEMPTED" if capacity == 40 else "UNLOADED_ALL_COLLECTED_BALLS")
+    assert last["result"]["runtime_snapshots"][req["execution_id"]] == native
+    prepared=next(r.payload for r in reversed(store.journal.read()) if r.record_kind == "action_prepared")
+    assert prepared["decision"]["selection"] == "ORIGINAL_POLICY_CONVERGED"
+    assert prepared["decision"]["original_action"] == prepared["decision"]["selected_action"] == unload
+    r=store.replay()["executions"][req["execution_id"]]
+    assert r["actions"][-1]["selection"] == selection
+    assert r["actions"][-1]["safety_shield"] == "ACCEPTED"
+    assert conform(store)["executions"][0]["state"] == state
