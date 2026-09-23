@@ -388,7 +388,7 @@ successful HTTP read or session replay does not clear them.
 | Device restart after acceptance but before actual start | Existing Edge rule: `FAILED` (`not_started_after_restart`); no execution. |
 | Device restart after actual start without persisted terminal | Existing Edge rule: `INCONCLUSIVE` (`interrupted_execution_unknown_outcome`); do not resume or reauthorize old work. |
 | New incarnation or lost/rolled-back device journal | Reject old target authorization, flag session regression and require new explicit authorization. |
-| Terminal conflict or conflicting replay | Preserve all evidence, effective result `CONFLICT`, block authorization; never choose a winning success. |
+| Terminal conflict or conflicting replay | Preserve all evidence, set effective V3 status to `INCONCLUSIVE` with Edge verification resolution `CONFLICT`, block authorization; never choose a winning success. |
 
 ## Shared wire contract and Manager API
 
