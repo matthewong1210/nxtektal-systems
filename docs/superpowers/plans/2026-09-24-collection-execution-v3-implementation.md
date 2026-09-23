@@ -106,11 +106,11 @@
 - `SimulatorBackedTaskDevice` consumes only durable V3 committed outbox events and persists Edge ACCEPTED/PROGRESS/terminal events through `RobotCore`/`JsonlJournal`.
 - Restart continues to use `RobotCore.on_start()`: accepted/not-started becomes FAILED, started/no-terminal becomes INCONCLUSIVE, a new incarnation rejects old authorization.
 
-- [ ] Write failing tests proving no Mock path, no terminal without committed simulator evidence, exact PARTIAL/REJECTED/MISSED/FAILED/INCONCLUSIVE mappings, outbox idempotency, protection, and restart/incarnation behavior.
-- [ ] Verify RED.
-- [ ] Add the minimal external-committed-event seam to the Edge owner and implement the device adapter at the composition root.
-- [ ] Prove ordinary chunk replay does not invoke `on_start()` while an actual device restart does, and old authorization never executes.
-- [ ] Run all Edge tests and commit `feat(edge-task): bridge committed simulator execution evidence`.
+- [x] Write failing tests proving no Mock path, no terminal without committed simulator evidence, exact PARTIAL/REJECTED/MISSED/FAILED/INCONCLUSIVE mappings, outbox idempotency, protection, and restart/incarnation behavior.
+- [x] Verify RED.
+- [x] Add the minimal external-committed-event seam to the Edge owner and implement the device adapter at the composition root.
+- [x] Prove ordinary chunk replay does not invoke `on_start()` while an actual device restart does, and old authorization never executes.
+- [x] Run all Edge tests and commit `feat(edge-task): bridge committed simulator execution evidence`.
 
 ---
 
