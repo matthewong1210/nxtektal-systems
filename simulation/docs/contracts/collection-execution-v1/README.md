@@ -188,8 +188,9 @@ latest-start 300 but before deadline 780, ahead of an eligible pending task.
 The success example independently retains unchanged original-policy handoff.
 At latest_start an unstarted request is MISSED without a late directive.
 Non-Wait original actions remain unchanged. A matching handoff is recorded as
-ORIGINAL_POLICY_CONVERGED; a different action for the leased robot explicitly
-preempts. Other robot/staff actions remain unchanged. Only selected actions
+ORIGINAL_POLICY_CONVERGED; a different action for the leased robot, including
+`SendToCharge` or `ReassignRobot`, explicitly redirects/preempts it. Other
+robot/staff actions remain unchanged. Only selected actions
 pass once through ActionCatalog, RangeOpsEnv.step and final SafetyShield.
 Safety rejection does not create an accepted assignment or ledger movement.
 In Phase 3B the pre-acceptance sole-station gate makes the generic handoff

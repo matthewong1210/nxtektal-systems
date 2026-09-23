@@ -323,7 +323,7 @@ Collection exit reasons are explicit and do not alone imply task success:
 | `ROBOT_PAYLOAD_FULL` | Normal finite raw-collection boundary | Continue to handoff; success only after equal unload. |
 | `ZONE_EMPTY` | Zone is empty at the checked simulation instant | If positive raw quantity exists, attempt unload and normally finish `PARTIAL`; zero complete quantity is `FAILED`. |
 | `COLLECTION_ACCESS_BLOCKED` | Access/closure check failed before another move | Positive known quantity may be unloaded but overall result is `PARTIAL`; otherwise `FAILED`. |
-| `POLICY_PREEMPTED` | Original non-`Wait` action selected for the leased robot | Apply original action and terminalize explicitly; never claim success. |
+| `POLICY_PREEMPTED` | Original non-`Wait` action redirects or reassigns the leased robot | Apply the original action and terminalize explicitly; never claim success. |
 | `LOW_BATTERY` | Runtime reached its collection battery floor | Attempt only actions selected by arbitration/SafetyShield; result is partial/failed unless the full success condition was already met. |
 | `ROBOT_FAULT` | Runtime robot failed | Protect device; positive complete quantity is partial, zero complete is failed, incomplete evidence is inconclusive. |
 | `ESTOP_LATCHED` | Simulator e-stop is latched | No motion follows e-stop; protect device and require existing external reset semantics. |
@@ -567,8 +567,9 @@ and contract tests.  The two owners do not edit the same file concurrently.
    complete quantity may be unloaded but remains partial.
 7. **Access closes at boundary:** no ball moves after the exact access check;
    any prior known quantity remains partial and may be unloaded.
-8. **Policy preemption:** a different original action for the leased robot wins
-   and produces an explicit partial/failed terminal; no silent reassignment.
+8. **Policy redirection/preemption:** a different original action, including
+   `ReassignRobot`, for the leased robot wins and produces an explicit
+   partial/failed/inconclusive terminal; no silent reassignment or success.
 9. **Low battery, fault, e-stop, assistance:** exact reason and device
    protection remain visible; no post-e-stop motion and no success mapping.
 10. **Execution timeout:** exact deadline is enforced independently from task
