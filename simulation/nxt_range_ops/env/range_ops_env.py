@@ -46,11 +46,13 @@ class RangeOpsEnv(gym.Env):
         *,
         joint_inputs: dict | None = None,
         session_inputs: dict | None = None,
+        collection_assignment_evidence: bool = False,
     ):
         super().__init__()
         if joint_inputs is not None and session_inputs is not None:
             raise ValueError("joint_inputs and session_inputs are mutually exclusive")
         self.scenario = scenario
+        self._collection_assignment_evidence = collection_assignment_evidence
         self._joint_inputs = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
                                                   open_minute=scenario.hours.open_minute,
                                                   close_minute=scenario.hours.close_minute)
@@ -124,7 +126,8 @@ class RangeOpsEnv(gym.Env):
             else None
         )
         self.sim = RangeSimulation(self.scenario, self._episode_seed, skill_model,
-                                   joint_inputs=self._joint_inputs, session_inputs=self._session_inputs)
+                                   joint_inputs=self._joint_inputs, session_inputs=self._session_inputs,
+                                   collection_assignment_evidence=self._collection_assignment_evidence)
         self._steps = 0
         self._metrics_prev = self.sim.metrics.copy()
         obs = self._build_obs()
@@ -162,6 +165,25 @@ class RangeOpsEnv(gym.Env):
             truncated=truncated,
         )
         return obs, total, terminated, truncated, info
+
+    def arm_collection_assignment(self, execution_id: str, robot_id: str, zone_id: str,
+                                  handoff_station_id: str, execution_deadline_sim_t_s: float) -> None:
+        """Register a candidate only; the selected action still enters via step()."""
+        if self.sim is None:
+            raise RuntimeError("call reset() before arming an assignment")
+        self.sim.arm_collection_assignment(execution_id, robot_id, zone_id,
+                                          handoff_station_id, execution_deadline_sim_t_s)
+
+    def collection_assignment_snapshot(self, execution_id: str) -> dict | None:
+        if self.sim is None:
+            raise RuntimeError("call reset() before reading assignment evidence")
+        return self.sim.collection_assignment_snapshot(execution_id)
+
+    def disarm_collection_assignment(self, execution_id: str) -> None:
+        """Clear an exact unstarted candidate after its caller records rejection."""
+        if self.sim is None:
+            raise RuntimeError("call reset() before disarming an assignment")
+        self.sim.disarm_collection_assignment(execution_id)
 
     def admit_observation_job(self, job_id: str, observation_id: str, evidence_ref: str,
                               captured_minute: int, deadline_minute: int) -> dict:
