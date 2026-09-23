@@ -119,6 +119,7 @@ def relations(data):
                 continue
             other_start = other["started_sim_t_s"]
             other_end = other["terminal_sim_t_s"] if other["terminal_sim_t_s"] is not None else math.inf
+            assert start != other_start, "distinct attempts cannot acquire the lease at the same tick"
             assert max(start, other_start) >= min(end, other_end), "overlapping running lease intervals"
     assert requests.keys() == receipts.keys(), "orphan request or receipt"
     unique(data["receipts"], "execution_id")
@@ -898,6 +899,29 @@ def test_lease_allows_exact_terminal_to_start_boundary(schema):
     for key in ("bindings", "requests", "receipts", "executions"):
         combined[key].extend(second[key])
     validate_snapshot(schema, combined)
+
+
+def test_lease_rejects_distinct_zero_duration_failed_attempts_at_same_start(schema):
+    first, second = snapshot(), unique_terminal_snapshot()
+    for data in (first, second):
+        record = data["executions"][0]
+        record.update(state="FAILED", reason="ZONE_EMPTY", terminal_sim_t_s=120,
+                      success_display_allowed=False)
+        record["actions"] = record["actions"][:1]
+        record["runtime_evidence"]["collection_exit_reason"] = "ZONE_EMPTY"
+        record["raw_quantity"]["balls"] = 0
+        record["unload_quantity"].update(status="NOT_REACHED", balls=None,
+                                         source_event_ids=[], event_digest=None)
+        record["edge_evidence"].update(effective_state="FAILED", terminal_states=["FAILED"],
+                                      reason="unknown:zone_empty")
+        # Each complete-zero terminal is valid alone, including all independent
+        # task/request/receipt/binding/assignment links and canonical hashes.
+        validate_snapshot(schema, data)
+    combined = copy.deepcopy(first)
+    for key in ("bindings", "requests", "receipts", "executions"):
+        combined[key].extend(second[key])
+    with pytest.raises(AssertionError, match="lease"):
+        validate_snapshot(schema, combined)
 
 
 def parity_case(kind):
