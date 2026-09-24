@@ -88,9 +88,31 @@ entry CLI. It is not physical task admission, robot telemetry, facility
 state, advice, or execution; it adds no sensor, device, ROS, actuator, or
 emergency-stop path, and does not change the "Not implemented" rows above.
 Known gaps recorded for a future site acceptance: the Edge process cannot
-notify anyone about its own death (no host watchdog exists), and human
-intervention cases plus notification records are PR B, not part of this
-slice.
+notify anyone about its own death (no host watchdog exists); human
+intervention cases and notification records are the PR B slice below, not
+part of PR A.
+
+Also added after that baseline (verify merge status against the current
+branch): `nxt_edge_interventions`, Edge Task Interventions V0 (PR B) — a
+stdlib-only, SIMULATION-only human-handling rehearsal over the PR A Edge
+journal. It turns evidence the Edge already records (a robot's explicit
+`ASSISTANCE_REQUIRED`, a device the Edge marks OFFLINE while holding a
+task, an exhausted republish budget or expired unconfirmed result, an
+evidence conflict or session regression) into a persisted case with
+evidence-keyed identity, a persisted notification intent with a stable id,
+a bounded-retry delivery to a loopback-only local test receiver that keeps
+its own journal and deduplicates independently, reminders for
+unacknowledged cases, escalation on severity rise, and human `ack`/`resolve`
+records from a local CLI. It writes nothing into the Edge or robot journals.
+`ack`/`resolve` clear no authorization gate or conflict marker, resume no
+dispatch, resend no task, set no device idle, and release no e-stop or
+unconfirmed occupancy; a receiver receipt proves local persistence, not
+phone delivery or human attention. Not implemented and not claimed: any
+real notification channel (e-mail, SMS, push, webhook, contacts,
+credentials), recovery or re-authorization after a conflict, state loss, or
+exhausted retries (that needs a separate evidence condition, recovery
+protocol, and acceptance contract), real devices, authenticated operators,
+and a host watchdog. The "Not implemented" rows below are unchanged.
 
 ## Static truth versus dynamic evidence
 
@@ -213,6 +235,7 @@ give Site Runtime ownership of simulation truth.
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
 | Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules | `nxt_edge_task` (SIMULATION rehearsal only; MQTT, clocks, processes, and the test-entry CLI stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
+| Simulated human-handling cases over the Edge journal, persisted notification intents with bounded loopback delivery, human ack/resolve records | `nxt_edge_interventions` (SIMULATION rehearsal only; HTTP, clocks, processes, the loopback test receiver, and the operator CLI stay in `simulation/scripts/`; human records clear no gate and command nothing; not a real notification channel, recovery protocol, or execution) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |

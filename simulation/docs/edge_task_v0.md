@@ -3,8 +3,9 @@
 SIMULATION ONLY — a protocol rehearsal between an Edge gateway process and
 two protocol doubles over a local, loopback-bound Mosquitto. No physical
 robot, sensor, ROS, actuator, or emergency-stop path exists or is reachable
-from this code. Human-intervention cases and notifications are PR B and are
-not part of this slice.
+from this code. Human-intervention cases and notifications are the separate
+PR B slice (`nxt_edge_interventions`, `edge_interventions_v0.md`): it reads
+this journal as plain data and writes nothing into it.
 
 ## Architecture decision (recorded gate outcome)
 
@@ -173,9 +174,10 @@ Terminal conflict: a second, different terminal is preserved as evidence,
 a `conflicting_terminal` record is written once, `effective_result` becomes
 `CONFLICT` with `result_verification = conflicting`, and the device's
 authorization gate closes: no new task for that robot and no republication.
-Nothing in PR A reopens the gate, and a future `ack`/`resolve` never
-will on its own; resuming execution needs a separately defined evidence
-condition and acceptance contract (see deviation 4). The conflict is detected in every arrival
+Nothing in PR A reopens the gate, and PR B's `ack`/`resolve` never will:
+they are human records only. Resuming execution needs a separate evidence
+condition, recovery protocol, and acceptance contract that neither slice
+defines (see deviation 4 and its recorded decision). The conflict is detected in every arrival
 order — a differing terminal that arrived earlier as late or unexpected
 evidence conflicts with the terminal applied later — and the
 `task_event_received` line that carries `conflict: true` closes the gate by
@@ -207,9 +209,10 @@ Evidence conflicts also close the gate: `post_terminal_activity` (a
 higher-key non-terminal event after a terminal), `unexpected_acceptance`,
 `unexpected_rejection`, and `conflicting_replay` are sticky and, like a
 terminal conflict or a session regression, refuse every new authorization
-and republication for that robot; no reopening path exists in PR A, and a
-future human reconciliation needs its own evidence condition and
-acceptance contract (deviation 4). A robot
+and republication for that robot; no reopening path exists in PR A or PR B
+(PR B raises an `EVIDENCE_CONFLICT` case for a human and changes nothing
+here), and a future human reconciliation needs its own evidence condition,
+recovery protocol, and acceptance contract (deviation 4). A robot
 reporting activity the Edge's record cannot explain is executing something
 the Edge did not authorise as such.
 
@@ -258,13 +261,16 @@ keeps being probed within the same interval and attempt bounds; a stream
 of unsolicited duplicates therefore consumes the attempt cap rather than
 starving the probing, and once the cap is spent the task stays unresolved;
 recovery after the retry budget is exhausted is not implemented in PR A
-and not yet defined. The progress-type
+or PR B (PR B raises a `RESULT_UNCONFIRMED` case for a human; it resends
+nothing) and needs its own evidence condition, recovery protocol, and
+acceptance contract. The progress-type
 reasons (`progress_window_elapsed`, `acceptance_window_elapsed`,
 `heartbeat_mismatch`) share one probe epoch: within one progress epoch
 (trusted progress starts a new one) there is never more than one
 progress-type probe per progress window, and never one past
 `max_republish_attempts`; once the cap is reached the task stays visibly
-unresolved; no recovery after cap exhaustion is implemented. The
+unresolved; no recovery after cap exhaustion is implemented in either
+slice. The
 attempt is journaled (`task_publish_attempted`) before the transport call,
 so the bound holds even when hop-1 never confirms. The gateway re-derives
 each candidate from the live view immediately before publishing, because
@@ -417,7 +423,8 @@ are recorded in the PR A hand-off, not here.
 | Local-broker boundary (config and transport, no network) | `test_contracts.py::test_config_refuses_non_loopback_or_conventional_broker_endpoints`, `::test_config_accepts_loopback_task_specific_endpoints`, `test_transport.py::test_paho_client_refuses_a_non_loopback_endpoint_before_any_socket` |
 | Broker restart | `test_recovery_edge.py::test_broker_restart_mid_task_converges_without_duplicate_execution`, `test_integration_mosquitto.py::test_broker_restart_mid_task_converges_without_duplicate_execution` |
 
-E and F (notifications, human handling) are PR B.
+E and F (notifications, human handling) are PR B: see the scenario map in
+`edge_interventions_v0.md` and `tests/edge_interventions/`.
 
 ## Non-goals and known gaps
 
@@ -455,6 +462,9 @@ Recorded so the plan can be amended rather than silently diverged from:
    conflicts and session regression. PR B's `ack`/`resolve` never clear
    any gate by themselves (plan D4 stands); how a human reconciliation
    reopens authorization is a PR B design decision.
+   *Decision recorded with the PR B authorization (2026-09-17): the
+   historical wording above is kept as written; the decision itself is
+   in the block below.*
 5. Receipt and progress clocks are distinct; presence reasons are answered
    by any robot evidence, progress reasons only by applied events; an
    answered progress flag re-arms one window later while the task is
@@ -472,6 +482,28 @@ Recorded so the plan can be amended rather than silently diverged from:
    (pinned by `test_sessions.py::test_reprovisioning_at_the_same_clock_instant_is_still_a_new_incarnation`;
    creation and refusal paths in
    `test_cli_views.py::test_task_creation_needs_a_seen_incarnation_and_refuses_a_foreign_one`).
+
+### Errata decisions (recorded with the PR B authorization, 2026-09-17)
+
+- Items 1, 2, 3, 5, 6, and 7 are accepted as the current simulation
+  baseline. They are not reopened by PR B.
+- Item 4 is decided as follows. PR B's `ack` and `resolve` are human
+  records only. They clear no authorization gate and no evidence-conflict
+  marker, resume no dispatch, resend no task, set no device idle or
+  available, release no emergency stop, and release no task occupancy whose
+  end is unconfirmed. Recovery or re-authorization after a conflict, a state
+  loss, or an exhausted retry budget is out of scope for PR A and PR B; it
+  needs a separate evidence condition, recovery protocol, and acceptance
+  contract. A pending task cannot be cleared by deleting old evidence or by
+  re-initializing a robot: a wiped robot journal is refused (exit 4), and
+  re-provisioning is recorded as a session regression that closes the gate
+  further rather than opening it.
+- Any record or configuration PR B adds carries its own schema id and a
+  compatibility statement (`edge_interventions_v0.md`); nothing inside
+  `nxt-edge-task/journal/v1` changed for PR B; the only PR A code changes
+  are one additive field on the task summary (`blocking_event`) and a
+  `schema` constructor parameter on the shared journal class with an
+  unchanged default, both of which older readers ignore.
 
 No physical robot, sensor, CAN, serial, ROS, arm, charger, or site broker;
 no automatic zone selection, density learning, or scheduling; no carrier

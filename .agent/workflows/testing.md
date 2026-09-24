@@ -20,10 +20,12 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
 `twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
-`edge_observation`, `workflow_enablement`, `course_world_model`, and
-`edge_task`. `tests/edge_task/test_integration_mosquitto.py` needs a local
-`mosquitto` binary; it skips with an explicit reason otherwise, and a skip is
-not delivery evidence for an Edge Task change — attach a local run.
+`edge_observation`, `workflow_enablement`, `course_world_model`,
+`edge_task`, and `edge_interventions`. `tests/edge_task/test_integration_mosquitto.py`
+and `tests/edge_interventions/test_integration_e2e.py` need a local
+`mosquitto` binary; they skip with an explicit reason otherwise, and a skip is
+not delivery evidence for an Edge Task or Edge Interventions change — attach
+a local run.
 Root Phase 0 tests live directly under `tests/` and should be selected by file.
 
 Run the architecture suite after any package-boundary or contract change:
@@ -50,6 +52,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/course_world_model/test_architecture.py \
   tests/edge_task/test_architecture.py \
   tests/edge_task/test_scripts_guard.py \
+  tests/edge_interventions/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -57,9 +60,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 ```
 
 For changes to merged Commissioning, Site Runtime, Agent Runtime, the Edge
-Observation adapter kit, Workflow Enablement, the Course World Model, or the
-Edge Task Exchange, run the entire relevant package suites in addition to the
-architecture/safety subset:
+Observation adapter kit, Workflow Enablement, the Course World Model, the
+Edge Task Exchange, or the Edge Task Interventions, run the entire relevant
+package suites in addition to the architecture/safety subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
@@ -69,7 +72,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_observation \
   tests/workflow_enablement \
   tests/course_world_model \
-  tests/edge_task
+  tests/edge_task \
+  tests/edge_interventions
 ```
 
 Run the full suite before handing off a Python production/contract change:
@@ -108,6 +112,7 @@ safe. Do not build into the repository.
 | Edge observation adapter | Calibration identity/unit/range/timestamp fail-closed behavior; explicit MISSING instead of an optimistic default; unmapped raw fields reported; deterministic observation identity; at-least-once feed semantics; boundary guards proving no transport, network, robot, actuator, or e-stop surface |
 | Course World Model contract/query | Immutable identity and content-digest verification; deterministic serialization across processes and hash seeds; coordinate/geometry/elevation fail-closed rules; pure read-only queries with explicit non-answer statuses and no fabricated intersection; site-binding cross-checks; Range Operations readiness byte-identical with and without Course Model evidence; boundary guards proving no runtime, transport, filesystem, or execution import |
 | Edge Task Exchange contract/journal/executor | Strict wire decoding (exact keys, single-member `SIMULATION` environment, content-derived `task_id`); Edge transition table enumerated cell by cell with duplicate/late/conflicting dispositions; terminal-conflict gate in both arrival orders with prior facts preserved; session regression; liveness and restart grace; crash injection on both sides with execution counts asserted from the double's own journal (exactly one `execution_started` for a completed task, zero for the carrier); no republish after a terminal; journal truncation/tamper fail loud; journal high-water anchor (rollback and rewritten-record refusal, torn-batch tolerance); robot identity continuity (explicit provisioning, state-loss and rolled-back-journal refusal, re-provisioning detected as a session regression on status and events); evidence-conflict authorization gate; read-time freshness of the CLI views; boundary guards proving stdlib-only, no other `nxt_*` import, no transport, clock, execution, or live-switch surface; plus a real local Mosquitto multi-process run attached to the delivery |
+| Edge Task Interventions cases/notifications/human records | Strict config (loopback-only receiver, bounded intervals and attempt caps) and `EdgeSnapshot` input (missing fields refused, never defaulted); actual sender URL bound to the loopback host, environment proxies disabled, redirects refused without contacting their targets; one case and one unique notification per evidence key with repeats deduplicated and restarts reopening nothing; recurrence after resolution as a new case naming the old one, with a new task distinguished from task completion within the same offline episode; pre-fix resolved journals deduplicated before any key normalization, open critical keys normalized once without notifying; reminders at the interval up to the cap, no new reminders after ack/resolve, escalation delivered even when acknowledged; recovered older intents do not move the reminder clock backwards, and escalation replay synchronizes the evidence key without redundant records; lost receipt retried under the same id and received once; unreachable and refusing receivers bounded and never reported delivered; one process-lifetime dispatcher per persistent journal, with a contender exiting before attempts or sends, CLI journal operations remaining available, and crash recovery using the same evidence; expected journal append failures preserve their cause, exit 2, and perform no later send; a torn opening batch repaired on restart and exposed read-only by the CLI before recovery; torn escalation batches repaired before fresh Edge reads or reminders, even with an unreadable Edge snapshot or a later resolve, preserving the escalation's event-time payload and stable notification id; crashes between attempt and result retried without fake or lost delivery; ack/resolve leave task state, result, gate, execution count, and the Edge journal byte-identical; lost device keeps last valid data with explicit unknown markers and never reads as parked; boundary guards proving stdlib-only, no `nxt_*` import, only the three scripts import the leaf, no executor import or task creation in the scripts, service writes only its own journal; plus a real local Mosquitto plus real receiver multi-process run attached to the delivery |
 | Physical/config value | Provenance and placeholder census/validation |
 | Bug fix | A regression test that fails for the reproduced defect |
 

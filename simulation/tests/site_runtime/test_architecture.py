@@ -108,6 +108,7 @@ def test_upstream_and_consumers_do_not_depend_on_runtime():
         # composition-root work.
         "nxt_course_world_model",
         "nxt_edge_task",
+        "nxt_edge_interventions",
     )
     for package_name in ("nxt_commissioning", "nxt_pilot_ops", "nxt_edge_observation"):
         assert (SIMULATION_ROOT / package_name).is_dir(), (
