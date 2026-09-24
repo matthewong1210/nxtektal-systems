@@ -415,7 +415,7 @@ export function ConfirmationSection({
       <p className="fineprint">
         Confirmation records explicit human intent for one plan version and creates one simulated schedule through the existing task admission. It is not a
         physical command. Re-confirming the same version returns the original confirmation; it never creates a second task. The old advice queue&apos;s Accept
-        button remains workflow evidence only.
+        button remains workflow evidence only. Simulated execution evidence for an admitted task appears in the collection execution panel below this one.
       </p>
       {confirmation ? (
         <article className="dispatch-record">
@@ -435,6 +435,11 @@ export function ConfirmationSection({
               <span className="mono">{confirmation.schedule_id}</span>
             </KeyValue>
             <KeyValue label="Task">{confirmation.task_id ? <span className="mono">{confirmation.task_id}</span> : "No task yet; the schedule is admitted at its due time"}</KeyValue>
+            <KeyValue label="Admitted (lower bound)">
+              {confirmation.task_created_at_utc
+                ? `${formatSiteTime(confirmation.task_created_at_utc, timeZone)} · Edge TASK_CREATED time: a lower bound on any start, not the start itself`
+                : "Not admitted yet · no TASK_CREATED evidence"}
+            </KeyValue>
             <KeyValue label="Due">{formatSiteTime(confirmation.schedule.due_at_utc, timeZone)}</KeyValue>
             <KeyValue label="Expires">{formatSiteTime(confirmation.schedule.expires_at_utc, timeZone)}</KeyValue>
             <KeyValue label="Robot · zone">

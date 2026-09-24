@@ -754,3 +754,27 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
 .stage-card { min-width: 0; }
 .outcome-group { margin-top: 12px; }
 .zone-entry { margin-top: 12px; }
+
+/* Read-only collection execution panel (V3 evidence projection). The
+   simulation clock, the service read and the session state stay on separate
+   rows; evidence levels stay in one column so nothing reads as a progress bar. */
+.exec-strip { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 5px; margin-bottom: 12px; font-size: 13px; min-width: 0; }
+.exec-strip-row { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; min-width: 0; }
+.exec-strip-row .detail-text { min-width: 0; overflow-wrap: anywhere; }
+.exec-strip-row .btn { margin-left: auto; }
+.exec-strip .kv-grid { margin: 0; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); font-size: 13px; }
+.exec-strip small { display: block; color: var(--text-dim); font-size: 11px; overflow-wrap: anywhere; }
+.exec-list { display: grid; gap: 10px; }
+.exec-record .rec-head, .exec-binding-only .rec-head { flex-wrap: wrap; }
+.exec-ladder { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 0; }
+.exec-ladder li { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 4px 12px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.exec-ladder li strong { font-weight: 550; }
+.exec-ladder li span { min-width: 0; overflow-wrap: anywhere; }
+.exec-terminal, .exec-protection, .exec-conflict, .exec-edge { margin: 10px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.exec-trace table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; display: block; overflow-x: auto; }
+.exec-trace th, .exec-trace td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+.exec-trace th { color: var(--text-dim); font-weight: 600; }
+@media (max-width: 600px) {
+  .exec-ladder li { grid-template-columns: minmax(0, 1fr); }
+  .exec-strip-row .btn { margin-left: 0; }
+}

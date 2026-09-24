@@ -257,7 +257,8 @@ export function OutcomeSection({
       <p className="fineprint">
         A successful task does not tell you how many balls were collected; each stage is unknown until someone records it with its source and times. Recording
         SUPPLIED does not change the clean inventory shown in the operating input: enter a new opening count, with its provenance, when you next revise the input.
-        A correction adds a record that supersedes the earlier one; nothing is deleted.
+        A correction adds a record that supersedes the earlier one; nothing is deleted. Simulated ledger quantities in the collection execution panel are
+        SIMULATION evidence, not MEASURED or MANUAL_ESTIMATE results; they are never copied into these records.
       </p>
       {confirmations.length === 0 ? (
         <EmptyNote>No confirmation, so no task to record results for.</EmptyNote>

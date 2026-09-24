@@ -197,7 +197,7 @@ export function DispatchView({ view, actions, health }: { view: TaskOpsView; act
       {data ? <>
         <div className="dispatch-health">
           <span className="detail-text">Updated {utcLabel(data.server_time_utc)} · refreshes every 2 seconds</span>
-          <span className="detail-text">{data.transport === "in_memory" ? "Local protocol double" : "MQTT protocol double"}</span>
+          <span className="detail-text">{data.transport === "in_memory" ? "Local protocol double" : "MQTT protocol double"} · protocol rehearsal, not V3 execution evidence</span>
           <button className="btn btn-quiet" type="button" onClick={() => void actions.refresh()} disabled={view.busy || view.loading}>Refresh tasks</button>
         </div>
         {data.scheduler.state === "FAILED" ? <p className="form-error" role="alert">Scheduler failed. Changes are disabled. {data.scheduler.detail ?? "Inspect the service before continuing."}</p> : healthBlock !== null ? <p className="form-error" role="alert">Changes are disabled. {healthBlock}</p> : null}
@@ -226,6 +226,7 @@ export function DispatchView({ view, actions, health }: { view: TaskOpsView; act
             <p className="fineprint dispatch-inbox-note">Notifications appear in this page while it is open. Email, text messages and remote alerts are not connected.</p>
             <div className="dispatch-list">{data.notifications.length ? data.notifications.map((item) => <NotificationCard key={item.notification_id} item={item} disabled={disabled} onRespond={actions.respond} />) : <EmptyNote>No notifications recorded.</EmptyNote>}</div>
             <h3 className="subhead">Task progress and results</h3>
+            <p className="fineprint">Protocol-double task states from the rehearsal device. Simulated collection and unloading evidence, when a V3 session is connected, appears in the collection execution panel above.</p>
             <div className="dispatch-list">{Object.values(data.tasks).length ? Object.values(data.tasks).map((task) => <article className="dispatch-record" key={task.task_id}>
               <div className="rec-head"><Badge tone={statusTone(task.state)}>{task.state}</Badge><strong>{task.target_robot_id} · {task.zone_id}</strong></div>
               <dl className="kv-grid dispatch-kv"><KeyValue label="Accepted">{task.acceptance_observed ? "Observed" : "Not observed"}</KeyValue><KeyValue label="Result">{task.effective_result ?? "Not reported"}</KeyValue><KeyValue label="Verification">{task.result_verification ?? "Not reported"}</KeyValue><KeyValue label="Last progress">{utcLabel(task.last_progress_at_utc)}</KeyValue></dl>

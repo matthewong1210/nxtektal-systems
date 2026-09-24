@@ -2,6 +2,29 @@
 
 SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA.
 
+Collection execution v1 adds a read-only execution panel between the planning
+panel and the task panel. It consumes only the GET-only
+[`collection-execution-v1` contract](../../simulation/docs/contracts/collection-execution-v1/README.md)
+(`GET /api/v1/collection-executions`) through the Codex-owned strict parser in
+`lib/collection-executions.ts`, and shows each bound task's admission lower
+bound, durable request, device acceptance, simulated job start (which may
+still be travel), collection and unloading, with both ledger quantities,
+exit reasons, device protection and Edge verification. The browser adds no
+button that starts, retries, recovers or stops an execution. Success is shown
+only when the contract's `success_display_allowed` flag is set; balls on the
+robot are a milestone, never completion; washing, supply and manager-recorded
+outcomes stay independent. Missing evidence stays unknown (`INCOMPLETE`),
+`NOT_REACHED` is the contract's own proof that a milestone did not occur, and
+zero is never invented. A response the parser rejects is a read failure: the
+last valid snapshot stays on screen marked stale with its age. The session
+state (`ACTIVE`/`PAUSED`/`ENDED`) and simulation clock are shown apart from the
+wall-clock service read, and a successful read grants no execution authority.
+A round change resets only this panel's own display state; the planning
+panel's pending requests and recovery state are untouched. The V3 route,
+session and device are DESIGN ONLY — NOT IMPLEMENTED at this baseline, so the
+panel reports UNAVAILABLE against current services; its tests run over the
+frozen SIMULATION contract examples, which is not a live integration.
+
 Whole-course monitoring v1 adds a read-only panel above the pilot controls.
 It shows 54 inspection points across 18 synthetic holes, the last observed
 positions of up to 16 carts, saved synthetic camera images/detections, condition
@@ -132,4 +155,5 @@ npm audit --omit=dev
 `tests/boundaries.test.ts` mechanically forbids Python/ROI/replay
 imports, robot-command vocabulary, hidden browser persistence, hardcoded
 network URLs, and any API path outside `/api/v0/` and the frozen
-`/api/v1/planning` and read-only `/api/v1/course-ops` contracts.
+`/api/v1/planning`, read-only `/api/v1/course-ops` and read-only
+`/api/v1/collection-executions` contracts.
