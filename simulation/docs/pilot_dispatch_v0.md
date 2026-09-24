@@ -85,6 +85,22 @@ the clock and background loop live only in the composition script. Storage or
 loop failure stops scheduling and becomes an API/UI error. A process lock
 prevents two runner instances sharing evidence.
 
+## Explicit service capabilities
+
+Current task-ops services publish the versioned
+[`service_capabilities`](contracts/pilot-dispatch-v0/service-capabilities/README.md)
+block on every successful `GET /api/v0/task-ops`. This legacy runner identifies
+itself as `LEGACY_PILOT_DISPATCH` and explicitly declares all eight existing
+Planning, schedule, cancellation and local-notification writes as `SUPPORTED`.
+That declaration preserves this runner's existing routes; it is not inferred
+from its in-memory transport, an HTTP success, or the absence of V3 runtime
+fields. Scheduler failure and record-level preconditions remain separate gates.
+
+An older response without the block remains readable by the console but grants
+no write capability. It is labelled `UNDECLARED`, not guessed to be this legacy
+mode. This fail-closed compatibility rule does not alter any saved journal or
+replay evidence.
+
 ## Verification contract
 
 Exercise future/due/expired schedules, duplicate HTTP requests, restart and

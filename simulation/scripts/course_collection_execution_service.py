@@ -48,6 +48,9 @@ from scripts.site_agent_fixture import (  # noqa: E402
     SITE_ID,
     service_composition_seam,
 )
+from scripts.task_ops_service_capabilities import (  # noqa: E402
+    task_ops_service_capabilities,
+)
 
 
 _TERMINAL_EXECUTIONS = frozenset(
@@ -251,6 +254,9 @@ class CollectionExecutionServiceRuntime:
                         "state": "FAILED" if failure is not None else "RUNNING",
                         "detail": failure,
                     },
+                    "service_capabilities": task_ops_service_capabilities(
+                        "FIXED_V3_EXECUTION"
+                    ),
                     "runtime": {
                         **self.demo.runtime_status(),
                         "driver_state": self.driver_state,

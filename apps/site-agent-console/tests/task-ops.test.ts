@@ -1,13 +1,36 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { API_SCHEMA, ManagerApiError } from "../lib/api";
-import { buildSchedule, createTaskOpsClient, humanResponse, isAmbiguousMutation, localTimeToUtc, parseTaskOps } from "../lib/task-ops";
+import {
+  TASK_OPS_WRITE_OPERATIONS,
+  buildSchedule,
+  canPerformTaskOps,
+  createTaskOpsClient,
+  humanResponse,
+  isAmbiguousMutation,
+  localTimeToUtc,
+  parseTaskOps,
+  taskOpsCapabilities,
+  taskOpsSupports,
+  type TaskOpsView,
+} from "../lib/task-ops";
 import { taskOpsFixture } from "./task-ops-fixtures";
 
 const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({ schema: API_SCHEMA, disclaimer: "SIMULATION", data }), { status });
+const CAPABILITIES_EXAMPLES = join(
+  import.meta.dirname, "..", "..", "..", "simulation", "docs", "contracts",
+  "pilot-dispatch-v0", "service-capabilities", "examples",
+);
+const capabilityExample = (name: string): unknown =>
+  JSON.parse(readFileSync(join(CAPABILITIES_EXAMPLES, `${name}.json`), "utf-8"));
 const originalTz = process.env.TZ;
 afterEach(() => { if (originalTz === undefined) delete process.env.TZ; else process.env.TZ = originalTz; });
 
 describe("task operations contracts", () => {
+  const fixedV3Capabilities = capabilityExample("fixed-v3-execution") as Record<string, unknown>;
+  const legacyCapabilities = capabilityExample("legacy-pilot-dispatch") as Record<string, unknown>;
+
   it("accepts additive evidence fields and preserves absent results", () => {
     const payload = { ...taskOpsFixture(), future_field: true };
     expect(parseTaskOps(payload).tasks["task-1"].result_verification).toBeNull();
@@ -23,6 +46,61 @@ describe("task operations contracts", () => {
     const sample = taskOpsFixture();
     expect(() => parseTaskOps({ ...sample, schedules: [{ ...sample.schedules[0], status: "NEW" }] })).toThrow();
     expect(() => parseTaskOps({ ...sample, devices: { "picker-01": { robot_id: "picker-01" } } })).toThrow();
+  });
+  it("validates fixed V3 capabilities per operation without treating notifications as globally unavailable", () => {
+    const parsed = parseTaskOps({ ...taskOpsFixture(), service_capabilities: fixedV3Capabilities });
+    expect(taskOpsCapabilities(parsed)).toEqual({ declared: true, ...fixedV3Capabilities });
+    expect(taskOpsSupports(parsed, "planning_confirmations_create")).toBe(false);
+    expect(taskOpsSupports(parsed, "schedules_create")).toBe(false);
+    expect(taskOpsSupports(parsed, "planning_outcomes_create")).toBe(true);
+    expect(taskOpsSupports(parsed, "notifications_acknowledge")).toBe(true);
+    expect(taskOpsSupports(parsed, "notifications_resolve")).toBe(true);
+  });
+  it("keeps the explicit legacy mode distinct and preserves its installed write routes", () => {
+    const parsed = parseTaskOps({ ...taskOpsFixture(), service_capabilities: legacyCapabilities });
+    expect(taskOpsCapabilities(parsed)).toEqual({ declared: true, ...legacyCapabilities });
+    for (const operation of TASK_OPS_WRITE_OPERATIONS) expect(taskOpsSupports(parsed, operation)).toBe(true);
+  });
+  it("keeps an undeclared historical payload readable but grants no write capability", () => {
+    const historical = taskOpsFixture() as TaskOpsView["data"] & Record<string, unknown>;
+    delete historical.service_capabilities;
+    const parsed = parseTaskOps({
+      ...historical,
+      transport: "mqtt",
+      runtime: { fixed_confirmation: false, accepts_new_confirmations: true, accepts_new_schedules: true },
+    });
+    const capabilities = taskOpsCapabilities(parsed);
+    expect(capabilities.mode).toBe("UNDECLARED");
+    expect(capabilities.declared).toBe(false);
+    for (const operation of TASK_OPS_WRITE_OPERATIONS) expect(taskOpsSupports(parsed, operation)).toBe(false);
+  });
+  it("fails loudly when a declared capability block is partial, unknown or malformed", () => {
+    const incomplete = structuredClone(fixedV3Capabilities) as Record<string, unknown>;
+    delete (incomplete.operations as Record<string, unknown>).schedules_cancel;
+    const wrongStatus = structuredClone(fixedV3Capabilities);
+    (wrongStatus.operations as Record<string, unknown>).schedules_create = true;
+    const inconsistent = structuredClone(fixedV3Capabilities);
+    (inconsistent.operations as Record<string, unknown>).schedules_create = "SUPPORTED";
+    const extraOperation = structuredClone(fixedV3Capabilities);
+    (extraOperation.operations as Record<string, unknown>).invented_write = "SUPPORTED";
+    for (const service_capabilities of [
+      incomplete,
+      wrongStatus,
+      inconsistent,
+      extraOperation,
+      { ...fixedV3Capabilities, schema: "nxt-pilot-dispatch/service-capabilities/v2" },
+      { ...fixedV3Capabilities, mode: "AUTO_DETECT" },
+    ]) {
+      expect(() => parseTaskOps({ ...taskOpsFixture(), service_capabilities })).toThrow(ManagerApiError);
+    }
+  });
+  it("combines explicit per-operation support with view health instead of transport success", () => {
+    const snapshot = parseTaskOps({ ...taskOpsFixture(), service_capabilities: fixedV3Capabilities });
+    const healthy: TaskOpsView = { data: snapshot, loading: false, busy: false, error: null, unavailable: false };
+    expect(canPerformTaskOps(healthy, "schedules_create")).toBe(false);
+    expect(canPerformTaskOps(healthy, "notifications_acknowledge")).toBe(true);
+    expect(canPerformTaskOps({ ...healthy, busy: true }, "notifications_acknowledge")).toBe(false);
+    expect(canPerformTaskOps({ ...healthy, data: { ...snapshot, scheduler: { state: "FAILED", detail: "stopped" } } }, "notifications_acknowledge")).toBe(false);
   });
   it("uses only the same-origin endpoint and unwraps checked snapshots", async () => {
     const fetcher = vi.fn(async () => envelope(taskOpsFixture()));

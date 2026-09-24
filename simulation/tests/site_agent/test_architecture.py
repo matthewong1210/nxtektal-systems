@@ -135,6 +135,7 @@ SERVICE_SCRIPTS = (
     "scripts/site_agent_fixture.py",
     "scripts/site_agent_demo.py",
     "scripts/course_collection_execution_service.py",
+    "scripts/task_ops_service_capabilities.py",
 )
 
 COLLECTION_EXECUTION_SERVICE = (

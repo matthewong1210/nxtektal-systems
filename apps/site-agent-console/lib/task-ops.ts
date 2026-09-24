@@ -2,6 +2,34 @@ import { API_SCHEMA, ManagerApiError, type FetchLike } from "./api";
 
 export const TASK_OPS_SCHEMA = "nxt-pilot-dispatch/v0";
 export const TASK_OPS_POLL_MS = 2_000;
+export const TASK_OPS_CAPABILITIES_SCHEMA = "nxt-pilot-dispatch/service-capabilities/v1";
+export const TASK_OPS_WRITE_OPERATIONS = [
+  "planning_inputs_create",
+  "planning_plans_create",
+  "planning_confirmations_create",
+  "planning_outcomes_create",
+  "schedules_create",
+  "schedules_cancel",
+  "notifications_acknowledge",
+  "notifications_resolve",
+] as const;
+
+export type TaskOpsWriteOperation = (typeof TASK_OPS_WRITE_OPERATIONS)[number];
+export type TaskOpsCapabilityStatus = "SUPPORTED" | "UNAVAILABLE";
+export type TaskOpsServiceMode = "FIXED_V3_EXECUTION" | "LEGACY_PILOT_DISPATCH";
+export interface TaskOpsServiceCapabilities {
+  schema: typeof TASK_OPS_CAPABILITIES_SCHEMA;
+  mode: TaskOpsServiceMode;
+  operations: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus>;
+}
+export type EffectiveTaskOpsCapabilities =
+  | ({ declared: true } & TaskOpsServiceCapabilities)
+  | {
+      declared: false;
+      schema: null;
+      mode: "UNDECLARED";
+      operations: Record<TaskOpsWriteOperation, "UNAVAILABLE">;
+    };
 
 export interface Schedule {
   schedule_id: string;
@@ -65,6 +93,9 @@ export interface TaskOpsSnapshot {
   environment: "SIMULATION";
   server_time_utc: string;
   scheduler: { state: "RUNNING" | "FAILED"; detail: string | null };
+  /** Optional only for historical payload compatibility. Missing means no
+   * write capability is declared; it never means legacy full access. */
+  service_capabilities?: TaskOpsServiceCapabilities;
   schedules: Schedule[];
   notifications: TaskNotification[];
   devices: Record<string, DeviceSummary>;
@@ -96,6 +127,44 @@ const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(text);
 const timestamp = (value: unknown): value is string =>
   text(value) && /Z$/.test(value) && Number.isFinite(Date.parse(value));
+const exactKeys = (value: Record<string, unknown>, expected: readonly string[]) =>
+  Object.keys(value).length === expected.length && expected.every((key) => key in value);
+
+const FIXED_V3_OPERATIONS: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus> = {
+  planning_inputs_create: "UNAVAILABLE",
+  planning_plans_create: "UNAVAILABLE",
+  planning_confirmations_create: "UNAVAILABLE",
+  planning_outcomes_create: "SUPPORTED",
+  schedules_create: "UNAVAILABLE",
+  schedules_cancel: "UNAVAILABLE",
+  notifications_acknowledge: "SUPPORTED",
+  notifications_resolve: "SUPPORTED",
+};
+const LEGACY_OPERATIONS: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus> = Object.fromEntries(
+  TASK_OPS_WRITE_OPERATIONS.map((operation) => [operation, "SUPPORTED"]),
+) as Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus>;
+const UNDECLARED_OPERATIONS = Object.fromEntries(
+  TASK_OPS_WRITE_OPERATIONS.map((operation) => [operation, "UNAVAILABLE"]),
+) as Record<TaskOpsWriteOperation, "UNAVAILABLE">;
+const UNDECLARED_CAPABILITIES: EffectiveTaskOpsCapabilities = {
+  declared: false,
+  schema: null,
+  mode: "UNDECLARED",
+  operations: UNDECLARED_OPERATIONS,
+};
+
+function validServiceCapabilities(value: unknown): value is TaskOpsServiceCapabilities {
+  if (!object(value) || !exactKeys(value, ["schema", "mode", "operations"]) ||
+      value.schema !== TASK_OPS_CAPABILITIES_SCHEMA ||
+      !["FIXED_V3_EXECUTION", "LEGACY_PILOT_DISPATCH"].includes(String(value.mode))) return false;
+  const operations = value.operations;
+  if (!object(operations) || !exactKeys(operations, TASK_OPS_WRITE_OPERATIONS)) return false;
+  const mode = value.mode as TaskOpsServiceMode;
+  const expected = mode === "FIXED_V3_EXECUTION" ? FIXED_V3_OPERATIONS : LEGACY_OPERATIONS;
+  return TASK_OPS_WRITE_OPERATIONS.every((operation) =>
+    ["SUPPORTED", "UNAVAILABLE"].includes(String(operations[operation])) &&
+    operations[operation] === expected[operation]);
+}
 
 /** Validate the fields the UI reads before enabling any form. Unknown additive
  * projection fields remain compatible; missing values never become defaults. */
@@ -110,6 +179,8 @@ export function parseTaskOps(value: unknown): TaskOpsSnapshot {
       !strings(value.available_zones) || !["in_memory", "mqtt"].includes(String(value.transport)) ||
       !Array.isArray(value.schedules) || !Array.isArray(value.notifications) ||
       !object(value.tasks) || !object(value.devices)) return fail();
+  if ("service_capabilities" in value &&
+      !validServiceCapabilities(value.service_capabilities)) return fail();
   for (const item of value.schedules) {
     if (!object(item) || !text(item.schedule_id) || !text(item.robot_id) || !text(item.zone_id) ||
         !text(item.operator) || !timestamp(item.due_at_utc) || !timestamp(item.expires_at_utc) ||
@@ -236,6 +307,26 @@ export const INITIAL_TASK_OPS_VIEW: TaskOpsView = {
 };
 export const canMutateTaskOps = (view: TaskOpsView) =>
   !!view.data && !view.busy && !view.loading && !view.error && !view.unavailable && view.data.scheduler.state === "RUNNING";
+
+/** Return a validated service declaration. Historical payloads remain readable
+ * but normalize to an explicit fail-closed state; transport, runtime fields and
+ * HTTP success never grant an operation. */
+export function taskOpsCapabilities(snapshot: TaskOpsSnapshot): EffectiveTaskOpsCapabilities {
+  return snapshot.service_capabilities === undefined
+    ? UNDECLARED_CAPABILITIES
+    : { declared: true, ...snapshot.service_capabilities };
+}
+
+export function taskOpsSupports(snapshot: TaskOpsSnapshot, operation: TaskOpsWriteOperation): boolean {
+  return taskOpsCapabilities(snapshot).operations[operation] === "SUPPORTED";
+}
+
+/** Static service support and dynamic read/scheduler health are independent
+ * gates. Record-level preconditions (for example notification.can_resolve)
+ * remain an additional caller and server responsibility. */
+export function canPerformTaskOps(view: TaskOpsView, operation: TaskOpsWriteOperation): boolean {
+  return canMutateTaskOps(view) && view.data !== null && taskOpsSupports(view.data, operation);
+}
 
 /** One read at a time. Mutations invalidate pending reads before any network
  * work, and perform a fresh read while controls remain busy. The saved view is
