@@ -1,14 +1,15 @@
-# Collection Execution V3 backend runbook
+# Collection Execution V3 integration runbook
 
-Status: implemented on the local, unmerged
-`codex/collection-execution-3b` branch.  This is a deterministic
-**SIMULATION-only** backend rehearsal.  It is not a physical robot path, live
-site integration, production service, or claim of field performance.
+Status: Phase 3B backend and Phase 3C isolated console integration are
+implemented on the local, unmerged `codex/collection-execution-3c` branch.
+This is a deterministic **SIMULATION-only** rehearsal.  It is not a physical
+robot path, live site integration, production service, or claim of field
+performance.
 
 The frozen architecture and contract remain in
 [`collection_execution_v1_architecture.md`](collection_execution_v1_architecture.md).
-This runbook covers the implemented Phase 3B backend and the read-only
-handoff to the Manager API and console client.
+This runbook covers the Phase 3B durable execution backend and the Phase 3C
+single-process read-only Manager API/console integration.
 
 ## Ownership and safety boundary
 
@@ -38,8 +39,74 @@ cd simulation
 uv sync --locked --all-extras
 ```
 
-The demo command itself uses `uv run --no-sync` so it cannot silently update
-the environment or lock file.
+The commands below use `uv run --no-sync` so they cannot silently update the
+environment or lock file.  Build the already-integrated static console once:
+
+```bash
+cd ../apps/site-agent-console
+npm ci
+npm run build
+cd ../../simulation
+```
+
+## Start the integrated service
+
+The Phase 3C service has one supported scope: one seeded Planning
+confirmation and its one V3 execution.  One composition root owns the same V3
+session, simulator-backed task device, Edge journal, Planning records and
+in-memory transport.  Exactly one background driver advances it; every HTTP
+GET is read-only, appends no evidence and never advances beyond the durable
+committed prefix.  A verified causal replay may reconstruct that prefix in
+memory.
+
+Use a fresh empty evidence directory for the first start:
+
+```bash
+SERVICE_ROOT="$(mktemp -d /tmp/nxt-collection-execution-service.XXXXXX)"
+uv run --no-sync python -B -m scripts.course_collection_execution_service \
+  --out "$SERVICE_ROOT" \
+  --initialize \
+  --port 8767
+```
+
+The command prints its bound URL.  With the shown port, open
+`http://127.0.0.1:8767/`.  At the default six-second driver cadence the same
+durable session is observable as `PENDING`, then `RUNNING` with positive raw
+collection evidence, then `SUCCEEDED` with an equal positive unload quantity.
+The API remains online after the driver completes, protects, ends or
+fail-stops.  The HTTP surface is started before the driver is armed, so the
+initial `PENDING` state is available before any live tick.
+
+To restart the same durable device/session after stopping the process, run the
+same command with the same `SERVICE_ROOT` and omit `--initialize`.  This is a
+real device-process restart: existing incarnation and unknown-outcome rules
+run before any residual outbox reconciliation.  It is not ordinary committed
+prefix replay, and an old authorization is never re-executed.
+
+This fixed service explicitly rejects new Planning inputs, plans and
+confirmations and new schedules.  It cannot acknowledge a request it has no
+execution path to fulfill.  Existing evidence-only Planning outcome recording
+and local notification acknowledgement/resolution keep their prior semantics;
+neither unlocks a protected device nor starts execution.
+
+Business deadlines, schedule lifecycle and execution use projected simulation
+UTC.  The console's 15-second read-health expiry and `server_time_utc` use wall
+UTC even while simulation is paused.  A driver exception or unexpected
+nonterminal session end stops all further advancement, retains durable
+evidence and makes disallowed writes fail closed.  If failure occurs after a
+V3 tick commit but before matching Edge evidence is durable, the strict
+collection GET returns 503 instead of inventing a reconciled result.  Task Ops
+remains readable with `scheduler.state=FAILED`; the console retains its last
+successful execution snapshot as stale.  The original request-id receipt
+remains independently recoverable because it was durable before Edge
+acceptance.  Explicit process restart performs the existing device-first
+recovery without another live tick.
+
+The saved `nxt-course-ops/v1` panel backed by frozen
+`nxt-whole-course-session/v2` evidence is not wired to this V3 runtime.  If
+separately configured, it remains an independent read-only observation with
+unrelated session identity and must not be presented as this execution's
+course view.
 
 ## Initialize a fresh deterministic run
 
@@ -271,19 +338,15 @@ binding, execution, attempt, quantities and replay digest.
 
 ## Read-only API and TypeScript handoff
 
-Phase 3B implements the transport seams but deliberately does **not** add a
-combined collection-execution server command.  The current bounded runner
-requires `--no-serve`; omitting it is a command-line error.  Do not document
-`--serve` or claim that a production/live service exists.
-
-A composition root may inject these readers into `SiteAgentApiServer`:
+`scripts.course_collection_execution_service` injects these same-instance
+readers into `SiteAgentApiServer`:
 
 - `collection_executions: Callable[[], dict]`;
 - `collection_execution_request: Callable[[str], dict]`; and
 - `collection_execution_parser=parse_collection_execution_read_contract`.
 
-The server receives only reader callbacks, not a mutable session, store or
-filesystem capability.  The implemented routes are:
+The API handler receives only callbacks, not a second runtime, device or
+journal.  The implemented routes are:
 
 - `GET /api/v1/collection-executions`;
 - `GET /api/v1/collection-executions/requests/{request_id}`; and
@@ -306,9 +369,9 @@ In `apps/site-agent-console/lib/collection-executions.ts`:
 
 ### Claude/React ownership
 
-React components, CSS, visual states and interaction tests remain
-Claude-owned and are not implemented on this backend branch.  The frontend
-handoff must preserve these rules:
+The Claude-owned React components, CSS, visual states and interaction tests
+are integrated unchanged from the accepted frontend commits.  They preserve
+these rules:
 
 - display the backend `state`, `stage`, reasons, quantities, source IDs,
   protection and Edge verification as evidence; do not recompute them;
@@ -322,6 +385,51 @@ handoff must preserve these rules:
   collection-execution namespace; and
 - do not infer washed, supplied, clean-inventory or Planning-outcome facts from
   raw/unloaded quantities.
+
+## Phase 3C loopback service evidence
+
+A final loopback run on 2026-09-24 used one fresh evidence root, one service
+process and one 30-second background driver.  Three GETs against that same
+process and `collection-execution-session-v3` observed:
+
+| Read | `now_sim_t_s` | State / stage | Raw balls | Unloaded balls |
+|---:|---:|---|---:|---:|
+| Before first tick | `29400.0` | `PENDING` / `WAITING_FOR_POLICY_SLOT` | `null` | `null` |
+| After first tick | `30000.0` | `RUNNING` / `RAW_COLLECTED_TO_ROBOT` | `600` | `0` |
+| After second tick | `30600.0` | `SUCCEEDED` / `TERMINAL` | `600` | `600` |
+
+The terminal read reported source `RANGE_SIMULATION_BALL_LEDGER`, reason
+`UNLOADED_ALL_COLLECTED_BALLS`, `success_display_allowed=true`, and exactly one
+durable request receipt.  It did not report wash, supply, inventory or
+Planning outcome completion.  The same process returned a strict
+`nxt-pilot-dispatch/v0` task projection with `environment=SIMULATION`,
+`transport=in_memory`, `runtime.driver_state=COMPLETED`, the task
+`state=SUCCEEDED`, and the device's journal-receipt-based ONLINE observation.
+Its `server_time_utc` was wall time; the execution reads above retained the
+simulation clock.
+
+The durable execution tree hash, excluding process locks and the independent
+Site Agent fixture root, was
+`ca0b622a3cf14b2b89eaf28eae5ca48667485dc03ae79634965372260e64d982`
+both before and after another collection GET.  That is direct service evidence
+that the read appended no execution evidence and did not advance the session.
+
+A browser run against another single-process root visibly followed the same
+`PENDING` to `RUNNING` to `SUCCEEDED` sequence.  The panel showed 600 raw / 0
+unloaded at the milestone and 600 / 600 at terminal success, with the
+simulation-only and read-only labels intact.  The browser reported no warning
+or error logs and no framework error overlay.  The independent Whole-course
+panel explicitly rendered its unconnected/no-data state instead of presenting
+V2 evidence as this V3 session.
+
+The loopback integration tests in
+`tests/site_agent/test_collection_execution_service.py` additionally exercise
+the actual `SiteAgentApiServer` callbacks for paused simulation with advancing
+wall health, unexpected session end, pre-commit and post-commit driver
+failure, uncertain Planning/notification evidence writes, real SafetyShield
+rejection, human-assistance protection, and a running-device restart that
+becomes unknown without re-executing the old authorization.  These are
+isolated simulation-service tests, not physical-device evidence.
 
 ## Frozen 20-case acceptance matrix
 
@@ -350,8 +458,8 @@ The shared TypeScript parser consumes that runtime witness in
 | 14 | Terminal conflict | Effective result becomes protected `INCONCLUSIVE`/conflict even when one terminal says success. |
 | 15 | Quantity integrity | Assignment events reconcile with `BallLedger`, conservation and payload parity; missing evidence is null, not zero. |
 | 16 | Stage separation | Raw, unload, wash, supply and Planning outcome remain distinct; no downstream inventory is inferred. |
-| 17 | Clock separation | Simulation deadlines and wall-clock 15-second health remain independent; shared TS helper coverage exists, but React rendering remains unimplemented. |
-| 18 | Schedule form reuse | Date comparison uses simulation UTC while write health remains wall-clock based; shared TS helper coverage exists, but React integration remains unimplemented. |
+| 17 | Clock separation | Simulation deadlines and wall-clock 15-second health remain independent; the React read-health timer expires on wall time even when simulation is paused. |
+| 18 | Schedule form reuse | Date comparison uses the shared V3 simulation UTC while write health remains wall-clock based and fail-closed. |
 | 19 | Bound handoff | Zero/multiple/wrong station rejects before acceptance; only correlated unload to `H1` completes the fixture. |
 | 20 | Crash boundaries | Before-prepare, prepared-only, committed/cursor-stale and outbox-unconfirmed recovery avoid duplicate lifecycle/movement; unverifiable replay protects as `INCONCLUSIVE`. |
 
@@ -360,31 +468,38 @@ Focused evidence observed while writing this runbook:
 ```text
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/course_monitoring/test_collection_execution_acceptance.py
-21 passed in 11.20s
+21 passed in 12.35s
 
 npm test -- tests/collection-execution-acceptance.test.ts \
   tests/collection-executions-contract.test.ts
 2 test files passed; 341 tests passed
 ```
 
-The root-agent delivery verification subsequently observed:
+Final Phase 3C delivery verification observed:
 
-- full Python suite: 3054 passed in 255.45 seconds;
+- service integration tests: 14 passed in 63.79 seconds;
+- frozen Python acceptance manifest: 21 passed in 12.35 seconds;
+- normative architecture/safety subset: 210 passed in 6.89 seconds;
+- full Python suite: 3069 passed in 320.53 seconds;
 - `scripts/validate_configs.py`: 0 errors / 0 warnings;
 - console typecheck passed;
-- console lint: 0 errors / 2 warnings;
-- console tests: 563 passed;
-- console build and smoke passed;
-- `npm audit --omit=dev`: 0 vulnerabilities;
-- Python package build passed;
+- console lint: 0 errors / 2 existing unused-parameter warnings;
+- console tests: 24 files / 607 tests passed;
+- focused console contract tests: 2 files / 341 tests passed;
+- console production build and loopback HTTP smoke passed;
+- real browser check passed through `PENDING`, `RUNNING` and `SUCCEEDED` with
+  no browser warning/error logs or framework error overlay;
+- `npm ci` audited 392 packages and reported 0 vulnerabilities; the separate
+  required `npm audit --omit=dev` command was not run because permission to
+  contact the external registry audit service was denied;
+- Python source distribution and wheel build passed;
 - repository policy unit tests: 111 passed; and
-- repository verifier: passed across 702 tracked/nonignored paths and 83
-  Markdown files, followed by clean whitespace and tracked/untracked scope
-  checks.
+- repository verifier: passed across 712 tracked/nonignored paths and 84
+  Markdown files.
 
 ## Implemented and still unimplemented
 
-Implemented on this local backend branch:
+Implemented on this local integration branch:
 
 - V3-only assignment IDs and immutable simulator event evidence;
 - ledger-backed raw collection and bound-station unload attribution;
@@ -393,17 +508,21 @@ Implemented on this local backend branch:
   replay digest and crash recovery;
 - simulator-backed Edge lifecycle/protection and restart mapping;
 - the bounded Planning-confirmation-to-verified-Edge-terminal demo;
+- the single-runtime service composition, sole background driver and strict
+  `nxt-pilot-dispatch/v0` projection;
 - strict read-only Manager API injection routes;
 - strict TypeScript types, parser, `read()`/`readRequest()` client and
-  simulation-clock helper; and
+- simulation-clock helper;
+- Claude-owned React/CSS presentation, independent 15-second wall-clock read
+  health and component/interaction tests; and
 - executable backend coverage for all 20 frozen acceptance cases.
 
 Not implemented:
 
 - any physical robot, live device, hardware/vendor transport, ROS, actuator,
   production publisher, physical task admission or real-site deployment;
-- a combined long-running collection-execution server/serve command;
-- the Claude-owned React components, CSS, visual states and interaction tests;
+- arbitrary new confirmations or schedules in the fixed Phase 3C service;
+- a Course Ops projection bound to the V3 execution session;
 - automatic Planning outcome writes;
 - wash results, supply results or per-task washed/supplied lineage;
 - clean/supply inventory replenishment inferred from raw or unload evidence;

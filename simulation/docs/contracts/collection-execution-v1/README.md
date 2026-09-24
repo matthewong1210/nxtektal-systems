@@ -1,10 +1,13 @@
 # Collection execution v1 wire contract
 
-**DESIGN ONLY — execution is not implemented.** These synthetic SIMULATION
-assets freeze Phase 3A data and rejection rules. They add no session driver,
-device, API route, simulator behavior or browser execution capability. The
+**IMPLEMENTED FOR THE LOCAL SIMULATION REHEARSAL; NOT A PHYSICAL EXECUTION
+CONTRACT.** These synthetic assets freeze the Phase 3A wire data and rejection
+rules.  Phase 3B implements the V3 driver, simulator-backed device, durable
+journals and read-only API; Phase 3C integrates the strict console reader with
+one fixed-confirmation service.  The
 [architecture](../../collection_execution_v1_architecture.md) is normative
-alongside this schema and its relational conformance tests.
+alongside this schema and its relational conformance tests.  No browser or
+LLM receives execution authority.
 
 ## Owners and compatibility
 
@@ -12,9 +15,9 @@ Planning v1 owns input revisions, plan versions, confirmation and separate
 human outcomes. Edge v1 owns schedules, admission and transport lifecycle.
 PlanningOperations verifies their exact cross-links. RangeSimulation owns
 mutable runtime truth; BallLedger alone owns conserved quantities.
-The future single V3 whole-course driver owns advancement; scripts compose
-binding, durable requests and read projections. SafetyShield remains final
-admission through apply_directive. The browser validates and displays.
+The single V3 whole-course driver owns advancement; scripts compose binding,
+durable requests and read projections. SafetyShield remains final admission
+through apply_directive. The browser validates and displays.
 
 V2 roots, bytes and replay digests remain immutable; execution requires a new
 V3 root. Planning v1, Edge v1, Course Ops v1 and schedule v2 are unchanged.
@@ -37,7 +40,7 @@ Portable JSON Schema describes shape and local conditions. Consumers must
 also enforce the relational rules below; schema validation alone does not
 prove hashes, cross-links, time arithmetic, quantity attribution or admission.
 The Python fixture oracle tests those rules; the TypeScript parser enforces
-them on read. Neither replaces Phase 3B runtime verification.
+them on read. Neither replaces runtime verification.
 
 Each example has a description, an ordered `bodies` list of
 `{schema_ref, body}` declarations and a complete `snapshot` declaration.
@@ -68,8 +71,8 @@ Edge ACCEPTED, the Phase 3B composition must verify the frozen scenario has
 exactly one handoff station and that its ID equals handoff_station_id. The
 existing one-station scenario and these fixtures use H1; zero stations,
 multiple stations or a mismatched H1 binding reject before acceptance. The
-mode is a contract restriction, not a claim that this topology check is
-implemented. Multi-station execution needs a separately versioned contract.
+mode is a contract restriction implemented by the V3 binding gate.
+Multi-station execution needs a separately versioned contract.
 
 Production binding_id is SHA-256 of the canonical binding body excluding
 binding_id. execution_id hashes the canonical object containing task_id,
@@ -315,7 +318,7 @@ original ID. Exact replay includes bindings, high-water identity, policy,
 arbiter, original/selected actions, assignment events and terminals; mismatch
 fails closed.
 
-The per-tick transaction is also DESIGN ONLY. Under the session lock,
+The implemented per-tick transaction runs under the session lock.
 ACTION_PREPARED means append and fsync tick_intent containing the previous
 committed cursor/digest, request-log high water, policy/arbiter identities,
 original/selected action and execution/assignment identity. Then call
@@ -334,9 +337,10 @@ committed Edge event is redelivered with its same bytes and sequence, never a
 new attempt. Edge evidence lacking a matching committed tick is a conflict
 and blocks authorization. An intent alone cannot publish progress or terminal
 evidence. These crash rules do not downgrade actual device-process restart
-rules to ordinary chunk replay and do not implement a journal in Phase 3A.
+rules to ordinary chunk replay.  Phase 3A defined this protocol; Phase 3B
+implements its journal and recovery behavior.
 
-Future GET /api/v1/collection-executions reads snapshots.
+GET /api/v1/collection-executions reads snapshots.
 GET /api/v1/collection-executions/requests/{request_id} recovers receipts.
 Every POST/PUT/PATCH/DELETE in that namespace is 405. No browser endpoint
 creates, retries or controls execution. The existing Planning confirmation and
@@ -346,8 +350,10 @@ recorded; only then may Edge ACCEPTED and an execution action follow.
 
 The existing nxt-site-agent/api/v0 success envelope is schema/disclaimer/data;
 error is schema/disclaimer/error with code/detail. The client is same-origin,
-GET-only and cache: no-store. These routes, device, request journal, V3 session,
-runtime assignment evidence and React components remain Phase 3B work.
+GET-only and cache: no-store. The routes, device, request journal, V3 session,
+runtime assignment evidence and strict React presentation are implemented for
+the local simulation integration. Physical execution and arbitrary new task
+admission remain outside this contract.
 
 ## Verification
 

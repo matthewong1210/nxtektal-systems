@@ -134,6 +134,11 @@ BANNED_CALL_NAMES = {
 SERVICE_SCRIPTS = (
     "scripts/site_agent_fixture.py",
     "scripts/site_agent_demo.py",
+    "scripts/course_collection_execution_service.py",
+)
+
+COLLECTION_EXECUTION_SERVICE = (
+    SIMULATION_ROOT / "scripts" / "course_collection_execution_service.py"
 )
 
 SCRIPT_BANNED_IMPORT_ROOTS = {
@@ -267,6 +272,25 @@ def test_service_scripts_import_no_transport_or_robot_stack():
             assert root not in SCRIPT_BANNED_IMPORT_ROOTS, (
                 f"{relative} imports banned module {module}"
             )
+
+
+def test_collection_execution_service_has_one_simulator_path_and_no_mock_or_physical_path():
+    text = COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+    assert text.count("CourseCollectionExecutionDemo(") == 1
+    assert text.count("self.demo.advance_once()") == 1
+    for token in (
+        "MockRobotDevice",
+        "PilotDispatchRuntime",
+        "RobotTaskInterface",
+        "HandoffController",
+        "apply_directive(",
+        "rclpy",
+        "rospy",
+        "--live",
+        "--real-robot",
+        "--hardware",
+    ):
+        assert token not in text, f"collection service mentions {token!r}"
 
 
 def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess:

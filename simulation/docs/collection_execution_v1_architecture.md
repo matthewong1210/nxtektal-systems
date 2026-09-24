@@ -1,12 +1,13 @@
 # Collection execution v1 architecture
 
-> **IMPLEMENTATION STATUS — SIMULATION BACKEND IMPLEMENTED ON AN UNMERGED
-> BRANCH.** This document remains the accepted Phase 3A architecture and shared
-> v1 contract.  Phase 3B implements the V3 session driver, simulator-backed
-> task device, durable request/replay path, read-only Manager API seams and
-> strict TypeScript client on `codex/collection-execution-3b`.  React/CSS,
-> physical/live integration, Planning outcome writes, washing and supply
-> remain unimplemented.  See
+> **IMPLEMENTATION STATUS — PHASE 3C SIMULATION INTEGRATION IMPLEMENTED ON AN
+> UNMERGED BRANCH.** This document remains the accepted Phase 3A architecture
+> and shared v1 contract.  Phase 3B implements the V3 session driver,
+> simulator-backed task device, durable request/replay path, read-only Manager
+> API seams and strict TypeScript client.  Phase 3C combines that backend with
+> the Claude-owned console through one same-runtime service on
+> `codex/collection-execution-3c`.  Physical/live integration, automatic
+> Planning outcome writes, washing and supply remain unimplemented.  See
 > [`collection_execution_v3_runbook.md`](collection_execution_v3_runbook.md)
 > for reproducible operation and observed backend evidence.
 
@@ -14,6 +15,10 @@ Phase 3A base: `ffb0aa623c2e7093398b1d42a493c16411a61a70`.
 Phase 3A design branch: `codex/collection-execution-3a`.
 Phase 3B base: `064b90456557acf78b769dfb12f3bf2ccf3cdf17`.
 Phase 3B implementation branch: `codex/collection-execution-3b` (local,
+unmerged).
+Phase 3C integration base: backend `869bb6c74b50da40aacca1e7fcd46f78663cbb76`
+plus frontend `a02e7ec67e48446a3f03d0ee848c272c64cc063d` and its accepted clock fixes.
+Phase 3C integration branch: `codex/collection-execution-3c` (local,
 unmerged).
 Environment: `SIMULATION` only.
 
@@ -76,7 +81,7 @@ carry per-task lineage, so their attribution remains unknown.
 | Session advancement and deterministic prefix replay | the single whole-course session driver | The only component allowed to call `RangeOpsEnv.step()`. |
 | Cross-owner binding, durable request input, arbitration evidence and result projection | new `simulation/scripts/` composition code | Composition only; no new package or truth store. |
 | Manager API transport | `nxt_site_agent.api` | Implemented injected read-only callbacks and strict GET routes; no simulator import or mutation capability. |
-| Browser presentation | `apps/site-agent-console` | Strict TypeScript parser/client implemented; React/CSS presentation remains a separate unimplemented handoff and must never calculate admission or quantities. |
+| Browser presentation | `apps/site-agent-console` | Strict TypeScript parser/client and Claude-owned React/CSS presentation are integrated; they remain read-only and must never calculate admission or quantities. |
 
 No LLM, advice engine, browser component, Site Runtime component, or task
 transport may call `apply_directive()`, `RobotTaskInterface`, an adapter, ROS,
@@ -549,7 +554,7 @@ simulator, policy, Edge package or experiment was changed in Phase 3A.  That is
 a historical statement about the contract-freeze delivery, not the current
 Phase 3B branch status.
 
-### Phase 3B — backend implemented on the named local branch
+### Phase 3B and Phase 3C — backend plus isolated console integration
 
 Implemented Codex backend ownership:
 
@@ -562,7 +567,7 @@ Implemented Codex backend ownership:
 - injected read-only transport in `nxt_site_agent.api`;
 - Python behavioral, replay, safety, conservation and API tests.
 
-Claude frontend ownership after contract freeze remains unimplemented here:
+Integrated Claude frontend ownership remains:
 
 - React execution components;
 - CSS and visual states;
@@ -571,18 +576,30 @@ Claude frontend ownership after contract freeze remains unimplemented here:
 Codex continues to own schema, examples, TypeScript wire types/parser/client
 and contract tests.  The two owners do not edit the same file concurrently.
 
-There is no combined long-running collection-execution serve command on this
-branch.  Task 6 implements the injected GET transport seams and strict client;
-the bounded demo still requires `--no-serve`.  This limitation must not be
-described as a production service gap being closed.
+Phase 3C adds
+`simulation/scripts/course_collection_execution_service.py` as the sole
+composition root for the fixed demo.  One instance owns the V3 runtime,
+simulator-backed device, Edge journal and Planning records; one background
+loop advances it.  The injected collection and task-operation GET callbacks
+are read-only.  The service rejects arbitrary new confirmations and schedules
+because it supports exactly one seeded confirmation.  This local rehearsal is
+not a production service or physical execution bridge.
+
+The API is available before the sole driver is armed.  Any driver exception
+is fail-stop.  A failure between a committed V3 tick and durable Edge
+reconciliation deliberately makes the strict collection read unavailable
+rather than fabricating a current projection; Task Ops exposes the driver
+failure, the console preserves the prior successful snapshot as stale, and the
+original durable request receipt remains recoverable by request ID.  An
+explicit restart applies the existing device-first unknown-outcome rules.
 
 ## Phase 3B acceptance cases frozen by this design
 
-All 20 cases now have executable backend coverage in
+All 20 cases have executable backend coverage in
 `tests/course_monitoring/test_collection_execution_acceptance.py`.  Cases 01,
 17 and 18 also consume the runtime witness through the shared TypeScript
-parser/helpers.  This coverage does not imply that the separate React UI or a
-physical path is implemented.
+parser/helpers, and Phase 3C adds service/React integration coverage.  This
+does not imply that a physical path is implemented.
 
 1. **Normal, policy preserved:** original policy returns `Wait` for collection,
    so the execution action fills the slot; later original policy itself
@@ -637,15 +654,16 @@ physical path is implemented.
     fixed recovery table; replay never emits a second lifecycle or logical ball
     move, and unverifiable prefixes become protected `INCONCLUSIVE`.
 
-## Explicitly unimplemented after Phase 3A — history and current Phase 3B status
+## Phase history and current Phase 3C status
 
 At the end of Phase 3A, the schema, examples, TypeScript parser/client and
 their contract tests were the only executable artifacts.  They validated and
 rejected data but did not advance `env.step()` or grant execution authority.
-That statement is retained as design history; it is no longer the complete
-status of the Phase 3B branch.
+That statement is retained as design history; it is no longer the current
+implementation status.
 
-Implemented on `codex/collection-execution-3b`:
+Implemented across Phase 3B and the local `codex/collection-execution-3c`
+integration branch:
 
 - the V3 session format, fresh root creation and deterministic verified-prefix
   replay without migration of V2 evidence;
@@ -660,13 +678,16 @@ Implemented on `codex/collection-execution-3b`:
 - injected, read-only Manager API collection-execution routes; and
 - strict TypeScript wire parsing, `read()`/`readRequest()` methods and the
   simulation-clock helper, plus executable backend coverage for all 20 frozen
-  acceptance cases.
+  acceptance cases;
+- a same-process static console/API service with a sole fail-stop driver,
+  strict `nxt-pilot-dispatch/v0` task projection and independent wall-clock
+  read health; and
+- Claude-owned React/CSS presentation and component/interaction tests.
 
 Still explicitly unimplemented:
 
-- React collection-execution components, styling, visual states and
-  interaction behavior;
-- a combined long-running collection-execution server command;
+- arbitrary new confirmations or schedules in the fixed Phase 3C service;
+- a Course Ops projection bound to the V3 execution identity;
 - automatic Planning outcome writes;
 - wash results, supply results or washed/supplied per-task lineage;
 - clean or supply inventory replenishment inferred from raw/unload evidence;
