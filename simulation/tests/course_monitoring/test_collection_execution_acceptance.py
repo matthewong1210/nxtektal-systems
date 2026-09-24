@@ -278,6 +278,7 @@ def _aligned_runtime(
             )
 
         monkeypatch.setattr(device_api, "execution_admission", admission)
+        monkeypatch.setattr(device_api, "restart_reconciliation", admission)
         device = device_api.SimulatorBackedTaskDevice(
             tmp_path / "session", config, "picker-01",
             journal_path=tmp_path / "device.jsonl", initialize=True,

@@ -522,6 +522,7 @@ def _device_fixture(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr(device_api, "execution_admission", admission)
+    monkeypatch.setattr(device_api, "restart_reconciliation", admission)
     device = device_api.SimulatorBackedTaskDevice(
         tmp_path / "session",
         config,

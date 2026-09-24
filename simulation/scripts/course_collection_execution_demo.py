@@ -278,9 +278,28 @@ class CourseCollectionExecutionDemo:
                 )
                 if state["now_sim_t_s"] != 29400:
                     raise RuntimeError("deterministic V3 warm-up did not reach 08:10")
-            else:
-                # A read validates the immutable root without advancing it.
-                self.runtime_status()
+            elif (
+                course_session_v3.structural_recovery_status(self.session_root)
+                == "COMMITTED_CURSOR_STALE"
+            ):
+                # A committed simulator prefix is causal truth. Repair only
+                # its disposable cursor before the device attests its restart;
+                # PREPARED_NO_COMMIT deliberately takes the device-first path.
+                course_session_v3.recover_committed_cursor(self.session_root)
+
+            # On resume the device must attest/reconcile its own durable restart
+            # before any read or runner can replay a prepared authorization.
+            self.device = SimulatorBackedTaskDevice(
+                self.session_root,
+                self.config,
+                ROBOT_ID,
+                journal_path=self.root / "device" / ROBOT_ID / "robot_task_journal.jsonl",
+                initialize=self.initialize,
+                provisioning_nonce=(
+                    (lambda: "collection-execution-v3") if self.initialize else None
+                ),
+            )
+            self.device.start()
 
             self.broker = InMemoryBroker()
             self.gateway = EdgeGateway(
@@ -293,17 +312,6 @@ class CourseCollectionExecutionDemo:
                 emit=lambda _event: None,
             )
             self.gateway.start()
-            self.device = SimulatorBackedTaskDevice(
-                self.session_root,
-                self.config,
-                ROBOT_ID,
-                journal_path=self.root / "device" / ROBOT_ID / "robot_task_journal.jsonl",
-                initialize=self.initialize,
-                provisioning_nonce=(
-                    (lambda: "collection-execution-v3") if self.initialize else None
-                ),
-            )
-            self.device.start()
             robot = self.config.robot(ROBOT_ID)
             self.publisher = self.broker.client(robot.client_id)
             self.publisher.set_handlers(

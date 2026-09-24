@@ -12,6 +12,8 @@ import pytest
 
 from nxt_edge_task.contracts import TaskRequest
 from nxt_edge_task.journal import JsonlJournal, RecordSpec
+from nxt_range_ops.core import ledger as ledger_locations
+from nxt_range_ops.core.skills import SkillOutcome, SkillOutcomeModel, SkillType
 from nxt_range_ops.scenarios.generators import make_scenario
 from scripts.course_collection_execution import simulation_utc
 from scripts.joint_learning import atomic_json, read_record, write_record
@@ -428,6 +430,34 @@ def test_execution_admission_does_not_initialize_a_missing_root(runner, tmp_path
     assert not missing.exists()
 
 
+def test_structural_recovery_status_reads_cursor_stale_without_replay(
+    runner, tmp_path, monkeypatch
+):
+    compiled = compiled_fixture()
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    with pytest.raises(Crash, match="after_commit"):
+        runner.run(tmp_path, crash_hook=crash_at("after_commit"))
+    before = {
+        str(path.relative_to(tmp_path)): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+    def forbid_step(_env, _action):
+        pytest.fail("structural recovery status must not replay the simulator")
+
+    monkeypatch.setattr(runner.RangeOpsEnv, "step", forbid_step)
+
+    assert runner.structural_recovery_status(tmp_path) == "COMMITTED_CURSOR_STALE"
+    assert {
+        str(path.relative_to(tmp_path)): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    } == before
+
+
 def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(runner, tmp_path):
     v3 = session(runner, tmp_path)
     robot, zone = v3.env.scenario.robot_ids[0], v3.env.scenario.zone_ids[0]
@@ -442,6 +472,126 @@ def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(run
     continuation = after["continuations"][execution["execution_id"]]
     assert continuation["name"] == "SendToHandoff"
     assert continuation["robot_id"] == robot and continuation["target_id"] is None
+
+
+def test_short_ticks_do_not_restart_an_inflight_handoff(runner, tmp_path):
+    """A Wait tick may continue a stopped assignment, never an active task.
+
+    Regression target: exposing SendToHandoff while the bound robot is already
+    TRAVELING used to interrupt and resample the same loaded travel every tick.
+    """
+
+    compiled = compiled_fixture(end_minute=10)
+    scenario = make_scenario("normal_weekday")
+    scenario = scenario.model_copy(
+        update={
+            "name": "v3_short_tick_handoff",
+            "hours": scenario.hours.model_copy(
+                update={"open_minute": 1, "close_minute": 10}
+            ),
+            "episode": scenario.episode.model_copy(
+                update={"control_interval_s": 15, "max_steps": 40}
+            ),
+            "robots": [
+                scenario.robots[0].model_copy(
+                    update={"payload_capacity_balls": 20}
+                )
+            ],
+            "stations": [scenario.stations[0]],
+        }
+    )
+    compiled["scenario"] = scenario.model_dump(mode="json")
+    compiled["session_inputs"]["demand_by_minute"] = [0] * 9
+    compiled["session_inputs"]["landing_zones_by_minute"] = [[] for _ in range(9)]
+    compiled["session_inputs"]["collection_blocks"] = {
+        zone_id: [] for zone_id in scenario.zone_ids
+    }
+    v3 = runner.V3Session(
+        tmp_path,
+        config(runner, compiled, control_interval_s=15),
+        compiled,
+    )
+    assert type(v3.policy).__name__ == "JointDispatchPolicy"
+    zone_id = v3.env.scenario.zone_ids[0]
+    robot_id = v3.env.scenario.robot_ids[0]
+    v3.env.sim.ledger.move(
+        ledger_locations.DISPENSER, ledger_locations.zone_loc(zone_id), 20
+    )
+
+    sampled: list[SkillType] = []
+
+    class CountingSkills(SkillOutcomeModel):
+        def sample(self, request, _rng):
+            sampled.append(request.skill)
+            duration = {
+                SkillType.TRAVEL: 40,
+                SkillType.COLLECT_CYCLE: 5,
+                SkillType.DOCK: 5,
+                SkillType.UNLOAD: 5,
+                SkillType.CHARGE_CONNECT: 5,
+            }[request.skill]
+            return SkillOutcome(True, duration, 1)
+
+    v3.env.sim.skill_model = CountingSkills()
+    request = accepted_request(
+        v3,
+        tmp_path / "planning",
+        cycle_minutes={"travel": 2, "collect": 2, "return": 2, "unload": 2},
+    )
+    wait_index = v3.env.catalog.index_of("wait")
+
+    first_tick = True
+    while v3.store.replay()["executions"][request["execution_id"]]["state"] not in {
+        "SUCCEEDED",
+        "PARTIAL",
+        "REJECTED",
+        "MISSED",
+        "FAILED",
+        "INCONCLUSIVE",
+    }:
+        assert v3.env.sim.now < 600
+        # Only the initial tick exposes the Wait slot that starts the request.
+        # Every later tick uses the real JointDispatchPolicy and simulator mask.
+        if first_tick:
+            v3.info["action_mask"] = {wait_index: True}
+            first_tick = False
+        v3.advance()
+        confirm_outbox(v3)
+
+    row = v3.store.replay()["executions"][request["execution_id"]]
+    selected_handoffs = [
+        action
+        for action in row["actions"]
+        if action["selected_action"]["name"] == "SendToHandoff"
+    ]
+    handoff_starts = [
+        event
+        for event in v3.env.sim.events.to_dicts()
+        if event["kind"] == "travel_started"
+        and event["payload"].get("robot_id") == robot_id
+        and event["payload"].get("dest")
+        == ledger_locations.station_loc(v3.env.scenario.station_ids[0])
+    ]
+
+    assert row["actions"][0]["selection"] == "WAIT_SLOT"
+    policy_handoffs = [
+        action for action in selected_handoffs
+        if action["original_action"]["name"] == "SendToHandoff"
+    ]
+    assert policy_handoffs
+    assert all(
+        action["selected_action"] == action["original_action"]
+        and action["safety_shield"] == "ACCEPTED"
+        for action in policy_handoffs
+    )
+    assert len(handoff_starts) == 1
+    assert sampled.count(SkillType.TRAVEL) == 2
+    assert sampled.count(SkillType.COLLECT_CYCLE) == 1
+    assert sampled.count(SkillType.DOCK) == 1
+    assert sampled.count(SkillType.UNLOAD) == 1
+    assert v3.env.sim.metrics.loaded_travel_s == 40
+    assert row["state"] == "SUCCEEDED"
+    assert row["raw_quantity"]["balls"] == row["unload_quantity"]["balls"] == 20
 
 
 def test_policy_provenance_has_no_public_injection_path(runner, tmp_path):

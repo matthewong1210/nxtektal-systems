@@ -30,7 +30,7 @@ from nxt_edge_task.executor import (
     derive_robot_view,
 )
 from nxt_edge_task.journal import JsonlJournal, JournalRecord, PreconditionFailed
-from scripts.course_session_v3 import execution_admission
+from scripts.course_session_v3 import execution_admission, restart_reconciliation
 
 
 _TERMINALS = frozenset(
@@ -222,7 +222,7 @@ class SimulatorBackedTaskDevice:
 
         if self._started:
             raise ValueError("device process is already started")
-        with execution_admission(self.session_root) as admission:
+        with restart_reconciliation(self.session_root) as admission:
             if (
                 admission.identity["site_id"] != self.config.site_id
                 or admission.identity["deployment_id"] != self.config.deployment_id

@@ -730,6 +730,38 @@ class RangeSimulation:
         evidence = self._assignments.get(execution_id)
         return evidence.snapshot() if evidence is not None else None
 
+    def is_same_active_assignment_handoff(
+        self, directive: SendToHandoff
+    ) -> bool:
+        """Return whether ``directive`` repeats the exact live V3 handoff.
+
+        The feature gate and active-assignment map keep this false for V2.
+        A generic handoff is equivalent only when the live task itself proves
+        that it is already travelling to, queued at, or unloading at the
+        assignment's bound station.
+        """
+
+        if not self._assignment_evidence_enabled:
+            return False
+        robot = self._robots.get(directive.robot_id)
+        if robot is None or robot.task_proc is None or not robot.task_proc.is_alive:
+            return False
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None or evidence.collection_exit_reason is None:
+            return False
+        station_id = evidence.candidate.handoff_station_id
+        if directive.station_id not in (None, station_id):
+            return False
+        bound_location = ledger_mod.station_loc(station_id)
+        if robot.activity is RobotActivity.TRAVELING:
+            return robot.destination_label == bound_location
+        if robot.activity in {
+            RobotActivity.QUEUED_HANDOFF,
+            RobotActivity.UNLOADING,
+        }:
+            return robot.location_label == bound_location
+        return False
+
     def _assignment_event(self, robot: _Robot, kind: str, **fields) -> None:
         evidence = self._robot_assignments.get(robot.robot_id)
         if evidence is None:
@@ -836,6 +868,11 @@ class RangeSimulation:
             return decision
 
         robot = self._robots[directive.robot_id]
+        if (
+            isinstance(directive, SendToHandoff)
+            and self.is_same_active_assignment_handoff(directive)
+        ):
+            return decision
         evidence = self._robot_assignments.get(robot.robot_id)
         if evidence is not None:
             continuation = (isinstance(directive, SendToHandoff)

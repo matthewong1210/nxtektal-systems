@@ -328,7 +328,8 @@ class V3Session:
         continuations = {}
         for row in rows:
             if (row.get("state") != "RUNNING"
-                    or row.get("runtime_evidence", {}).get("collection_exit_reason") is None):
+                    or row.get("runtime_evidence", {}).get("collection_exit_reason") is None
+                    or robots.get(row.get("runtime_robot_id"), {}).get("activity") != "IDLE"):
                 continue
             matches = [action for action in actions
                        if action["name"] == "SendToHandoff"
@@ -456,6 +457,20 @@ class V3Session:
         now = max(self.env.sim.now, prepared["decision"]["sim_t_s"])
         self.store.record_replay_failure(
             execution_api.digest(prepared), now_sim_t_s=now, observed_digest=observed_digest)
+
+    def _assert_no_protected_live_assignment(self):
+        """Refuse new work when durable authority and simulator work diverge."""
+
+        executions = self.store.replay()["executions"]
+        for execution_id, row in executions.items():
+            protected = row["device_protection"]["protected"]
+            if row["state"] not in _TERMINAL_EXECUTIONS and not protected:
+                continue
+            assignment = self.env.collection_assignment_snapshot(execution_id)
+            if assignment is not None and assignment["terminal_reason"] is None:
+                raise ReplayMismatch(
+                    "protected execution still has a live simulator assignment"
+                )
 
     def _raise_committed_mismatch(
         self, item, final_sim_t_s, message, observed, *, seal_mismatch,
@@ -638,6 +653,7 @@ class V3Session:
             raise OutboxPending("committed outbox remains device-owned and unconfirmed")
         if self.env.sim.facility_closed:
             raise RuntimeError("the finite V3 session has already completed")
+        self._assert_no_protected_live_assignment()
         projection = self._projection()
         original = self._policy_action()
         decision = self.store.arbitrate(
@@ -713,14 +729,14 @@ def _read_control(root):
     return control
 
 
-def _validate_saved_runtime(saved, session, recovery):
+def _validate_saved_cursor(saved, session, recovery, now_sim_t_s):
     if saved.get("status") not in _STATE_STATUSES:
         raise ValueError("invalid persisted V3 session status")
     expected = {
         "step": recovery["tick_sequence"],
-        "now_sim_t_s": session.env.sim.now,
+        "now_sim_t_s": now_sim_t_s,
         "simulation_time_utc": execution_api.simulation_utc(
-            session.identity, session.env.sim.now),
+            session.identity, now_sim_t_s),
         "replay_digest": recovery["replay_digest"],
     }
     current_unconfirmed = len(recovery["unconfirmed_outbox"])
@@ -729,6 +745,10 @@ def _validate_saved_runtime(saved, session, recovery):
             or type(saved_unconfirmed) is not int
             or not current_unconfirmed <= saved_unconfirmed):
         raise ValueError("persisted V3 state differs from the validated execution prefix")
+
+
+def _validate_saved_runtime(saved, session, recovery):
+    _validate_saved_cursor(saved, session, recovery, session.env.sim.now)
 
 
 def _existing_runtime(root):
@@ -757,6 +777,77 @@ def _validated_admission_runtime(root):
     session, saved, control = _existing_runtime(root)
     _, recovery = session._admission_prefix_unlocked()
     return _validated_external_runtime(session, saved, control, recovery)
+
+
+def _validated_restart_runtime(root):
+    """Validate durable identity/cursors for device restart without stepping.
+
+    A real device process must be able to attest its own journal and persist a
+    restart terminal before an uncommitted simulator authorization is replayed.
+    Structural store replay plus the saved cursor is sufficient here; causal
+    simulator replay remains owned by the ordinary run/read/admission paths.
+    """
+
+    session, saved, control = _existing_runtime(root)
+    recovery = session.store.recovery_state()
+    if recovery["status"] not in {
+        "NO_PREPARED",
+        "PREPARED_NO_COMMIT",
+        "COMMITTED_OUTBOX_UNCONFIRMED",
+    }:
+        raise ReplayMismatch("V3 session is not available for device restart reconciliation")
+    persisted = session.store.replay()
+    _validate_saved_cursor(saved, session, recovery, persisted["now_sim_t_s"])
+    return session, saved, control
+
+
+def structural_recovery_status(root) -> str:
+    """Read only the durable store recovery class without simulator replay."""
+
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        config, compiled, _ = _load_root(root, None)
+        identity = build_identity(config, compiled)
+        store = CollectionExecutionStore(
+            root / "collection-execution.jsonl",
+            identity,
+            policy_id=POLICY_ID,
+        )
+        return store.recovery_state()["status"]
+
+
+def recover_committed_cursor(root):
+    """Causally replay a committed prefix and publish only its stale cursor."""
+
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        config, compiled, _ = _load_root(root, None)
+        session = V3Session(root, config, compiled)
+        before = session.store.recovery_state()
+        if before["status"] != "COMMITTED_CURSOR_STALE":
+            raise ReplayMismatch("V3 session has no committed cursor to repair")
+        plan_before = session.store.replay_plan()
+        recovery = session._recover_unlocked()
+        if (
+            recovery["tick_sequence"] != before["tick_sequence"]
+            or recovery["replay_digest"] != before["replay_digest"]
+            or session.store.replay_plan() != plan_before
+        ):
+            raise ReplayMismatch("committed cursor repair changed the logical prefix")
+        status_name = (
+            "OUTBOX_PENDING"
+            if recovery["status"] == "COMMITTED_OUTBOX_UNCONFIRMED"
+            else "SESSION_COMPLETE"
+            if session.env.sim.facility_closed
+            else "CHUNK_COMPLETE"
+        )
+        state = _state(session, status_name)
+        write_record(root / "state.json", state)
+        return state
 
 
 def run(root, config=None, *, crash_hook=None):
@@ -837,6 +928,22 @@ def execution_admission(root):
             store=session.store,
             identity=deepcopy(session.identity),
             now_sim_t_s=session.env.sim.now,
+        )
+
+
+@contextmanager
+def restart_reconciliation(root):
+    """Hold the V3 lock for no-step device restart attestation and evidence."""
+
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        session, _, _ = _validated_restart_runtime(root)
+        yield ExecutionAdmission(
+            store=session.store,
+            identity=deepcopy(session.identity),
+            now_sim_t_s=session.store.replay()["now_sim_t_s"],
         )
 
 

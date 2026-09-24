@@ -446,6 +446,51 @@ def test_explicit_device_restart_differs_from_prefix_replay(api, tmp_path, runni
     assert r["reason"] == ("INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME" if running else "NOT_STARTED_AFTER_RESTART")
 
 
+@pytest.mark.parametrize("targets_execution", [False, True])
+def test_device_restart_cancels_only_its_exact_pending_authorization(
+    api, tmp_path, targets_execution
+):
+    store, _, req = setup(api, tmp_path)
+    decision = store.arbitrate(
+        WAIT if targets_execution else PAUSE,
+        60,
+        view(),
+    )
+    assert (decision["execution_id"] == req["execution_id"]) is targets_execution
+    recovery = store.recovery_state()
+    pending = store.prepare_tick(
+        decision,
+        previous_cursor=recovery["tick_sequence"],
+        previous_digest=recovery["replay_digest"],
+    )
+
+    restart(store, req, tmp_path, running=False, now=120)
+
+    after = store.recovery_state()
+    assert after["replay_digest"] == recovery["replay_digest"]
+    assert after["tick_sequence"] == recovery["tick_sequence"] == 0
+    row = store.replay()["executions"][req["execution_id"]]
+    assert (row["state"], row["reason"]) == (
+        "FAILED",
+        "NOT_STARTED_AFTER_RESTART",
+    )
+    if targets_execution:
+        assert after["status"] == "NO_PREPARED"
+        assert after["pending_prepared"] is None
+        # The cancelled sequence was never committed and may be reused by the
+        # next ordinary policy tick without changing the committed digest.
+        next_decision = store.arbitrate(PAUSE, 120, view())
+        replacement = store.prepare_tick(
+            next_decision,
+            previous_cursor=after["tick_sequence"],
+            previous_digest=after["replay_digest"],
+        )
+        assert replacement["tick_sequence"] == pending["tick_sequence"] == 1
+    else:
+        assert after["status"] == "PREPARED_NO_COMMIT"
+        assert after["pending_prepared"] == pending
+
+
 @pytest.mark.parametrize(
     "v3_started,device_started",
     [(True, False), (False, True)],
@@ -1023,7 +1068,14 @@ def test_replay_failure_seals_exact_pending_without_edge_fabrication(api,tmp_pat
     now=120 if execution in ("running","terminal") else 60
     decision=store.arbitrate(WAIT,now,view())
     pending=store.prepare_tick(decision,previous_cursor=recovery["tick_sequence"],previous_digest=recovery["replay_digest"])
-    if execution == "terminal":restart(store,req,tmp_path,running=True,now=120)
+    if execution == "terminal":
+        # Use an independent terminal overlay here. A device_restart targeting
+        # this exact prepared execution now cancels it by contract, so it is no
+        # longer a valid setup for the generic replay-failure path.
+        store.record_edge_evidence(
+            req["execution_id"], terminal_states=["INCONCLUSIVE"],
+            event_ids=["terminal-before-replay-failure"], now_sim_t_s=120,
+        )
     prefix=store.replay_plan()
     outbox=store.committed_outbox()
     edge=deepcopy(store.replay()["executions"][req["execution_id"]]["edge_evidence"]) if req else None

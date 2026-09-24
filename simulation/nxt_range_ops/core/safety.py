@@ -179,6 +179,8 @@ class SafetyShield:
         sim = self._sim
         if robot.payload_balls <= 0:
             return ShieldDecision.reject(directive, "no payload to hand off")
+        if sim.is_same_active_assignment_handoff(directive):
+            return ShieldDecision.ok(directive)
         if robot.activity not in (
             RobotActivity.IDLE,
             RobotActivity.TRAVELING,

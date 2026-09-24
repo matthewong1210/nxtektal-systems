@@ -7,6 +7,7 @@ import json
 import pytest
 
 from nxt_range_ops.core import ledger as locations
+from nxt_range_ops.core.directives import SendToHandoff
 from nxt_range_ops.core.entities import RobotActivity
 from nxt_range_ops.core.skills import SkillOutcome, SkillOutcomeModel, SkillType
 from nxt_range_ops.env.range_ops_env import RangeOpsEnv
@@ -34,8 +35,15 @@ def environment(*, balls=100, deadline=100, close_minutes=10, access=False, enab
              "demand_by_minute": [0] * close_minutes, "staff_jobs": [],
              "collection_blocks": {z: ([{"start_minute": start + 1, "end_minute": start + 2}]
                                       if access and z == zone else []) for z in scenario.zone_ids}}
-    env = RangeOpsEnv(scenario, lambda _: FixedSkills(), joint_inputs=joint,
-                      collection_assignment_evidence=enabled)
+    evidence_option = (
+        {} if enabled is None else {"collection_assignment_evidence": enabled}
+    )
+    env = RangeOpsEnv(
+        scenario,
+        lambda _: FixedSkills(),
+        joint_inputs=joint,
+        **evidence_option,
+    )
     env.reset(seed=53)
     for z in scenario.zone_ids:
         env.sim.ledger.move(locations.zone_loc(z), locations.DISPENSER, scenario.total_balls)
@@ -44,6 +52,16 @@ def environment(*, balls=100, deadline=100, close_minutes=10, access=False, enab
         env.arm_collection_assignment("execution-1", scenario.robot_ids[0], zone,
                                       scenario.station_ids[-1], env.sim.now + deadline)
     return env
+
+
+class LongHandoffSkills(SkillOutcomeModel):
+    def __init__(self):
+        self.sampled = []
+
+    def sample(self, request, rng):
+        self.sampled.append(request.skill)
+        duration = 40 if request.skill is SkillType.TRAVEL else 100
+        return SkillOutcome(True, duration, 1)
 
 
 def step(env, verb="wait", zone=None):
@@ -304,6 +322,176 @@ def test_active_evidence_does_not_change_successful_legacy_trajectory():
     assert left.sim.metrics == right.sim.metrics
     for name in ("_rng_demand", "_rng_skills", "_rng_failures", "_rng_sensors", "_rng_forecast"):
         assert getattr(left.sim, name).bit_generator.state == getattr(right.sim, name).bit_generator.state
+
+
+@pytest.mark.parametrize(
+    "activity,hold_station",
+    [
+        (RobotActivity.TRAVELING, False),
+        (RobotActivity.QUEUED_HANDOFF, True),
+        (RobotActivity.UNLOADING, False),
+    ],
+)
+def test_same_active_assignment_handoff_is_idempotent_after_shield(
+    activity, hold_station
+):
+    """A repeated bound-station handoff is evidence, not a task restart."""
+
+    env = environment(deadline=300)
+    finish_collection(env)
+    robot = env.sim._robots[env.scenario.robot_ids[0]]
+    station = env.sim._stations[env.scenario.station_ids[0]]
+    blockers = (
+        [station.resource.request() for _ in range(station.resource.capacity)]
+        if hold_station
+        else []
+    )
+    skills = LongHandoffSkills()
+    env.sim.skill_model = skills
+
+    first = step(env, "send_to_handoff")
+    assert first[-1]["shield"]["allowed"]
+    while robot.activity is not activity:
+        assert env.sim.now < env.scenario.hours.open_seconds + 120
+        step(env)
+    task = robot.task_proc
+    before_snapshot = snapshot(env)
+    before_samples = list(skills.sampled)
+    before_travel_starts = sum(
+        event["kind"] == "travel_started"
+        and event["payload"].get("dest")
+        == locations.station_loc(env.scenario.station_ids[0])
+        for event in env.sim.events.to_dicts()
+    )
+
+    repeated = step(env, "send_to_handoff")
+
+    assert repeated[-1]["shield"]["allowed"]
+    assert robot.task_proc is task
+    assert skills.sampled == before_samples
+    assert snapshot(env) == before_snapshot
+    assert sum(
+        event["kind"] == "travel_started"
+        and event["payload"].get("dest")
+        == locations.station_loc(env.scenario.station_ids[0])
+        for event in env.sim.events.to_dicts()
+    ) == before_travel_starts == 1
+    assert env.sim.events.to_dicts()[-1]["kind"] == "directive_applied"
+    for blocker in blockers:
+        station.resource.release(blocker)
+
+
+def test_disabled_assignment_evidence_keeps_legacy_repeated_handoff_bytes():
+    """The V3 no-op must not change the default/V2 redirect trajectory."""
+
+    default = environment(enabled=None, deadline=300)
+    explicit_v2 = environment(enabled=False, deadline=300)
+    encoded = []
+    for env in (default, explicit_v2):
+        finish_collection(env)
+        skills = LongHandoffSkills()
+        env.sim.skill_model = skills
+        step(env, "send_to_handoff")
+        step(env, "send_to_handoff")
+        assert skills.sampled.count(SkillType.TRAVEL) == 2
+        assert sum(
+            event["kind"] == "travel_started"
+            and event["payload"].get("dest")
+            == locations.station_loc(env.scenario.station_ids[0])
+            for event in env.sim.events.to_dicts()
+        ) == 2
+        encoded.append(
+            json.dumps(
+                {
+                    "events": env.sim.events.to_dicts(),
+                    "ledger": env.sim.ledger.counts(),
+                    "robots": [row.to_dict() for row in env.sim.robot_snapshots()],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        )
+    assert encoded[0] == encoded[1]
+
+
+def test_different_station_handoff_is_not_hidden_as_v3_idempotency():
+    env = environment(deadline=300, wrong_station=True)
+    finish_collection(env)
+    robot = env.sim._robots[env.scenario.robot_ids[0]]
+    wrong_station = env.scenario.station_ids[0]
+    assert wrong_station != snapshot(env)["handoff_station_id"]
+    env.sim.skill_model = LongHandoffSkills()
+    directive = SendToHandoff(robot.robot_id, wrong_station)
+    assert env.sim.apply_directive(directive).allowed
+    env.sim.advance(15)
+    task = robot.task_proc
+
+    assert env.sim.apply_directive(directive).allowed
+    assert robot.task_proc is not task
+
+
+def test_unstarted_candidate_cannot_make_repeated_handoff_idempotent():
+    env = environment(deadline=300)
+    robot = env.sim._robots[env.scenario.robot_ids[0]]
+    moved = env.sim.ledger.move(
+        locations.DISPENSER, locations.robot_loc(robot.robot_id), 20
+    )
+    robot.payload_balls = moved
+    env.sim.skill_model = LongHandoffSkills()
+    directive = SendToHandoff(robot.robot_id)
+    assert env.sim.apply_directive(directive).allowed
+    env.sim.advance(15)
+    task = robot.task_proc
+
+    assert snapshot(env) is None
+    assert env.sim.apply_directive(directive).allowed
+    assert robot.task_proc is not task
+
+
+def test_active_handoff_with_no_payload_remains_safety_rejected():
+    env = environment(deadline=300)
+    finish_collection(env)
+    robot = env.sim._robots[env.scenario.robot_ids[0]]
+    env.sim.skill_model = LongHandoffSkills()
+    directive = SendToHandoff(robot.robot_id)
+    assert env.sim.apply_directive(directive).allowed
+    env.sim.advance(15)
+    task = robot.task_proc
+    returned = env.sim.ledger.move(
+        locations.robot_loc(robot.robot_id),
+        locations.DISPENSER,
+        robot.payload_balls,
+    )
+    robot.payload_balls -= returned
+
+    decision = env.sim.apply_directive(directive)
+
+    assert not decision.allowed
+    assert decision.reason == "no payload to hand off"
+    assert robot.task_proc is task
+
+
+@pytest.mark.parametrize("cause", ["fault", "estop"])
+def test_hard_protection_precedes_active_handoff_idempotency(cause):
+    env = environment(deadline=300)
+    finish_collection(env)
+    robot = env.sim._robots[env.scenario.robot_ids[0]]
+    env.sim.skill_model = LongHandoffSkills()
+    directive = SendToHandoff(robot.robot_id)
+    assert env.sim.apply_directive(directive).allowed
+    env.sim.advance(15)
+    if cause == "fault":
+        env.sim._fail_robot(robot, "test fault")
+    else:
+        env.sim._latch_estop(robot, "test estop")
+
+    decision = env.sim.apply_directive(directive)
+
+    assert not decision.allowed
+    assert robot.activity in {
+        RobotActivity.FAILED,
+        RobotActivity.EMERGENCY_STOPPED,
+    }
 
 
 def test_disarm_requires_exact_unstarted_identity_before_replacing_candidate():

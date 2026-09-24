@@ -497,6 +497,15 @@ class CollectionExecutionStore:
                     _protect(r, "RESTART_UNKNOWN" if unknown else "ORPHANED_ACTIVITY")
                 r["edge_evidence"]["terminal_states"] = terminals
                 r["edge_evidence"]["event_ids"].append(p["edge_record"]["record_id"])
+                pending = state["pending_prepared"]
+                if (pending is not None
+                        and pending["decision"]["execution_id"] == p["execution_id"]):
+                    # The fsynced device restart terminal is explicit evidence
+                    # that this exact old authorization cannot execute.  It
+                    # cancels only that uncommitted intent; ordinary chunk
+                    # recovery (and unrelated prepared policy ticks) remains
+                    # replayable under the existing prepared/commit contract.
+                    state["pending_prepared"] = None
                 state["now_sim_t_s"] = max(state["now_sim_t_s"], p["now_sim_t_s"])
             elif kind == "edge_evidence":
                 _require(p.get("outbox_id") not in state["blocked_outbox"],
