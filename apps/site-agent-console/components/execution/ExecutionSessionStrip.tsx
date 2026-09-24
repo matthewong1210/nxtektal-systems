@@ -8,6 +8,7 @@ import { SESSION_STATE_BADGE, simSeconds, utcLabel } from "./shared";
 export function ExecutionSessionStrip({
   snapshot,
   stale,
+  expired,
   loading,
   lastReadAtMs,
   nowMs,
@@ -15,6 +16,8 @@ export function ExecutionSessionStrip({
 }: {
   snapshot: CollectionExecutionsSnapshot;
   stale: boolean;
+  /** The last successful read is older than the wall-clock validity. */
+  expired: boolean;
   loading: boolean;
   lastReadAtMs: number | null;
   nowMs: number;
@@ -60,7 +63,8 @@ export function ExecutionSessionStrip({
       <div className="exec-strip-row">
         <Badge tone={stale ? "warn" : "info"}>{stale ? "READ STALE" : "READ FRESH"}</Badge>
         <span className="detail-text">
-          A successful read only shows recorded evidence. It grants no execution authority, starts nothing and restarts nothing.
+          {expired ? "The last successful read is older than 15 s; the snapshot below may be outdated. " : ""}A successful read only shows recorded evidence. It grants no execution
+          authority, starts nothing and restarts nothing.
         </span>
         <button type="button" className="btn btn-quiet" onClick={onRetry} disabled={loading}>
           Retry execution read

@@ -11,7 +11,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { COLLECTION_EXECUTIONS_POLL_MS } from "../components/execution/CollectionExecutionPanel";
+import { COLLECTION_EXECUTIONS_POLL_MS, EXECUTION_READ_EXPIRY_MS } from "../components/execution/CollectionExecutionPanel";
 import { PilotOperations } from "../components/PilotOperations";
 import { API_SCHEMA, DISCLAIMER } from "../lib/api";
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
@@ -42,6 +42,7 @@ function scriptedService() {
     requests: [] as { method: string; path: string }[],
     outcomes: [] as OutcomeRecord[],
     planningPostMode: "ok" as "ok" | "network",
+    paused: false,
   };
   const envelope = (status: number, payload: unknown) =>
     new Response(JSON.stringify({ schema: API_SCHEMA, disclaimer: DISCLAIMER, ...(status < 400 ? { data: payload } : { error: payload }) }), {
@@ -68,6 +69,11 @@ function scriptedService() {
       if (state.execMode === "network") throw new TypeError("fetch failed");
       if (state.execMode === "missing") return envelope(404, { code: "collection_execution_not_found", detail: "route not connected" });
       if (state.execMode === "hang") return new Promise<Response>((resolve) => { state.hung.push(resolve); });
+      if (state.paused) {
+        const paused = structuredClone(state.executions) as { session_state: string };
+        paused.session_state = "PAUSED";
+        return envelope(200, paused);
+      }
       if (state.execMode === "invalid") {
         const bad = structuredClone(state.executions) as { executions: { state: string }[] };
         bad.executions[0].state = "COMPLETED"; // not in the frozen enum
@@ -274,5 +280,79 @@ describe("read-only collection execution panel mounted in PilotOperations", () =
     expect(input("-UNLOADED-quantity").value).toBe("480");
     expect(buttonNamed("Recover by request ID")?.disabled).toBe(false);
     expect(buttonNamed("Save UNLOADED result")?.disabled).toBe(true);
+  });
+});
+
+describe("read health expires on its own 15-second wall clock, independent of errors and of the simulation clock", () => {
+  const readBadge = () => [...panel()!.querySelectorAll(".exec-strip-row .badge")].map((b) => b.textContent).find((t) => t === "READ FRESH" || t === "READ STALE");
+
+  it("flips READ FRESH to READ STALE at the boundary while a read keeps waiting without error, and re-arms on the next success", async () => {
+    const service = scriptedService();
+    await mount(service);
+    expect(readBadge()).toBe("READ FRESH");
+    service.state.execMode = "hang"; // the poll at +5 s never answers
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(service.state.hung).toHaveLength(1);
+    await tick(EXECUTION_READ_EXPIRY_MS - COLLECTION_EXECUTIONS_POLL_MS - 100); // just before 15 s since the last success
+    expect(readBadge()).toBe("READ FRESH");
+    await tick(200); // past the boundary: no error, no new read, still must flip
+    expect(readBadge()).toBe("READ STALE");
+    expect(panelText()).toContain("older than 15 s");
+    expect(panelText()).not.toContain("fetch failed");
+    expect(panelText()).toContain("SUCCEEDED"); // the last valid snapshot stays on screen
+    service.state.execMode = "ok";
+    service.releaseHung(); // the waiting read finally succeeds: timing restarts
+    await tick(50);
+    expect(readBadge()).toBe("READ FRESH");
+    expect(panelText()).not.toContain("older than 15 s");
+    await tick(EXECUTION_READ_EXPIRY_MS - 100); // fresh again for a full period from the new success
+    expect(readBadge()).toBe("READ FRESH");
+  });
+
+  it("keeps the old snapshot with the expiry hint when reads fail past the boundary", async () => {
+    const service = scriptedService();
+    await mount(service);
+    service.state.execMode = "network";
+    await tick(EXECUTION_READ_EXPIRY_MS + 200);
+    expect(readBadge()).toBe("READ STALE");
+    expect(panelText()).toContain("fetch failed");
+    expect(panelText()).toContain("older than 15 s");
+    expect(panelText()).toContain("SUCCEEDED");
+  });
+
+  it("does not freeze the read-health clock while the simulation is PAUSED", async () => {
+    const service = scriptedService();
+    service.state.paused = true;
+    await mount(service);
+    expect(panelText()).toContain("SESSION PAUSED");
+    expect(readBadge()).toBe("READ FRESH");
+    service.state.execMode = "hang";
+    await tick(EXECUTION_READ_EXPIRY_MS + 200);
+    expect(panelText()).toContain("SESSION PAUSED");
+    expect(readBadge()).toBe("READ STALE");
+  });
+
+  it("clears its expiry timer on unmount and re-arms from the remounted instance's own read", async () => {
+    const service = scriptedService();
+    await mount(service);
+    service.state.execMode = "hang";
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    await act(async () => {
+      root.unmount();
+    });
+    service.state.execMode = "ok";
+    await tick(8_000 - COLLECTION_EXECUTIONS_POLL_MS - 50); // remount 8 s after the first mount
+    root = createRoot(container);
+    await act(async () => {
+      root.render(<PilotOperations />);
+    });
+    await tick(50);
+    expect(readBadge()).toBe("READ FRESH");
+    service.state.execMode = "hang"; // keep the remounted instance's later reads waiting
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    await tick(EXECUTION_READ_EXPIRY_MS - 8_000 - COLLECTION_EXECUTIONS_POLL_MS + 100); // the first instance's boundary passes
+    expect(readBadge()).toBe("READ FRESH");
+    await tick(8_000); // the remounted instance's own boundary
+    expect(readBadge()).toBe("READ STALE");
   });
 });
