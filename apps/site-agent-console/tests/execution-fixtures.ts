@@ -96,3 +96,42 @@ export function withRound(data: Record<string, unknown>, round: string, index: n
   for (const r of s.executions) r.round_id = round;
   return s as unknown as Record<string, unknown>;
 }
+
+/** Accepted human-assistance exit on a running lease (derived from partial-preempted,
+ * following the parser's own contract test recipe). Unparsed data for scripted services. */
+export function humanAssistanceData(): Record<string, unknown> {
+  const s = exampleData("partial-preempted") as unknown as Mutable;
+  const r = s.executions[0];
+  const action = r.actions[r.actions.length - 1];
+  r.reason = "HUMAN_ASSISTANCE_REQUIRED";
+  r.runtime_evidence.collection_exit_reason = "HUMAN_ASSISTANCE_REQUIRED";
+  r.device_protection = { protected: true, authorization_blocked: true, reasons: ["HUMAN_ASSISTANCE_REQUIRED"] };
+  action.selection = "ORIGINAL_POLICY_UNCHANGED";
+  action.original_action.name = "RequestHumanAssistance";
+  action.selected_action.name = "RequestHumanAssistance";
+  return s as unknown as Record<string, unknown>;
+}
+export function humanAssistanceSnapshot(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(humanAssistanceData());
+}
+
+/** The success example with its session ENDED (only terminal records may remain). */
+export function endedData(): Record<string, unknown> {
+  const s = exampleData("success") as unknown as Mutable;
+  s.session_state = "ENDED";
+  return s as unknown as Record<string, unknown>;
+}
+export function endedSnapshot(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(endedData());
+}
+
+/** Backend-generated witness of the frozen normal loop (Codex Phase 3B, fixture
+ * `collection-execution-normal-loop-v3.json`). It was produced by the Python
+ * runtime and checked in; it is still a fixture, not a live service read. */
+const WITNESS = join(import.meta.dirname, "..", "..", "..", "simulation", "tests", "course_monitoring", "fixtures", "collection-execution-normal-loop-v3.json");
+export function witnessData(): Record<string, unknown> {
+  return JSON.parse(readFileSync(WITNESS, "utf8")) as Record<string, unknown>;
+}
+export function witnessSnapshot(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(witnessData());
+}
