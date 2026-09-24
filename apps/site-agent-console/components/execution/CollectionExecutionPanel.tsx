@@ -111,10 +111,15 @@ export type SimulationClock =
   | { status: "stale"; detail: string };
 
 export function simulationClockFor(view: ExecutionReadView): SimulationClock {
-  if (view.unavailable) return { status: "unavailable" };
   if (view.data === null) {
+    // Nothing from a V3 session has ever been read: a missing route means the
+    // legacy wall-clock rehearsal rule; any other failure stays undecided.
+    if (view.unavailable) return { status: "unavailable" };
     return { status: "stale", detail: view.error !== null ? `the collection execution read failed (${view.error})` : "the first simulation clock reading is still pending" };
   }
+  // A V3 snapshot has been seen: the simulation clock governs from here on and
+  // is never replaced by the wall clock, not even when the route answers 404.
+  if (view.unavailable) return { status: "stale", detail: "the execution route answered 404 after a successful read; the last simulation clock is kept but not trusted" };
   const expired = view.lastReadAtMs !== null && view.nowMs - view.lastReadAtMs > EXECUTION_READ_EXPIRY_MS;
   if (view.error !== null) return { status: "stale", detail: `the last collection execution read failed (${view.error})` };
   if (expired) return { status: "stale", detail: "the last successful collection execution read is older than 15 s" };

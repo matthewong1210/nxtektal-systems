@@ -440,6 +440,42 @@ describe("3C acceptance: the schedule form uses the shared simulation clock whil
     expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(false);
   });
 
+  it("keeps the simulation clock stale and refuses new schedules when the route answers 404 after a successful read, then recovers", async () => {
+    const service = scriptedService();
+    service.state.executions = witnessData();
+    await mount(service);
+    expect(text()).toContain("compared with simulation time 2026-09-16 08:30:00 UTC");
+    const simulationNow = Date.parse("2026-09-16T08:30:00Z");
+    const local = localInput(simulationNow + 60_000);
+    await fillSchedule(local);
+    service.state.execMode = "missing"; // the route disappears after a successful V3 read
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("UNAVAILABLE");
+    expect(panelText()).toContain("remains below marked stale");
+    expect(panel()!.querySelectorAll(".exec-record")).toHaveLength(1); // old snapshot kept
+    expect(text()).toContain("Changes are disabled. The simulation clock reading is not fresh");
+    expect(text()).toContain("404");
+    expect(text()).not.toContain("compared with simulation time");
+    expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(true);
+    const form = container.querySelector<HTMLFormElement>("form.dispatch-form");
+    await act(async () => {
+      form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(service.state.schedules).toHaveLength(0); // never falls back to the wall clock
+    service.state.execMode = "ok";
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("READ FRESH");
+    expect(panelText()).not.toContain("UNAVAILABLE");
+    expect(text()).toContain("compared with simulation time 2026-09-16 08:30:00 UTC");
+    expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(false);
+    expect(container.querySelector<HTMLInputElement>("#dispatch-time")!.value).toBe(local); // draft kept through the outage
+    await click("Schedule simulated collection");
+    await tick(100);
+    expect(service.state.schedules).toHaveLength(1);
+    expect(service.state.schedules[0].due_at_utc).toBe(new Date(simulationNow + 60_000).toISOString());
+  });
+
   it("falls back to the legacy wall-clock rule when the service has no execution route", async () => {
     const service = scriptedService();
     service.state.execMode = "missing";

@@ -315,3 +315,18 @@ describe("task panel: source-neutral device copy and the shared simulation clock
     expect(stale).toContain("scheduling is disabled");
   });
 });
+
+describe("simulationClockFor never falls back to the wall clock once a V3 snapshot has been seen", () => {
+  it("is stale on a 404 after a successful read, unavailable only when no snapshot was ever read", async () => {
+    const { simulationClockFor } = await import("../components/execution/CollectionExecutionPanel");
+    const data = exampleSnapshot("success");
+    const seen = view(data, { unavailable: true, error: "collection_execution_not_found: route not connected", lastReadAtMs: 1_000, nowMs: 6_000 });
+    const clock = simulationClockFor(seen);
+    expect(clock.status).toBe("stale");
+    expect(clock.status === "stale" ? clock.detail : "").toContain("404");
+    expect(simulationClockFor(view(null, { unavailable: true, error: "collection_execution_not_found: route not connected", lastReadAtMs: null }))).toEqual({ status: "unavailable" });
+    expect(simulationClockFor(view(data)).status).toBe("fresh");
+    expect(simulationClockFor(view(data, { nowMs: 31_000 })).status).toBe("stale");
+    expect(simulationClockFor(view(data, { error: "fetch failed" })).status).toBe("stale");
+  });
+});
