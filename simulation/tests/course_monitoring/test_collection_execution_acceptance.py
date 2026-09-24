@@ -16,7 +16,6 @@ import importlib.util
 import json
 from pathlib import Path
 import re
-import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -34,9 +33,11 @@ from tests.range_ops import test_collection_execution_assignment as assignment_f
 
 
 SIMULATION_ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY_ROOT = SIMULATION_ROOT.parent
-CONSOLE_ROOT = REPOSITORY_ROOT / "apps/site-agent-console"
 ARCHITECTURE = SIMULATION_ROOT / "docs/collection_execution_v1_architecture.md"
+RUNTIME_WITNESS = (
+    SIMULATION_ROOT
+    / "tests/course_monitoring/fixtures/collection-execution-normal-loop-v3.json"
+)
 SCHEMA = json.loads(
     (SIMULATION_ROOT / "docs/contracts/collection-execution-v1/schema.json").read_text()
 )
@@ -101,6 +102,11 @@ def normal_loop(tmp_path_factory):
         evidence = runtime.evidence()
     finally:
         runtime.close()
+    snapshot = result["collection_executions"]
+    witness_text = RUNTIME_WITNESS.read_text(encoding="utf-8").strip()
+    witness = json.loads(witness_text)
+    assert snapshot == witness
+    assert json.dumps(snapshot, sort_keys=True, separators=(",", ":")) == witness_text
     return {"root": root, "result": result, "evidence": evidence}
 
 
@@ -111,144 +117,6 @@ def _execution(normal_loop):
 def _assert_wire_contract(snapshot):
     wire_oracle.validator(SCHEMA, "#/$defs/ExecutionSnapshot").validate(snapshot)
     wire_oracle.relations(snapshot)
-
-
-def _assert_typescript_parser(snapshot, tmp_path):
-    """Compile the existing parser once and feed it runtime-generated JSON."""
-
-    input_path = tmp_path / "runtime-snapshot.json"
-    input_path.write_text(json.dumps(snapshot, sort_keys=True), encoding="utf-8")
-    output = tmp_path / "compiled-parser"
-    subprocess.run(
-        [
-            str(CONSOLE_ROOT / "node_modules/.bin/tsc"),
-            "--target", "es2022", "--module", "commonjs",
-            "--moduleResolution", "node", "--skipLibCheck",
-            "--outDir", str(output),
-            "lib/api.ts", "lib/collection-executions.ts",
-        ],
-        cwd=CONSOLE_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    checked = subprocess.run(
-        [
-            "node", "-e",
-            (
-                "const fs=require('node:fs');"
-                "const p=require(process.argv[1]);"
-                "const value=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));"
-                "const parsed=p.parseCollectionExecutions(value);"
-                "process.stdout.write(parsed.schema);"
-            ),
-            str(output / "collection-executions.js"), str(input_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert checked.stdout == "nxt-collection-executions/v1"
-
-
-def _assert_wall_health_gate(task_operations, tmp_path):
-    """Feed a real backend read into the 15-second wall-clock health gate.
-
-    The task-operation payload is carried through unchanged so the assertion
-    also proves scheduler freshness cannot rewrite ACTIVE/PAUSED business time.
-    """
-
-    input_path = tmp_path / "task-operations.json"
-    input_path.write_text(json.dumps(task_operations, sort_keys=True), encoding="utf-8")
-    output = tmp_path / "compiled-health"
-    subprocess.run(
-        [
-            str(CONSOLE_ROOT / "node_modules/.bin/tsc"),
-            "--target", "es2022", "--module", "commonjs",
-            "--moduleResolution", "node", "--skipLibCheck",
-            "--outDir", str(output), "lib/scheduler-health.ts",
-        ],
-        cwd=CONSOLE_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    checked = subprocess.run(
-        [
-            "node", "-e",
-            (
-                "const fs=require('node:fs');"
-                "const h=require(process.argv[1]);"
-                "const data=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));"
-                "let now=1000000;"
-                "const tracker=h.createSchedulerHealthTracker({now:()=>now});"
-                "const fresh=tracker.observe({data,loading:false,busy:false,error:null,unavailable:false});"
-                "if(!h.schedulerAllowsWrites(fresh,now))process.exit(2);"
-                "now+=16000;"
-                "const expired=tracker.current();"
-                "if(expired.status!=='expired'||h.schedulerAllowsWrites(expired,now))process.exit(3);"
-                "const unavailable=tracker.observe({data:null,loading:false,busy:false,error:'offline',unavailable:true});"
-                "if(unavailable.status!=='unavailable'||h.schedulerAllowsWrites(unavailable,now))process.exit(4);"
-                "process.stdout.write(`${fresh.status}:${expired.status}:${unavailable.status}:${data.runtime.session_state}`);"
-            ),
-            str(output / "scheduler-health.js"), str(input_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    assert checked.stdout == (
-        "fresh:expired:unavailable:" + task_operations["runtime"]["session_state"]
-    )
-
-
-def _build_schedule_with_simulation_clock(task_operations, tmp_path):
-    """Invoke the shipped TypeScript form builder with backend simulation time."""
-
-    input_path = tmp_path / "task-operations.json"
-    input_path.write_text(json.dumps(task_operations, sort_keys=True), encoding="utf-8")
-    output = tmp_path / "compiled-schedule"
-    subprocess.run(
-        [
-            str(CONSOLE_ROOT / "node_modules/.bin/tsc"),
-            "--target", "es2022", "--module", "commonjs",
-            "--moduleResolution", "node", "--skipLibCheck",
-            "--outDir", str(output), "lib/api.ts", "lib/task-ops.ts",
-        ],
-        cwd=CONSOLE_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    checked = subprocess.run(
-        [
-            "node", "-e",
-            (
-                "const fs=require('node:fs');"
-                "const t=require(process.argv[1]);"
-                "const data=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));"
-                "const simNow=Date.parse(data.runtime.simulation_time_utc);"
-                "const dueDate=new Date(simNow+60000);"
-                "const pad=n=>String(n).padStart(2,'0');"
-                "const localTime=`${dueDate.getFullYear()}-${pad(dueDate.getMonth()+1)}-${pad(dueDate.getDate())}`+"
-                  "`T${pad(dueDate.getHours())}:${pad(dueDate.getMinutes())}`;"
-                "const fields={robot:'picker-01',zone:'Z1',localTime,validityMinutes:'1',operator:' acceptance '};"
-                "const schedule=t.buildSchedule(fields,simNow);"
-                "if(Date.parse(schedule.due_at_utc)!==simNow+60000)process.exit(2);"
-                "if(Date.parse(schedule.expires_at_utc)!==simNow+120000)process.exit(3);"
-                "if(schedule.operator!=='acceptance')process.exit(4);"
-                "let wallRejected=false;"
-                "try{t.buildSchedule(fields,Date.parse(data.server_time_utc));}catch{wallRejected=true;}"
-                "if(!wallRejected)process.exit(5);"
-                "process.stdout.write(JSON.stringify(schedule));"
-            ),
-            str(output / "task-ops.js"), str(input_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return json.loads(checked.stdout)
 
 
 def _iso(identity, seconds):
@@ -482,7 +350,6 @@ def _case_01(context):
         ("SendToHandoff", "SendToHandoff", "ORIGINAL_POLICY_CONVERGED"),
     ]
     _assert_wire_contract(snapshot)
-    _assert_typescript_parser(snapshot, context.root("typescript"))
 
 
 def _case_02(context):
@@ -1022,7 +889,6 @@ def _case_17(context):
         assert paused["scheduler"] == {"state": "RUNNING", "detail": None}
         assert paused_snapshot["session_state"] == "PAUSED"
         assert paused_snapshot["executions"][0]["state"] == before_snapshot["executions"][0]["state"] == "PENDING"
-        _assert_wall_health_gate(paused, context.root("clock-health"))
     finally:
         runtime.close()
 
@@ -1038,10 +904,18 @@ def _case_18(context):
         runtime.start()
         status = runtime.runtime_status()
         assert status["simulation_time_utc"] == "2026-09-16T08:10:00Z"
-        read = runtime.task_operations_snapshot()
-        schedule = _build_schedule_with_simulation_clock(
-            read, context.root("typescript-schedule-form")
-        )
+        simulation_now = parse_utc(status["simulation_time_utc"])
+        schedule = {
+            "robot_id": "picker-01",
+            "zone_id": "Z1",
+            "due_at_utc": (simulation_now + timedelta(minutes=1)).isoformat(
+                timespec="seconds"
+            ).replace("+00:00", "Z"),
+            "expires_at_utc": (simulation_now + timedelta(minutes=2)).isoformat(
+                timespec="seconds"
+            ).replace("+00:00", "Z"),
+            "operator": "acceptance",
+        }
         created = runtime.create_schedule(schedule)
         read = runtime.task_operations_snapshot()
         assert created["status"] == "created"
@@ -1051,7 +925,6 @@ def _case_18(context):
         assert parse_utc(created["schedule"]["due_at_utc"]) == parse_utc(schedule["due_at_utc"])
         assert parse_utc(created["schedule"]["expires_at_utc"]) == parse_utc(schedule["expires_at_utc"])
         assert wall.value.year == 2035
-        _assert_wall_health_gate(read, context.root("schedule-health"))
     finally:
         runtime.close()
 

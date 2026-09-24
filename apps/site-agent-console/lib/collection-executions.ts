@@ -187,6 +187,12 @@ export function parseCollectionExecutions(value: unknown): CollectionExecutionsS
   return s;
 }
 
+/** Business-clock instant for schedule validation. Call with the result of
+ * parseCollectionExecutions; wall/read-health time remains separately owned. */
+export function collectionExecutionSimulationNow(value: CollectionExecutionsSnapshot): number {
+  return Date.parse(value.simulation_time_utc);
+}
+
 /** Parse one durable receipt returned by the request-recovery endpoint. */
 export function parseCollectionExecutionReceipt(value: unknown, expectedRequestId?: string): RequestReceipt {
   if (!receipt(value) || (expectedRequestId !== undefined && value.request_id !== expectedRequestId)) return fail();
