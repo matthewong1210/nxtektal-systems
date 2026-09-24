@@ -1,4 +1,4 @@
-/** Strict read projection only. V3 runtime, device and API execution remain DESIGN ONLY — NOT IMPLEMENTED. */
+/** Strict read-only V3 collection execution projection and receipt recovery client. */
 import { API_SCHEMA, ManagerApiError, type FetchLike } from "./api";
 
 export const COLLECTION_EXECUTIONS_SCHEMA = "nxt-collection-executions/v1";
@@ -187,6 +187,12 @@ export function parseCollectionExecutions(value: unknown): CollectionExecutionsS
   return s;
 }
 
+/** Parse one durable receipt returned by the request-recovery endpoint. */
+export function parseCollectionExecutionReceipt(value: unknown, expectedRequestId?: string): RequestReceipt {
+  if (!receipt(value) || (expectedRequestId !== undefined && value.request_id !== expectedRequestId)) return fail();
+  return value;
+}
+
 function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsSnapshot) {
   const start = r.started_sim_t_s, end = r.terminal_sim_t_s, deadline = r.execution_deadline_sim_t_s;
   const runtime = r.runtime_evidence, edge = r.edge_evidence, raw = r.raw_quantity, unload = r.unload_quantity, p = r.device_protection;
@@ -361,13 +367,13 @@ function decodeJson(source: string): unknown {
 }
 
 export function createCollectionExecutionsClient(fetchImpl: FetchLike) {
-  return {async read(signal?: AbortSignal): Promise<CollectionExecutionsSnapshot> {
+  async function get(path: string, signal?: AbortSignal): Promise<unknown> {
     const abort = new AbortController(), cancel = () => abort.abort();
     signal?.addEventListener("abort", cancel, {once: true});
     if (signal?.aborted) abort.abort();
     const timer = setTimeout(cancel, 8000);
     try {
-      const response = await fetchImpl("/api/v1/collection-executions", {method: "GET", cache: "no-store", signal: abort.signal});
+      const response = await fetchImpl(path, {method: "GET", cache: "no-store", signal: abort.signal});
       let payload: unknown;
       try { payload = decodeJson(await response.text()); } catch { return fail(response.status); }
       if (!response.ok) {
@@ -375,7 +381,19 @@ export function createCollectionExecutionsClient(fetchImpl: FetchLike) {
         throw new ManagerApiError(response.status, payload.error);
       }
       if (!successEnvelope(payload)) return fail(response.status);
-      return parseCollectionExecutions(payload.data);
+      return payload.data;
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", cancel); }
-  }};
+  }
+  return {
+    async read(signal?: AbortSignal): Promise<CollectionExecutionsSnapshot> {
+      return parseCollectionExecutions(await get("/api/v1/collection-executions", signal));
+    },
+    async readRequest(requestId: string, signal?: AbortSignal): Promise<RequestReceipt> {
+      if (!id(requestId)) throw new ManagerApiError(400, {
+        code: "collection_execution_invalid_request", detail: "The request ID is invalid.",
+      });
+      const path = `/api/v1/collection-executions/requests/${encodeURIComponent(requestId)}`;
+      return parseCollectionExecutionReceipt(await get(path, signal), requestId);
+    },
+  };
 }

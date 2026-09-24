@@ -10,6 +10,8 @@ A deliberately small loopback-only HTTP surface:
 - ``GET  /api/v0/recommendations``  manager decision queue projection
 - ``GET  /api/v0/briefing``         shift briefing projection
 - ``GET  /api/v0/demo``             fixture-only cycle metadata
+- ``GET  /api/v1/collection-executions`` saved V3 execution evidence
+- ``GET  /api/v1/collection-executions/requests/{id}`` request receipt
 - ``POST /api/v0/recommendations/{id}/accept|reject|modify``
 - ``POST /api/v0/demo/advance|restart|reset``  fixture-only controls
 
@@ -42,10 +44,28 @@ from .contracts import (
 from .service import SiteAgentService
 
 _MAX_BODY_BYTES = 65536
+_COLLECTION_EXECUTIONS_PATH = "/api/v1/collection-executions"
+_COLLECTION_REQUESTS_PATH = f"{_COLLECTION_EXECUTIONS_PATH}/requests/"
+_COLLECTION_ERROR_CODES = frozenset(
+    {
+        "collection_execution_invalid_request",
+        "collection_execution_not_found",
+        "collection_execution_request_not_found",
+        "collection_execution_conflict",
+        "collection_execution_unavailable",
+        "collection_execution_result_unknown",
+    }
+)
 
 _STATUS_BY_CODE = {
     "course_ops_unavailable": 503,
     "course_ops_not_found": 404,
+    "collection_execution_invalid_request": 400,
+    "collection_execution_not_found": 404,
+    "collection_execution_request_not_found": 404,
+    "collection_execution_conflict": 409,
+    "collection_execution_unavailable": 503,
+    "collection_execution_result_unknown": 503,
     "planning_invalid_request": 400,
     "planning_not_found": 404,
     "planning_request_not_found": 404,
@@ -106,6 +126,177 @@ def _error_payload(code: str, detail: str) -> dict[str, Any]:
         "disclaimer": DISCLAIMER,
         "error": {"code": code, "detail": detail},
     }
+
+
+def _is_collection_execution_path(path: str) -> bool:
+    return path == _COLLECTION_EXECUTIONS_PATH or path.startswith(
+        f"{_COLLECTION_EXECUTIONS_PATH}/"
+    )
+
+
+def _valid_identifier(value: object) -> bool:
+    if not isinstance(value, str) or not 1 <= len(value) <= 128:
+        return False
+    if not value.isascii():
+        return False
+    first = value[0]
+    if not ("A" <= first <= "Z" or "a" <= first <= "z" or "0" <= first <= "9"):
+        return False
+    allowed = "_.:-"
+    return all(
+        "A" <= character <= "Z"
+        or "a" <= character <= "z"
+        or "0" <= character <= "9"
+        or character in allowed
+        for character in value[1:]
+    )
+
+
+def _decode_collection_request_id(segment: str) -> str:
+    """Decode one URL segment once, then apply the frozen ASCII ID grammar."""
+
+    decoded = bytearray()
+    index = 0
+    while index < len(segment):
+        character = segment[index]
+        if character == "%":
+            if index + 2 >= len(segment):
+                raise SiteAgentError(
+                    "collection_execution_invalid_request",
+                    "request_id has malformed percent encoding",
+                )
+            pair = segment[index + 1 : index + 3]
+            if any(value not in "0123456789abcdefABCDEF" for value in pair):
+                raise SiteAgentError(
+                    "collection_execution_invalid_request",
+                    "request_id has malformed percent encoding",
+                )
+            decoded.append(int(pair, 16))
+            index += 3
+            continue
+        if ord(character) > 127:
+            raise SiteAgentError(
+                "collection_execution_invalid_request",
+                "request_id must be ASCII",
+            )
+        decoded.append(ord(character))
+        index += 1
+    try:
+        request_id = bytes(decoded).decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SiteAgentError(
+            "collection_execution_invalid_request",
+            "request_id is not valid UTF-8",
+        ) from exc
+    if not _valid_identifier(request_id) or "/" in request_id:
+        raise SiteAgentError(
+            "collection_execution_invalid_request",
+            "request_id must match the collection execution ID contract",
+        )
+    return request_id
+
+
+def _valid_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _json_compatible(value: object) -> bool:
+    try:
+        json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _valid_collection_snapshot(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    expected = {
+        "schema",
+        "environment",
+        "series_id",
+        "session_id",
+        "round_id",
+        "round_index",
+        "engine_digest",
+        "config_digest",
+        "session_epoch_utc",
+        "control_interval_s",
+        "session_end_sim_t_s",
+        "session_state",
+        "now_sim_t_s",
+        "simulation_time_utc",
+        "server_time_utc",
+        "replay_digest",
+        "bindings",
+        "requests",
+        "receipts",
+        "executions",
+    }
+    return (
+        set(value) == expected
+        and value.get("schema") == "nxt-collection-executions/v1"
+        and value.get("environment") == "SIMULATION"
+        and all(
+            isinstance(value.get(key), list)
+            for key in ("bindings", "requests", "receipts", "executions")
+        )
+        and all(
+            _valid_identifier(value.get(key))
+            for key in ("series_id", "session_id", "round_id")
+        )
+        and all(
+            _valid_digest(value.get(key))
+            for key in ("engine_digest", "config_digest", "replay_digest")
+        )
+        and value.get("session_state") in {"ACTIVE", "PAUSED", "ENDED"}
+        and _json_compatible(value)
+    )
+
+
+def _valid_collection_receipt(value: object, request_id: str) -> bool:
+    if not isinstance(value, dict):
+        return False
+    expected = {
+        "schema",
+        "environment",
+        "request_id",
+        "request_digest",
+        "binding_id",
+        "execution_id",
+        "attempt_id",
+        "sequence",
+        "request_log_high_water_digest",
+        "durable",
+    }
+    sequence = value.get("sequence")
+    return (
+        set(value) == expected
+        and value.get("schema")
+        == "nxt-collection-execution-request-receipt/v1"
+        and value.get("environment") == "SIMULATION"
+        and value.get("request_id") == request_id
+        and _valid_identifier(value.get("request_id"))
+        and _valid_identifier(value.get("attempt_id"))
+        and all(
+            _valid_digest(value.get(key))
+            for key in (
+                "request_digest",
+                "binding_id",
+                "execution_id",
+                "request_log_high_water_digest",
+            )
+        )
+        and isinstance(sequence, int)
+        and not isinstance(sequence, bool)
+        and sequence > 0
+        and value.get("durable") is True
+        and _json_compatible(value)
+    )
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -245,7 +436,9 @@ class _Handler(BaseHTTPRequestHandler):
             ):
                 # A GET carrying an unread body would desync keep-alive.
                 self.close_connection = True
-            if path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
+            if _is_collection_execution_path(path):
+                self._serve_collection_executions(path)
+            elif path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
                 self._serve_course(path)
             elif path == "/api/v1/planning" or path.startswith("/api/v1/planning/"):
                 self._send_json(200, _envelope(self._route_planning("GET", path, {})))
@@ -297,6 +490,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 self._send_error_code("forbidden_origin", reason or "refused")
                 return
+            if _is_collection_execution_path(path):
+                self._reject_collection_execution_mutation()
+                return
             body = self._read_body()
             if path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
                 raise SiteAgentError("method_not_allowed", "course evidence is read-only")
@@ -329,6 +525,102 @@ class _Handler(BaseHTTPRequestHandler):
                     "internal_error", f"{type(exc).__name__}: {exc}"
                 ),
             )
+
+    def do_PUT(self) -> None:  # noqa: N802 - stdlib handler naming
+        self._serve_other_mutation_method()
+
+    def do_PATCH(self) -> None:  # noqa: N802 - stdlib handler naming
+        self._serve_other_mutation_method()
+
+    def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler naming
+        self._serve_other_mutation_method()
+
+    def _serve_other_mutation_method(self) -> None:
+        path = self.path.split("?", 1)[0]
+        if not _is_collection_execution_path(path):
+            self.send_error(501, f"Unsupported method ({self.command!r})")
+            return
+        allowed, reason = self._request_allowed()
+        if not allowed:
+            self.close_connection = True
+            self._send_error_code("forbidden_origin", reason or "refused")
+            return
+        self._reject_collection_execution_mutation()
+
+    def _reject_collection_execution_mutation(self) -> None:
+        # Do not parse a body for a read-only namespace. Leaving body bytes on
+        # keep-alive would desynchronise the next request, so close when any
+        # framing claims a body.
+        if self.headers.get("Content-Length") or self.headers.get(
+            "Transfer-Encoding"
+        ):
+            self.close_connection = True
+        self._send_error_code(
+            "method_not_allowed", "collection execution evidence is read-only"
+        )
+
+    def _serve_collection_executions(self, path: str) -> None:
+        if path == _COLLECTION_EXECUTIONS_PATH:
+            callback = self.server.collection_executions
+            if callback is None:
+                raise SiteAgentError(
+                    "collection_execution_unavailable",
+                    "collection execution evidence is unavailable",
+                )
+            data = self._call_collection_reader(callback)
+            if not _valid_collection_snapshot(data):
+                raise SiteAgentError(
+                    "collection_execution_unavailable",
+                    "collection execution evidence is unavailable",
+                )
+            self._send_json(200, _envelope(data))
+            return
+
+        if path.startswith(_COLLECTION_REQUESTS_PATH):
+            segment = path[len(_COLLECTION_REQUESTS_PATH) :]
+            if "/" in segment:
+                raise SiteAgentError(
+                    "collection_execution_not_found",
+                    "unknown collection execution evidence path",
+                )
+            request_id = _decode_collection_request_id(segment)
+            callback = self.server.collection_execution_request
+            if callback is None:
+                raise SiteAgentError(
+                    "collection_execution_unavailable",
+                    "collection execution evidence is unavailable",
+                )
+            data = self._call_collection_reader(callback, request_id)
+            if not _valid_collection_receipt(data, request_id):
+                raise SiteAgentError(
+                    "collection_execution_unavailable",
+                    "collection execution evidence is unavailable",
+                )
+            self._send_json(200, _envelope(data))
+            return
+
+        raise SiteAgentError(
+            "collection_execution_not_found",
+            "unknown collection execution evidence path",
+        )
+
+    @staticmethod
+    def _call_collection_reader(callback: Callable[..., object], *args: str) -> object:
+        try:
+            return callback(*args)
+        except Exception as exc:  # noqa: BLE001 - injected read boundary
+            code = getattr(exc, "code", None)
+            detail = getattr(exc, "detail", None)
+            if (
+                code in _COLLECTION_ERROR_CODES
+                and isinstance(detail, str)
+                and bool(detail)
+            ):
+                raise SiteAgentError(code, detail) from exc
+            raise SiteAgentError(
+                "collection_execution_unavailable",
+                "collection execution evidence is unavailable",
+            ) from exc
 
     def _serve_course(self, path: str) -> None:
         # Evidence selection and integrity belong to the injected reader.
@@ -480,6 +772,8 @@ class _Server(ThreadingHTTPServer):
         planning_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
         course_operations: Callable[[], dict[str, Any]] | None = None,
         course_media: Callable[[str, str, str], bytes] | None = None,
+        collection_executions: Callable[[], dict[str, Any]] | None = None,
+        collection_execution_request: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         self.service = service
         self.console_dir = console_dir
@@ -487,6 +781,8 @@ class _Server(ThreadingHTTPServer):
         self.planning_operations = planning_operations
         self.course_operations = course_operations
         self.course_media = course_media
+        self.collection_executions = collection_executions
+        self.collection_execution_request = collection_execution_request
         super().__init__(address, _Handler)
 
 
@@ -504,6 +800,8 @@ class SiteAgentApiServer:
         planning_operations: Callable[[str, str, dict[str, Any]], dict[str, Any]] | None = None,
         course_operations: Callable[[], dict[str, Any]] | None = None,
         course_media: Callable[[str, str, str], bytes] | None = None,
+        collection_executions: Callable[[], dict[str, Any]] | None = None,
+        collection_execution_request: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         if host not in LOOPBACK_HOSTS:
             raise SiteAgentError(
@@ -524,7 +822,17 @@ class SiteAgentApiServer:
                     f"console directory does not exist: {resolved_console}",
                 )
         self._service = service
-        self._server = _Server((host, port), service, resolved_console, task_operations, planning_operations, course_operations, course_media)
+        self._server = _Server(
+            (host, port),
+            service,
+            resolved_console,
+            task_operations,
+            planning_operations,
+            course_operations,
+            course_media,
+            collection_executions,
+            collection_execution_request,
+        )
         self._thread: threading.Thread | None = None
         self._serving = False
 
