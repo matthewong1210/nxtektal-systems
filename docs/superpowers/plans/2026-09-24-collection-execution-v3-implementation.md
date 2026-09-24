@@ -149,10 +149,10 @@
 - POST/PUT/PATCH/DELETE on either path return 405; unavailable readers return `collection_execution_unavailable`; unknown IDs return the frozen not-found error.
 - TypeScript client exposes `read(signal?)` and `readRequest(requestId, signal?)`, both uncached GET-only methods with strict response parsing.
 
-- [ ] Write failing Python and Vitest route/client tests, including percent-decoding, invalid IDs, malformed envelopes, no callback, callback failure, all mutation verbs, and proof a GET cannot tick/advance.
-- [ ] Verify RED.
-- [ ] Implement only the injected read routes and strict client method; change no React/CSS/component file.
-- [ ] Run focused Site Agent and console contract tests and commit `feat(site-agent): expose collection execution evidence`.
+- [x] Write failing Python and Vitest route/client tests, including percent-decoding, invalid IDs, malformed envelopes, no callback, callback failure, all mutation verbs, and proof a GET cannot tick/advance.
+- [x] Verify RED.
+- [x] Implement only the injected read routes and strict client method; change no React/CSS/component file.
+- [x] Run focused Site Agent and console contract tests and commit `feat(site-agent): expose collection execution evidence`.
 
 ---
 
