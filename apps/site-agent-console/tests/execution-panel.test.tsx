@@ -236,3 +236,82 @@ describe("presentation helpers never add judgement of their own", () => {
     expect(quantityText({ ...raw, status: "INCOMPLETE", balls: null }).label).not.toContain("0 balls");
   });
 });
+
+describe("3C acceptance renders: human assistance, ENDED, and the backend-generated witness", () => {
+  it("shows an accepted human-assistance exit as a protected non-success with no browser control", async () => {
+    const { humanAssistanceSnapshot } = await import("./execution-fixtures");
+    const html = clean(render(view(humanAssistanceSnapshot())));
+    expect(html).toContain("PARTIAL");
+    expect(html).toContain("HUMAN_ASSISTANCE_REQUIRED");
+    expect(html).toContain("requires a person");
+    expect(html).toContain("not resumable from the browser");
+    expect(html).toContain("DEVICE PROTECTED");
+    expect(html).toContain("human assistance required");
+    expect(html).toContain("new authorization blocked");
+    expect(html).toContain("RequestHumanAssistance");
+    expect(html).toContain("ORIGINAL_POLICY_UNCHANGED");
+    expect(html).toContain("12 balls · ledger-backed");
+    expect(html).not.toMatch(/badge-ok">SUCCEEDED/);
+    expect(html).not.toMatch(/<button[^>]*>(Resume|Release|Clear protection|Acknowledge)/);
+  });
+
+  it("marks an ENDED session while keeping its terminal record", async () => {
+    const { endedSnapshot } = await import("./execution-fixtures");
+    const html = clean(render(view(endedSnapshot())));
+    expect(html).toContain("SESSION ENDED");
+    expect(html).toContain("The session has ended");
+    expect(html).toContain("SUCCEEDED");
+    expect(html).not.toContain("SESSION ACTIVE");
+  });
+
+  it("renders the backend-generated normal-loop witness (a checked-in fixture, not a live read)", async () => {
+    const { witnessSnapshot } = await import("./execution-fixtures");
+    const html = clean(render(view(witnessSnapshot())));
+    expect(html).toContain("collection-execution-session-v3");
+    expect(html).toContain("task_b32398701c03d4a1fb2a0106");
+    expect(html).toContain("SUCCEEDED");
+    expect((html.match(/600 balls · ledger-backed/g) ?? []).length).toBe(2);
+    expect(html).toContain("Admitted (lower bound) at 2026-09-16T08:10:00 UTC");
+    expect(html).toContain("Started at t = 29400 s");
+    expect(html).toContain("Ended at t = 30118.034 s");
+    expect(html).toContain("execution deadline t = 30600 s");
+    expect(html).toContain("2035-01-02T03:04:05 UTC"); // the wall-clock service read, shown apart from simulation time
+    expect(html).toContain("t = 30600 s"); // simulation now
+    expect(html).toContain("Arbitration trace (2 ticks)");
+    expect(html).toContain("ORIGINAL_POLICY_CONVERGED");
+  });
+});
+
+describe("task panel: source-neutral device copy and the shared simulation clock", () => {
+  const actions = { schedule: async () => {}, cancel: async () => {}, respond: async () => {}, refresh: async () => {} };
+  it("names the transport as reported and never infers a device kind from it", async () => {
+    const { DispatchView } = await import("../components/DispatchPanel");
+    const { INITIAL_TASK_OPS_VIEW } = await import("../lib/task-ops");
+    const { taskOpsFixture } = await import("./task-ops-fixtures");
+    const html = clean(renderToStaticMarkup(<DispatchView view={{ ...INITIAL_TASK_OPS_VIEW, data: taskOpsFixture(), loading: false }} actions={actions} />));
+    expect(html).toContain("Transport in_memory");
+    expect(html).toContain("not inferred here");
+    expect(html).toContain("No physical robot or CE82A is connected");
+    expect(html).not.toContain("protocol double");
+    expect(html).not.toContain("Protocol-double");
+    expect(html).not.toContain("Mock");
+    const mqtt = renderToStaticMarkup(<DispatchView view={{ ...INITIAL_TASK_OPS_VIEW, data: taskOpsFixture({ transport: "mqtt" }), loading: false }} actions={actions} />);
+    expect(mqtt).toContain("Transport mqtt");
+    expect(mqtt).not.toContain("protocol double");
+  });
+
+  it("compares schedule dates with a fresh simulation clock and disables scheduling on a stale one", async () => {
+    const { DispatchView } = await import("../components/DispatchPanel");
+    const { INITIAL_TASK_OPS_VIEW } = await import("../lib/task-ops");
+    const { taskOpsFixture } = await import("./task-ops-fixtures");
+    const base = { ...INITIAL_TASK_OPS_VIEW, data: taskOpsFixture(), loading: false };
+    const fresh = clean(renderToStaticMarkup(<DispatchView view={base} actions={actions} simulationClock={{ status: "fresh", nowMs: Date.parse("2026-09-16T08:30:00Z"), utc: "2026-09-16T08:30:00Z", sessionState: "ACTIVE" }} />));
+    expect(fresh).toContain("Simulation time 2026-09-16 08:30:00 UTC · session ACTIVE");
+    expect(fresh).toContain("compared with simulation time 2026-09-16 08:30:00 UTC, not the wall clock");
+    expect(fresh).not.toMatch(/id="dispatch-robot"[^>]*disabled/);
+    const stale = clean(renderToStaticMarkup(<DispatchView view={base} actions={actions} simulationClock={{ status: "stale", detail: "the last successful collection execution read is older than 15 s" }} />));
+    expect(stale).toContain("Changes are disabled. The simulation clock reading is not fresh (the last successful collection execution read is older than 15 s)");
+    expect(stale).toMatch(/id="dispatch-robot"[^>]*disabled/);
+    expect(stale).toContain("scheduling is disabled");
+  });
+});

@@ -10,6 +10,15 @@ Codex 维护于 `simulation/docs/contracts/collection-execution-v1/` 与
 "DESIGN ONLY — NOT IMPLEMENTED"：路由、设备与 V3 会话在该基线上仍未实现，
 因此组件测试只能用冻结的 SIMULATION 示例经真实 parser 驱动，不是真实联调。
 
+3C 联调增量（2026-09-24，基线合入 Codex `869bb6c`）：读取健康改为独立
+15 s 墙钟过期（`EXECUTION_READ_EXPIRY_MS`），与请求错误、模拟暂停无关；
+读取循环提升为 `useCollectionExecutions()`，`PilotOperations` 用
+`simulationClockFor(view)` 把新鲜的模拟时钟传给 `DispatchView`，排程表单按
+`collectionExecutionSimulationNow` 比较日期，读取过期时禁用排程，无 V3 路由时
+沿用墙钟规则；`DispatchPanel` 文案改为按服务报告显示传输方式，不再由
+in_memory/MQTT 推断设备种类；新增人工介入、安全拒绝、PAUSED/ENDED、过期恢复
+与后端生成 witness 夹具的验收测试。示例测试与真实联调分开记录。
+
 v3 相对 v2 的变化：组件文件名定稿为 `CollectionExecutionPanel`（含纯渲染
 `CollectionExecutionView`）、`ExecutionSessionStrip`、`ExecutionRecordCard`
 （含 `BindingOnlyCard`）、`shared`；面板内唯一按钮是"Retry execution read"；

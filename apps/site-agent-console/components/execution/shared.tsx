@@ -98,7 +98,7 @@ export function quantityText(quantity: QuantityEvidence): { label: string; tone:
 }
 
 /** Simulation seconds as the contract states them. */
-export const simSeconds = (seconds: number) => `t = ${seconds} s`;
+export const simSeconds = (seconds: number) => `t = ${Number.isInteger(seconds) ? seconds : Number(seconds.toFixed(3))} s`;
 
 /** RFC3339 UTC text as a readable label; no timezone conversion here
  * because the execution snapshot carries no site timezone. */

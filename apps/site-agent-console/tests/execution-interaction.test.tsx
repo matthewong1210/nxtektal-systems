@@ -15,8 +15,8 @@ import { COLLECTION_EXECUTIONS_POLL_MS, EXECUTION_READ_EXPIRY_MS } from "../comp
 import { PilotOperations } from "../components/PilotOperations";
 import { API_SCHEMA, DISCLAIMER } from "../lib/api";
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
-import type { TaskOpsSnapshot } from "../lib/task-ops";
-import { exampleData, withRound } from "./execution-fixtures";
+import { localTimeToUtc, type TaskOpsSnapshot } from "../lib/task-ops";
+import { endedData, exampleData, humanAssistanceData, withRound, witnessData } from "./execution-fixtures";
 import { taskOpsFixture } from "./task-ops-fixtures";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -43,6 +43,7 @@ function scriptedService() {
     outcomes: [] as OutcomeRecord[],
     planningPostMode: "ok" as "ok" | "network",
     paused: false,
+    schedules: [] as Record<string, unknown>[],
   };
   const envelope = (status: number, payload: unknown) =>
     new Response(JSON.stringify({ schema: API_SCHEMA, disclaimer: DISCLAIMER, ...(status < 400 ? { data: payload } : { error: payload }) }), {
@@ -56,6 +57,10 @@ function scriptedService() {
     state.requests.push({ method, path: input });
     if (method === "GET") state.reads.push(input);
     if (method === "GET" && input === "/api/v0/task-ops") return envelope(200, taskOps());
+    if (method === "POST" && input === "/api/v0/task-ops/schedules") {
+      state.schedules.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return envelope(200, { recorded: true });
+    }
     if (method === "GET" && input === "/api/v1/planning") return envelope(200, planning());
     if (method === "GET" && input.startsWith("/api/v1/planning/requests/")) {
       return envelope(404, { code: "planning_request_not_found", detail: "no committed request in verified evidence" });
@@ -354,5 +359,126 @@ describe("read health expires on its own 15-second wall clock, independent of er
     expect(readBadge()).toBe("READ FRESH");
     await tick(8_000); // the remounted instance's own boundary
     expect(readBadge()).toBe("READ STALE");
+  });
+});
+
+describe("3C acceptance: safety rejection, human assistance, PAUSED and ENDED arrive through polling", () => {
+  it("renders each service-reported state in turn without any browser control appearing", async () => {
+    const service = scriptedService();
+    service.state.executions = exampleData("safety-rejected");
+    await mount(service);
+    expect(panelText()).toContain("REJECTED");
+    expect(panelText()).toContain("final safety check rejected");
+    expect(panelText()).toContain("Did not start (contract evidence)");
+    service.state.executions = humanAssistanceData();
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("HUMAN_ASSISTANCE_REQUIRED");
+    expect(panelText()).toContain("DEVICE PROTECTED");
+    expect(panelText()).toContain("not resumable from the browser");
+    service.state.paused = true;
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("SESSION PAUSED");
+    expect(panelText()).toContain("READ FRESH"); // service connection is healthy while the simulation is paused
+    service.state.paused = false;
+    service.state.executions = endedData();
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("SESSION ENDED");
+    expect(panelText()).toContain("SUCCEEDED");
+    const labels = [...panel()!.querySelectorAll("button")].map((b) => b.textContent);
+    expect(labels).toEqual(["Retry execution read"]);
+    expect(service.state.requests.filter((r) => r.path.startsWith("/api/v1/collection-executions") && r.method !== "GET")).toHaveLength(0);
+  });
+});
+
+describe("3C acceptance: the schedule form uses the shared simulation clock while the execution read is fresh", () => {
+  const localInput = (instantMs: number) => {
+    const d = new Date(instantMs);
+    const two = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
+  };
+  const fillSchedule = async (local: string) => {
+    await setValue(container.querySelector<HTMLInputElement>("#dispatch-time")!, local);
+    await setValue(container.querySelector<HTMLInputElement>("#dispatch-operator")!, "operator-a");
+  };
+
+  it("accepts a 2026 simulation date that the 2026-09-24 wall clock would reject, and posts the simulation-derived UTC", async () => {
+    const service = scriptedService();
+    service.state.executions = witnessData(); // simulation time 2026-09-16T08:30:00Z, wall clock far later
+    await mount(service);
+    expect(text()).toContain("Simulation time 2026-09-16 08:30:00 UTC · session ACTIVE");
+    const simulationNow = Date.parse("2026-09-16T08:30:00Z");
+    const local = localInput(simulationNow + 60_000);
+    await fillSchedule(local);
+    expect(text()).toContain("compared with simulation time 2026-09-16 08:30:00 UTC, not the wall clock");
+    await click("Schedule simulated collection");
+    await tick(100);
+    expect(service.state.schedules).toHaveLength(1);
+    expect(service.state.schedules[0]).toMatchObject({ robot_id: "picker-01", zone_id: "Z1", operator: "operator-a", due_at_utc: localTimeToUtc(local) });
+    expect(service.state.schedules[0].due_at_utc).toBe(new Date(simulationNow + 60_000).toISOString());
+    expect(text()).toContain("Schedule recorded");
+  });
+
+  it("disables scheduling when the simulation clock reading goes stale, and refuses a directly dispatched submit", async () => {
+    const service = scriptedService();
+    service.state.executions = witnessData();
+    await mount(service);
+    await fillSchedule(localInput(Date.parse("2026-09-16T08:31:00Z")));
+    service.state.execMode = "hang";
+    await tick(EXECUTION_READ_EXPIRY_MS + 200);
+    expect(text()).toContain("Changes are disabled. The simulation clock reading is not fresh");
+    expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(true);
+    const form = container.querySelector<HTMLFormElement>("form.dispatch-form");
+    await act(async () => {
+      form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      await vi.advanceTimersByTimeAsync(50);
+    });
+    expect(service.state.schedules).toHaveLength(0);
+    service.state.execMode = "ok";
+    service.releaseHung();
+    await tick(50);
+    expect(text()).not.toContain("Changes are disabled. The simulation clock reading is not fresh");
+    expect(document.getElementById("dispatch-robot")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("falls back to the legacy wall-clock rule when the service has no execution route", async () => {
+    const service = scriptedService();
+    service.state.execMode = "missing";
+    await mount(service);
+    expect(panelText()).toContain("UNAVAILABLE");
+    expect(text()).not.toContain("compared with simulation time");
+    await fillSchedule(localInput(Date.parse("2026-09-16T08:31:00Z")));
+    await click("Schedule simulated collection");
+    await tick(50);
+    expect(text()).toContain("Choose a start time in the future.");
+    expect(service.state.schedules).toHaveLength(0);
+  });
+
+  it("keeps a pending planning UNKNOWN request intact while the execution read expires and recovers", async () => {
+    const service = scriptedService();
+    service.state.executions = witnessData();
+    await mount(service);
+    await click("Record UNLOADED");
+    await setValue(input("-UNLOADED-quantity"), "480");
+    await setValue(input("-UNLOADED-source-ref"), "tab-a-count");
+    await setValue(input("-UNLOADED-operator"), "operator-a");
+    await setValue(input("-UNLOADED-started"), "2026-09-16T16:30");
+    await setValue(input("-UNLOADED-completed"), "2026-09-16T16:31");
+    await setValue(input("-UNLOADED-reason"), "Interaction test.");
+    service.state.planningPostMode = "network";
+    await click("Save UNLOADED result");
+    await tick(100);
+    const requestId = /outcomes-[0-9a-f-]{36}/.exec(text())?.[0];
+    expect(requestId).toBeDefined();
+    service.state.execMode = "hang";
+    await tick(EXECUTION_READ_EXPIRY_MS + 200);
+    expect(panelText()).toContain("READ STALE");
+    service.state.execMode = "ok";
+    service.releaseHung();
+    await tick(50);
+    expect(panelText()).toContain("READ FRESH");
+    expect(text()).toContain("UNKNOWN OUTCOME");
+    expect(text()).toContain(requestId!);
+    expect(input("-UNLOADED-quantity").value).toBe("480");
+    expect(buttonNamed("Recover by request ID")?.disabled).toBe(false);
   });
 });

@@ -20,10 +20,18 @@ last valid snapshot stays on screen marked stale with its age. The session
 state (`ACTIVE`/`PAUSED`/`ENDED`) and simulation clock are shown apart from the
 wall-clock service read, and a successful read grants no execution authority.
 A round change resets only this panel's own display state; the planning
-panel's pending requests and recovery state are untouched. The V3 route,
-session and device are DESIGN ONLY — NOT IMPLEMENTED at this baseline, so the
+panel's pending requests and recovery state are untouched. The read health
+expires on its own 15-second wall clock even while a read keeps waiting or the
+session is PAUSED. While that read is fresh, the task panel's schedule form
+compares dates with the shared simulation clock
+(`collectionExecutionSimulationNow`) instead of the wall clock; a stale
+reading disables scheduling, and no V3 route means the legacy wall-clock rule.
+The task panel names its device source only as the service reports it and
+does not infer a device kind from the transport. On this branch the V3
+backend exists but no combined serve command exposes the route yet, so the
 panel reports UNAVAILABLE against current services; its tests run over the
-frozen SIMULATION contract examples, which is not a live integration.
+frozen SIMULATION contract examples and the backend-generated normal-loop
+witness fixture, which is not a live integration.
 
 Whole-course monitoring v1 adds a read-only panel above the pilot controls.
 It shows 54 inspection points across 18 synthetic holes, the last observed
@@ -37,8 +45,9 @@ The panel consumes only the
 It distinguishes saved simulation time, source pause flags and API read time;
 successful polling never makes a saved frame live. Missing/broken reads keep
 the last snapshot marked stale, and unavailable images have an explicit retry.
-The pilot controls below belong to a separate protocol rehearsal and do not
-dispatch robots or staff in the 18-hole session.
+The pilot controls below run whatever task composition the service provides
+(a protocol rehearsal or the simulator-backed V3 execution session); they
+never act on this saved V2 report.
 
 The integrated dated-task rehearsal adds a task panel above the fixture panels:
 single-date collection schedules, automatic task/device refresh, and a local

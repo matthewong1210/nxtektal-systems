@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ManagerApiError } from "../../lib/api";
-import { createCollectionExecutionsClient, type CollectionExecutionsSnapshot } from "../../lib/collection-executions";
+import { collectionExecutionSimulationNow, createCollectionExecutionsClient, type CollectionExecutionsSnapshot } from "../../lib/collection-executions";
 import { Badge, EmptyNote, Section } from "../ui";
 import { BindingOnlyCard, ExecutionRecordCard } from "./ExecutionRecordCard";
 import { ExecutionSessionStrip } from "./ExecutionSessionStrip";
@@ -101,9 +101,39 @@ export function CollectionExecutionView({ view, onRetry }: { view: ExecutionRead
 
 const describe = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
+/** The simulation/business clock the legacy schedule form compares dates
+ * against, derived from the execution read. It is fresh only while the read
+ * itself is fresh; read health stays on wall time. No V3 route (404) means
+ * the legacy wall-clock rehearsal rule applies. */
+export type SimulationClock =
+  | { status: "unavailable" }
+  | { status: "fresh"; nowMs: number; utc: string; sessionState: CollectionExecutionsSnapshot["session_state"] }
+  | { status: "stale"; detail: string };
+
+export function simulationClockFor(view: ExecutionReadView): SimulationClock {
+  if (view.unavailable) return { status: "unavailable" };
+  if (view.data === null) {
+    return { status: "stale", detail: view.error !== null ? `the collection execution read failed (${view.error})` : "the first simulation clock reading is still pending" };
+  }
+  const expired = view.lastReadAtMs !== null && view.nowMs - view.lastReadAtMs > EXECUTION_READ_EXPIRY_MS;
+  if (view.error !== null) return { status: "stale", detail: `the last collection execution read failed (${view.error})` };
+  if (expired) return { status: "stale", detail: "the last successful collection execution read is older than 15 s" };
+  return { status: "fresh", nowMs: collectionExecutionSimulationNow(view.data), utc: view.data.simulation_time_utc, sessionState: view.data.session_state };
+}
+
+/** Thin shell around the pure view; the read loop lives in the hook so the
+ * page can share the same reading with the task panel's schedule form. */
+export function CollectionExecutionPanel({ view, onRetry }: { view: ExecutionReadView; onRetry: () => void }) {
+  return (
+    <div className="dispatch-shell">
+      <CollectionExecutionView view={view} onRetry={onRetry} />
+    </div>
+  );
+}
+
 /** One serial read loop over the Codex-owned GET-only client. A failed or
  * rejected read keeps the exact previous snapshot; unmount aborts. */
-export function CollectionExecutionPanel() {
+export function useCollectionExecutions(): { view: ExecutionReadView; retry: () => void } {
   const [view, setView] = useState<ExecutionReadView>(INITIAL_EXECUTION_VIEW);
   const refresh = useRef<() => void>(() => {});
   useEffect(() => {
@@ -161,9 +191,5 @@ export function CollectionExecutionPanel() {
     const timer = setTimeout(() => setView((previous) => ({ ...previous, nowMs: Date.now() })), delay);
     return () => clearTimeout(timer);
   }, [view.lastReadAtMs]);
-  return (
-    <div className="dispatch-shell">
-      <CollectionExecutionView view={view} onRetry={() => refresh.current()} />
-    </div>
-  );
+  return { view, retry: () => refresh.current() };
 }

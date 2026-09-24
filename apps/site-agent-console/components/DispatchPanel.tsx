@@ -16,6 +16,7 @@ import {
   type SchedulerHealth,
   type SchedulerHealthTracker,
 } from "../lib/scheduler-health";
+import type { SimulationClock } from "./execution/CollectionExecutionPanel";
 import { Badge, EmptyNote, KeyValue, Section, type Tone } from "./ui";
 
 const client = createTaskOpsClient((input, init) => fetch(input, init));
@@ -35,9 +36,13 @@ export type TaskOpsActions = {
   refresh: () => Promise<void>;
 };
 
-export function ScheduleForm({ robots, zones, disabled, onSchedule }: {
+const NO_SIMULATION_CLOCK: SimulationClock = { status: "unavailable" };
+
+export function ScheduleForm({ robots, zones, disabled, onSchedule, simulationClock = NO_SIMULATION_CLOCK }: {
   robots: string[]; zones: string[]; disabled: boolean;
   onSchedule: (input: ScheduleInput) => Promise<void>;
+  /** Fresh simulation clock: the date comparison uses it instead of the wall clock. */
+  simulationClock?: SimulationClock;
 }) {
   const [robot, setRobot] = useState(robots[0] ?? "");
   const [zone, setZone] = useState(zones[0] ?? "");
@@ -55,6 +60,9 @@ export function ScheduleForm({ robots, zones, disabled, onSchedule }: {
     const utc = localTimeToUtc(localTime);
     preview = `${Intl.DateTimeFormat().resolvedOptions().timeZone} → ${utcLabel(utc)}`;
   } catch { /* Incomplete fields are validated on submit. */ }
+  const clockNote = simulationClock.status === "fresh"
+    ? ` · compared with simulation time ${utcLabel(simulationClock.utc)}, not the wall clock`
+    : simulationClock.status === "stale" ? " · the simulation clock reading is not fresh; scheduling is disabled" : "";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -64,7 +72,11 @@ export function ScheduleForm({ robots, zones, disabled, onSchedule }: {
     setError(null);
     setMessage(null);
     try {
-      const input = pending.current ?? buildSchedule({ robot, zone, localTime, validityMinutes, operator });
+      // A fresh simulation clock owns the "in the future" comparison; without a
+      // V3 route the legacy wall-clock rehearsal rule applies. A stale clock
+      // never reaches this point because the form is disabled.
+      const now = simulationClock.status === "fresh" ? simulationClock.nowMs : Date.now();
+      const input = pending.current ?? buildSchedule({ robot, zone, localTime, validityMinutes, operator }, now);
       pending.current = input;
       await onSchedule(input);
       pending.current = null;
@@ -101,7 +113,7 @@ export function ScheduleForm({ robots, zones, disabled, onSchedule }: {
         <div className="form-row"><label htmlFor="dispatch-operator">Schedule operator</label>
           <input id="dispatch-operator" autoComplete="off" value={operator} onChange={(event) => setOperator(event.target.value)} disabled={formDisabled} required /></div>
       </div>
-      <p className="fineprint" id="dispatch-time-preview">{preview}</p>
+      <p className="fineprint" id="dispatch-time-preview">{preview}{clockNote}</p>
       <p className="fineprint">One dated collection task. The service checks availability when it is due. Task expiry is a validity limit; it is not a physical stop command.</p>
       <div className="form-actions"><button className="btn btn-primary" type="submit" disabled={disabled || submitting || (!uncertain && (!operator.trim() || !localTime || !robot || !zone))}>
         {submitting ? "Saving…" : uncertain ? "Retry same schedule" : "Schedule simulated collection"}
@@ -177,18 +189,25 @@ function CancelSchedule({ id, disabled, cancel }: { id: string; disabled: boolea
   </form>;
 }
 
-export function DispatchView({ view, actions, health }: { view: TaskOpsView; actions: TaskOpsActions; health?: SchedulerHealth }) {
+export function DispatchView({ view, actions, health, simulationClock = NO_SIMULATION_CLOCK }: {
+  view: TaskOpsView; actions: TaskOpsActions; health?: SchedulerHealth;
+  /** Simulation/business clock from the execution read; stale blocks scheduling, absent means the legacy wall-clock rule. */
+  simulationClock?: SimulationClock;
+}) {
   const data = view.data;
   // With the shared reading, the task panel labels and gates on the same
   // freshness-aware health as the planning panel; without it (standalone
   // render) it keeps the raw snapshot semantics.
   const healthBlock = health !== undefined && !schedulerAllowsWrites(health) ? schedulerHealthReason(health) : null;
-  const disabled = !canMutateTaskOps(view) || healthBlock !== null;
+  const clockBlock = simulationClock.status === "stale"
+    ? `The simulation clock reading is not fresh (${simulationClock.detail}); a schedule date is not compared against the wall clock while a simulated session may be bound.`
+    : null;
+  const disabled = !canMutateTaskOps(view) || healthBlock !== null || clockBlock !== null;
   const count = data?.notifications.filter((item) => item.status !== "RESOLVED").length ?? 0;
   return (
     <Section title="Pilot task operations" aside={<><Badge tone="sim">SIMULATION</Badge>{health !== undefined ? <Badge tone={schedulerAllowsWrites(health) ? "ok" : health.status === "unknown" ? "warn" : "bad"}>{schedulerHealthLabel(health)}</Badge> : data ? <Badge tone={statusTone(data.scheduler.state)}>{data.scheduler.state}</Badge> : null}</>}>
       <p className="sim-note">Schedule a collection, follow its progress, and record staff handling in one place.</p>
-      <p className="fineprint dispatch-boundary">Local simulation with protocol doubles. No physical robot or CE82A is connected. Advice acceptance below remains a separate workflow record.</p>
+      <p className="fineprint dispatch-boundary">Local simulation. No physical robot or CE82A is connected. The task device kind (a rehearsal double or the simulator-backed V3 device) is set by the service composition and is not inferred here. Advice acceptance below remains a separate workflow record.</p>
       {view.unavailable ? <div className="dispatch-service-note" role="status"><Badge tone="muted">UNAVAILABLE</Badge>
         <p>This standalone demo does not expose pilot task operations. Start the pilot dispatch service to enable scheduling and the local notification inbox. The fixture console remains available below.</p>
       </div> : view.error ? <div className="load-warning" role="alert"><Badge tone="bad">{data ? "STALE" : "OFFLINE"}</Badge>
@@ -197,10 +216,11 @@ export function DispatchView({ view, actions, health }: { view: TaskOpsView; act
       {data ? <>
         <div className="dispatch-health">
           <span className="detail-text">Updated {utcLabel(data.server_time_utc)} · refreshes every 2 seconds</span>
-          <span className="detail-text">{data.transport === "in_memory" ? "Local protocol double" : "MQTT protocol double"} · protocol rehearsal, not V3 execution evidence</span>
+          <span className="detail-text">Transport {data.transport}</span>
+          {simulationClock.status === "fresh" ? <span className="detail-text">Simulation time {utcLabel(simulationClock.utc)} · session {simulationClock.sessionState}</span> : null}
           <button className="btn btn-quiet" type="button" onClick={() => void actions.refresh()} disabled={view.busy || view.loading}>Refresh tasks</button>
         </div>
-        {data.scheduler.state === "FAILED" ? <p className="form-error" role="alert">Scheduler failed. Changes are disabled. {data.scheduler.detail ?? "Inspect the service before continuing."}</p> : healthBlock !== null ? <p className="form-error" role="alert">Changes are disabled. {healthBlock}</p> : null}
+        {data.scheduler.state === "FAILED" ? <p className="form-error" role="alert">Scheduler failed. Changes are disabled. {data.scheduler.detail ?? "Inspect the service before continuing."}</p> : healthBlock !== null ? <p className="form-error" role="alert">Changes are disabled. {healthBlock}</p> : clockBlock !== null ? <p className="form-error" role="alert">Changes are disabled. {clockBlock}</p> : null}
         <div className="dispatch-device-list">{Object.values(data.devices).map((device) => <div className="dispatch-device" key={device.robot_id}>
           <strong>{device.robot_id}</strong><Badge tone={statusTone(device.as_read.connectivity)}>{device.as_read.connectivity}</Badge>
           <span>{device.last_reported_availability ?? "Availability unknown"}</span>
@@ -209,7 +229,7 @@ export function DispatchView({ view, actions, health }: { view: TaskOpsView; act
         </div>)}</div>
         <div className="dispatch-grid">
           <div className="dispatch-column"><h3 className="subhead">Schedule collection</h3>
-            <ScheduleForm robots={data.available_robots} zones={data.available_zones} disabled={disabled} onSchedule={actions.schedule} />
+            <ScheduleForm robots={data.available_robots} zones={data.available_zones} disabled={disabled} onSchedule={actions.schedule} simulationClock={simulationClock} />
             <h3 className="subhead">Schedules · {data.schedules.length}</h3>
             <div className="dispatch-list">{data.schedules.length ? data.schedules.map((schedule) => <article key={schedule.schedule_id} className="dispatch-record">
               <div className="rec-head"><Badge tone={statusTone(schedule.status)}>{schedule.status}</Badge><strong>{schedule.robot_id} · {schedule.zone_id}</strong></div>
@@ -226,7 +246,7 @@ export function DispatchView({ view, actions, health }: { view: TaskOpsView; act
             <p className="fineprint dispatch-inbox-note">Notifications appear in this page while it is open. Email, text messages and remote alerts are not connected.</p>
             <div className="dispatch-list">{data.notifications.length ? data.notifications.map((item) => <NotificationCard key={item.notification_id} item={item} disabled={disabled} onRespond={actions.respond} />) : <EmptyNote>No notifications recorded.</EmptyNote>}</div>
             <h3 className="subhead">Task progress and results</h3>
-            <p className="fineprint">Protocol-double task states from the rehearsal device. Simulated collection and unloading evidence, when a V3 session is connected, appears in the collection execution panel above.</p>
+            <p className="fineprint">Edge task lifecycle states as recorded by the service. Ledger-backed collection and unloading evidence, when the service exposes it, appears in the collection execution panel above.</p>
             <div className="dispatch-list">{Object.values(data.tasks).length ? Object.values(data.tasks).map((task) => <article className="dispatch-record" key={task.task_id}>
               <div className="rec-head"><Badge tone={statusTone(task.state)}>{task.state}</Badge><strong>{task.target_robot_id} · {task.zone_id}</strong></div>
               <dl className="kv-grid dispatch-kv"><KeyValue label="Accepted">{task.acceptance_observed ? "Observed" : "Not observed"}</KeyValue><KeyValue label="Result">{task.effective_result ?? "Not reported"}</KeyValue><KeyValue label="Verification">{task.result_verification ?? "Not reported"}</KeyValue><KeyValue label="Last progress">{utcLabel(task.last_progress_at_utc)}</KeyValue></dl>
