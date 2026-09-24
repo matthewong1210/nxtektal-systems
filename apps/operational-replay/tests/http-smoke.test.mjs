@@ -15,6 +15,40 @@ import {
 const delay = (milliseconds) =>
   new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
 
+const ROOT_SMOKE_HTML =
+  "<title>NXTektal Replay Story</title> Operational replay " +
+  "Simulation results Presentation layer only";
+
+function smokeHtmlForUrl(url) {
+  const requested = new URL(url);
+  if (requested.pathname !== "/yc-dispatch-report") {
+    return ROOT_SMOKE_HTML;
+  }
+  if (requested.searchParams.get("state") === "report") {
+    return (
+      "<title>YC Dispatch / Report | NXTektal Systems</title>" +
+      '<main data-active-state="report"><section data-demo-state="report">' +
+      "<strong>Complete</strong> Supervised prototype " +
+      "Mission report generated " +
+      "Prototype orchestration demo · supervised hardware execution" +
+      "</section></main>"
+    );
+  }
+  return (
+    "<title>YC Dispatch / Report | NXTektal Systems</title>" +
+    '<main data-active-state="dispatch"><section data-demo-state="dispatch">' +
+    "<strong>Dispatched</strong> " +
+    "Prototype orchestration demo · supervised hardware execution</section></main>"
+  );
+}
+
+function smokeResponse(url) {
+  return new Response(smokeHtmlForUrl(url), {
+    status: 200,
+    headers: { "content-type": "text/html" },
+  });
+}
+
 function processIsAlive(pid) {
   try {
     process.kill(pid, 0);
@@ -170,9 +204,6 @@ describe("HTTP smoke lifecycle", () => {
 
   test("decodes a readiness marker split across UTF-8 pipe chunks", async () => {
     let child;
-    const html =
-      "<title>NXTektal Replay Story</title> Operational replay " +
-      "Simulation results Presentation layer only";
 
     const smoke = runHttpSmoke({
       port: 54321,
@@ -192,11 +223,7 @@ describe("HTTP smoke lifecycle", () => {
         });
         return child;
       },
-      fetchImpl: async () =>
-        new Response(html, {
-          status: 200,
-          headers: { "content-type": "text/html" },
-        }),
+      fetchImpl: async (url) => smokeResponse(url),
       readyTimeoutMs: 1_000,
       fetchTimeoutMs: 500,
       bodyTimeoutMs: 500,
@@ -337,9 +364,6 @@ describe("HTTP smoke lifecycle", () => {
 
   test("fails if SIGTERM arrives while successful smoke cleanup is waiting", async () => {
     let child;
-    const html =
-      "<title>NXTektal Replay Story</title> Operational replay " +
-      "Simulation results Presentation layer only";
 
     const smoke = runHttpSmoke({
       port: 54321,
@@ -357,11 +381,7 @@ describe("HTTP smoke lifecycle", () => {
         });
         return child;
       },
-      fetchImpl: async () =>
-        new Response(html, {
-          status: 200,
-          headers: { "content-type": "text/html" },
-        }),
+      fetchImpl: async (url) => smokeResponse(url),
       readyTimeoutMs: 1_000,
       fetchTimeoutMs: 500,
       bodyTimeoutMs: 500,
@@ -386,9 +406,6 @@ describe("HTTP smoke lifecycle", () => {
 
   test("rejects a recorded child exit before its lifecycle event is delivered", async () => {
     let child;
-    const html =
-      "<title>NXTektal Replay Story</title> Operational replay " +
-      "Simulation results Presentation layer only";
 
     const smoke = runHttpSmoke({
       port: 54321,
@@ -406,11 +423,7 @@ describe("HTTP smoke lifecycle", () => {
         });
         return child;
       },
-      fetchImpl: async () =>
-        new Response(html, {
-          status: 200,
-          headers: { "content-type": "text/html" },
-        }),
+      fetchImpl: async (url) => smokeResponse(url),
       readyTimeoutMs: 1_000,
       fetchTimeoutMs: 500,
       bodyTimeoutMs: 500,
