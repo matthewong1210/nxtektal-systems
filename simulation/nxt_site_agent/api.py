@@ -196,109 +196,6 @@ def _decode_collection_request_id(segment: str) -> str:
     return request_id
 
 
-def _valid_digest(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
-
-
-def _json_compatible(value: object) -> bool:
-    try:
-        json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False)
-    except (TypeError, ValueError):
-        return False
-    return True
-
-
-def _valid_collection_snapshot(value: object) -> bool:
-    if not isinstance(value, dict):
-        return False
-    expected = {
-        "schema",
-        "environment",
-        "series_id",
-        "session_id",
-        "round_id",
-        "round_index",
-        "engine_digest",
-        "config_digest",
-        "session_epoch_utc",
-        "control_interval_s",
-        "session_end_sim_t_s",
-        "session_state",
-        "now_sim_t_s",
-        "simulation_time_utc",
-        "server_time_utc",
-        "replay_digest",
-        "bindings",
-        "requests",
-        "receipts",
-        "executions",
-    }
-    return (
-        set(value) == expected
-        and value.get("schema") == "nxt-collection-executions/v1"
-        and value.get("environment") == "SIMULATION"
-        and all(
-            isinstance(value.get(key), list)
-            for key in ("bindings", "requests", "receipts", "executions")
-        )
-        and all(
-            _valid_identifier(value.get(key))
-            for key in ("series_id", "session_id", "round_id")
-        )
-        and all(
-            _valid_digest(value.get(key))
-            for key in ("engine_digest", "config_digest", "replay_digest")
-        )
-        and value.get("session_state") in {"ACTIVE", "PAUSED", "ENDED"}
-        and _json_compatible(value)
-    )
-
-
-def _valid_collection_receipt(value: object, request_id: str) -> bool:
-    if not isinstance(value, dict):
-        return False
-    expected = {
-        "schema",
-        "environment",
-        "request_id",
-        "request_digest",
-        "binding_id",
-        "execution_id",
-        "attempt_id",
-        "sequence",
-        "request_log_high_water_digest",
-        "durable",
-    }
-    sequence = value.get("sequence")
-    return (
-        set(value) == expected
-        and value.get("schema")
-        == "nxt-collection-execution-request-receipt/v1"
-        and value.get("environment") == "SIMULATION"
-        and value.get("request_id") == request_id
-        and _valid_identifier(value.get("request_id"))
-        and _valid_identifier(value.get("attempt_id"))
-        and all(
-            _valid_digest(value.get(key))
-            for key in (
-                "request_digest",
-                "binding_id",
-                "execution_id",
-                "request_log_high_water_digest",
-            )
-        )
-        and isinstance(sequence, int)
-        and not isinstance(sequence, bool)
-        and sequence > 0
-        and value.get("durable") is True
-        and _json_compatible(value)
-    )
-
-
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "NXTSiteAgent/0"
@@ -562,17 +459,17 @@ class _Handler(BaseHTTPRequestHandler):
     def _serve_collection_executions(self, path: str) -> None:
         if path == _COLLECTION_EXECUTIONS_PATH:
             callback = self.server.collection_executions
-            if callback is None:
+            parser = self.server.collection_execution_parser
+            if callback is None or parser is None:
                 raise SiteAgentError(
                     "collection_execution_unavailable",
                     "collection execution evidence is unavailable",
                 )
-            data = self._call_collection_reader(callback)
-            if not _valid_collection_snapshot(data):
-                raise SiteAgentError(
-                    "collection_execution_unavailable",
-                    "collection execution evidence is unavailable",
-                )
+            data = self._call_collection_parser(
+                parser,
+                self._call_collection_reader(callback),
+                "ExecutionSnapshot",
+            )
             self._send_json(200, _envelope(data))
             return
 
@@ -585,13 +482,18 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             request_id = _decode_collection_request_id(segment)
             callback = self.server.collection_execution_request
-            if callback is None:
+            parser = self.server.collection_execution_parser
+            if callback is None or parser is None:
                 raise SiteAgentError(
                     "collection_execution_unavailable",
                     "collection execution evidence is unavailable",
                 )
-            data = self._call_collection_reader(callback, request_id)
-            if not _valid_collection_receipt(data, request_id):
+            data = self._call_collection_parser(
+                parser,
+                self._call_collection_reader(callback, request_id),
+                "RequestReceipt",
+            )
+            if data.get("request_id") != request_id:
                 raise SiteAgentError(
                     "collection_execution_unavailable",
                     "collection execution evidence is unavailable",
@@ -617,6 +519,23 @@ class _Handler(BaseHTTPRequestHandler):
                 and bool(detail)
             ):
                 raise SiteAgentError(code, detail) from exc
+            raise SiteAgentError(
+                "collection_execution_unavailable",
+                "collection execution evidence is unavailable",
+            ) from exc
+
+    @staticmethod
+    def _call_collection_parser(
+        parser: Callable[[object, str], dict[str, Any]],
+        value: object,
+        definition: str,
+    ) -> dict[str, Any]:
+        try:
+            parsed = parser(value, definition)
+            if not isinstance(parsed, dict):
+                raise TypeError("collection execution parser returned non-object")
+            return parsed
+        except Exception as exc:  # noqa: BLE001 - injected parser boundary
             raise SiteAgentError(
                 "collection_execution_unavailable",
                 "collection execution evidence is unavailable",
@@ -774,6 +693,7 @@ class _Server(ThreadingHTTPServer):
         course_media: Callable[[str, str, str], bytes] | None = None,
         collection_executions: Callable[[], dict[str, Any]] | None = None,
         collection_execution_request: Callable[[str], dict[str, Any]] | None = None,
+        collection_execution_parser: Callable[[object, str], dict[str, Any]] | None = None,
     ) -> None:
         self.service = service
         self.console_dir = console_dir
@@ -783,6 +703,7 @@ class _Server(ThreadingHTTPServer):
         self.course_media = course_media
         self.collection_executions = collection_executions
         self.collection_execution_request = collection_execution_request
+        self.collection_execution_parser = collection_execution_parser
         super().__init__(address, _Handler)
 
 
@@ -802,6 +723,7 @@ class SiteAgentApiServer:
         course_media: Callable[[str, str, str], bytes] | None = None,
         collection_executions: Callable[[], dict[str, Any]] | None = None,
         collection_execution_request: Callable[[str], dict[str, Any]] | None = None,
+        collection_execution_parser: Callable[[object, str], dict[str, Any]] | None = None,
     ) -> None:
         if host not in LOOPBACK_HOSTS:
             raise SiteAgentError(
@@ -832,6 +754,7 @@ class SiteAgentApiServer:
             course_media,
             collection_executions,
             collection_execution_request,
+            collection_execution_parser,
         )
         self._thread: threading.Thread | None = None
         self._serving = False

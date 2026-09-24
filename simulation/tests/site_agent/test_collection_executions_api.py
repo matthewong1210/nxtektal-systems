@@ -14,6 +14,9 @@ from nxt_site_agent import (
     SiteAgentApiServer,
     SiteAgentError,
 )
+from scripts.course_collection_execution import (
+    parse_collection_execution_read_contract,
+)
 
 
 EXAMPLE = (
@@ -82,6 +85,7 @@ def execution_server(tmp_path, launch):
         service,
         collection_executions=read_snapshot,
         collection_execution_request=read_request,
+        collection_execution_parser=parse_collection_execution_read_contract,
     )
     server.start_background()
     yield server, calls, state
@@ -177,7 +181,11 @@ def test_missing_reader_is_sanitized_unavailable(tmp_path, launch, missing):
         if missing == "snapshot"
         else {"collection_executions": lambda: {}}
     )
-    server = SiteAgentApiServer(service, **keyword)
+    server = SiteAgentApiServer(
+        service,
+        collection_execution_parser=parse_collection_execution_read_contract,
+        **keyword,
+    )
     server.start_background()
     try:
         path = (
@@ -188,6 +196,30 @@ def test_missing_reader_is_sanitized_unavailable(tmp_path, launch, missing):
         status, _, payload = _request(server, "GET", path)
         assert status == 503
         assert payload["error"]["code"] == "collection_execution_unavailable"
+    finally:
+        server.shutdown()
+        service.stop()
+
+
+def test_reader_without_contract_parser_fails_closed_before_callback(
+    tmp_path, launch
+):
+    service = launch(tmp_path / "site-agent")
+    calls = []
+
+    def reader():
+        calls.append("read")
+        return _example()["snapshot"]["body"]["data"]
+
+    server = SiteAgentApiServer(service, collection_executions=reader)
+    server.start_background()
+    try:
+        status, _, payload = _request(
+            server, "GET", "/api/v1/collection-executions"
+        )
+        assert status == 503
+        assert payload["error"]["code"] == "collection_execution_unavailable"
+        assert calls == []
     finally:
         server.shutdown()
         service.stop()
@@ -253,6 +285,40 @@ def test_non_json_snapshot_value_is_sanitized_unavailable(execution_server):
 
     status, _, payload = _request(
         server, "GET", "/api/v1/collection-executions"
+    )
+
+    assert status == 503
+    assert payload["error"]["code"] == "collection_execution_unavailable"
+
+
+def test_nested_malformed_snapshot_is_sanitized_unavailable(execution_server):
+    server, _, state = execution_server
+    malformed = deepcopy(_example()["snapshot"]["body"]["data"])
+    malformed["bindings"] = ["malformed"]
+    state["snapshot"] = malformed
+
+    status, _, payload = _request(
+        server, "GET", "/api/v1/collection-executions"
+    )
+
+    assert status == 503
+    assert payload["error"]["code"] == "collection_execution_unavailable"
+
+
+def test_unsafe_integer_receipt_is_sanitized_unavailable(execution_server):
+    server, _, state = execution_server
+    receipt = next(
+        item["body"]
+        for item in _example()["bodies"]
+        if item["schema_ref"] == "#/$defs/RequestReceipt"
+    )
+    receipt["sequence"] = 10**100
+    state["request"] = receipt
+
+    status, _, payload = _request(
+        server,
+        "GET",
+        "/api/v1/collection-executions/requests/request-001",
     )
 
     assert status == 503
@@ -340,28 +406,31 @@ def test_other_namespaces_keep_existing_unsupported_method_behavior(
 
 
 def test_get_has_no_runtime_or_clock_capability_and_mutates_no_saved_state(
-    tmp_path, launch
+    monkeypatch, tmp_path, launch
 ):
     service = launch(tmp_path / "site-agent")
-    execution_root = tmp_path / "execution"
-    execution_root.mkdir()
-    cursor_path = execution_root / "cursor.json"
-    cursor_path.write_bytes(b'{"tick_sequence":17}\n')
-    cursor = {"tick_sequence": 17, "advance_calls": 0}
     snapshot = _example()["snapshot"]["body"]["data"]
+    fixture_before = deepcopy(service.fixture_snapshot())
 
     def reader():
-        assert cursor == {"tick_sequence": 17, "advance_calls": 0}
-        assert cursor_path.read_bytes() == b'{"tick_sequence":17}\n'
         return deepcopy(snapshot)
 
-    server = SiteAgentApiServer(service, collection_executions=reader)
+    def forbidden_advance():
+        raise AssertionError("collection execution GET advanced SiteAgentService")
+
+    monkeypatch.setattr(service, "advance", forbidden_advance)
+
+    server = SiteAgentApiServer(
+        service,
+        collection_executions=reader,
+        collection_execution_parser=parse_collection_execution_read_contract,
+    )
     server.start_background()
-    before = cursor_path.read_bytes()
     try:
         assert _request(server, "GET", "/api/v1/collection-executions")[0] == 200
-        assert cursor == {"tick_sequence": 17, "advance_calls": 0}
-        assert cursor_path.read_bytes() == before
+        fixture_after = service.fixture_snapshot()
+        assert fixture_after["cursor"] == fixture_before["cursor"]
+        assert fixture_after == fixture_before
     finally:
         server.shutdown()
         service.stop()

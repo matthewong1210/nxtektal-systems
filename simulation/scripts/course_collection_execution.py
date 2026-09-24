@@ -104,6 +104,23 @@ def _validate(value, name):
         raise CollectionExecutionError("invalid_request", f"invalid {name}: {exc.message if hasattr(exc, 'message') else exc}") from exc
 
 
+def parse_collection_execution_read_contract(value, definition):
+    """Validate and detach one frozen Manager read shape.
+
+    This is the composition-root parser seam used before the transport wraps
+    callback output.  The schema loaded above remains the single structural
+    contract owner; the Site Agent package receives this callable and never
+    imports the execution store, its schema path, or a JSON Schema runtime.
+    """
+    _require(
+        definition in {"ExecutionSnapshot", "RequestReceipt"},
+        "unsupported collection execution read definition",
+        "invalid_request",
+    )
+    _validate(value, definition)
+    return deepcopy(value)
+
+
 def _utc(value):
     _require(isinstance(value, str) and value.endswith("Z"), "UTC must end in Z", "invalid_request")
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
