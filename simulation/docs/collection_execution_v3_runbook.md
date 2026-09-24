@@ -89,6 +89,18 @@ execution path to fulfill.  Existing evidence-only Planning outcome recording
 and local notification acknowledgement/resolution keep their prior semantics;
 neither unlocks a protected device nor starts execution.
 
+Every task-ops snapshot identifies this composition as
+`FIXED_V3_EXECUTION` through the versioned
+[`service_capabilities`](contracts/pilot-dispatch-v0/service-capabilities/README.md)
+block. It independently marks Planning input/plan/confirmation creation and
+schedule creation/cancellation `UNAVAILABLE`, while Planning outcome recording
+and notification acknowledgement/resolution are `SUPPORTED`. The latter still
+requires scheduler health and the notification's own preconditions. Neither
+HTTP success, `transport=in_memory`, the `runtime` object nor an omitted field
+grants a write. Unsupported routes continue to return deterministic 409 errors;
+a fail-stopped service returns 503 for every write while preserving the static
+capability declaration on GET.
+
 Business deadlines, schedule lifecycle and execution use projected simulation
 UTC.  The console's 15-second read-health expiry and `server_time_utc` use wall
 UTC even while simulation is paused.  A driver exception or unexpected
@@ -366,6 +378,15 @@ In `apps/site-agent-console/lib/collection-executions.ts`:
   instant in JavaScript epoch milliseconds.  It may be used as the comparison
   clock for a simulation schedule form; it is not the wall-clock 15-second
   service-health clock.
+
+In `apps/site-agent-console/lib/task-ops.ts`, `parseTaskOps()` validates the
+separate service-capability schema and all eight operation values.
+`taskOpsCapabilities()`, `taskOpsSupports()` and `canPerformTaskOps()` are the
+shared React handoff. They preserve explicit V3 versus legacy mode and combine
+an operation only with the existing dynamic health gate; a historical payload
+without a declaration becomes `UNDECLARED` with all writes unavailable. Claude
+owns the component wiring and must not infer support from transport, HTTP
+success, V3 read availability or missing fields.
 
 ### Claude/React ownership
 

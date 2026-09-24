@@ -39,6 +39,7 @@ from scripts.edge_task_transport import InMemoryBroker  # noqa: E402
 from scripts.mock_robot_task_device import MockRobotDevice  # noqa: E402
 from scripts.pilot_course_a_task_fixture import admission_facts, commissioned_site  # noqa: E402
 from scripts.site_agent_fixture import DEPLOYMENT_ID, SITE_ID, service_composition_seam  # noqa: E402
+from scripts.task_ops_service_capabilities import task_ops_service_capabilities  # noqa: E402
 
 DISCLAIMER = "SIMULATION ONLY — scheduled protocol rehearsal; no physical robot or live customer data"
 CONFIG_PATH = SIM_ROOT / "configs/edge_task/pilot-course-a.sim.example.json"
@@ -186,6 +187,9 @@ class PilotDispatchRuntime:
                 "disclaimer": DISCLAIMER,
                 "server_time_utc": utc_text(now),
                 "scheduler": {"state": "FAILED" if self.failure is not None or not self.started else "RUNNING", "detail": self.failure},
+                "service_capabilities": task_ops_service_capabilities(
+                    "LEGACY_PILOT_DISPATCH"
+                ),
                 "devices": edge["devices"],
                 "tasks": edge["tasks"],
                 "available_robots": [r for r in self.config.robot_ids if self.config.robot(r).task_types],

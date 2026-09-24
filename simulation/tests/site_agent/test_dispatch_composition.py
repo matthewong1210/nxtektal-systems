@@ -90,6 +90,20 @@ def test_http_schedule_executes_once_and_restart_recovers(runner, launch, tmp_pa
         assert next(iter(data["tasks"].values()))["state"] == "SUCCEEDED"
         assert execution_count(runtime.root) == 1
         assert data["transport"] == "in_memory" and data["environment"] == "SIMULATION"
+        assert data["service_capabilities"] == {
+            "schema": "nxt-pilot-dispatch/service-capabilities/v1",
+            "mode": "LEGACY_PILOT_DISPATCH",
+            "operations": {
+                "planning_inputs_create": "SUPPORTED",
+                "planning_plans_create": "SUPPORTED",
+                "planning_confirmations_create": "SUPPORTED",
+                "planning_outcomes_create": "SUPPORTED",
+                "schedules_create": "SUPPORTED",
+                "schedules_cancel": "SUPPORTED",
+                "notifications_acknowledge": "SUPPORTED",
+                "notifications_resolve": "SUPPORTED",
+            },
+        }
         # Advice state is a separate fixture: task progress did not create a
         # facility observation or recommendation behind the manager's back.
         _, state = call(server, "GET", "/api/v0/state")

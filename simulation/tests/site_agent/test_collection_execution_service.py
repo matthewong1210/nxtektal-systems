@@ -90,6 +90,72 @@ def test_runtime_allows_exactly_one_background_driver(tmp_path):
         runtime.close()
 
 
+def test_fixed_v3_service_declares_exact_operation_capabilities(tmp_path):
+    runtime = CollectionExecutionServiceRuntime(
+        tmp_path / "execution",
+        initialize=True,
+        wall_clock=WallClock(),
+    )
+    runtime.start()
+    try:
+        assert runtime.task_operations_snapshot()["service_capabilities"] == {
+            "schema": "nxt-pilot-dispatch/service-capabilities/v1",
+            "mode": "FIXED_V3_EXECUTION",
+            "operations": {
+                "planning_inputs_create": "UNAVAILABLE",
+                "planning_plans_create": "UNAVAILABLE",
+                "planning_confirmations_create": "UNAVAILABLE",
+                "planning_outcomes_create": "SUPPORTED",
+                "schedules_create": "UNAVAILABLE",
+                "schedules_cancel": "UNAVAILABLE",
+                "notifications_acknowledge": "SUPPORTED",
+                "notifications_resolve": "SUPPORTED",
+            },
+        }
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body", "code"),
+    [
+        ("POST", "/api/v1/planning/inputs", {}, "planning_conflict"),
+        ("POST", "/api/v1/planning/plans", {}, "planning_conflict"),
+        ("POST", "/api/v1/planning/confirmations", {}, "planning_conflict"),
+        ("POST", "/api/v0/task-ops/schedules", {}, "task_ops_conflict"),
+        (
+            "POST",
+            "/api/v0/task-ops/schedules/schedule-fixed/cancel",
+            {"operator": "manager"},
+            "task_ops_conflict",
+        ),
+    ],
+)
+def test_fixed_v3_service_rejects_each_unavailable_operation_without_evidence(
+    tmp_path, method, path, body, code
+):
+    runtime = CollectionExecutionServiceRuntime(
+        tmp_path / path.rsplit("/", 1)[-1],
+        initialize=True,
+        wall_clock=WallClock(),
+    )
+    runtime.start()
+    try:
+        before = evidence_bytes(runtime.root)
+        route = (
+            runtime.route_planning
+            if path.startswith("/api/v1/planning")
+            else runtime.route_task_operations
+        )
+        with pytest.raises(SiteAgentError) as raised:
+            route(method, path, body)
+        assert raised.value.code == code
+        assert "fixed" in raised.value.detail.lower()
+        assert evidence_bytes(runtime.root) == before
+    finally:
+        runtime.close()
+
+
 def test_invalid_platform_timeout_is_rejected_and_driver_death_latches_failure(
     tmp_path, monkeypatch
 ):
@@ -384,6 +450,12 @@ def test_driver_failure_is_fail_stop_readable_and_rejects_new_confirmation(
             "state": "FAILED",
             "detail": "OSError: injected driver failure",
         }
+        assert task_payload["data"]["service_capabilities"]["mode"] == (
+            "FIXED_V3_EXECUTION"
+        )
+        assert task_payload["data"]["service_capabilities"]["operations"][
+            "notifications_acknowledge"
+        ] == "SUPPORTED"
         status, rejected = call(
             server,
             "POST",
@@ -392,6 +464,14 @@ def test_driver_failure_is_fail_stop_readable_and_rejects_new_confirmation(
         )
         assert status == 503
         assert rejected["error"]["code"] == "planning_unavailable"
+        status, rejected = call(
+            server,
+            "POST",
+            "/api/v0/task-ops/notifications/notice-unknown/acknowledge",
+            {"operator": "manager", "note": "must fail-stop"},
+        )
+        assert status == 503
+        assert rejected["error"]["code"] == "task_ops_unavailable"
     finally:
         server.shutdown()
         service.stop()

@@ -5,6 +5,16 @@ export function taskOpsFixture(overrides: Partial<TaskOpsSnapshot> = {}): TaskOp
     schema: "nxt-pilot-dispatch/v0", environment: "SIMULATION",
     server_time_utc: "2026-09-16T12:00:00Z",
     scheduler: { state: "RUNNING", detail: null },
+    service_capabilities: {
+      schema: "nxt-pilot-dispatch/service-capabilities/v1",
+      mode: "LEGACY_PILOT_DISPATCH",
+      operations: {
+        planning_inputs_create: "SUPPORTED", planning_plans_create: "SUPPORTED",
+        planning_confirmations_create: "SUPPORTED", planning_outcomes_create: "SUPPORTED",
+        schedules_create: "SUPPORTED", schedules_cancel: "SUPPORTED",
+        notifications_acknowledge: "SUPPORTED", notifications_resolve: "SUPPORTED",
+      },
+    },
     schedules: [{ schedule_id: "schedule-1", robot_id: "picker-01", zone_id: "Z1",
       due_at_utc: "2026-09-16T12:05:00Z", expires_at_utc: "2026-09-16T12:15:00Z",
       operator: "staff-01", progress_window_s: 30, status: "SCHEDULED", task_id: null,

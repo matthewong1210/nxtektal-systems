@@ -25,13 +25,16 @@ expires on its own 15-second wall clock even while a read keeps waiting or the
 session is PAUSED. While that read is fresh, the task panel's schedule form
 compares dates with the shared simulation clock
 (`collectionExecutionSimulationNow`) instead of the wall clock; a stale
-reading disables scheduling, and no V3 route means the legacy wall-clock rule.
+reading disables scheduling. Service mode and write availability come only
+from the validated `nxt-pilot-dispatch/service-capabilities/v1` block; a
+missing block is `UNDECLARED` and grants no write. The explicit
+`LEGACY_PILOT_DISPATCH` mode retains the legacy wall-clock scheduling rule,
+while `FIXED_V3_EXECUTION` identifies the simulator-backed session.
 The task panel names its device source only as the service reports it and
-does not infer a device kind from the transport. On this branch the V3
-backend exists but no combined serve command exposes the route yet, so the
-panel reports UNAVAILABLE against current services; its tests run over the
-frozen SIMULATION contract examples and the backend-generated normal-loop
-witness fixture, which is not a live integration.
+does not infer a device kind from the transport. The integrated V3 service
+serves the static console and the read-only execution route from one process;
+its tests also retain the frozen SIMULATION examples and backend-generated
+normal-loop witness fixture.
 
 Whole-course monitoring v1 adds a read-only panel above the pilot controls.
 It shows 54 inspection points across 18 synthetic holes, the last observed
