@@ -170,10 +170,10 @@
 - One parametrized acceptance manifest names and asserts cases 01-20 from the accepted architecture.
 - Generated snapshots must pass the existing Python relational oracle and the TypeScript parser; fixtures cannot replace runtime evidence in the normal-loop case.
 
-- [ ] Add a failing manifest that proves every case number/name is present once.
-- [ ] Implement and pass cases: normal policy-preserved; no opportunity; pending order; safety rejection; full payload; temporary empty; access boundary; preemption; low battery/fault/e-stop/assistance; timeout; duplicate/unknown; chunk replay; device restart; terminal conflict; quantity integrity; stage separation; clocks; schedule form; bound handoff; crash boundaries.
-- [ ] Run schema/example/TS parity after any compatible contract adjustment. List every incompatible requirement separately instead of silently changing it.
-- [ ] Commit `test(collection-execution): cover frozen v3 acceptance cases`.
+- [x] Add a failing manifest that proves every case number/name is present once.
+- [x] Implement and pass cases: normal policy-preserved; no opportunity; pending order; safety rejection; full payload; temporary empty; access boundary; preemption; low battery/fault/e-stop/assistance; timeout; duplicate/unknown; chunk replay; device restart; terminal conflict; quantity integrity; stage separation; clocks; schedule form; bound handoff; crash boundaries.
+- [x] Run schema/example/TS parity after any compatible contract adjustment. List every incompatible requirement separately instead of silently changing it.
+- [x] Commit `test(collection-execution): cover frozen v3 acceptance cases`.
 
 ---
 
@@ -185,12 +185,30 @@
 - Update this plan's checkboxes as tasks complete.
 
 **Interfaces:**
-- The runbook gives exact initialize/resume/serve commands, output paths, expected session/request IDs, normal-loop evidence fields, restart versus replay procedure, and Claude integration contract.
+- The runbook gives exact initialize/resume commands, the explicit no-serve limitation, output paths, expected session/request IDs, normal-loop evidence fields, restart versus replay procedure, and Claude integration contract.
 - The architecture status distinguishes implemented backend from React/UI and every physical/live integration that remains unimplemented.
 
-- [ ] Run focused suites after each task, then the normative full Python suite and `scripts/validate_configs.py` from `simulation/`.
-- [ ] Run console `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm run smoke`, and `npm audit --omit=dev`.
-- [ ] Run the repository verifier and diff/hygiene checks from `.agent/workflows/testing.md`, `.agent/workflows/review.md`, and `.agent/workflows/hygiene.md`.
-- [ ] Execute the documented closed loop from a fresh output directory and capture actual IDs, quantities, event IDs/digest, Edge terminal, conservation/payload parity, and replay digest.
-- [ ] Review against all 20 cases and the user scope. Explicitly list backend implemented items, Claude-owned/unmerged UI work, and unimplemented physical/Planning-outcome/wash/supply paths.
-- [ ] Commit `docs(collection-execution): document v3 backend operation`; keep the branch local and unmerged.
+- [x] Run focused suites after each task, then the normative full Python suite and `scripts/validate_configs.py` from `simulation/`.
+- [x] Run console `npm run typecheck`, `npm run lint`, `npm test`, `npm run build`, `npm run smoke`, and `npm audit --omit=dev`.
+- [x] Run the repository verifier and diff/hygiene checks from `.agent/workflows/testing.md`, `.agent/workflows/review.md`, and `.agent/workflows/hygiene.md`.
+- [x] Execute the documented closed loop from a fresh output directory and capture actual IDs, quantities, event IDs/digest, Edge terminal, conservation/payload parity, and replay digest.
+- [x] Review against all 20 cases and the user scope. Explicitly list backend implemented items, Claude-owned/unmerged UI work, and unimplemented physical/Planning-outcome/wash/supply paths.
+- [x] Commit `docs(collection-execution): document v3 backend operation`; keep the branch local and unmerged.
+
+Task 8 evidence observed by the root agent:
+
+- fresh initialize plus same-root `--advance 0` resume preserved the fixed
+  request/binding/execution/attempt identities, 600 raw, 600 unload, verified
+  Edge `SUCCEEDED`, conservation/payload parity, event digest and replay digest;
+- `tests/course_monitoring/test_collection_execution_acceptance.py`: 21 passed;
+- focused console acceptance plus collection-execution contract tests: 2 files,
+  341 tests passed;
+- full Python suite: 3054 passed; config validation: 0 errors / 0 warnings;
+- console: typecheck passed, lint reported 0 errors / 2 warnings, 563 tests
+  passed, build and smoke passed, and production audit reported 0
+  vulnerabilities; and
+- repository policy unit tests: 111 passed; Python package build passed;
+- repository verifier: passed across 702 tracked/nonignored paths and 83
+  Markdown files; and
+- final tracked/untracked inventory and whitespace checks passed with only the
+  sixteen current-delivery source/test/document paths present before commit.

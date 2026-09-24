@@ -1,20 +1,28 @@
 # Collection execution v1 architecture
 
-> **DESIGN ONLY — NOT IMPLEMENTED.** This document freezes the Phase 3A
-> architecture and shared contract for review.  It does not add a session
-> driver, simulator-backed task device, Manager API route, or executable
-> collection path.  Those changes belong to Phase 3B after this design is
-> accepted.
+> **IMPLEMENTATION STATUS — SIMULATION BACKEND IMPLEMENTED ON AN UNMERGED
+> BRANCH.** This document remains the accepted Phase 3A architecture and shared
+> v1 contract.  Phase 3B implements the V3 session driver, simulator-backed
+> task device, durable request/replay path, read-only Manager API seams and
+> strict TypeScript client on `codex/collection-execution-3b`.  React/CSS,
+> physical/live integration, Planning outcome writes, washing and supply
+> remain unimplemented.  See
+> [`collection_execution_v3_runbook.md`](collection_execution_v3_runbook.md)
+> for reproducible operation and observed backend evidence.
 
-Base: `ffb0aa623c2e7093398b1d42a493c16411a61a70`.
-Design branch: `codex/collection-execution-3a`.
+Phase 3A base: `ffb0aa623c2e7093398b1d42a493c16411a61a70`.
+Phase 3A design branch: `codex/collection-execution-3a`.
+Phase 3B base: `064b90456557acf78b769dfb12f3bf2ccf3cdf17`.
+Phase 3B implementation branch: `codex/collection-execution-3b` (local,
+unmerged).
 Environment: `SIMULATION` only.
 
 ## Architecture review decision
 
-Decision: **Proceed for the Phase 3A contract; implementation remains gated
-for Phase 3B.** The design reuses existing fact and execution owners and adds
-no package, physical command bridge, policy engine, or mutable facility truth.
+Historical Phase 3A decision: **Proceed.** Phase 3B was gated until this design
+was accepted.  The implementation on the named local branch follows that
+decision: it reuses existing fact and execution owners and adds no package,
+physical command bridge, policy engine or mutable facility truth.
 
 The rejected shortcuts are:
 
@@ -67,8 +75,8 @@ carry per-task lineage, so their attribution remains unknown.
 | Final simulator admission | `SafetyShield` through `RangeSimulation.apply_directive()` | Cannot be bypassed by the task device, API, UI, or planning evidence. |
 | Session advancement and deterministic prefix replay | the single whole-course session driver | The only component allowed to call `RangeOpsEnv.step()`. |
 | Cross-owner binding, durable request input, arbitration evidence and result projection | new `simulation/scripts/` composition code | Composition only; no new package or truth store. |
-| Manager API transport | `nxt_site_agent.api` | Future injected read-only callback; no simulator import. |
-| Browser presentation | `apps/site-agent-console` | Strictly parse and display; never calculate admission or quantities. |
+| Manager API transport | `nxt_site_agent.api` | Implemented injected read-only callbacks and strict GET routes; no simulator import or mutation capability. |
+| Browser presentation | `apps/site-agent-console` | Strict TypeScript parser/client implemented; React/CSS presentation remains a separate unimplemented handoff and must never calculate admission or quantities. |
 
 No LLM, advice engine, browser component, Site Runtime component, or task
 transport may call `apply_directive()`, `RobotTaskInterface`, an adapter, ROS,
@@ -171,8 +179,8 @@ ordering, policy choice, simulator events or results.
 
 A fresh scheduler-service reading and a `PAUSED` simulation are different
 facts.  A paused session may have a healthy service connection while its
-simulation clock and execution remain stopped.  The future UI must show both
-states.
+simulation clock and execution remain stopped.  The unimplemented React UI
+must show both states when that separate frontend work is delivered.
 
 `PlanningOperations`, `ScheduleService`, the Edge gateway and the
 simulator-backed device all receive the same projected simulation UTC.  Edge
@@ -222,11 +230,13 @@ At an unstarted evaluation time `t`, a window exists only when
 Otherwise the request becomes `MISSED` with
 `INSUFFICIENT_SESSION_HORIZON`, no assignment or action, and normalized Edge
 reason `unknown:insufficient_session_horizon`.  If Edge already accepted the
-request its projection is `FAILED`; otherwise it is `REJECTED`.  Phase 3B must
-make the simulator-owned bounded assignment terminate exactly at the deadline
-with `EXECUTION_TIMEOUT` evidence; merely stopping attribution while the robot
-continues is not conforming.  No new task may use that device while a
-late/orphaned runtime activity or unresolved protection remains.
+request its projection is `FAILED`; otherwise it is `REJECTED`.  The frozen
+Phase 3A requirement was for Phase 3B to make the simulator-owned bounded
+assignment terminate exactly at the deadline with `EXECUTION_TIMEOUT`
+evidence; merely stopping attribution while the robot continues is not
+conforming.  This requirement is implemented and tested by the Phase 3B
+backend.  No new task may use that device while a late/orphaned runtime
+activity or unresolved protection remains.
 
 ## Wait-only non-preemptive arbitration v1
 
@@ -343,9 +353,9 @@ stage ended abnormally.
 
 ## Result attribution
 
-Phase 3B must give every accepted bounded collection assignment a stable
-simulator-owned `assignment_id` and propagate it through V3-only collection and
-unload events.  V2 event bytes remain unchanged.
+Phase 3B gives every accepted bounded collection assignment a stable
+simulator-owned `assignment_id` and propagates it through V3-only collection
+and unload events.  V2 event bytes remain unchanged.
 
 For one attempt:
 
@@ -437,6 +447,15 @@ chunk recovery or reauthorize its old task.
 Normal chunk replay is not a device restart: it emits no new Edge request,
 acceptance, progress or terminal and performs no second logical execution.
 
+After device restart or any other durable protection overlay, V3 also checks
+the causally reconstructed simulator prefix before admitting another live
+tick.  If a terminal or protected execution still names a simulator assignment
+with no terminal reason, the whole session fails closed before policy
+selection, prepare, `env.step()` or commit.  Continuing that assignment would
+require a separately versioned, durable and replayable exact-cancellation
+contract; protection must never let the original policy move it as an
+unowned action.
+
 ## Edge v1 mapping and device protection
 
 The Edge contract remains a transport/task lifecycle.  It does not acquire
@@ -492,7 +511,7 @@ shapes:
 - `nxt-collection-executions/v1` read snapshot;
 - existing Manager API success/error envelope examples.
 
-The future Manager API surface is read-only:
+The implemented Manager API surface is read-only:
 
 - `GET /api/v1/collection-executions`;
 - `GET /api/v1/collection-executions/requests/{request_id}` for recovery;
@@ -512,7 +531,7 @@ success.
 
 ## File ownership
 
-### Phase 3A — this delivery
+### Phase 3A — historical contract delivery
 
 Codex owns and may change only the shared design/contract surfaces:
 
@@ -526,11 +545,13 @@ Codex owns and may change only the shared design/contract surfaces:
 - this phase's implementation plan.
 
 No React component, CSS, interaction test, API server route, session driver,
-simulator, policy, Edge package or experiment is changed in Phase 3A.
+simulator, policy, Edge package or experiment was changed in Phase 3A.  That is
+a historical statement about the contract-freeze delivery, not the current
+Phase 3B branch status.
 
-### Phase 3B — planned, not implemented
+### Phase 3B — backend implemented on the named local branch
 
-Codex backend ownership:
+Implemented Codex backend ownership:
 
 - V3-only assignment/terminal evidence in `nxt_range_ops`;
 - `simulation/scripts/course_collection_execution.py` for binding, persistence,
@@ -541,7 +562,7 @@ Codex backend ownership:
 - injected read-only transport in `nxt_site_agent.api`;
 - Python behavioral, replay, safety, conservation and API tests.
 
-Claude frontend ownership after contract freeze:
+Claude frontend ownership after contract freeze remains unimplemented here:
 
 - React execution components;
 - CSS and visual states;
@@ -550,7 +571,18 @@ Claude frontend ownership after contract freeze:
 Codex continues to own schema, examples, TypeScript wire types/parser/client
 and contract tests.  The two owners do not edit the same file concurrently.
 
+There is no combined long-running collection-execution serve command on this
+branch.  Task 6 implements the injected GET transport seams and strict client;
+the bounded demo still requires `--no-serve`.  This limitation must not be
+described as a production service gap being closed.
+
 ## Phase 3B acceptance cases frozen by this design
+
+All 20 cases now have executable backend coverage in
+`tests/course_monitoring/test_collection_execution_acceptance.py`.  Cases 01,
+17 and 18 also consume the runtime witness through the shared TypeScript
+parser/helpers.  This coverage does not imply that the separate React UI or a
+physical path is implemented.
 
 1. **Normal, policy preserved:** original policy returns `Wait` for collection,
    so the execution action fills the slot; later original policy itself
@@ -605,19 +637,43 @@ and contract tests.  The two owners do not edit the same file concurrently.
     fixed recovery table; replay never emits a second lifecycle or logical ball
     move, and unverifiable prefixes become protected `INCONCLUSIVE`.
 
-## Explicitly unimplemented after Phase 3A
+## Explicitly unimplemented after Phase 3A — history and current Phase 3B status
 
-- V3 session format, root creation and replay engine;
-- bounded simulator assignment IDs and terminal events;
-- simulator-backed Edge task device and runtime-derived RobotStatus;
-- request journal, arbiter and result projector;
-- Manager API collection-executions routes;
-- React component, styling and interaction behavior;
+At the end of Phase 3A, the schema, examples, TypeScript parser/client and
+their contract tests were the only executable artifacts.  They validated and
+rejected data but did not advance `env.step()` or grant execution authority.
+That statement is retained as design history; it is no longer the complete
+status of the Phase 3B branch.
+
+Implemented on `codex/collection-execution-3b`:
+
+- the V3 session format, fresh root creation and deterministic verified-prefix
+  replay without migration of V2 evidence;
+- bounded simulator assignment IDs and immutable assignment/transfer/terminal
+  events derived from actual `BallLedger.move()` results;
+- the simulator-backed Edge task device, runtime-derived status evidence and
+  existing restart/incarnation protection;
+- the durable binding/request/receipt and prepare/commit/outbox/cursor journal,
+  wait-only arbiter and strict result projector;
+- a bounded Planning-confirmed closed-loop demo that reaches verified 600-ball
+  raw collection and equal bound-station unload in the frozen fixture;
+- injected, read-only Manager API collection-execution routes; and
+- strict TypeScript wire parsing, `read()`/`readRequest()` methods and the
+  simulation-clock helper, plus executable backend coverage for all 20 frozen
+  acceptance cases.
+
+Still explicitly unimplemented:
+
+- React collection-execution components, styling, visual states and
+  interaction behavior;
+- a combined long-running collection-execution server command;
 - automatic Planning outcome writes;
-- washed/supplied per-task lineage;
-- any physical robot, hardware, ROS, actuator, production publisher or live
-  site integration.
+- wash results, supply results or washed/supplied per-task lineage;
+- clean or supply inventory replenishment inferred from raw/unload evidence;
+- a generic multi-station handoff action/selection contract; and
+- any physical robot, live device or hardware/vendor transport, ROS, actuator,
+  production publisher, physical command-admission path, live site integration
+  or production real-site deployment.
 
-The schema, examples, TypeScript parser/client and their contract tests are the
-only executable artifacts in Phase 3A.  They validate and reject data; they do
-not advance `env.step()` or grant execution authority.
+Neither the implemented backend nor its API gives an LLM, browser, advisory
+engine or Site Runtime component execution authority.
