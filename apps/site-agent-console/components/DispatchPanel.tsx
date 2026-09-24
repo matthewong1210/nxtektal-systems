@@ -16,6 +16,7 @@ import {
   type SchedulerHealth,
   type SchedulerHealthTracker,
 } from "../lib/scheduler-health";
+import { capabilityBlocker, CapabilityNote, ServiceModeBadge, serviceModeText, type CapabilityInput } from "./capabilities";
 import type { SimulationClock } from "./execution/CollectionExecutionPanel";
 import { Badge, EmptyNote, KeyValue, Section, type Tone } from "./ui";
 
@@ -124,15 +125,21 @@ export function ScheduleForm({ robots, zones, disabled, onSchedule, simulationCl
   );
 }
 
-function NotificationCard({ item, disabled, onRespond }: {
-  item: TaskNotification; disabled: boolean; onRespond: TaskOpsActions["respond"];
+function NotificationCard({ item, disabled, onRespond, capabilities }: {
+  item: TaskNotification; disabled: boolean; onRespond: TaskOpsActions["respond"]; capabilities?: CapabilityInput;
 }) {
+  // Acknowledgement and resolution are declared separately; SUPPORTED never
+  // replaces the record's own can_resolve / condition_active preconditions.
+  const acknowledgeBlock = capabilityBlocker(capabilities, "notifications_acknowledge");
+  const resolveBlock = capabilityBlocker(capabilities, "notifications_resolve");
   const [operator, setOperator] = useState("");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
   const lock = useRef(false);
   async function respond(kind: "acknowledge" | "resolve") {
     if (disabled || lock.current) return;
+    const block = kind === "acknowledge" ? acknowledgeBlock : resolveBlock;
+    if (block !== null) { setError(block); return; }
     lock.current = true;
     setError(null);
     try { await onRespond(item.notification_id, kind, humanResponse(operator, note)); }
@@ -157,9 +164,11 @@ function NotificationCard({ item, disabled, onRespond }: {
               <input id={`${item.notification_id}-note`} value={note} onChange={(event) => setNote(event.target.value)} disabled={disabled} required /></div>
           </div>
           <div className="form-actions">
-            {item.status === "OPEN" ? <button type="button" className="btn" disabled={!ready} onClick={() => void respond("acknowledge")}>Acknowledge</button> : null}
-            <button type="button" className="btn" disabled={!ready || !item.can_resolve || item.condition_active} onClick={() => void respond("resolve")}>Resolve notification</button>
+            {item.status === "OPEN" ? <button type="button" className="btn" disabled={!ready || acknowledgeBlock !== null} onClick={() => void respond("acknowledge")}>Acknowledge</button> : null}
+            <button type="button" className="btn" disabled={!ready || !item.can_resolve || item.condition_active || resolveBlock !== null} onClick={() => void respond("resolve")}>Resolve notification</button>
           </div>
+          {item.status === "OPEN" ? <CapabilityNote capabilities={capabilities} operation="notifications_acknowledge" /> : null}
+          <CapabilityNote capabilities={capabilities} operation="notifications_resolve" />
           <p className="fineprint">{item.condition_active ? "The condition is still active. Resolution is unavailable." : !item.can_resolve ? "Waiting for the service to permit resolution." : "The condition has cleared; record the handling outcome."} Resolving this notification never unlocks or restarts a robot.</p>
           {error ? <p role="alert" className="form-error">{error}</p> : null}
         </div>
@@ -189,12 +198,17 @@ function CancelSchedule({ id, disabled, cancel }: { id: string; disabled: boolea
   </form>;
 }
 
-export function DispatchView({ view, actions, health, simulationClock = NO_SIMULATION_CLOCK }: {
+export function DispatchView({ view, actions, health, simulationClock = NO_SIMULATION_CLOCK, capabilities }: {
   view: TaskOpsView; actions: TaskOpsActions; health?: SchedulerHealth;
   /** Simulation/business clock from the execution read; stale blocks scheduling, absent means the legacy wall-clock rule. */
   simulationClock?: SimulationClock;
+  /** Validated service declaration from the same task-ops reading; undefined = standalone render without gating, null = not read yet. */
+  capabilities?: CapabilityInput;
 }) {
   const data = view.data;
+  const scheduleBlock = capabilityBlocker(capabilities, "schedules_create");
+  const cancelBlock = capabilityBlocker(capabilities, "schedules_cancel");
+  const modeText = serviceModeText(capabilities);
   // With the shared reading, the task panel labels and gates on the same
   // freshness-aware health as the planning panel; without it (standalone
   // render) it keeps the raw snapshot semantics.
@@ -205,9 +219,10 @@ export function DispatchView({ view, actions, health, simulationClock = NO_SIMUL
   const disabled = !canMutateTaskOps(view) || healthBlock !== null || clockBlock !== null;
   const count = data?.notifications.filter((item) => item.status !== "RESOLVED").length ?? 0;
   return (
-    <Section title="Pilot task operations" aside={<><Badge tone="sim">SIMULATION</Badge>{health !== undefined ? <Badge tone={schedulerAllowsWrites(health) ? "ok" : health.status === "unknown" ? "warn" : "bad"}>{schedulerHealthLabel(health)}</Badge> : data ? <Badge tone={statusTone(data.scheduler.state)}>{data.scheduler.state}</Badge> : null}</>}>
+    <Section title="Pilot task operations" aside={<><Badge tone="sim">SIMULATION</Badge><ServiceModeBadge capabilities={capabilities} />{health !== undefined ? <Badge tone={schedulerAllowsWrites(health) ? "ok" : health.status === "unknown" ? "warn" : "bad"}>{schedulerHealthLabel(health)}</Badge> : data ? <Badge tone={statusTone(data.scheduler.state)}>{data.scheduler.state}</Badge> : null}</>}>
       <p className="sim-note">Schedule a collection, follow its progress, and record staff handling in one place.</p>
       <p className="fineprint dispatch-boundary">Local simulation. No physical robot or CE82A is connected. The task device kind (a rehearsal double or the simulator-backed V3 device) is set by the service composition and is not inferred here. Advice acceptance below remains a separate workflow record.</p>
+      {modeText ? <p className="fineprint dispatch-capabilities">{modeText}</p> : null}
       {view.unavailable ? <div className="dispatch-service-note" role="status"><Badge tone="muted">UNAVAILABLE</Badge>
         <p>This standalone demo does not expose pilot task operations. Start the pilot dispatch service to enable scheduling and the local notification inbox. The fixture console remains available below.</p>
       </div> : view.error ? <div className="load-warning" role="alert"><Badge tone="bad">{data ? "STALE" : "OFFLINE"}</Badge>
@@ -229,7 +244,8 @@ export function DispatchView({ view, actions, health, simulationClock = NO_SIMUL
         </div>)}</div>
         <div className="dispatch-grid">
           <div className="dispatch-column"><h3 className="subhead">Schedule collection</h3>
-            <ScheduleForm robots={data.available_robots} zones={data.available_zones} disabled={disabled} onSchedule={actions.schedule} simulationClock={simulationClock} />
+            <CapabilityNote capabilities={capabilities} operation="schedules_create" />
+            <ScheduleForm robots={data.available_robots} zones={data.available_zones} disabled={disabled || scheduleBlock !== null} onSchedule={actions.schedule} simulationClock={simulationClock} />
             <h3 className="subhead">Schedules · {data.schedules.length}</h3>
             <div className="dispatch-list">{data.schedules.length ? data.schedules.map((schedule) => <article key={schedule.schedule_id} className="dispatch-record">
               <div className="rec-head"><Badge tone={statusTone(schedule.status)}>{schedule.status}</Badge><strong>{schedule.robot_id} · {schedule.zone_id}</strong></div>
@@ -239,12 +255,12 @@ export function DispatchView({ view, actions, health, simulationClock = NO_SIMUL
               {schedule.detail ? <p className="rec-summary">{schedule.detail}</p> : null}
               <p className="fineprint mono">{schedule.schedule_id}</p>
               <p className="fineprint mono">Task: {schedule.task_id ?? "Not created"}</p>
-              {schedule.status === "SCHEDULED" ? <CancelSchedule id={schedule.schedule_id} disabled={disabled} cancel={actions.cancel} /> : null}
+              {schedule.status === "SCHEDULED" ? (cancelBlock === null ? <CancelSchedule id={schedule.schedule_id} disabled={disabled} cancel={actions.cancel} /> : <CapabilityNote capabilities={capabilities} operation="schedules_cancel" />) : null}
             </article>) : <EmptyNote>No schedules yet. Add one dated collection task above.</EmptyNote>}</div>
           </div>
           <div className="dispatch-column"><div className="dispatch-subhead"><h3 className="subhead">Local notification inbox</h3><Badge tone={count ? "warn" : "muted"}>{count} UNRESOLVED</Badge></div>
             <p className="fineprint dispatch-inbox-note">Notifications appear in this page while it is open. Email, text messages and remote alerts are not connected.</p>
-            <div className="dispatch-list">{data.notifications.length ? data.notifications.map((item) => <NotificationCard key={item.notification_id} item={item} disabled={disabled} onRespond={actions.respond} />) : <EmptyNote>No notifications recorded.</EmptyNote>}</div>
+            <div className="dispatch-list">{data.notifications.length ? data.notifications.map((item) => <NotificationCard key={item.notification_id} item={item} disabled={disabled} onRespond={actions.respond} capabilities={capabilities} />) : <EmptyNote>No notifications recorded.</EmptyNote>}</div>
             <h3 className="subhead">Task progress and results</h3>
             <p className="fineprint">Edge task lifecycle states as recorded by the service. Ledger-backed collection and unloading evidence, when the service exposes it, appears in the collection execution panel above.</p>
             <div className="dispatch-list">{Object.values(data.tasks).length ? Object.values(data.tasks).map((task) => <article className="dispatch-record" key={task.task_id}>

@@ -30,6 +30,12 @@ from the validated `nxt-pilot-dispatch/service-capabilities/v1` block; a
 missing block is `UNDECLARED` and grants no write. The explicit
 `LEGACY_PILOT_DISPATCH` mode retains the legacy wall-clock scheduling rule,
 while `FIXED_V3_EXECUTION` identifies the simulator-backed session.
+Each of the eight declared write operations gates its own control and
+handler: a withheld operation is disabled with the declared reason and a
+directly dispatched submit is refused before any request; `UNDECLARED` keeps
+records readable and withholds every write; SUPPORTED still passes the shared
+15-second health gate, request validation, busy state and record-level
+preconditions such as a notification's `can_resolve`.
 The task panel names its device source only as the service reports it and
 does not infer a device kind from the transport. The integrated V3 service
 serves the static console and the read-only execution route from one process;

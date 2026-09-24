@@ -17,6 +17,7 @@ import { formatSiteTime } from "../lib/site-time";
 import { InputForm, InputSummary } from "./planning/InputSection";
 import { OutcomeSection } from "./planning/OutcomeSection";
 import { ConfirmationSection, PlanSection } from "./planning/PlanSection";
+import { capabilityBlocker, CapabilityNote, ServiceModeBadge, serviceModeText, type CapabilityInput } from "./capabilities";
 import { Badge, EmptyNote, Section } from "./ui";
 
 export type { PlanningActions } from "../lib/planning-actions";
@@ -127,9 +128,27 @@ function SchedulerHealthBanner({ view, timeZone }: { view: PlanningViewState; ti
   );
 }
 
-export function PlanningView({ view, actions }: { view: PlanningViewState; actions: PlanningActions }) {
+export function PlanningView({ view, actions, capabilities }: { view: PlanningViewState; actions: PlanningActions; capabilities?: CapabilityInput }) {
   const data = view.data;
   const locked = !canWritePlanning(view);
+  // Each write is gated by its own declared operation on top of the shared
+  // health lock. A withheld operation is disabled in the form and refused in
+  // the handler, so a directly dispatched submit never reaches the client.
+  const inputBlock = capabilityBlocker(capabilities, "planning_inputs_create");
+  const planBlock = capabilityBlocker(capabilities, "planning_plans_create");
+  const confirmBlock = capabilityBlocker(capabilities, "planning_confirmations_create");
+  const outcomeBlock = capabilityBlocker(capabilities, "planning_outcomes_create");
+  const refuse = (reason: string) => async () => {
+    throw new Error(reason);
+  };
+  const guarded: PlanningActions = {
+    ...actions,
+    saveInput: inputBlock ? refuse(inputBlock) : actions.saveInput,
+    requestPlan: planBlock ? refuse(planBlock) : actions.requestPlan,
+    confirmPlan: confirmBlock ? refuse(confirmBlock) : actions.confirmPlan,
+    recordOutcome: outcomeBlock ? refuse(outcomeBlock) : actions.recordOutcome,
+  };
+  const modeText = serviceModeText(capabilities);
   const refreshDisabled = view.loading || view.busy;
   const timeZone = data?.context.site_timezone ?? "UTC";
   const plan = data ? focusPlan(data.plans) : null;
@@ -141,6 +160,7 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
         <>
           <Badge tone="sim">SIMULATION</Badge>
           <Badge tone="info">MANUAL-LED</Badge>
+          <ServiceModeBadge capabilities={capabilities} />
         </>
       }
     >
@@ -166,6 +186,7 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
         <p className="empty-note">Loading the planning records…</p>
       ) : null}
       <SchedulerHealthBanner view={view} timeZone={timeZone} />
+      {modeText ? <p className="fineprint planning-capabilities">{modeText}</p> : null}
       {view.write ? <WriteBanner write={view.write} view={view} actions={actions} /> : null}
       {data ? (
         <>
@@ -189,8 +210,11 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
           ) : (
             <EmptyNote>No operating input has been recorded for this site yet. Enter the opening count, demand assumptions and zone estimates below; unknown fields stay unknown.</EmptyNote>
           )}
-          <InputForm key={data.latest_input?.revision ?? 0} input={data.latest_input} context={data.context} disabled={locked} onSave={actions.saveInput} />
-          <PlanSection plan={plan} plans={data.plans} latestInput={data.latest_input} context={data.context} disabled={locked} onRequestPlan={actions.requestPlan} />
+          <CapabilityNote capabilities={capabilities} operation="planning_inputs_create" />
+          <InputForm key={data.latest_input?.revision ?? 0} input={data.latest_input} context={data.context} disabled={locked || inputBlock !== null} onSave={guarded.saveInput} />
+          <CapabilityNote capabilities={capabilities} operation="planning_plans_create" />
+          <PlanSection plan={plan} plans={data.plans} latestInput={data.latest_input} context={data.context} disabled={locked || planBlock !== null} onRequestPlan={guarded.requestPlan} />
+          <CapabilityNote capabilities={capabilities} operation="planning_confirmations_create" />
           <ConfirmationSection
             key={plan ? `${plan.plan_id}:${plan.version}` : "none"}
             plan={plan}
@@ -199,10 +223,11 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
             confirmation={confirmation}
             confirmations={data.confirmations}
             timeZone={timeZone}
-            disabled={locked}
-            onConfirm={actions.confirmPlan}
+            disabled={locked || confirmBlock !== null}
+            onConfirm={guarded.confirmPlan}
           />
-          <OutcomeSection confirmations={data.confirmations} outcomes={data.outcomes} timeZone={timeZone} disabled={locked} onRecord={actions.recordOutcome} />
+          <CapabilityNote capabilities={capabilities} operation="planning_outcomes_create" />
+          <OutcomeSection confirmations={data.confirmations} outcomes={data.outcomes} timeZone={timeZone} disabled={locked || outcomeBlock !== null} onRecord={guarded.recordOutcome} />
         </>
       ) : !view.loading && !view.unavailable && view.error === null ? (
         <div className="form-actions">
@@ -215,7 +240,7 @@ export function PlanningView({ view, actions }: { view: PlanningViewState; actio
   );
 }
 
-export function PlanningPanel({ health, healthSource }: { health: SchedulerHealth; healthSource: () => SchedulerHealth }) {
+export function PlanningPanel({ health, healthSource, capabilities }: { health: SchedulerHealth; healthSource: () => SchedulerHealth; capabilities?: CapabilityInput }) {
   const [view, setView] = useState<PlanningViewState>(() => initialPlanningView());
   const [controller] = useState(() => createPlanningController(client, setView, { health: healthSource }));
   useEffect(() => {
@@ -233,5 +258,5 @@ export function PlanningPanel({ health, healthSource }: { health: SchedulerHealt
   }, [controller, health]);
   const context = view.data?.context ?? null;
   const actions = useMemo(() => createPlanningActions(controller, context), [controller, context]);
-  return <PlanningView view={view} actions={actions} />;
+  return <PlanningView view={view} actions={actions} capabilities={capabilities} />;
 }

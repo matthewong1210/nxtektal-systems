@@ -778,3 +778,7 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
   .exec-ladder li { grid-template-columns: minmax(0, 1fr); }
   .exec-strip-row .btn { margin-left: 0; }
 }
+
+/* Service-capability notes: one line per withheld write, next to its control. */
+.capability-note { margin: 6px 0 10px; }
+.planning-capabilities, .dispatch-capabilities { margin: 6px 0 10px; max-width: 110ch; }
