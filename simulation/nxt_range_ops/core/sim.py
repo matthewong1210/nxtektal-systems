@@ -34,6 +34,7 @@ from nxt_range_ops.config.models import (
     ZoneConfig,
 )
 from nxt_range_ops.core import ledger as ledger_mod
+from nxt_range_ops.core.assignment_evidence import AssignmentCandidate, AssignmentEvidence
 from nxt_range_ops.core.directives import (
     AssignCollection,
     AssignStaffWork,
@@ -156,10 +157,15 @@ class RangeSimulation:
         *,
         joint_inputs: dict | None = None,
         session_inputs: dict | None = None,
+        collection_assignment_evidence: bool = False,
     ):
         if joint_inputs is not None and session_inputs is not None:
             raise ValueError("joint_inputs and session_inputs are mutually exclusive")
         self.scenario = scenario
+        self._assignment_evidence_enabled = collection_assignment_evidence
+        self._assignment_candidates: dict[str, AssignmentCandidate] = {}
+        self._assignments: dict[str, AssignmentEvidence] = {}
+        self._robot_assignments: dict[str, AssignmentEvidence] = {}
         self._joint_inputs = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
                                                   open_minute=scenario.hours.open_minute,
                                                   close_minute=scenario.hours.close_minute)
@@ -670,9 +676,148 @@ class RangeSimulation:
             "ledger": self.ledger.counts(),
         }
 
+    def rng_state_snapshot(self) -> dict:
+        """Return detached named RNG state without advancing any generator."""
+        return {
+            "demand": deepcopy(self._rng_demand.bit_generator.state),
+            "skills": deepcopy(self._rng_skills.bit_generator.state),
+            "failures": deepcopy(self._rng_failures.bit_generator.state),
+            "sensors": deepcopy(self._rng_sensors.bit_generator.state),
+            "forecast": deepcopy(self._rng_forecast.bit_generator.state),
+        }
+
     # ------------------------------------------------------------------
     # Control interface
     # ------------------------------------------------------------------
+
+    def arm_collection_assignment(self, execution_id: str, robot_id: str, zone_id: str,
+                                  handoff_station_id: str, execution_deadline_sim_t_s: float) -> None:
+        """One-shot evidence candidate, with no action, process, or RNG effect."""
+        if not self._assignment_evidence_enabled:
+            raise RuntimeError("collection assignment evidence is disabled")
+        if not isinstance(execution_id, str) or not execution_id:
+            raise ValueError("execution_id must be nonempty")
+        if robot_id not in self._robots or zone_id not in self._zones or handoff_station_id not in self._stations:
+            raise ValueError("unknown assignment robot, zone, or station")
+        if (type(execution_deadline_sim_t_s) not in (int, float)
+                or not np.isfinite(execution_deadline_sim_t_s)
+                or execution_deadline_sim_t_s <= self.now):
+            raise ValueError("assignment deadline must be finite and in the future")
+        if execution_id in self._assignments or robot_id in self._robot_assignments:
+            raise ValueError("assignment already started or robot already leased")
+        candidate = AssignmentCandidate(execution_id, robot_id, zone_id, handoff_station_id,
+                                        float(execution_deadline_sim_t_s))
+        existing = self._assignment_candidates.get(robot_id)
+        if existing is not None and existing != candidate:
+            raise ValueError("robot already has a different assignment candidate")
+        if any(c.execution_id == execution_id and c != candidate for c in self._assignment_candidates.values()):
+            raise ValueError("execution_id already has a different candidate")
+        self._assignment_candidates[robot_id] = candidate
+
+    def disarm_collection_assignment(self, execution_id: str) -> None:
+        """Remove only an exact unstarted candidate; never alter running work."""
+        if not self._assignment_evidence_enabled:
+            raise RuntimeError("collection assignment evidence is disabled")
+        if execution_id in self._assignments:
+            raise ValueError("cannot disarm an assignment that already started")
+        for robot_id, candidate in self._assignment_candidates.items():
+            if candidate.execution_id == execution_id:
+                del self._assignment_candidates[robot_id]
+                return
+        raise ValueError("no matching unstarted assignment candidate")
+
+    def collection_assignment_snapshot(self, execution_id: str) -> dict | None:
+        evidence = self._assignments.get(execution_id)
+        return evidence.snapshot() if evidence is not None else None
+
+    def is_same_active_assignment_handoff(
+        self, directive: SendToHandoff
+    ) -> bool:
+        """Return whether ``directive`` repeats the exact live V3 handoff.
+
+        The feature gate and active-assignment map keep this false for V2.
+        A generic handoff is equivalent only when the live task itself proves
+        that it is already travelling to, queued at, or unloading at the
+        assignment's bound station.
+        """
+
+        if not self._assignment_evidence_enabled:
+            return False
+        robot = self._robots.get(directive.robot_id)
+        if robot is None or robot.task_proc is None or not robot.task_proc.is_alive:
+            return False
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None or evidence.collection_exit_reason is None:
+            return False
+        station_id = evidence.candidate.handoff_station_id
+        if directive.station_id not in (None, station_id):
+            return False
+        bound_location = ledger_mod.station_loc(station_id)
+        if robot.activity is RobotActivity.TRAVELING:
+            return robot.destination_label == bound_location
+        if robot.activity in {
+            RobotActivity.QUEUED_HANDOFF,
+            RobotActivity.UNLOADING,
+        }:
+            return robot.location_label == bound_location
+        return False
+
+    def _assignment_event(self, robot: _Robot, kind: str, **fields) -> None:
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None:
+            return
+        counts = self.ledger.counts()
+        evidence.append(kind, self.now, ledger_conserved=(sum(counts.values()) == self.ledger.total
+                                                        and all(n >= 0 for n in counts.values())),
+                        robot_payload_parity=(robot.payload_balls == counts[ledger_mod.robot_loc(robot.robot_id)]),
+                        **fields)
+
+    def _collection_exit(self, robot: _Robot, reason: str) -> None:
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None or evidence.collection_exit_reason is not None:
+            return
+        self._assignment_event(robot, "COLLECTION_EXIT", reason=reason, payload_after=robot.payload_balls)
+        if reason in ("ZONE_EMPTY", "COLLECTION_ACCESS_BLOCKED") and evidence.quantity("RAW_COLLECTED_TO_ROBOT") == 0:
+            self._terminal_assignment(robot, reason)
+
+    def _terminal_assignment(self, robot: _Robot, reason: str) -> None:
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None:
+            return
+        if evidence.collection_exit_reason is None:
+            self._assignment_event(robot, "COLLECTION_EXIT", reason=reason, payload_after=robot.payload_balls)
+        self._assignment_event(robot, "ASSIGNMENT_TERMINAL", reason=reason, payload_after=robot.payload_balls)
+        self._robot_assignments.pop(robot.robot_id, None)
+
+    def _start_assignment(self, robot: _Robot, candidate: AssignmentCandidate) -> None:
+        evidence = AssignmentEvidence(candidate, self.now)
+        self._assignments[candidate.execution_id] = evidence
+        self._robot_assignments[robot.robot_id] = evidence
+        self._assignment_candidates.pop(robot.robot_id)
+        self._assignment_event(robot, "ASSIGNMENT_STARTED", payload_after=robot.payload_balls)
+        boundary = min(candidate.execution_deadline_sim_t_s, self.session_end_s)
+
+        def stop_at_boundary(event):
+            if self._robot_assignments.get(robot.robot_id) is not evidence:
+                return
+            reason = ("EXECUTION_TIMEOUT" if candidate.execution_deadline_sim_t_s <= self.session_end_s
+                      else "SESSION_ENDED")
+            self._terminal_assignment(robot, reason)
+            self._interrupt_task(robot, "assignment_boundary")
+            self._settle_partial_travel(robot)
+            self._settle_partial_charge(robot)
+            robot.assigned_zone = None
+            robot.destination_label = None
+            self._set_activity(robot, RobotActivity.IDLE)
+
+        # A normal Timeout at the exact run(until=...) endpoint is deferred by
+        # SimPy's urgent stop event. This boundary precedes that event and any
+        # same-time skill completion, so it is visible at the exact deadline.
+        boundary_event = simpy.Event(self.env)
+        boundary_event._ok = True
+        boundary_event._value = None
+        boundary_event.callbacks.append(stop_at_boundary)
+        self.env.schedule(boundary_event, priority=-1, delay=boundary - self.now)
 
     def apply_directive(self, directive: Directive) -> ShieldDecision:
         """Validate through the SafetyShield and, if allowed, execute.
@@ -682,6 +827,14 @@ class RangeSimulation:
         simulation directly.
         """
         decision = self.shield.check(directive)
+        candidate = (self._assignment_candidates.get(directive.robot_id)
+                     if isinstance(directive, AssignCollection) else None)
+        matching_candidate = candidate is not None and candidate.zone_id == directive.zone_id
+        if decision.allowed and matching_candidate:
+            robot = self._robots[directive.robot_id]
+            if (candidate.execution_deadline_sim_t_s <= self.now or robot.payload_balls != 0
+                    or self.ledger.count(ledger_mod.robot_loc(robot.robot_id)) != 0):
+                decision = ShieldDecision.reject(directive, "assignment requires a future deadline and empty payload")
         if not decision.allowed:
             self.metrics.unsafe_rejections += 1
             self.events.emit(
@@ -715,11 +868,26 @@ class RangeSimulation:
             return decision
 
         robot = self._robots[directive.robot_id]
+        if (
+            isinstance(directive, SendToHandoff)
+            and self.is_same_active_assignment_handoff(directive)
+        ):
+            return decision
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is not None:
+            continuation = (isinstance(directive, SendToHandoff)
+                            and evidence.collection_exit_reason is not None
+                            and directive.station_id in (None, evidence.candidate.handoff_station_id))
+            if not continuation:
+                self._terminal_assignment(robot, "HUMAN_ASSISTANCE_REQUIRED"
+                                          if isinstance(directive, RequestHumanAssistance) else "POLICY_PREEMPTED")
         if isinstance(directive, AssignCollection):
             # Commit the zone immediately so occupancy caps see it before the
             # task process first runs.
             robot.assigned_zone = directive.zone_id
             self._start_task(robot, self._task_collect(robot, directive.zone_id))
+            if matching_candidate:
+                self._start_assignment(robot, candidate)
         elif isinstance(directive, ReassignRobot):
             self.metrics.task_switches += 1
             self.events.emit(
@@ -815,6 +983,8 @@ class RangeSimulation:
         robot.task_proc = proc
 
     def _interrupt_task(self, robot: _Robot, cause: str) -> None:
+        if cause in ("zone_closed", "collection_access_blocked"):
+            self._collection_exit(robot, "COLLECTION_ACCESS_BLOCKED")
         proc = robot.task_proc
         if proc is None:
             return
@@ -833,6 +1003,8 @@ class RangeSimulation:
             return  # state set by the failure process
         if cause == "estop":
             return  # state set by the e-stop path
+        if cause == "assignment_boundary":
+            return  # settled synchronously by the exact boundary event
         if cause in ("zone_closed", "station_outage", "collection_access_blocked"):
             robot.assigned_zone = None
             robot.destination_label = None
@@ -955,6 +1127,7 @@ class RangeSimulation:
             RobotActivity.CHARGING,
         ):
             return
+        self._terminal_assignment(robot, "LOW_BATTERY")
         self._interrupt_task(robot, "failure")
         self._set_activity(robot, RobotActivity.FAILED)
         robot.health = RobotHealth.FAILED
@@ -970,6 +1143,7 @@ class RangeSimulation:
         )
 
     def _fail_robot(self, robot: _Robot, note: str, human_required: bool = True) -> None:
+        self._terminal_assignment(robot, "ROBOT_FAULT")
         self._interrupt_task(robot, "failure")
         self._set_activity(robot, RobotActivity.FAILED)
         robot.health = RobotHealth.FAILED
@@ -991,6 +1165,7 @@ class RangeSimulation:
         Only the human-intervention path clears it. The learning policy has
         no action that can trigger OR clear an e-stop.
         """
+        self._terminal_assignment(robot, "ESTOP_LATCHED")
         self._interrupt_task(robot, "estop")
         self._set_activity(robot, RobotActivity.EMERGENCY_STOPPED)
         robot.estop_latched = True
@@ -1107,12 +1282,18 @@ class RangeSimulation:
             # event. Revalidate before any conserved balls move.
             if not zone.is_open or not self.collection_access_allowed(zone_id):
                 break
+            if robot.robot_id in self._robot_assignments and robot.battery_frac <= self.scenario.safety.hard_battery_floor_frac:
+                self._check_battery_floor(robot)
+                return
             if not outcome.success:
                 self._fail_robot(robot, f"collection failure in {zone_id}")
                 return
             moved = self.ledger.move(zone_key, robot_key, n)
             robot.payload_balls += moved
             self.metrics.balls_collected += moved
+            self._assignment_event(robot, "RAW_COLLECTED_TO_ROBOT", balls=moved,
+                                   source_location=zone_key, destination_location=robot_key,
+                                   payload_after=robot.payload_balls)
             self.events.emit(
                 self.now,
                 EventKind.COLLECT_CYCLE,
@@ -1123,6 +1304,14 @@ class RangeSimulation:
             )
             if robot.health is RobotHealth.FAILED:
                 return
+        if not zone.is_open or not self.collection_access_allowed(zone_id):
+            self._collection_exit(robot, "COLLECTION_ACCESS_BLOCKED")
+        elif robot.battery_frac <= self.scenario.safety.hard_battery_floor_frac:
+            self._terminal_assignment(robot, "LOW_BATTERY")
+        elif robot.payload_balls >= robot.payload_capacity:
+            self._collection_exit(robot, "ROBOT_PAYLOAD_FULL")
+        else:
+            self._collection_exit(robot, "ZONE_EMPTY")
         robot.assigned_zone = None
         self._set_activity(robot, RobotActivity.IDLE)
         self.events.emit(
@@ -1228,6 +1417,9 @@ class RangeSimulation:
                 )
                 moved = self.ledger.move(robot_key, station_key, min(n, max(0, free_now)))
                 robot.payload_balls -= moved
+                self._assignment_event(robot, "UNLOADED_TO_STATION", balls=moved, station_id=station_id,
+                                       source_location=robot_key, destination_location=station_key,
+                                       payload_after=robot.payload_balls)
                 if moved > 0:
                     self.events.emit(
                         self.now,
@@ -1236,6 +1428,25 @@ class RangeSimulation:
                         station_id=station_id,
                         balls=moved,
                     )
+                evidence = self._robot_assignments.get(robot.robot_id)
+                if evidence is not None:
+                    # Keep the completed ledger transfer, but resolve its
+                    # energy-induced protection before any success terminal.
+                    self._check_battery_floor(robot)
+                    if robot.activity is RobotActivity.FAILED:
+                        return
+                if evidence is not None and robot.payload_balls == 0:
+                    raw = evidence.quantity("RAW_COLLECTED_TO_ROBOT")
+                    valid = evidence.snapshot()
+                    if station_id != evidence.candidate.handoff_station_id:
+                        reason = "POLICY_PREEMPTED"
+                    elif (raw > 0 and evidence.quantity("UNLOADED_TO_STATION") == raw
+                          and valid["ledger_conserved"] and valid["robot_payload_parity"]):
+                        reason = ("UNLOADED_ALL_COLLECTED_BALLS" if evidence.collection_exit_reason == "ROBOT_PAYLOAD_FULL"
+                                  else evidence.collection_exit_reason)
+                    else:
+                        reason = "ROBOT_FAULT"
+                    self._terminal_assignment(robot, reason)
         self._set_activity(robot, RobotActivity.IDLE)
         self._check_battery_floor(robot)
 

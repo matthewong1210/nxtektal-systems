@@ -254,17 +254,23 @@ def relations(data):
             else:
                 assert action["original_action"] == action["selected_action"]
             if action["selection"] == "ORIGINAL_POLICY_CONVERGED":
+                assert action["safety_shield"] == "ACCEPTED"
                 assert start is not None and start < action["sim_t_s"] < deadline
                 assert action["selected_action"]["name"] == "SendToHandoff"
                 assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
                 assert action["selected_action"]["target_id"] is None
             if action["selection"] == "POLICY_PREEMPTED":
+                assert action["safety_shield"] == "ACCEPTED"
                 assert start is not None and start <= action["sim_t_s"] and action["selected_action"]["name"] != "Wait"
                 assert action["selected_action"]["robot_id"] == binding["runtime_robot_id"]
             original = action["original_action"]
             if start is not None and action["sim_t_s"] >= start and original["name"] != "Wait" and original["robot_id"] == binding["runtime_robot_id"]:
-                expected = "ORIGINAL_POLICY_CONVERGED" if original["name"] == "SendToHandoff" else "POLICY_PREEMPTED"
+                terminal_preemption = runtime["collection_exit_reason"] == "POLICY_PREEMPTED" and action["sim_t_s"] == end
+                expected = ("ORIGINAL_POLICY_UNCHANGED" if action["safety_shield"] == "REJECTED" or original["name"] == "RequestHumanAssistance" else
+                            "ORIGINAL_POLICY_CONVERGED" if original["name"] == "SendToHandoff" and not terminal_preemption else "POLICY_PREEMPTED")
                 assert action["selection"] == expected, "leased-robot policy action must classify its effect"
+                if action["safety_shield"] == "ACCEPTED" and original["name"] == "RequestHumanAssistance":
+                    assert runtime["collection_exit_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
         # Conflict overlays retain the causal runtime exit; they never rewrite
         # a preemption/fault into success or discard its required protection.
         flags = record["conflicts"]
@@ -804,6 +810,67 @@ def test_final_review_two_otherwise_valid_running_records_rejected(schema):
         combined[key].extend(second[key])
     with pytest.raises(AssertionError, match="running lease"):
         validate_snapshot(schema, combined)
+
+
+@pytest.mark.parametrize("name", ["PauseRobot", "SendToHandoff"])
+def test_rejected_leased_robot_proposal_has_no_admitted_effect(schema, name):
+    data = snapshot()
+    record = data["executions"][0]
+    record.update(state="RUNNING", stage="COLLECTING", reason=None,
+                  terminal_sim_t_s=None, success_display_allowed=False)
+    record["actions"] = record["actions"][:1]
+    record["edge_evidence"].update(effective_state="RUNNING", terminal_states=[])
+    record["runtime_evidence"].update(assignment_terminal=False, collection_exit_reason=None)
+    for key in ("raw_quantity", "unload_quantity"):
+        record[key].update(status="NOT_REACHED", balls=None, source_event_ids=[], event_digest=None)
+    proposal = dict(name=name, index=2, robot_id=record["runtime_robot_id"], target_id=None)
+    record["actions"].append(dict(sim_t_s=480, original_action=proposal, selected_action=proposal,
+        selection="ORIGINAL_POLICY_UNCHANGED", eligible_pending=[], safety_shield="REJECTED", safety_reason="unsafe"))
+    validate_snapshot(schema, data)
+    record["actions"][-1]["selection"] = "ORIGINAL_POLICY_CONVERGED" if name == "SendToHandoff" else "POLICY_PREEMPTED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_accepted_human_assistance_keeps_causal_protection_not_preemption(schema):
+    data = snapshot("partial-preempted.json")
+    record = data["executions"][0]
+    record["reason"] = record["runtime_evidence"]["collection_exit_reason"] = "HUMAN_ASSISTANCE_REQUIRED"
+    record["device_protection"].update(protected=True, authorization_blocked=True, reasons=["HUMAN_ASSISTANCE_REQUIRED"])
+    action = record["actions"][-1]
+    action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
+    action["original_action"]["name"] = action["selected_action"]["name"] = "RequestHumanAssistance"
+    validate_snapshot(schema, data)
+    action["selection"] = "POLICY_PREEMPTED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_accepted_human_assistance_cannot_claim_success(schema):
+    data = snapshot()
+    action = data["executions"][0]["actions"][1]
+    action["original_action"]["name"] = action["selected_action"]["name"] = "RequestHumanAssistance"
+    action["selection"] = "ORIGINAL_POLICY_UNCHANGED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+
+
+def test_early_handoff_is_preemption_only_at_causal_terminal_tick(schema):
+    data = snapshot("partial-preempted.json")
+    record = data["executions"][0]
+    action = record["actions"][-1]
+    action["original_action"]["name"] = action["selected_action"]["name"] = "SendToHandoff"
+    earlier = copy.deepcopy(action)
+    earlier.update(sim_t_s=180, selection="ORIGINAL_POLICY_CONVERGED")
+    record["actions"].insert(1, earlier)
+    validate_snapshot(schema, data)
+    action["selection"] = "ORIGINAL_POLICY_CONVERGED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
+    action["selection"] = "POLICY_PREEMPTED"
+    earlier["selection"] = "POLICY_PREEMPTED"
+    with pytest.raises(AssertionError):
+        validate_snapshot(schema, data)
 
 
 def test_final_review_running_handoff_after_latest_start_is_valid(schema):

@@ -11,6 +11,12 @@ function envelope(name = "success") {
   return JSON.parse(readFileSync(join(import.meta.dirname,
     "../../../simulation/docs/contracts/collection-execution-v1/examples", `${name}.json`), "utf8")).snapshot.body;
 }
+function receiptEnvelope(requestId = "request-001") {
+  const body = envelope();
+  const receipt = structuredClone(body.data.receipts[0]);
+  receipt.request_id = requestId;
+  return {schema: body.schema, disclaimer: body.disclaimer, data: receipt};
+}
 function snapshot(name = "success"): CollectionExecutionsSnapshot { return envelope(name).data; }
 function mutate(value: unknown, path: string, replacement: unknown) {
   const keys = path.split(".");
@@ -78,6 +84,37 @@ function notStartedAfterRestart() {
 }
 
 describe("collection execution v1 read contract", () => {
+  it("classifies early handoff preemption only at the causal terminal tick", () => {
+    const s = snapshot("partial-preempted"), r = s.executions[0], action = r.actions.at(-1)!;
+    action.original_action.name = action.selected_action.name = "SendToHandoff";
+    const earlier = structuredClone(action);
+    earlier.sim_t_s = 180; earlier.selection = "ORIGINAL_POLICY_CONVERGED";
+    r.actions.splice(1, 0, earlier);
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("PARTIAL");
+    action.selection = "ORIGINAL_POLICY_CONVERGED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+    action.selection = "POLICY_PREEMPTED"; earlier.selection = "POLICY_PREEMPTED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it("keeps accepted human assistance causal protection distinct from preemption", () => {
+    const s = snapshot("partial-preempted"), r = s.executions[0], action = r.actions.at(-1)!;
+    r.reason = r.runtime_evidence.collection_exit_reason = "HUMAN_ASSISTANCE_REQUIRED";
+    r.device_protection = {protected: true, authorization_blocked: true, reasons: ["HUMAN_ASSISTANCE_REQUIRED"]};
+    action.selection = "ORIGINAL_POLICY_UNCHANGED";
+    action.original_action.name = action.selected_action.name = "RequestHumanAssistance";
+    expect(parseCollectionExecutions(s).executions[0].reason).toBe("HUMAN_ASSISTANCE_REQUIRED");
+    action.selection = "POLICY_PREEMPTED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
+  it.each(["PauseRobot", "SendToHandoff"] as const)("keeps shield-rejected %s as unchanged policy on a running lease", (name) => {
+    const s = running(), r = s.executions[0];
+    const proposal = {name, index: 2, robot_id: r.runtime_robot_id, target_id: null};
+    r.actions.push({sim_t_s: 480, original_action: proposal, selected_action: proposal,
+      selection: "ORIGINAL_POLICY_UNCHANGED", eligible_pending: [], safety_shield: "REJECTED", safety_reason: "unsafe"});
+    expect(parseCollectionExecutions(s).executions[0].state).toBe("RUNNING");
+    r.actions.at(-1)!.selection = name === "SendToHandoff" ? "ORIGINAL_POLICY_CONVERGED" : "POLICY_PREEMPTED";
+    expect(() => parseCollectionExecutions(s)).toThrow(ManagerApiError);
+  });
   it.each(examples)("preserves the frozen %s snapshot exactly", (name) => {
     const input = snapshot(name), before = structuredClone(input);
     expect(parseCollectionExecutions(input)).toEqual(before);
@@ -628,13 +665,58 @@ describe("final review regressions: admission and terminal limits", () => {
 
 describe("collection execution GET-only client", () => {
   afterEach(() => vi.useRealTimers());
-  it("exposes only read and sends an uncached same-origin GET", async () => {
+  it("exposes only read methods and sends an uncached same-origin GET", async () => {
     const fetcher = vi.fn(async () => Response.json(envelope()));
     const client = createCollectionExecutionsClient(fetcher);
-    expect(Object.keys(client)).toEqual(["read"]);
+    expect(Object.keys(client)).toEqual(["read", "readRequest"]);
     expect((await client.read()).executions[0].raw_quantity.balls).toBe(44);
     expect(fetcher).toHaveBeenCalledExactlyOnceWith("/api/v1/collection-executions",
       { method: "GET", cache: "no-store", signal: expect.any(AbortSignal) });
+  });
+  it("reads one percent-encoded request receipt without a write surface", async () => {
+    const fetcher = vi.fn(async () => Response.json(receiptEnvelope("request:001")));
+    const client = createCollectionExecutionsClient(fetcher);
+    await expect(client.readRequest("request:001")).resolves.toMatchObject({
+      schema: "nxt-collection-execution-request-receipt/v1", request_id: "request:001", durable: true,
+    });
+    expect(fetcher).toHaveBeenCalledExactlyOnceWith(
+      "/api/v1/collection-executions/requests/request%3A001",
+      { method: "GET", cache: "no-store", signal: expect.any(AbortSignal) },
+    );
+  });
+  it.each(["", "/request", "request%2F001", "é", "a".repeat(129)])(
+    "rejects invalid request ID %j before fetch", async (requestId) => {
+      const fetcher = vi.fn();
+      await expect(createCollectionExecutionsClient(fetcher).readRequest(requestId)).rejects.toMatchObject({
+        status: 400, code: "collection_execution_invalid_request",
+      });
+      expect(fetcher).not.toHaveBeenCalled();
+    });
+  it.each([
+    null,
+    [],
+    {...receiptEnvelope(), extra: true},
+    {...receiptEnvelope(), data: envelope().data},
+    {...receiptEnvelope(), data: {...receiptEnvelope().data, schema: "nxt-collection-execution-request/v1"}},
+    {...receiptEnvelope(), data: {...receiptEnvelope().data, durable: false}},
+    {...receiptEnvelope(), data: {...receiptEnvelope().data, request_id: "different-request"}},
+  ])("rejects malformed, wrong-kind, or mismatched request receipts", async (payload) => {
+    await expect(createCollectionExecutionsClient(async () => Response.json(payload)).readRequest("request-001"))
+      .rejects.toBeInstanceOf(ManagerApiError);
+  });
+  it("rejects duplicate keys anywhere in a request receipt envelope", async () => {
+    const raw = JSON.stringify(receiptEnvelope()).replace(
+      '"request_id":"request-001"',
+      '"request_id":"other","request\\u005fid":"request-001"',
+    );
+    await expect(createCollectionExecutionsClient(async () => new Response(raw)).readRequest("request-001"))
+      .rejects.toBeInstanceOf(ManagerApiError);
+  });
+  it("preserves typed request lookup errors", async () => {
+    const failure = {schema: "nxt-site-agent/api/v0", disclaimer: "fixture", error:
+      {code: "collection_execution_request_not_found", detail: "Unknown request."}};
+    await expect(createCollectionExecutionsClient(async () => Response.json(failure, {status: 404})).readRequest("request-001"))
+      .rejects.toMatchObject({code: "collection_execution_request_not_found", status: 404});
   });
   it.each([null, [], {schema: "wrong", disclaimer: "fixture", data: {}},
     {...envelope(), extra: true}, {...envelope(), disclaimer: ""}, {...envelope(), error: {code: "x", detail: "x"}},
@@ -664,5 +746,16 @@ describe("collection execution GET-only client", () => {
     if (mode === "caller") caller.abort();
     if (mode === "timeout") await vi.advanceTimersByTimeAsync(8000);
     await assertion; expect(vi.getTimerCount()).toBe(0);
+  });
+  it("uses the caller-abort path for request recovery too", async () => {
+    vi.useFakeTimers(); const caller = new AbortController();
+    const fetcher = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const cancel = () => reject(new DOMException("Aborted", "AbortError"));
+      if (init?.signal?.aborted) cancel(); else init?.signal?.addEventListener("abort", cancel, {once: true});
+    }));
+    const result = createCollectionExecutionsClient(fetcher).readRequest("request-001", caller.signal);
+    const assertion = expect(result).rejects.toMatchObject({name: "AbortError"});
+    caller.abort(); await assertion;
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

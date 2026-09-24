@@ -18,8 +18,9 @@ Invariants the mock robot honours (and a real device would have to):
   ``interrupted_execution_unknown_outcome`` and the robot stays
   ``awaiting_human``; completed-but-unpublished -> republish the original
   event; completed-but-no-terminal-persisted -> report the persisted
-  outcome; a request persisted without its decision is decided at restart
-  exactly as if it had just arrived; a rejected decision without its event
+  outcome; a simulator-backed request-only prefix remains undecided until
+  the current V3 session re-attests it under admission, while other behaviors
+  keep their decide-on-restart rule; a rejected decision without its event
   publishes that rejection.  Nothing is ever re-executed after a restart;
 * the robot's protective condition (``awaiting_human``, availability,
   energy and fault facts) is derived from the persisted task events and the
@@ -79,6 +80,7 @@ EVENT_PUBLISH_CONFIRMED = "event_publish_confirmed"
 EXECUTION_STARTED = "execution_started"
 EXECUTION_PROGRESS = "execution_progress"
 EXECUTION_COMPLETED = "execution_completed"
+COMMITTED_EVENT_ADMITTED = "committed_event_admitted"
 SIMULATE_RESET = "simulate_reset"
 
 ROBOT_RECORD_KINDS = frozenset(
@@ -93,6 +95,7 @@ ROBOT_RECORD_KINDS = frozenset(
         EXECUTION_STARTED,
         EXECUTION_PROGRESS,
         EXECUTION_COMPLETED,
+        COMMITTED_EVENT_ADMITTED,
         SIMULATE_RESET,
     }
 )
@@ -109,7 +112,28 @@ BEHAVIORS = (
     "crash_after_accept",
     "crash_after_execution_started",
     "crash_after_result_persisted",
+    "simulator_backed",
     "standby",
+)
+
+_COMMITTED_PHASE_ORDER = {
+    "collecting": 0,
+    "raw_collected": 1,
+    "returning": 2,
+    "unloading": 3,
+}
+_PROTECTION_REASONS = frozenset(
+    {
+        "RUNTIME_ACTIVE",
+        "ROBOT_FAULT",
+        "ESTOP_LATCHED",
+        "HUMAN_ASSISTANCE_REQUIRED",
+        "TERMINAL_CONFLICT",
+        "SESSION_REGRESSION",
+        "INCARNATION_MISMATCH",
+        "ORPHANED_ACTIVITY",
+        "RESTART_UNKNOWN",
+    }
 )
 
 
@@ -140,6 +164,7 @@ class RobotTaskView:
     completed_outcome: str | None = None
     terminal_kind: str | None = None
     step: int = 0
+    committed_events: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def is_terminal(self) -> bool:
@@ -221,8 +246,27 @@ class RobotView:
                 task = self.tasks.get(event["task_id"])
                 if task is None:
                     raise ValueError(f"robot journal event for unknown task {event['task_id']!r} at sequence {record.sequence}")
+                committed_id = payload.get("committed_outbox_id")
+                if committed_id is not None:
+                    source = task.committed_events.get(committed_id)
+                    if (
+                        source is None
+                        or payload.get("committed_outbox_digest")
+                        != stable_digest(source["outbox"])
+                        or event != source["event"]
+                        or _thaw(payload.get("device_protection"))
+                        != source["outbox"]["device_protection"]
+                    ):
+                        raise ValueError(
+                            f"committed task event lacks its exact source at sequence {record.sequence}"
+                        )
                 task.events.append(event)
-                self._derive_condition(task, event)
+                protection = payload.get("device_protection")
+                self._derive_condition(
+                    task,
+                    event,
+                    None if protection is None else _thaw(protection),
+                )
         elif kind == EVENT_PUBLISH_CONFIRMED:
             if payload.get("record_sequence") is not None:
                 self.confirmed_rejections.add(payload["record_sequence"])
@@ -242,6 +286,45 @@ class RobotView:
             task = self.tasks[payload["task_id"]]
             task.execution_completed = True
             task.completed_outcome = payload["outcome"]
+        elif kind == COMMITTED_EVENT_ADMITTED:
+            task = self.tasks[payload["task_id"]]
+            outbox = _thaw(payload["outbox"])
+            event = _thaw(payload["event"])
+            token = outbox.get("event_kind") + (
+                ":" + outbox["phase"] if outbox.get("phase") else ""
+            )
+            expected_id = stable_digest(
+                {
+                    "execution_id": outbox.get("execution_id"),
+                    "tick_sequence": outbox.get("tick_sequence"),
+                    "event_kind": token,
+                }
+            )
+            if (
+                record.origin != "SIM_ENTRY"
+                or stable_digest(outbox) != payload.get("outbox_digest")
+                or outbox.get("outbox_id") != expected_id
+            ):
+                raise ValueError(
+                    f"committed outbox digest mismatch for task {task.task_id!r} at sequence {record.sequence}"
+                )
+            parsed = TaskEvent.from_dict(event)
+            expected_phase = parsed.phase
+            if (
+                parsed.task_id != task.task_id
+                or outbox.get("task_id") != task.task_id
+                or parsed.kind.value != outbox.get("event_kind")
+                or expected_phase != outbox.get("phase")
+                or parsed.reason_code != outbox.get("reason")
+                or outbox["outbox_id"] in task.committed_events
+            ):
+                raise ValueError(
+                    f"committed event identity mismatch for task {task.task_id!r} at sequence {record.sequence}"
+                )
+            task.committed_events[outbox["outbox_id"]] = {
+                "outbox": outbox,
+                "event": event,
+            }
         elif kind == SIMULATE_RESET:
             # The explicit operator act is the only record that clears protection.
             self._clear_condition()
@@ -252,17 +335,31 @@ class RobotView:
 
     # -- condition derivation (pure function of the persisted events) -------
 
-    def _derive_condition(self, task: RobotTaskView, event: Mapping[str, Any]) -> None:
+    def _derive_condition(
+        self,
+        task: RobotTaskView,
+        event: Mapping[str, Any],
+        external_protection: Mapping[str, Any] | None = None,
+    ) -> None:
         kind = event["kind"]
         reason = event.get("reason_code")
         if kind == EventKind.ASSISTANCE_REQUIRED.value:
             self._protect(reason)
             return
+        if external_protection is not None and external_protection["protected"]:
+            self._apply_v3_protection(external_protection["reasons"])
         if kind not in _TERMINAL_EVENT_KINDS:
             return
         task.terminal_kind = kind
         if self.current_task_id == task.task_id:
             self.current_task_id = None
+        if external_protection is not None:
+            if not external_protection["protected"] and kind != EventKind.REJECTED.value:
+                # The V3 result owns this decision.  In particular,
+                # ``unknown:partial_execution`` is a lossy Edge reason, not a
+                # device-fault assertion.
+                self._clear_condition()
+            return
         if kind == EventKind.SUCCEEDED.value:
             self._clear_condition()
         elif kind in {EventKind.FAILED.value, EventKind.INCONCLUSIVE.value}:
@@ -292,6 +389,26 @@ class RobotView:
             # kept and a faulted robot stays faulted.
             if self.availability is not Availability.FAULTED:
                 self.availability = Availability.AWAITING_HUMAN
+
+    def _apply_v3_protection(self, reasons: list[str]) -> None:
+        """Derive device condition from the V3 protection owner, not Edge lossiness."""
+
+        reason_set = set(reasons)
+        self.awaiting_human = True
+        self.safe_return_confirmed = None
+        if "ESTOP_LATCHED" in reason_set:
+            self.availability = Availability.ESTOPPED
+            self.fault_code = None
+            self.can_continue = False
+            self.needs_manual_recharge = False
+        elif "ROBOT_FAULT" in reason_set:
+            self.availability = Availability.FAULTED
+            self.fault_code = "robot_fault"
+            self.can_continue = False
+            self.needs_manual_recharge = False
+        else:
+            self.availability = Availability.AWAITING_HUMAN
+            self.can_continue = False
 
     def _clear_condition(self) -> None:
         self.availability = Availability.AVAILABLE
@@ -505,7 +622,19 @@ class RobotCore:
         # protects the robot before an undecided request is decided).
         scratch = RobotView(robot_id=self.robot.robot_id)
         scratch.__dict__.update({k: v for k, v in view.__dict__.items()})
-        scratch.tasks = {task_id: RobotTaskView(**{**task.__dict__, "events": list(task.events), "confirmed": set(task.confirmed)}) for task_id, task in view.tasks.items()}
+        scratch.tasks = {
+            task_id: RobotTaskView(
+                **{
+                    **task.__dict__,
+                    "events": list(task.events),
+                    "confirmed": set(task.confirmed),
+                    "committed_events": {
+                        key: _thaw(value) for key, value in task.committed_events.items()
+                    },
+                }
+            )
+            for task_id, task in view.tasks.items()
+        }
         scratch.executions_by_task = dict(view.executions_by_task)
         scratch.rejections = [dict(item) for item in view.rejections]
         scratch.confirmed_rejections = set(view.confirmed_rejections)
@@ -518,12 +647,36 @@ class RobotCore:
             for task in ordered:
                 if task.decision != "accepted" or task.is_terminal:
                     continue
+                event_payload: dict[str, Any]
                 if task.execution_completed:
                     outcome = task.completed_outcome or "FAILED"
-                    if outcome == "SUCCEEDED":
+                    committed = [
+                        source
+                        for source in task.committed_events.values()
+                        if source["outbox"]["event_kind"] == outcome
+                        and source["event"] not in task.events
+                    ]
+                    if len(committed) > 1:
+                        raise PreconditionFailed(
+                            "committed_event_conflict",
+                            "multiple committed terminals match persisted execution outcome",
+                        )
+                    if committed:
+                        source = committed[0]
+                        event = source["event"]
+                        outbox = source["outbox"]
+                        event_payload = {
+                            "event": event,
+                            "committed_outbox_id": outbox["outbox_id"],
+                            "committed_outbox_digest": stable_digest(outbox),
+                            "device_protection": outbox["device_protection"],
+                        }
+                    elif outcome == "SUCCEEDED":
                         event = self._event(task, EventKind.SUCCEEDED, now, detail="collection cycle completed before restart; terminal record persisted after restart (SIMULATION)")
+                        event_payload = {"event": event}
                     else:
                         event = self._event(task, EventKind.FAILED, now, reason_code="cannot_continue", detail="execution ended before restart with a failed outcome (SIMULATION)")
+                        event_payload = {"event": event}
                 elif not task.execution_started:
                     event = self._event(
                         task,
@@ -532,6 +685,7 @@ class RobotCore:
                         reason_code="not_started_after_restart",
                         detail="accepted before restart; execution never started; will not start without a new request (SIMULATION)",
                     )
+                    event_payload = {"event": event}
                 else:
                     event = self._event(
                         task,
@@ -540,21 +694,83 @@ class RobotCore:
                         reason_code="interrupted_execution_unknown_outcome",
                         detail="execution started before restart; outcome unknown; not resumed (SIMULATION)",
                     )
-                batch = [self._spec(TASK_EVENT_PERSISTED, now, {"event": event})]
+                    event_payload = {"event": event}
+                batch = [self._spec(TASK_EVENT_PERSISTED, now, event_payload)]
                 specs.extend(batch)
                 self._apply_scratch(scratch, batch)
                 # completed-and-persisted-but-unpublished terminals are republished from pending_publications()
             # Pass 2: a rejected decision whose REJECTED event was never persisted.
             for task in ordered:
                 if task.decision == "rejected" and not task.events:
-                    event = self._event(task, EventKind.REJECTED, now, reason_code=task.reason_code, detail="rejection decided before restart; event persisted after restart (SIMULATION)", sequence=1)
-                    batch = [self._spec(TASK_EVENT_PERSISTED, now, {"event": event})]
+                    committed = [
+                        source
+                        for source in task.committed_events.values()
+                        if source["outbox"]["event_kind"] == EventKind.REJECTED.value
+                    ]
+                    if len(committed) > 1:
+                        raise PreconditionFailed(
+                            "committed_event_conflict",
+                            "multiple committed rejections match one task",
+                        )
+                    if committed:
+                        source = committed[0]
+                        outbox = source["outbox"]
+                        payload = {
+                            "event": source["event"],
+                            "committed_outbox_id": outbox["outbox_id"],
+                            "committed_outbox_digest": stable_digest(outbox),
+                            "device_protection": outbox["device_protection"],
+                        }
+                    else:
+                        event = self._event(task, EventKind.REJECTED, now, reason_code=task.reason_code, detail="rejection decided before restart; event persisted after restart (SIMULATION)", sequence=1)
+                        payload = {"event": event}
+                    batch = [self._spec(TASK_EVENT_PERSISTED, now, payload)]
                     specs.extend(batch)
                     self._apply_scratch(scratch, batch)
             # Pass 3: a request persisted without any decision is decided now, as if it had just arrived.
             for task in ordered:
                 if task.decision is None:
-                    batch = self._decide_new_task(scratch, task, now)
+                    committed = [
+                        source
+                        for source in task.committed_events.values()
+                        if source["outbox"]["event_kind"] == EventKind.REJECTED.value
+                    ]
+                    if len(committed) > 1:
+                        raise PreconditionFailed(
+                            "committed_event_conflict",
+                            "multiple committed rejections match one undecided task",
+                        )
+                    if committed:
+                        source = committed[0]
+                        outbox = source["outbox"]
+                        batch = [
+                            self._spec(
+                                TASK_DECISION,
+                                now,
+                                {
+                                    "task_id": task.task_id,
+                                    "decision": "rejected",
+                                    "reason_code": outbox["reason"],
+                                },
+                            ),
+                            self._spec(
+                                TASK_EVENT_PERSISTED,
+                                now,
+                                {
+                                    "event": source["event"],
+                                    "committed_outbox_id": outbox["outbox_id"],
+                                    "committed_outbox_digest": stable_digest(outbox),
+                                    "device_protection": outbox["device_protection"],
+                                },
+                            ),
+                        ]
+                    elif self.behavior == "simulator_backed":
+                        # This composition must recover the durable V3 request
+                        # before deciding it.  Never invent ACCEPTED from a
+                        # request-only torn prefix during a real restart.
+                        continue
+                    else:
+                        batch = self._decide_new_task(scratch, task, now)
                     specs.extend(batch)
                     self._apply_scratch(scratch, batch)
         finally:
@@ -693,6 +909,385 @@ class RobotCore:
             self._spec(TASK_EVENT_PERSISTED, now, {"event": event}),
         ]
 
+    def decide_persisted_request(
+        self, view: RobotView, request: TaskRequest, now: datetime
+    ) -> list[RecordSpec]:
+        """Decide one exact request-only prefix attested by the V3 admission lock.
+
+        A real process restart deliberately leaves simulator-backed, undecided
+        requests untouched: the device journal alone cannot prove that the
+        request belongs to the current V3 session.  The composition root may
+        call this seam only while it holds that session's admission lock and
+        has verified the exact durable V3 request identity.
+        """
+
+        if self.behavior != "simulator_backed":
+            raise PreconditionFailed(
+                "persisted_request_not_supported",
+                "persisted-request recovery belongs to simulator_backed devices",
+            )
+        if not isinstance(request, TaskRequest):
+            raise TypeError("verified TaskRequest required")
+        task = view.tasks.get(request.task_id)
+        if task is None:
+            raise PreconditionFailed(
+                "persisted_request_missing", "device has no persisted request prefix"
+            )
+        if (
+            task.content_digest != request.content_digest()
+            or task.request.to_dict() != request.to_dict()
+        ):
+            raise PreconditionFailed(
+                "task_id_content_conflict", "persisted request content differs"
+            )
+        if request.target_incarnation != view.incarnation:
+            raise PreconditionFailed(
+                "incarnation_mismatch", "persisted request names an old incarnation"
+            )
+        if task.decision is not None:
+            return []
+        if (
+            task.events
+            or task.execution_started
+            or task.execution_completed
+            or task.committed_events
+        ):
+            raise PreconditionFailed(
+                "persisted_request_conflict",
+                "undecided request has later execution or event evidence",
+            )
+        return self._decide_new_task(view, task, now)
+
+    # ------------------------------------------------------------------
+    # externally committed simulator evidence
+    # ------------------------------------------------------------------
+
+    def _validated_committed_outbox(
+        self,
+        view: RobotView,
+        task: RobotTaskView,
+        value: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        outbox = _thaw(value)
+        keys = {
+            "execution_id",
+            "tick_sequence",
+            "event_kind",
+            "phase",
+            "reason",
+            "task_id",
+            "incarnation",
+            "device_protection",
+            "outbox_id",
+        }
+        if type(outbox) is not dict or set(outbox) != keys:
+            raise PreconditionFailed("invalid_committed_event", "committed outbox fields differ")
+        kind, phase = outbox["event_kind"], outbox["phase"]
+        if kind == EventKind.PROGRESS.value:
+            if phase not in _COMMITTED_PHASE_ORDER or outbox["reason"] is not None:
+                raise PreconditionFailed("invalid_committed_event", "invalid committed progress")
+        elif kind in _TERMINAL_EVENT_KINDS:
+            if phase is not None:
+                raise PreconditionFailed("invalid_committed_event", "terminal committed event has a phase")
+        else:
+            raise PreconditionFailed("invalid_committed_event", "unsupported committed event kind")
+        if (
+            type(outbox["execution_id"]) is not str
+            or len(outbox["execution_id"]) != 64
+            or any(char not in "0123456789abcdef" for char in outbox["execution_id"])
+            or type(outbox["tick_sequence"]) is not int
+            or outbox["tick_sequence"] < 1
+        ):
+            raise PreconditionFailed("invalid_committed_event", "invalid execution or tick identity")
+        token = kind + (":" + phase if phase else "")
+        expected_id = stable_digest(
+            {
+                "execution_id": outbox["execution_id"],
+                "tick_sequence": outbox["tick_sequence"],
+                "event_kind": token,
+            }
+        )
+        if outbox["outbox_id"] != expected_id:
+            raise PreconditionFailed("invalid_committed_event", "outbox identity differs from content")
+        if outbox["task_id"] != task.task_id or outbox["incarnation"] != task.request.target_incarnation:
+            raise PreconditionFailed("invalid_committed_event", "task or incarnation identity differs")
+        if outbox["incarnation"] != view.incarnation:
+            raise PreconditionFailed("invalid_committed_event", "old incarnation authorization is blocked")
+        protection = outbox["device_protection"]
+        if (
+            type(protection) is not dict
+            or set(protection) != {"protected", "reasons", "authorization_blocked"}
+            or type(protection["protected"]) is not bool
+            or type(protection["authorization_blocked"]) is not bool
+            or type(protection["reasons"]) is not list
+            or len(set(protection["reasons"])) != len(protection["reasons"])
+            or not set(protection["reasons"]) <= _PROTECTION_REASONS
+            or protection["protected"] != bool(protection["reasons"])
+            or protection["authorization_blocked"] != protection["protected"]
+        ):
+            raise PreconditionFailed("invalid_committed_event", "invalid V3 device protection")
+        known_execution_ids = {
+            item["outbox"]["execution_id"] for item in task.committed_events.values()
+        }
+        if known_execution_ids and known_execution_ids != {outbox["execution_id"]}:
+            raise PreconditionFailed("committed_event_conflict", "execution identity conflict")
+        return outbox
+
+    @staticmethod
+    def _committed_order(outbox: Mapping[str, Any]) -> tuple[int, int]:
+        rank = (
+            _COMMITTED_PHASE_ORDER[outbox["phase"]]
+            if outbox["event_kind"] == EventKind.PROGRESS.value
+            else len(_COMMITTED_PHASE_ORDER)
+        )
+        return outbox["tick_sequence"], rank
+
+    def _external_specs(
+        self,
+        task: RobotTaskView,
+        outbox: dict[str, Any],
+        event: dict[str, Any],
+        now: datetime,
+        *,
+        include_source: bool,
+        include_execution_fact: bool = True,
+    ) -> list[RecordSpec]:
+        specs: list[RecordSpec] = []
+        if include_source:
+            specs.append(
+                self._spec(
+                    COMMITTED_EVENT_ADMITTED,
+                    now,
+                    {
+                        "task_id": task.task_id,
+                        "outbox_digest": stable_digest(outbox),
+                        "outbox": outbox,
+                        "event": event,
+                    },
+                    origin="SIM_ENTRY",
+                )
+            )
+        if include_execution_fact and outbox["event_kind"] == EventKind.PROGRESS.value:
+            step = _COMMITTED_PHASE_ORDER[outbox["phase"]] + 1
+            if outbox["phase"] == "collecting" and not task.execution_started:
+                specs.append(
+                    self._spec(
+                        EXECUTION_STARTED,
+                        now,
+                        {
+                            "task_id": task.task_id,
+                            "phase": "collecting",
+                            "simulation": True,
+                            "execution_id": outbox["execution_id"],
+                        },
+                    )
+                )
+            elif task.step < step:
+                specs.append(
+                    self._spec(
+                        EXECUTION_PROGRESS,
+                        now,
+                        {
+                            "task_id": task.task_id,
+                            "phase": outbox["phase"],
+                            "step": step,
+                            "execution_id": outbox["execution_id"],
+                        },
+                    )
+                )
+        elif include_execution_fact and not task.execution_completed:
+            specs.append(
+                self._spec(
+                    EXECUTION_COMPLETED,
+                    now,
+                    {
+                        "task_id": task.task_id,
+                        "outcome": outbox["event_kind"],
+                        "execution_id": outbox["execution_id"],
+                    },
+                )
+            )
+        specs.append(
+            self._spec(
+                TASK_EVENT_PERSISTED,
+                now,
+                {
+                    "event": event,
+                    "committed_outbox_id": outbox["outbox_id"],
+                    "committed_outbox_digest": stable_digest(outbox),
+                    "device_protection": outbox["device_protection"],
+                },
+            )
+        )
+        return specs
+
+    def on_committed_execution_event(
+        self,
+        view: RobotView,
+        committed_outbox: Mapping[str, Any],
+        now: datetime,
+    ) -> list[RecordSpec]:
+        """Persist one exact V3 committed outbox item, never advance work."""
+
+        if self.behavior != "simulator_backed":
+            raise PreconditionFailed(
+                "external_committed_event_not_supported",
+                "external committed evidence requires simulator_backed behavior",
+            )
+        task_id = committed_outbox.get("task_id") if isinstance(committed_outbox, Mapping) else None
+        task = view.tasks.get(task_id) if type(task_id) is str else None
+        if task is None:
+            raise PreconditionFailed("invalid_committed_event", "committed event names an unknown task")
+        outbox = self._validated_committed_outbox(view, task, committed_outbox)
+        prior = task.committed_events.get(outbox["outbox_id"])
+        if prior is not None:
+            if prior["outbox"] != outbox:
+                raise PreconditionFailed("committed_event_conflict", "outbox content conflict")
+            event = prior["event"]
+            if event in task.events:
+                return []
+            return self._external_specs(task, outbox, event, now, include_source=False)
+        if task.decision != "accepted":
+            raise PreconditionFailed("invalid_committed_event", "task has no durable ACCEPTED decision")
+        if outbox["event_kind"] == EventKind.REJECTED.value:
+            raise PreconditionFailed(
+                "invalid_committed_event",
+                "REJECTED is only valid for a pre-acceptance terminal",
+            )
+        if task.is_terminal:
+            raise PreconditionFailed("invalid_committed_event", "task is already terminal")
+        previous = [item["outbox"] for item in task.committed_events.values()]
+        if previous:
+            old_tick = max(self._committed_order(item)[0] for item in previous)
+            old_rank = max(self._committed_order(item)[1] for item in previous)
+            new_tick, new_rank = self._committed_order(outbox)
+            if new_tick < old_tick or new_rank <= old_rank:
+                raise PreconditionFailed("invalid_committed_event", "committed event order regressed")
+        if outbox["event_kind"] == EventKind.PROGRESS.value and outbox["phase"] != "collecting" and not task.execution_started:
+            raise PreconditionFailed("invalid_committed_event", "committed progress starts out of order")
+        event = self._event(
+            task,
+            EventKind(outbox["event_kind"]),
+            now,
+            reason_code=outbox["reason"],
+            detail="persisted from committed V3 simulator evidence (SIMULATION)",
+            phase=outbox["phase"],
+        )
+        return self._external_specs(task, outbox, event, now, include_source=True)
+
+    def on_preaccepted_committed_terminal(
+        self,
+        view: RobotView,
+        request: TaskRequest,
+        committed_outbox: Mapping[str, Any],
+        now: datetime,
+    ) -> list[RecordSpec]:
+        """Link a V3 pre-acceptance miss/rejection without inventing ACCEPTED."""
+
+        if self.behavior != "simulator_backed":
+            raise PreconditionFailed(
+                "external_committed_event_not_supported",
+                "external committed evidence requires simulator_backed behavior",
+            )
+        if (
+            request.site_id != self.config.site_id
+            or request.deployment_id != self.config.deployment_id
+            or request.simulation_env_id != self.config.simulation_env_id
+            or request.target_robot_id != self.robot.robot_id
+            or request.target_incarnation != view.incarnation
+            or request.task_type not in self.effective_task_types
+        ):
+            raise PreconditionFailed("invalid_committed_event", "request identity is not this device")
+        known = view.tasks.get(request.task_id)
+        if known is not None and known.content_digest != request.content_digest():
+            raise PreconditionFailed("committed_event_conflict", "task request content conflict")
+        task = known or RobotTaskView(
+            task_id=request.task_id,
+            request=request,
+            content_digest=request.content_digest(),
+        )
+        outbox = self._validated_committed_outbox(view, task, committed_outbox)
+        if outbox["event_kind"] != EventKind.REJECTED.value:
+            raise PreconditionFailed("invalid_committed_event", "pre-acceptance terminal must be REJECTED")
+        if task.decision not in {None, "rejected"}:
+            raise PreconditionFailed(
+                "committed_event_conflict", "pre-acceptance terminal follows ACCEPTED"
+            )
+        prior = task.committed_events.get(outbox["outbox_id"])
+        if prior is not None and prior["outbox"] != outbox:
+            raise PreconditionFailed("committed_event_conflict", "outbox content conflict")
+        if prior is None:
+            event = self._event(
+                task,
+                EventKind.REJECTED,
+                now,
+                reason_code=outbox["reason"],
+                detail="rejected from committed V3 pre-acceptance evidence (SIMULATION)",
+                sequence=1,
+            )
+        else:
+            event = prior["event"]
+        if task.events:
+            if task.events == [event]:
+                return []
+            raise PreconditionFailed(
+                "committed_event_conflict", "pre-acceptance terminal event conflict"
+            )
+        specs: list[RecordSpec] = []
+        if known is None:
+            specs.append(
+                self._spec(
+                    REQUEST_RECEIVED,
+                    now,
+                    {
+                        "task_id": request.task_id,
+                        "content_digest": request.content_digest(),
+                        "disposition": "new",
+                        "request": request.to_dict(),
+                    },
+                    origin="EDGE",
+                )
+            )
+        external = self._external_specs(
+            task,
+            outbox,
+            event,
+            now,
+            include_source=prior is None,
+            include_execution_fact=False,
+        )
+        specs.extend(external[:-1])
+        if task.decision is None:
+            specs.append(
+                self._spec(
+                    TASK_DECISION,
+                    now,
+                    {
+                        "task_id": request.task_id,
+                        "decision": "rejected",
+                        "reason_code": outbox["reason"],
+                    },
+                )
+            )
+        specs.append(external[-1])
+        return specs
+
+    @staticmethod
+    def committed_event_record(
+        records: tuple[JournalRecord, ...], outbox_id: str
+    ) -> JournalRecord:
+        matches = [
+            record
+            for record in records
+            if record.record_kind == TASK_EVENT_PERSISTED
+            and record.payload.get("committed_outbox_id") == outbox_id
+        ]
+        if len(matches) != 1:
+            raise PreconditionFailed(
+                "committed_event_missing", "exactly one persisted event must link the outbox"
+            )
+        return matches[0]
+
     # ------------------------------------------------------------------
     # simulated execution steps (one step per tick)
     # ------------------------------------------------------------------
@@ -707,7 +1302,7 @@ class RobotCore:
         if task.is_terminal or task.blocked:
             return []
         behavior = self.behavior
-        if behavior == "standby":
+        if behavior in {"standby", "simulator_backed"}:
             return []
         if behavior == "crash_after_accept":
             # C2: the acceptance decision and ACCEPTED event are persisted, the
@@ -843,6 +1438,7 @@ def _peek_task_id(payload: bytes) -> str | None:
 
 __all__ = [
     "BEHAVIORS",
+    "COMMITTED_EVENT_ADMITTED",
     "EVENT_PUBLISH_CONFIRMED",
     "EXECUTION_COMPLETED",
     "EXECUTION_PROGRESS",

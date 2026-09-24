@@ -80,8 +80,8 @@ describe("console boundaries", () => {
   });
 
   it("talks only to the versioned same-origin manager API", () => {
-    // v0 is the Manager API; /api/v1/planning is the frozen human-led planning
-    // and read-only course-ops contracts (simulation/docs/contracts/).
+    // v0 is the Manager API; v1 permits only the exact frozen planning,
+    // course-ops, and collection-execution read contracts.
     for (const file of sourceFiles()) {
       const text = readFileSync(file, "utf-8");
       const urls = text.match(/https?:\/\/[^\s"'`]+/g) ?? [];
@@ -92,6 +92,7 @@ describe("console boundaries", () => {
           path === "/api/v0" ||
             path.startsWith("/api/v0/") ||
             path === "/api/v1/collection-executions" ||
+            path === "/api/v1/collection-executions/requests/${encodeURIComponent(requestId)}" ||
             path === "/api/v1/course-ops" ||
             path.startsWith("/api/v1/course-ops/") ||
             path === "/api/v1/planning" ||
