@@ -220,39 +220,49 @@ exec_req_ + first24hex(sha256(canonical_json({
 | 崩溃位置 | 重启行为 |
 |---|---|
 | confirmation 后、schedule 前 | Planning recover 物化原 schedule |
-| `TASK_CREATED` 后、binding 前 | 创建一次 binding/request；因 TaskRequest 冻结了旧 incarnation，走准入前拒绝闭环 |
-| binding 后、request 前 | 复用 binding 与同 request ID；旧 incarnation 走准入前拒绝闭环 |
-| request 后、Edge ACCEPTED 前 | 复用 request；恢复或生成唯一设备拒绝证据并终态化，不建立第二条 request |
-| RUNNING 中 | 现有 device restart 规则给出 FAILED/INCONCLUSIVE 并阻断旧授权 |
+| `TASK_CREATED` 后、binding 前 | 普通同 incarnation 进程重启创建一次 binding/request，并继续同一准入尝试 |
+| binding 后、request 前 | 普通同 incarnation 进程重启复用 binding 与同 request ID，不建立第二个 attempt |
+| request 后、Edge ACCEPTED 前 | 普通同 incarnation 进程重启复用原 request/receipt；可进入 ACCEPTED/PENDING，且不重复 BallLedger move |
+| ACCEPTED 或 RUNNING 中 | 现有 device restart 规则给出 FAILED/INCONCLUSIVE 并阻断旧授权 |
+| ACCEPTED 前显式 re-provisioning / different incarnation | 冻结的旧 incarnation 触发唯一 seq-0 拒绝并终态化为 `REJECTED/IDENTITY_CONFLICT`；BallLedger move 为零 |
 | commit/outbox/cursor 任一边界 | 复用现有 V3 recovery；不重复 BallLedger move |
 
-### 9.1 准入前重启拒绝闭环
+### 9.1 准入前同 incarnation 续接与 different-incarnation 拒绝闭环
 
-设备每次进程启动会增加 boot sequence/incarnation。已经写入 `TASK_CREATED` 的
-`TaskRequest` 冻结了旧 incarnation，因此在设备 ACCEPTED 之前重启后，正确结果不是
-继续接受，而是设备产生 event sequence 0 的 `REJECTED/incarnation_mismatch`。
+`RobotCore` 的 incarnation 由 provisioning identity 固定。普通进程重启只增加
+`boot_sequence`，不会改变 incarnation。已经写入 `TASK_CREATED` 的 `TaskRequest`
+若仍指向当前 provisioned incarnation，启动恢复必须复用同一 binding、request body、
+request ID、receipt 和 attempt；它可以正常进入 ACCEPTED/PENDING，但不得创建第二个
+request/attempt，也不得重复 BallLedger move。
 
-现有实现只查找 ACCEPTED，尚不能把这条拒绝写回 V3；V4 实施必须先补齐以下持久、
-可重放合同：
+只有显式 re-provisioning 或其他可验证的设备替换使当前 incarnation 与冻结值不同，
+才由设备产生 event sequence 0 的 `REJECTED/incarnation_mismatch`。V4 必须同时保留
+同 incarnation 续接与 different-incarnation 拒绝两条持久、可重放合同：
 
-1. `SimulatorBackedTaskDevice` 在再次发送请求前，先查找与 task ID、设备身份和
+1. 同 incarnation 恢复按稳定 request ID 查询或重放原内容，并复用原 receipt/attempt；
+   多次扫描或再次重启仍只有一个 request、一个 execution attempt。
+2. `SimulatorBackedTaskDevice` 在向 different-incarnation 设备再次发送请求前，先查找
+   与 task ID、设备身份和
    `incarnation_mismatch` 精确匹配的已持久 seq-0 REJECTED；存在时复用，禁止再写一条。
-2. 没有既有拒绝时，设备按现有 RobotCore 规则持久化唯一 seq-0 REJECTED。
-3. collection execution store 增加内部的幂等“准入前设备拒绝”记录；它只接收验证过的
+3. 没有既有拒绝时，different-incarnation 设备按现有 RobotCore 规则持久化唯一
+   seq-0 REJECTED。
+4. collection execution store 的内部幂等“准入前设备拒绝”记录只接收验证过的
    Edge `TASK_EVENT_PERSISTED`，不自行判断设备结果。
-4. replay 将对应 execution 固定为：`REJECTED / IDENTITY_CONFLICT / TERMINAL`；
+5. replay 将该 different-incarnation execution 固定为：
+   `REJECTED / IDENTITY_CONFLICT / TERMINAL`；
    `started_sim_t_s=null`、无 assignment/action；两组数量保持 `NOT_REACHED`；Edge
    `accepted=false`、`effective_state=REJECTED`、`reason=incarnation_mismatch`、
    `result_verification=VERIFIED`；`conflicts.incarnation_mismatch=true`；设备保护为
    `INCARNATION_MISMATCH` 且 `authorization_blocked=true`。
-5. 若 Edge rejection 已写而 V3 terminal 未写就崩溃，启动 reconciliation 必须复用
+6. 若 Edge rejection 已写而 V3 terminal 未写就崩溃，启动 reconciliation 必须复用
    原 Edge record ID 完成同一终态；重复或冲突拒绝 fail closed。
-6. 服务在完成该 reconciliation 前不得标为 started，也不得提供一个“未 ACCEPTED 且
-   非终态”的不完整 execution snapshot。
+7. 服务在完成相应续接或拒绝 reconciliation 前不得标为 started，也不得提供一个
+   request 已持久但既未 ACCEPTED、也未终态的 execution snapshot。
 
-这个关闭路径不需要改变 `nxt-collection-executions/v1` 的公开字段，但会增加 V3
-内部 journal record/replay 语义及其合同测试。它是 V4 的前置实现，不得用捕获异常后
-留下 PENDING 的方式替代。
+这两个分支都不需要改变 `nxt-collection-executions/v1` 的公开字段。different-
+incarnation 关闭路径使用 V3 内部 journal record/replay 语义；same-incarnation 路径保留
+稳定准入身份。不得把 request-only、尚未 ACCEPTED 的 PENDING 暴露为完成恢复，也不得
+把普通进程重启伪装成 incarnation mismatch。
 
 ## 10. session、任务与保护生命周期
 
@@ -390,11 +400,13 @@ Console 的最小变化：
 7. 分别在 confirmation、schedule、TASK_CREATED、binding、request、设备拒绝、
    ACCEPTED、prepared、commit、outbox、cursor 边界注入崩溃，不重复 Edge terminal
    或 BallLedger move。
-8. 第一项终态与第二项 due 之间重启，第二项仍可执行；第一项 RUNNING 中重启则按
-   现有规则 INCONCLUSIVE/protected，第二项不得启动。
-9. `TASK_CREATED` 后、binding 前重启，以及 request 后、device append 前重启，均
-   产生一条可读的 `REJECTED/IDENTITY_CONFLICT` execution 和唯一 seq-0 Edge rejection；
-   不出现无法读取的未受理 PENDING，不产生 BallLedger move。
+8. 第一项终态与第二项 due 之间重启，第二项仍可执行；第一项已 ACCEPTED 或 RUNNING
+   时重启则按现有规则 FAILED/INCONCLUSIVE/protected，第二项不得启动。
+9. `TASK_CREATED`、binding 或 request 已持久但尚未 ACCEPTED 时，普通同 incarnation
+   进程重启复用唯一 request/receipt/attempt，并可恢复为 ACCEPTED/PENDING；后续执行
+   不重复 BallLedger move。显式 re-provisioning / different incarnation 则产生一条
+   可读的 `REJECTED/IDENTITY_CONFLICT` execution 和唯一 seq-0 Edge rejection，且
+   BallLedger move 为零。
 
 ### 15.3 失败与边界
 

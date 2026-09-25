@@ -21,6 +21,7 @@
 - HTTP GET handlers are pure reads. They must not recover Planning, tick schedules, bind tasks, admit devices, publish events, advance simulation, or change any evidence file.
 - HTTP Planning confirmation persists intent only. The single background driver owns recovery, due-time admission, binding, execution admission, outbox drain, publication, and exactly one `course_session_v3.run()` call per iteration.
 - V4 must derive each internal execution request ID only from the durable binding ID. Repeated scans, UNKNOWN recovery, and process restart must reuse the same request body and ID.
+- Robot incarnation is fixed by provisioning identity. An ordinary process restart increments only `boot_sequence`; before ACCEPTED, it resumes the one stable same-incarnation request/attempt. Only explicit re-provisioning or another verified different incarnation may produce `incarnation_mismatch`.
 - A normal task terminal does not stop an ACTIVE session. Session `PROTECTED`, `FAILED`, or `ENDED` stops advancement; existing GET evidence remains readable.
 - `PAUSED` may save future Planning intent but must not recover, dispatch, materialize, or advance simulation business time until resumed.
 - Keep the capability-v1 fixed and legacy examples and emitted payloads byte-compatible. Only the new continuous service emits `nxt-pilot-dispatch/service-capabilities/v2`.
@@ -29,7 +30,7 @@
 
 ## Review Focus
 
-- A device restart after `TASK_CREATED` but before `ACCEPTED` must reuse one exact seq-0 `incarnation_mismatch` rejection and close the execution as a verified `REJECTED/IDENTITY_CONFLICT`, never leave it PENDING. Task 2 pins the projection and parser exception; Task 3 pins both cross-journal crash boundaries.
+- A same-incarnation process restart after `TASK_CREATED` but before `ACCEPTED` must reuse one request body, ID, receipt, and attempt; it may return to ACCEPTED/PENDING and must never duplicate a ledger move. Explicit re-provisioning or another verified different incarnation must instead reuse one exact seq-0 `incarnation_mismatch` rejection and close the execution as `REJECTED/IDENTITY_CONFLICT` with zero ledger moves. Task 2 pins the projection and parser exception; Task 3 pins both rejection-journal crash boundaries.
 - A confirmation that references an older input revision after a newer input has arrived must bind against its exact historical input record, not `latest_input`. Task 4 pins this with two revisions and distinct cycle evidence.
 - Confirmation POST versus driver tick, and pending cancellation versus due-time dispatch, must be linearizable under the outer runtime lock. Task 6 uses synchronization barriers to prove both possible orderings and forbids duplicate or contradictory evidence.
 - A second task may find fewer balls than the first task because both share one BallLedger. Task 6 requires positive ledger-backed evidence and conservation but does not force a second 600-ball success.
@@ -564,14 +565,16 @@ git commit -m "fix(collection-execution): close preacceptance identity rejection
 
 - [ ] **Step 1: Add failing tests for a stale incarnation at admission**
 
-Create a request for the previous device incarnation, then call `admit` and assert both journals and the absence of simulator work:
+Create a request whose frozen target incarnation explicitly differs from the current provisioned device, then call `admit` and assert both journals and the absence of simulator work. The mismatch is a deliberate stale/re-provisioned fixture condition; an ordinary process restart does not create it:
 
 ```python
 def test_old_incarnation_admit_closes_seq0_rejection_without_execution(
     tmp_path, monkeypatch
 ):
     device_api, device, store, identity, task, request = _device_fixture(
-        tmp_path, monkeypatch
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
     )
     restarted = device_api.SimulatorBackedTaskDevice(
         tmp_path / "session",
@@ -600,7 +603,7 @@ def test_old_incarnation_admit_closes_seq0_rejection_without_execution(
     assert snapshot["executions"][0]["raw_quantity"]["status"] == "NOT_REACHED"
 ```
 
-Extend the existing `_device_fixture` return values only if the journal path is not already reachable from `device`; keep using the real `RobotCore.on_start()` path so it owns the new incarnation.
+Extend the existing `_device_fixture` return values only if the journal path is not already reachable from `device`. Keep using the real `RobotCore.on_start()` path so the current provisioning-derived incarnation and incremented `boot_sequence` remain authentic; the explicit stale target above, not `on_start()`, supplies the incarnation mismatch.
 
 - [ ] **Step 2: Add failing crash-boundary, startup, conflict, and publication tests**
 
@@ -615,7 +618,9 @@ def test_preacceptance_rejection_restart_reuses_both_journals(
     tmp_path, monkeypatch, boundary
 ):
     device_api, device, store, _identity, task, request = _device_fixture(
-        tmp_path, monkeypatch
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
     )
     restarted = device_api.SimulatorBackedTaskDevice(
         tmp_path / "session",
@@ -1229,7 +1234,7 @@ self._classify_unlocked()
 self.started = True
 ```
 
-`_resume_bound_admissions_unlocked()` may only complete a binding/request that was durable before this process started; it may generate or reuse the seq-0 rejection required to close an old incarnation, but it cannot bind a new `TASK_CREATED`. Consuming and publishing an already committed outbox is recovery of prior causal evidence, not a new simulator action, so it completes before the state gate. `_return_read_only_if_not_running()` sets `started = True` and returns for a verified PAUSED, PROTECTED, ENDED, or classifier-derived FAILED state; those states expose GETs but do not call Planning recover, schedule tick, new-task binding, or V3 run. An integrity, storage, gateway, or reconciliation exception still closes components, keeps `started == False`, and exposes no partial snapshot.
+`_resume_bound_admissions_unlocked()` may only complete a binding/request that was durable before this process started; it cannot bind a new `TASK_CREATED`. For an ordinary same-incarnation process restart it resumes the one stable request/receipt/attempt and may reach ACCEPTED/PENDING. If the current device was explicitly re-provisioned or otherwise has a verified different incarnation, it generates or reuses the one seq-0 rejection required to close the stale authorization. Consuming and publishing an already committed outbox is recovery of prior causal evidence, not a new simulator action, so it completes before the state gate. `_return_read_only_if_not_running()` sets `started = True` and returns for a verified PAUSED, PROTECTED, ENDED, or classifier-derived FAILED state; those states expose GETs but do not call Planning recover, schedule tick, new-task binding, or V3 run. An integrity, storage, gateway, or reconciliation exception still closes components, keeps `started == False`, and exposes no partial snapshot.
 
 - [ ] **Step 7: Implement incremental binding and stable admission without nested V3 locks**
 
@@ -1281,7 +1286,7 @@ def _materialize_new_tasks_unlocked(self) -> list[dict[str, Any]]:
     return [self.device.admit(task, request) for task, request in admissions]
 ```
 
-The list comprehension runs after the context exits. Exact retries return original receipts; a pre-acceptance restart closes through Task 3.
+The list comprehension runs after the context exits. Exact retries return original receipts. A same-incarnation pre-acceptance process restart resumes that stable admission without a second attempt; an explicit different-incarnation device closes through Task 3's exact rejection path.
 
 - [ ] **Step 8: Implement classifier and one driver iteration**
 
@@ -1433,15 +1438,6 @@ Cover every accepted-spec boundary with real journals:
         "after_task_created_append",
         "after_binding_append",
         "after_request_append",
-        "after_preacceptance_device_rejection",
-        "after_preacceptance_v3_rejection",
-        "after_device_acceptance",
-        "after_prepare",
-        "after_commit",
-        "after_device_append",
-        "after_v3_evidence",
-        "after_v3_confirm",
-        "after_cursor",
     ],
 )
 def test_continuous_runtime_recovers_each_durable_boundary_once(tmp_path, boundary):
@@ -1457,11 +1453,70 @@ def test_continuous_runtime_recovers_each_durable_boundary_once(tmp_path, bounda
     assert proof["tasks"] == 1
     assert proof["bindings"] == 1
     assert proof["requests"] == 1
+    assert proof["attempts"] == 1
     assert proof["edge_terminals"] == 1
     assert proof["ledger_moves"] == proof["unique_ledger_moves"]
 ```
 
-Implement `runtime_with_one_shot_crash` by using the runtime hook for device/V3 boundaries and a journal `append_via` wrapper that raises only after the selected Planning, schedule, task, binding, or request record has fsynced. `drive_until_injected_crash` must assert the named hook fired. For `TASK_CREATED`/binding/request pre-acceptance restarts, assert the Task 2 exact `REJECTED/IDENTITY_CONFLICT` result, one seq-0 rejection, and zero ledger moves. For ACCEPTED or RUNNING restart, assert the existing FAILED/INCONCLUSIVE protection path and no later task starts.
+Implement `runtime_with_one_shot_crash` by using the runtime hook for device/V3 boundaries and a journal `append_via` wrapper that raises only after the selected Planning, schedule, task, binding, or request record has fsynced. `drive_until_injected_crash` must assert the named hook fired. The test above uses the same provisioned device identity on reopen. At the `TASK_CREATED`/binding/request pre-acceptance boundaries, assert startup reuses the exact binding-derived request ID, request body, receipt, and attempt; the immediate recovered execution may be ACCEPTED/PENDING, subsequent progress reaches one terminal, and no BallLedger move is duplicated.
+
+Test the different-incarnation rejection boundaries separately:
+
+```python
+@pytest.mark.parametrize(
+    "boundary",
+    ["after_preacceptance_device_rejection", "after_preacceptance_v3_rejection"],
+)
+def test_explicit_reprovision_closes_preacceptance_request_once(
+    tmp_path, boundary
+):
+    runtime = runtime_with_reprovisioned_device_and_one_shot_crash(
+        tmp_path / boundary, boundary
+    )
+    drive_until_injected_crash(runtime, boundary)
+    recovered = reopen_same_reprovisioned_device(runtime.root)
+    snapshot = recovered.collection_executions()
+    assert snapshot["executions"][0]["state"] == "REJECTED"
+    assert snapshot["executions"][0]["reason"] == "IDENTITY_CONFLICT"
+    proof = causal_counts(recovered)
+    assert proof["requests"] == 1
+    assert proof["seq0_incarnation_rejections"] == 1
+    assert proof["ledger_moves"] == 0
+```
+
+The fixture must explicitly replace/re-provision the device so its current incarnation differs from the `TaskRequest.target_incarnation`; a normal process restart is insufficient. Reopening that replacement increments only its `boot_sequence` and must reuse the already durable seq-0 record.
+
+Keep every post-acceptance boundary in a third group and arrange the injected crash while the execution is ACCEPTED or RUNNING:
+
+```python
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "after_device_acceptance",
+        "after_prepare",
+        "after_commit",
+        "after_device_append",
+        "after_v3_evidence",
+        "after_v3_confirm",
+        "after_cursor",
+    ],
+)
+def test_accepted_or_running_restart_fail_stops_without_duplicate_move(
+    tmp_path, boundary
+):
+    runtime = runtime_with_one_shot_crash(tmp_path / boundary, boundary)
+    drive_accepted_or_running_until_injected_crash(runtime, boundary)
+    recovered = ContinuousCollectionExecutionRuntime(runtime.root, initialize=False)
+    recovered.start()
+    row = recovered.collection_executions()["executions"][0]
+    assert row["state"] in {"FAILED", "INCONCLUSIVE"}
+    assert row["device_protection"]["protected"]
+    proof = causal_counts(recovered)
+    assert proof["ledger_moves"] == proof["unique_ledger_moves"]
+    assert proof["later_task_starts"] == 0
+```
+
+These tests retain the established accepted/running restart fail-stop rule. They must not reinterpret a stable incarnation as authority to continue an already accepted authorization after its device process restarts.
 
 - [ ] **Step 4: Add failing overlap, horizon, pause, protection, and session-end tests**
 
