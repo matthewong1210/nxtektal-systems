@@ -10,8 +10,9 @@
  *   per attempt and kept verbatim for recovery of that same attempt.
  * - A transport failure or 503 leaves the write UNKNOWN. New writes are
  *   refused until it is recovered: GET by the original request ID, and on
- *   404 replay the identical request (same ID, same content). A fresh ID
- *   is never minted merely because a response was lost.
+ *   404 replay the identical request (same ID, same content) only if its
+ *   current capability and scheduler-health gates allow. A fresh ID is never
+ *   minted merely because a response was lost.
  * - A receipt whose `request_id` differs from the one sent (a duplicate
  *   answered with the original committed ID) keeps that original identity
  *   for later lookups; the sent ID never becomes an alias.
@@ -37,9 +38,21 @@ import {
   UNKNOWN_SCHEDULER_HEALTH,
   type SchedulerHealth,
 } from "./scheduler-health";
-import { isAmbiguousMutation } from "./task-ops";
+import { isAmbiguousMutation, type TaskOpsWriteOperation } from "./task-ops";
 
 export const PLANNING_POLL_MS = 5_000;
+
+const TASK_OPS_OPERATION_FOR_WRITE: Record<WriteKind, TaskOpsWriteOperation> = {
+  inputs: "planning_inputs_create",
+  plans: "planning_plans_create",
+  confirmations: "planning_confirmations_create",
+  outcomes: "planning_outcomes_create",
+};
+
+/** Exhaustive bridge from the planning route vocabulary to the validated
+ * service-capability operation checked immediately before a recovery replay. */
+export const taskOpsOperationForPlanningWrite = (kind: WriteKind): TaskOpsWriteOperation =>
+  TASK_OPS_OPERATION_FOR_WRITE[kind];
 
 export type WriteState =
   | { status: "in_flight"; kind: WriteKind; requestId: string }
@@ -74,6 +87,8 @@ export interface PlanningController {
   notifyHealth(): void;
   /** Replace the shared health source (a prop may change); republishes. */
   setHealthSource(source: () => SchedulerHealth): void;
+  /** Replace the replay capability gate without recreating in-flight state. */
+  setReplayBlocker(source: (kind: WriteKind) => string | null): void;
 }
 
 export function initialPlanningView(): PlanningView {
@@ -96,12 +111,21 @@ const codeOf = (cause: unknown): string =>
 export function createPlanningController(
   client: PlanningClient,
   publish: (view: PlanningView) => void,
-  options: { pollMs?: number; health?: () => SchedulerHealth; now?: () => number } = {},
+  options: {
+    pollMs?: number;
+    health?: () => SchedulerHealth;
+    now?: () => number;
+    /** Returns the latest static-capability reason that forbids replaying this
+     * write, or null when the operation is installed. Absence fails closed. */
+    replayBlocker?: (kind: WriteKind) => string | null;
+  } = {},
 ): PlanningController {
   const pollMs = options.pollMs ?? PLANNING_POLL_MS;
   const now = options.now ?? (() => Date.now());
   let healthSource: () => SchedulerHealth = options.health ?? (() => UNKNOWN_SCHEDULER_HEALTH);
   const healthNow = (): SchedulerHealth => evaluateSchedulerHealth(healthSource(), now());
+  let replayBlocker = options.replayBlocker ?? (() =>
+    "The task service write capabilities are unknown, so the original request cannot be replayed.");
   let active = false;
   let base: ConsoleView<PlanningSnapshot> = initialConsoleView<PlanningSnapshot>();
   let write: WriteState | null = null;
@@ -215,6 +239,7 @@ export function createPlanningController(
       emit();
       clearTimeout(timer);
       let receipt: MutationReceipt | undefined;
+      let blockedReplay: string | null = null;
       try {
         await inner.mutate(
           async () => {
@@ -232,9 +257,24 @@ export function createPlanningController(
             }
             if (found === undefined) {
               // Explicitly absent from the verified journal: replaying the
-              // identical request is safe and recovers a duplicate's original
-              // receipt. Only this replay may answer for the request: a
-              // definite refusal rejects it, an ambiguous failure keeps it unknown.
+              // identical request is safe only while the original operation is
+              // still installed and the latest shared scheduler reading allows
+              // writes. Both gates are evaluated here, after the GET, so a
+              // found record remains readable and changes while that GET was
+              // waiting are honored before any POST.
+              const capabilityReason = replayBlocker(pending.kind);
+              const currentHealth = healthNow();
+              const healthReason = schedulerAllowsWrites(currentHealth)
+                ? null
+                : schedulerHealthReason(currentHealth) ?? "The scheduler write health does not allow planning changes.";
+              const reason = capabilityReason ?? healthReason;
+              if (reason !== null) {
+                blockedReplay = `Replay was not sent: ${reason}`;
+                write = { ...pending, recovering: false, detail: blockedReplay };
+                return;
+              }
+              // Only this same-ID, same-body replay may answer for the request:
+              // a definite refusal rejects it, an ambiguous failure keeps it unknown.
               try {
                 found = await client.submit(pending.kind, pending.body);
               } catch (cause) {
@@ -249,6 +289,7 @@ export function createPlanningController(
       } finally {
         emit();
       }
+      if (blockedReplay !== null) throw new Error(blockedReplay);
       if (receipt === undefined) throw new Error("The recovery did not run.");
       return receipt;
     },
@@ -264,6 +305,9 @@ export function createPlanningController(
     setHealthSource(source) {
       healthSource = source;
       emit();
+    },
+    setReplayBlocker(source) {
+      replayBlocker = source;
     },
   };
 }

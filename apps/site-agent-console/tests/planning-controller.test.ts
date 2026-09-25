@@ -1,14 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ManagerApiError } from "../lib/api";
-import type { ConfirmationRequest, MutationReceipt, PlanningSnapshot } from "../lib/planning";
+import type {
+  ConfirmationRequest,
+  MutationReceipt,
+  PlanningRequestBody,
+  PlanningSnapshot,
+  WriteKind,
+} from "../lib/planning";
 import {
   canWritePlanning,
   createPlanningController,
   PLANNING_POLL_MS,
+  taskOpsOperationForPlanningWrite,
   type PlanningView,
 } from "../lib/planning-state";
 import { SCHEDULER_HEALTH_EXPIRY_MS, type SchedulerHealth } from "../lib/scheduler-health";
+import type { TaskOpsWriteOperation } from "../lib/task-ops";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -61,7 +69,11 @@ const receipt = (requestId: string, disposition: "created" | "duplicate" = "crea
     record: { confirmation_id: "confirmation_example_001", plan_id: "plan_example_001", plan_version: 1 },
   }) as unknown as MutationReceipt;
 
-function harnessWith(options: Parameters<typeof createPlanningController>[2]) {
+type ControllerOptions = Parameters<typeof createPlanningController>[2] & {
+  replayBlocker?: (kind: WriteKind) => string | null;
+};
+
+function harnessWith(options: ControllerOptions) {
   const snapshots: ReturnType<typeof deferred<PlanningSnapshot>>[] = [];
   const submits: ReturnType<typeof deferred<MutationReceipt>>[] = [];
   const lookups: ReturnType<typeof deferred<MutationReceipt>>[] = [];
@@ -83,7 +95,8 @@ function harnessWith(options: Parameters<typeof createPlanningController>[2]) {
     }),
   };
   const published: PlanningView[] = [];
-  const controller = createPlanningController(client, (view) => published.push(view), options);
+  const controllerOptions = { replayBlocker: () => null, ...options };
+  const controller = createPlanningController(client, (view) => published.push(view), controllerOptions);
   const last = () => published[published.length - 1];
   const ready = async () => {
     controller.start();
@@ -336,6 +349,117 @@ describe("recovery keeps UNKNOWN unless the service answers about the original r
     return h;
   }
 
+  const disabledReplayCases = [
+    [
+      "inputs",
+      { schema: "nxt-planning-input/v1", request_id: "inputs-original-id" } as PlanningRequestBody,
+      "planning_inputs_create",
+      "New operating input is not installed on this service",
+    ],
+    [
+      "plans",
+      { schema: "nxt-planning-request/v1", request_id: "plans-original-id" } as PlanningRequestBody,
+      "planning_plans_create",
+      "New or revised plan is not installed on this service",
+    ],
+    [
+      "confirmations",
+      confirmation,
+      "planning_confirmations_create",
+      "The task service write capabilities are unknown",
+    ],
+  ] satisfies [WriteKind, PlanningRequestBody, TaskOpsWriteOperation, string][];
+
+  it.each(disabledReplayCases)(
+    "keeps an UNKNOWN %s request without replay when the latest capability blocks it",
+    async (kind, body, expectedOperation, blockedReason) => {
+      const h = harnessWith({ health: () => HEALTHY, now: () => 1_000_000, replayBlocker: () => null });
+      await h.ready();
+      const pending = h.controller.submit(kind, body);
+      await flush();
+      h.submits[0].reject(new TypeError("fetch failed"));
+      await flush();
+      h.snapshots[1].resolve(snapshot());
+      await expect(pending).rejects.toThrow("fetch failed");
+
+      const recovery = h.controller.recover();
+      await flush();
+      expect(h.client.lookup).toHaveBeenCalledWith(body.request_id);
+      h.controller.setReplayBlocker((currentKind) =>
+        taskOpsOperationForPlanningWrite(currentKind) === expectedOperation ? blockedReason : null,
+      ); // capability changes while the GET is waiting
+      h.lookups[0].reject(new ManagerApiError(404, {
+        code: "planning_request_not_found",
+        detail: "no committed request",
+      }));
+      await flush();
+      expect(h.client.submit).toHaveBeenCalledTimes(1); // original attempt only; no replay POST
+      h.snapshots[2].resolve(snapshot());
+      await expect(recovery).rejects.toThrow(blockedReason);
+
+      const write = h.last().write;
+      expect(write).toMatchObject({ status: "unknown", kind, requestId: body.request_id, recovering: false });
+      expect(write?.status === "unknown" && write.body).toEqual(body);
+      expect(write?.status === "unknown" && write.detail).toContain(blockedReason);
+      h.controller.stop();
+    },
+  );
+
+  it("uses a found receipt even when the current capability no longer permits that write", async () => {
+    let blocker: string | null = null;
+    const h = harnessWith({ health: () => HEALTHY, now: () => 1_000_000, replayBlocker: () => blocker });
+    await h.ready();
+    const pending = h.controller.submit("confirmations", confirmation);
+    await flush();
+    h.submits[0].reject(new TypeError("fetch failed"));
+    await flush();
+    h.snapshots[1].resolve(snapshot());
+    await expect(pending).rejects.toThrow("fetch failed");
+
+    const recovery = h.controller.recover();
+    await flush();
+    blocker = "Plan confirmation is not installed on this service";
+    h.lookups[0].resolve(receipt(confirmation.request_id, "duplicate"));
+    await flush();
+    h.snapshots[2].resolve(snapshot());
+    await expect(recovery).resolves.toMatchObject({ request_id: confirmation.request_id });
+    expect(h.last().write).toMatchObject({ status: "committed", requestId: confirmation.request_id });
+    expect(h.client.submit).toHaveBeenCalledTimes(1);
+    h.controller.stop();
+  });
+
+  it("replays a supported outcome once with the same ID and body when lookup proves it absent", async () => {
+    const body = {
+      schema: "nxt-planning-outcome/v1",
+      request_id: "outcomes-original-id",
+    } as PlanningRequestBody;
+    const h = harnessWith({ health: () => HEALTHY, now: () => 1_000_000, replayBlocker: () => null });
+    await h.ready();
+    const pending = h.controller.submit("outcomes", body);
+    await flush();
+    h.submits[0].reject(new TypeError("fetch failed"));
+    await flush();
+    h.snapshots[1].resolve(snapshot());
+    await expect(pending).rejects.toThrow("fetch failed");
+
+    const recovery = h.controller.recover();
+    await flush();
+    h.lookups[0].reject(new ManagerApiError(404, {
+      code: "planning_request_not_found",
+      detail: "no committed request",
+    }));
+    await flush();
+    expect(h.client.submit).toHaveBeenCalledTimes(2);
+    expect(h.client.submit.mock.calls[1]).toEqual(["outcomes", body]);
+    h.submits[1].resolve(receipt(body.request_id, "created"));
+    await flush();
+    h.snapshots[2].resolve(snapshot());
+    await expect(recovery).resolves.toMatchObject({ request_id: body.request_id });
+    await expect(h.controller.recover()).rejects.toThrow(/no planning change with an unknown outcome/i);
+    expect(h.client.submit).toHaveBeenCalledTimes(2);
+    h.controller.stop();
+  });
+
   for (const [label, error] of [
     ["a plain 404 from a runner without the lookup route", new ManagerApiError(404, { code: "not_found", detail: "unknown API path" })],
     ["a 400 on the lookup itself", new ManagerApiError(400, { code: "planning_invalid_request", detail: "request ID path must be valid UTF-8" })],
@@ -456,7 +580,7 @@ describe("planning writes follow the shared scheduler health", () => {
     h.controller.stop();
   });
 
-  it("keeps the UNKNOWN request and its recovery entry while the scheduler is FAILED, and a recovered receipt does not change the health", async () => {
+  it("rechecks health after lookup, blocks an absent replay, but still recovers an existing receipt", async () => {
     const h = healthHarness(fresh("RUNNING"));
     await h.ready();
     const pending = h.controller.submit("confirmations", confirmation);
@@ -465,21 +589,22 @@ describe("planning writes follow the shared scheduler health", () => {
     await flush();
     h.snapshots[1].resolve(snapshot());
     await expect(pending).rejects.toThrow("fetch failed");
-    h.setHealth(fresh("FAILED", "scheduler stopped"));
     expect(h.last().write).toMatchObject({ status: "unknown", requestId: "confirmations-new-id" });
-    expect(canWritePlanning(h.last())).toBe(false);
-    // recovery stays available: the lookup is a read, the replay is judged by the service
+    // The GET starts while healthy. Health changes while that read is waiting,
+    // so the not-found branch must use the latest gate before any replay POST.
     const recovery = h.controller.recover();
     await flush();
+    h.setHealth(fresh("FAILED", "scheduler stopped"));
+    expect(canWritePlanning(h.last())).toBe(false);
     h.lookups[0].reject(new ManagerApiError(404, { code: "planning_request_not_found", detail: "absent" }));
     await flush();
-    h.submits[1].reject(new ManagerApiError(503, { code: "planning_unavailable", detail: "scheduler is not running" }));
-    await flush();
+    expect(h.client.submit).toHaveBeenCalledTimes(1);
     h.snapshots[2].resolve(snapshot());
-    await expect(recovery).rejects.toThrow("planning_unavailable");
+    await expect(recovery).rejects.toThrow("scheduler stopped");
     expect(h.last().write).toMatchObject({ status: "unknown", requestId: "confirmations-new-id", recovering: false });
     expect(h.last().health.scheduler?.state).toBe("FAILED");
-    // a later successful lookup recovers the receipt but still does not restart the scheduler
+    // A later GET that finds the committed request is read-only recovery and
+    // must succeed without either write gate becoming healthy.
     const second = h.controller.recover();
     await flush();
     h.lookups[1].resolve(receipt("confirmations-new-id", "duplicate"));

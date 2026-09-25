@@ -12,9 +12,17 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PilotOperations } from "../components/PilotOperations";
+import { PlanningPanel } from "../components/PlanningPanel";
 import { API_SCHEMA, DISCLAIMER } from "../lib/api";
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
-import { TASK_OPS_POLL_MS, type TaskOpsSnapshot } from "../lib/task-ops";
+import type { SchedulerHealth } from "../lib/scheduler-health";
+import {
+  parseTaskOps,
+  taskOpsCapabilities,
+  TASK_OPS_POLL_MS,
+  type EffectiveTaskOpsCapabilities,
+  type TaskOpsSnapshot,
+} from "../lib/task-ops";
 import { taskOpsFixture } from "./task-ops-fixtures";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -35,6 +43,30 @@ const outcomeTemplate = record<OutcomeRecord>("OutcomeRequest");
 
 type Mode = "fixed" | "legacy" | "undeclared";
 
+const HEALTHY: SchedulerHealth = {
+  status: "fresh",
+  scheduler: { state: "RUNNING", detail: null },
+  observedAtUtc: "2026-09-16T08:00:00Z",
+  observedAtMs: Date.now(),
+  error: null,
+};
+const healthSource = () => HEALTHY;
+
+function capabilitiesFor(mode: Mode): EffectiveTaskOpsCapabilities {
+  const value = taskOpsFixture() as TaskOpsSnapshot & Record<string, unknown>;
+  if (mode === "undeclared") delete value.service_capabilities;
+  else value.service_capabilities = declaration(mode === "fixed" ? "fixed-v3-execution" : "legacy-pilot-dispatch");
+  return taskOpsCapabilities(parseTaskOps(value));
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable" = "confirmed") {
   const state = {
     scheduler: { state: "RUNNING" as "RUNNING" | "FAILED", detail: null as string | null },
@@ -42,8 +74,10 @@ function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable
     outcomes: [] as OutcomeRecord[],
     committed: new Map<string, OutcomeRecord>(),
     posts: [] as { path: string; body: Record<string, unknown> }[],
+    attempts: [] as { path: string; body: Record<string, unknown> }[],
     reads: [] as string[],
     planningPostMode: "ok" as "ok" | "network",
+    lookupGate: null as ReturnType<typeof deferred<void>> | null,
     counter: 0,
   };
   const envelope = (status: number, payload: unknown) =>
@@ -71,6 +105,7 @@ function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable
     if (method === "GET" && input === "/api/v1/planning") return envelope(200, planning());
     if (method === "GET" && input === "/api/v1/collection-executions") return envelope(404, { code: "collection_execution_not_found", detail: "no execution route in this test" });
     if (method === "GET" && input.startsWith("/api/v1/planning/requests/")) {
+      if (state.lookupGate !== null) await state.lookupGate.promise;
       const id = decodeURIComponent(input.slice("/api/v1/planning/requests/".length));
       const found = state.committed.get(id);
       if (found) return envelope(200, { schema: "nxt-planning/v1", disposition: "duplicate", request_id: id, record: found });
@@ -78,6 +113,7 @@ function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable
     }
     if (method === "POST") {
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+      state.attempts.push({ path: input, body });
       if (input === "/api/v1/planning/outcomes" && state.planningPostMode === "network") throw new TypeError("fetch failed");
       state.posts.push({ path: input, body });
       if (input === "/api/v1/planning/outcomes") {
@@ -164,6 +200,19 @@ async function mount(service: ReturnType<typeof scriptedService>) {
     root.render(<PilotOperations />);
   });
   await tick(50);
+}
+async function mountPlanning(service: ReturnType<typeof scriptedService>, capabilities: EffectiveTaskOpsCapabilities) {
+  vi.stubGlobal("fetch", service.fetchImpl);
+  root = createRoot(container);
+  await act(async () => {
+    root.render(<PlanningPanel health={HEALTHY} healthSource={healthSource} capabilities={capabilities} />);
+  });
+  await tick(50);
+}
+async function rerenderPlanning(capabilities: EffectiveTaskOpsCapabilities) {
+  await act(async () => {
+    root.render(<PlanningPanel health={HEALTHY} healthSource={healthSource} capabilities={capabilities} />);
+  });
 }
 
 describe("fixed V3 service: five write entries withheld with the preset-demo reason, evidence-only writes kept", () => {
@@ -255,7 +304,41 @@ describe("fixed V3 service: five write entries withheld with the preset-demo rea
     await tick(100);
     expect(text()).toContain("SAVED");
     expect(service.state.committed.size).toBe(1);
+    expect(service.state.counter).toBe(1);
     expect(postsTo(service, "/api/v1/planning/outcomes").at(-1)?.body.request_id).toBe(requestId);
+  });
+
+  it("keeps UNKNOWN and the draft without replay when the latest capability becomes undeclared", async () => {
+    const service = scriptedService("fixed");
+    await mountPlanning(service, capabilitiesFor("fixed"));
+    await click("Record UNLOADED");
+    await fillOutcomeForm("UNLOADED", "480");
+    service.state.planningPostMode = "network";
+    await click("Save UNLOADED result");
+    await tick(100);
+    const requestId = /outcomes-[0-9a-f-]{36}/.exec(text())?.[0];
+    expect(requestId).toBeDefined();
+    expect(text()).toContain("UNKNOWN OUTCOME");
+    expect(service.state.attempts.filter((attempt) => attempt.path === "/api/v1/planning/outcomes")).toHaveLength(1);
+
+    service.state.planningPostMode = "ok";
+    service.state.lookupGate = deferred<void>();
+    await click("Recover by request ID");
+    expect(service.state.reads.some((path) => path.startsWith("/api/v1/planning/requests/"))).toBe(true);
+
+    await rerenderPlanning(capabilitiesFor("undeclared")); // capability changes while the request-ID GET is waiting
+    expect(text()).toContain("WRITES UNDECLARED");
+    await act(async () => {
+      service.state.lookupGate!.resolve();
+      await vi.advanceTimersByTimeAsync(100);
+    });
+
+    expect(text()).toContain("UNKNOWN OUTCOME");
+    expect(text()).toContain(requestId!);
+    expect(text()).toContain("declares no write capabilities (UNDECLARED)");
+    expect(input("-UNLOADED-quantity").value).toBe("480");
+    expect(service.state.attempts.filter((attempt) => attempt.path === "/api/v1/planning/outcomes")).toHaveLength(1);
+    expect(service.state.committed.size).toBe(0);
   });
 });
 

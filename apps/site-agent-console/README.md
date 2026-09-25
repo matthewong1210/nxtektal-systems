@@ -89,9 +89,12 @@ task panel displays and the planning controller uses as its write gate. A
 planning write is allowed only over a fresh RUNNING reading; FAILED, a failed
 read, an unverifiable route or a reading older than 15 seconds block new
 planning writes with the runner's own reason. A request with an unknown
-outcome keeps its ID and content and can still be queried and replayed by that
-ID; a recovered receipt is never treated as evidence that the scheduler is
-running. Nothing in the console restarts the runner.
+outcome keeps its ID and content and can always be queried by that ID. If the
+query proves it absent, the identical request is replayed only when its original
+operation is still installed and the latest scheduler health allows writes;
+otherwise it stays UNKNOWN with the blocker explained. A recovered receipt is
+never treated as evidence that the scheduler is running. Nothing in the console
+restarts the runner.
 
 `happy-dom` is a development-only dependency used by
 `tests/planning-interaction.test.tsx` to mount the real panels and drive the

@@ -8,6 +8,7 @@ import {
   createPlanningController,
   initialPlanningView,
   PLANNING_POLL_MS,
+  taskOpsOperationForPlanningWrite,
   type PlanningView as PlanningViewState,
   type WriteState,
 } from "../lib/planning-state";
@@ -53,8 +54,8 @@ function WriteBanner({ write, view, actions }: { write: WriteState; view: Planni
     return (
       <div className="load-warning" role="alert">
         <Badge tone="bad">UNKNOWN OUTCOME</Badge> The {label} request <span className="mono">{write.requestId}</span> did not receive a reliable receipt ({write.detail}).
-        It was not retried and its content is kept. Recover it by its request ID before making other planning changes; the service returns the committed record if it
-        exists and replays the identical request otherwise.{" "}
+        It was not retried and its content is kept. Recover it by its request ID before making other planning changes. The service first returns the committed record if
+        it exists; only when it is absent, the original operation remains installed and current write health allows will the identical request be replayed.{" "}
         <button type="button" className="btn btn-quiet" disabled={write.recovering || view.busy} onClick={() => void actions.recover().catch(() => undefined)}>
           {write.recovering ? "Recovering…" : "Recover by request ID"}
         </button>
@@ -242,7 +243,13 @@ export function PlanningView({ view, actions, capabilities }: { view: PlanningVi
 
 export function PlanningPanel({ health, healthSource, capabilities }: { health: SchedulerHealth; healthSource: () => SchedulerHealth; capabilities?: CapabilityInput }) {
   const [view, setView] = useState<PlanningViewState>(() => initialPlanningView());
-  const [controller] = useState(() => createPlanningController(client, setView, { health: healthSource }));
+  const [controller] = useState(() => createPlanningController(client, setView, {
+    health: healthSource,
+    replayBlocker: (kind) => capabilityBlocker(
+      capabilities,
+      taskOpsOperationForPlanningWrite(kind),
+    ),
+  }));
   useEffect(() => {
     controller.start();
     return () => controller.stop();
@@ -251,6 +258,15 @@ export function PlanningPanel({ health, healthSource, capabilities }: { health: 
     // A changed source prop is honoured without recreating the controller.
     controller.setHealthSource(healthSource);
   }, [controller, healthSource]);
+  useLayoutEffect(() => {
+    // A recovery lookup may outlive the render that started it. Replace the
+    // source after every committed capability change; recover reads it only
+    // after a not-found response, immediately before POST.
+    controller.setReplayBlocker((kind) => capabilityBlocker(
+      capabilities,
+      taskOpsOperationForPlanningWrite(kind),
+    ));
+  }, [controller, capabilities]);
   useLayoutEffect(() => {
     // The shared reading changed (task-ops poll): republish before paint so
     // this panel and the task panel commit the same reading in one frame.
