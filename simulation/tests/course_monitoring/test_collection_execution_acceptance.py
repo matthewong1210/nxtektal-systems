@@ -38,6 +38,10 @@ RUNTIME_WITNESS = (
     SIMULATION_ROOT
     / "tests/course_monitoring/fixtures/collection-execution-normal-loop-v3.json"
 )
+CONTINUOUS_TWO_TASK_WITNESS = (
+    SIMULATION_ROOT
+    / "tests/fixtures/continuous-collection-v4/two-task-active.json"
+)
 SCHEMA = json.loads(
     (SIMULATION_ROOT / "docs/contracts/collection-execution-v1/schema.json").read_text()
 )
@@ -117,6 +121,38 @@ def _execution(normal_loop):
 def _assert_wire_contract(snapshot):
     wire_oracle.validator(SCHEMA, "#/$defs/ExecutionSnapshot").validate(snapshot)
     wire_oracle.relations(snapshot)
+
+
+def test_continuous_two_task_witness_is_canonical_and_relation_valid():
+    raw = CONTINUOUS_TWO_TASK_WITNESS.read_bytes()
+    assert raw.endswith(b"\n")
+    assert b"\n" not in raw[:-1]
+    snapshot = json.loads(raw)
+    assert raw == (
+        json.dumps(
+            snapshot,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode()
+    assert execution_api.parse_collection_execution_read_contract(
+        snapshot, "ExecutionSnapshot"
+    ) == snapshot
+    _assert_wire_contract(snapshot)
+    assert snapshot["session_state"] == "ACTIVE"
+    assert len(snapshot["executions"]) == 2
+    assert sum(
+        row["state"] in execution_api.TERMINALS
+        for row in snapshot["executions"]
+    ) == 1
+    assert sum(
+        row["state"] in {"PENDING", "RUNNING"}
+        for row in snapshot["executions"]
+    ) == 1
+    assert len({row["execution_id"] for row in snapshot["executions"]}) == 2
+    assert len({row["request_id"] for row in snapshot["executions"]}) == 2
 
 
 def _iso(identity, seconds):

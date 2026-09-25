@@ -478,6 +478,28 @@ def _runtime(r, snapshot, now, *, prefix_complete=True):
         r["edge_evidence"].update(effective_state="RUNNING")
 
 
+def _recovery_status(state):
+    return (
+        "REPLAY_MISMATCH"
+        if state["replay_failure"]
+        else "EDGE_WITHOUT_COMMIT"
+        if state["edge_without_commit"]
+        else "PREPARED_NO_COMMIT"
+        if state["pending_prepared"]
+        else "COMMITTED_CURSOR_STALE"
+        if state["tick_sequence"]
+        and (
+            state["cursor"] is None
+            or state["cursor"]["tick_sequence"] != state["tick_sequence"]
+        )
+        else "COMMITTED_OUTBOX_UNCONFIRMED"
+        if set(state["outbox"])
+        - set(state["confirmed"])
+        - set(state["blocked_outbox"])
+        else "NO_PREPARED"
+    )
+
+
 class CollectionExecutionStore:
     def __init__(self, path, session_identity, *, policy_id="JointDispatchPolicy-v1"):
         _identity(session_identity)
@@ -1111,25 +1133,61 @@ class CollectionExecutionStore:
 
     def recovery_state(self):
         s = self.replay()
-        status = ("REPLAY_MISMATCH" if s["replay_failure"] else "EDGE_WITHOUT_COMMIT" if s["edge_without_commit"] else "PREPARED_NO_COMMIT" if s["pending_prepared"]
-                  else "COMMITTED_CURSOR_STALE" if s["tick_sequence"] and (s["cursor"] is None or s["cursor"]["tick_sequence"] != s["tick_sequence"])
-                  else "COMMITTED_OUTBOX_UNCONFIRMED" if set(s["outbox"]) - set(s["confirmed"]) - set(s["blocked_outbox"]) else "NO_PREPARED")
+        status = _recovery_status(s)
         eid = s["pending_prepared"]["decision"]["execution_id"] if s["pending_prepared"] else None
         permitted = s["pending_prepared"] is not None and (eid is None or s["executions"][eid]["state"] not in TERMINALS)
         return dict(status=status, replay_permitted=permitted, pending_prepared=s["pending_prepared"], tick_sequence=s["tick_sequence"], replay_digest=s["replay_digest"],
                     unconfirmed_outbox=self.committed_outbox(unconfirmed_only=True), replay_failure=deepcopy(s["replay_failure"]))
 
-    def snapshot(self, *, server_time_utc, session_state="ACTIVE"):
-        """Pure read. Wall-clock read time is excluded from every persisted digest."""
+    def _snapshot_from_state(self, state, *, server_time_utc, session_state):
         _utc(server_time_utc)
-        s = self.replay()
-        _require(s["replay_failure"] is None, "session sealed by replay mismatch", "unavailable")
-        _require(all(r["edge_evidence"]["accepted"] or r["state"] in ("MISSED","REJECTED") for r in s["executions"].values()), "durable Edge acceptance not yet recorded", "unavailable")
-        _require(not set(s["outbox"]) - set(s["confirmed"]) - set(s["blocked_outbox"]), "committed outbox awaits durable Edge evidence", "unavailable")
+        _require(all(r["edge_evidence"]["accepted"] or r["state"] in ("MISSED","REJECTED") for r in state["executions"].values()), "durable Edge acceptance not yet recorded", "unavailable")
+        _require(not set(state["outbox"]) - set(state["confirmed"]) - set(state["blocked_outbox"]), "committed outbox awaits durable Edge evidence", "unavailable")
         data = {k:self.session_identity[k] for k in SESSION_KEYS}
         data.update(schema="nxt-collection-executions/v1", environment="SIMULATION", session_state=session_state,
-                    now_sim_t_s=s["now_sim_t_s"], simulation_time_utc=simulation_utc(self.session_identity, s["now_sim_t_s"]),
-                    server_time_utc=server_time_utc, replay_digest=s["replay_digest"],
-                    bindings=list(s["bindings"].values()), requests=list(s["requests"].values()), receipts=list(s["receipts"].values()), executions=list(s["executions"].values()))
+                    now_sim_t_s=state["now_sim_t_s"], simulation_time_utc=simulation_utc(self.session_identity, state["now_sim_t_s"]),
+                    server_time_utc=server_time_utc, replay_digest=state["replay_digest"],
+                    bindings=list(state["bindings"].values()), requests=list(state["requests"].values()), receipts=list(state["receipts"].values()), executions=list(state["executions"].values()))
         _validate(data, "ExecutionSnapshot")
         return deepcopy(data)
+
+    def snapshot(self, *, server_time_utc, session_state="ACTIVE"):
+        """Pure read. Wall-clock read time is excluded from every persisted digest."""
+        state = self.replay()
+        _require(state["replay_failure"] is None, "session sealed by replay mismatch", "unavailable")
+        return self._snapshot_from_state(
+            state,
+            server_time_utc=server_time_utc,
+            session_state=session_state,
+        )
+
+    def _sealed_evidence_state(self):
+        state = self.replay()
+        _require(
+            _recovery_status(state)
+            in {"EDGE_WITHOUT_COMMIT", "REPLAY_MISMATCH"},
+            "sealed evidence read requires a protected recovery state",
+            "unavailable",
+        )
+        return state
+
+    def sealed_evidence_snapshot(
+        self, *, server_time_utc, session_state="ACTIVE"
+    ):
+        """Return closed protected evidence without replaying a simulator."""
+        return self._snapshot_from_state(
+            self._sealed_evidence_state(),
+            server_time_utc=server_time_utc,
+            session_state=session_state,
+        )
+
+    def sealed_request_result(self, request_id):
+        """Read one receipt from a structurally protected journal."""
+        state = self._sealed_evidence_state()
+        receipt = state["receipts"].get(request_id)
+        _require(
+            receipt is not None,
+            "no durable receipt for request",
+            "request_not_found",
+        )
+        return deepcopy(receipt)

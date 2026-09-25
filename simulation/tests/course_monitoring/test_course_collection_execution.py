@@ -783,6 +783,114 @@ def test_missing_events_never_become_zero_and_terminal_conflict_never_success(ap
     assert r["edge_evidence"]["effective_state"] == "CONFLICT" and not r["success_display_allowed"]
 
 
+def test_sealed_evidence_snapshot_exposes_only_closed_terminal_conflict(
+    api, tmp_path
+):
+    store, _, request = setup(api, tmp_path)
+    tick(
+        store,
+        60,
+        snapshots={request["execution_id"]: assignment(request)},
+    )
+    tick(
+        store,
+        120,
+        action=UNLOAD,
+        snapshots={
+            request["execution_id"]: assignment(request, terminal=True)
+        },
+    )
+    store.record_edge_evidence(
+        request["execution_id"],
+        terminal_states=["INCONCLUSIVE"],
+        event_ids=["conflicting-terminal"],
+        now_sim_t_s=180,
+    )
+    assert store.recovery_state()["status"] == "EDGE_WITHOUT_COMMIT"
+    assert store.committed_outbox(unconfirmed_only=True) == []
+    before = store.journal.path.read_bytes()
+
+    snapshot = store.sealed_evidence_snapshot(
+        server_time_utc="2035-01-02T03:04:05Z"
+    )
+    oracle.validator(SCHEMA, "#/$defs/ExecutionSnapshot").validate(snapshot)
+    oracle.relations(snapshot)
+    row = snapshot["executions"][0]
+    assert (row["state"], row["reason"]) == (
+        "INCONCLUSIVE",
+        "TERMINAL_CONFLICT",
+    )
+    assert row["conflicts"]["terminal_conflict"] is True
+    assert row["device_protection"]["authorization_blocked"] is True
+    assert store.sealed_request_result(request["request_id"]) == (
+        snapshot["receipts"][0]
+    )
+    snapshot["executions"][0]["reason"] = "mutated"
+    assert store.sealed_evidence_snapshot(
+        server_time_utc="2035-01-02T03:04:05Z"
+    )["executions"][0]["reason"] == "TERMINAL_CONFLICT"
+    assert store.journal.path.read_bytes() == before
+
+
+def test_sealed_evidence_snapshot_exposes_replay_mismatch_but_not_normal_root(
+    api, tmp_path
+):
+    store, _, request = setup(api, tmp_path)
+    tick(
+        store,
+        60,
+        snapshots={request["execution_id"]: assignment(request)},
+    )
+    with pytest.raises(api.CollectionExecutionError, match="sealed evidence"):
+        store.sealed_evidence_snapshot(
+            server_time_utc="2035-01-02T03:04:05Z"
+        )
+    recovery = store.recovery_state()
+    decision = store.arbitrate(WAIT, 120, view())
+    pending = store.prepare_tick(
+        decision,
+        previous_cursor=recovery["tick_sequence"],
+        previous_digest=recovery["replay_digest"],
+    )
+    store.record_replay_failure(
+        digest(pending), now_sim_t_s=180, observed_digest="e" * 64
+    )
+    assert store.recovery_state()["status"] == "REPLAY_MISMATCH"
+    snapshot = store.sealed_evidence_snapshot(
+        server_time_utc="2035-01-02T03:04:05Z"
+    )
+    row = snapshot["executions"][0]
+    assert (row["state"], row["reason"]) == (
+        "INCONCLUSIVE",
+        "REPLAY_MISMATCH",
+    )
+    assert row["conflicts"]["replay_mismatch"] is True
+    assert row["device_protection"]["authorization_blocked"] is True
+
+
+def test_sealed_request_receipt_remains_readable_when_list_is_not_closed(
+    api, tmp_path
+):
+    store, _, request = setup_without_acceptance(api, tmp_path)
+    recovery = store.recovery_state()
+    pending = store.prepare_tick(
+        store.arbitrate(WAIT, 60, view()),
+        previous_cursor=recovery["tick_sequence"],
+        previous_digest=recovery["replay_digest"],
+    )
+    store.record_replay_failure(
+        digest(pending), now_sim_t_s=60, observed_digest="e" * 64
+    )
+
+    with pytest.raises(api.CollectionExecutionError, match="acceptance"):
+        store.sealed_evidence_snapshot(
+            server_time_utc="2035-01-02T03:04:05Z"
+        )
+    assert store.sealed_request_result(request["request_id"])[
+        "request_id"
+    ] == request["request_id"]
+
+
 @pytest.mark.parametrize("running", [False, True])
 def test_explicit_device_restart_differs_from_prefix_replay(api, tmp_path, running):
     store, _, req = setup(api, tmp_path)

@@ -8,11 +8,14 @@ serializes those owners behind one process lock and one background driver.
 
 from __future__ import annotations
 
+import argparse
 from copy import deepcopy
 from datetime import datetime, timezone
 import fcntl
+import json
 import math
 from pathlib import Path
+import signal
 import sys
 import threading
 from typing import Any, Callable, Mapping
@@ -34,13 +37,18 @@ from nxt_edge_task.contracts import (  # noqa: E402
     status_topic,
     utc_text,
 )
-from nxt_edge_task.journal import JsonlJournal  # noqa: E402
+from nxt_edge_task.journal import JsonlJournal, PreconditionFailed  # noqa: E402
 from nxt_pilot_ops.planning_contracts import PlanningError  # noqa: E402
 from nxt_pilot_ops.planning_workflow import (  # noqa: E402
     INPUT,
     PLANNING_RECORD_KINDS,
 )
-from nxt_site_agent import SiteAgentError  # noqa: E402
+from nxt_site_agent import (  # noqa: E402
+    SiteAgentApiServer,
+    SiteAgentError,
+    SiteAgentService,
+)
+from nxt_workflow_enablement import RANGE_OPS_WORKFLOW_ID  # noqa: E402
 from scripts import course_collection_execution as execution_api  # noqa: E402
 from scripts import course_session_v3  # noqa: E402
 from scripts.course_collection_execution_demo import (  # noqa: E402
@@ -61,6 +69,11 @@ from scripts.pilot_course_a_task_fixture import (  # noqa: E402
     commissioned_site,
 )
 from scripts.planning_operations import PlanningOperations  # noqa: E402
+from scripts.site_agent_fixture import (  # noqa: E402
+    DEPLOYMENT_ID,
+    SITE_ID,
+    service_composition_seam,
+)
 from scripts.task_ops_service_capabilities import (  # noqa: E402
     task_ops_service_capabilities,
 )
@@ -74,6 +87,7 @@ _TERMINAL_EXECUTIONS = frozenset(
     {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
 )
 _DRIVER_DONE = frozenset({"ENDED", "PROTECTED", "FAILED"})
+_SEALED_RECOVERY = frozenset({"EDGE_WITHOUT_COMMIT", "REPLAY_MISMATCH"})
 
 
 def _wall_utc() -> datetime:
@@ -85,8 +99,6 @@ def classify_continuous_runtime(
 ) -> str:
     """Classify session health without treating ordinary history as completion."""
 
-    if runtime["session_state"] == "PAUSED":
-        return "PAUSED"
     if any(
         row["device_protection"]["protected"]
         or row["device_protection"]["authorization_blocked"]
@@ -97,6 +109,8 @@ def classify_continuous_runtime(
         if any(row["state"] not in _TERMINAL_EXECUTIONS for row in executions):
             raise RuntimeError("V3 session ended with nonterminal execution")
         return "ENDED"
+    if runtime["session_state"] == "PAUSED":
+        return "PAUSED"
     return "RUNNING"
 
 
@@ -148,6 +162,7 @@ class ContinuousCollectionExecutionRuntime:
         self.device: SimulatorBackedTaskDevice | None = None
         self.planning: PlanningOperations | None = None
         self.session_identity: dict[str, Any] | None = None
+        self._sealed_evidence: dict[str, Any] | None = None
         self.failure: str | None = None
         self.driver_state = "STOPPED"
         self.started = False
@@ -220,19 +235,31 @@ class ContinuousCollectionExecutionRuntime:
             self.session_root, config, crash_hook=self.crash_hook
         )
 
-    def _initialize_or_repair_v3(self) -> None:
+    def _initialize_or_repair_v3(self) -> str:
         if self.initialize:
             state = self._advance_v3_unlocked(
                 v3_config(self.config, self.facts.manifest_digest)
             )
             if state["now_sim_t_s"] != 29400:
                 raise RuntimeError("deterministic V3 warm-up did not reach 08:10")
-            return
-        if (
-            course_session_v3.structural_recovery_status(self.session_root)
-            == "COMMITTED_CURSOR_STALE"
-        ):
+            return course_session_v3.structural_recovery_status(
+                self.session_root
+            )
+        recovery = course_session_v3.structural_recovery_status(
+            self.session_root
+        )
+        if recovery in _SEALED_RECOVERY:
+            return recovery
+        if recovery == "COMMITTED_CURSOR_STALE":
             course_session_v3.recover_committed_cursor(self.session_root)
+        elif recovery == "COMMITTED_OUTBOX_UNCONFIRMED":
+            # A crash after the durable cursor but before run() refreshed its
+            # disposable state file is recovery-only: the pending outbox
+            # prevents this call from advancing another simulator step.
+            self._advance_v3_unlocked()
+        return course_session_v3.structural_recovery_status(
+            self.session_root
+        )
 
     def _start_device_and_reconcile(self) -> None:
         self.device = SimulatorBackedTaskDevice(
@@ -252,6 +279,25 @@ class ContinuousCollectionExecutionRuntime:
         self.device.start()
 
     def _runtime_status_unlocked(self) -> dict[str, Any]:
+        self._detect_sealed_unlocked()
+        if self._sealed_evidence is not None:
+            sealed = course_session_v3.read_sealed_execution_status(
+                self.session_root
+            )
+            self._sealed_evidence = sealed
+            identity = sealed["identity"]
+            return {
+                "session_id": identity["session_id"],
+                "round_id": identity["round_id"],
+                "robot_id": ROBOT_ID,
+                "simulation_time_utc": sealed[
+                    "published_simulation_time_utc"
+                ],
+                "session_state": sealed["session_state"],
+                "paused": sealed["control"]["paused"],
+                "recovery_status": sealed["recovery_status"],
+                "current_engine_match": sealed["current_engine_match"],
+            }
         return course_session_v3.read_runtime_status(self.session_root, ROBOT_ID)
 
     def _simulation_clock_unlocked(self) -> datetime:
@@ -282,12 +328,11 @@ class ContinuousCollectionExecutionRuntime:
         )
         self.publisher.connect()
 
-    def _construct_planning_with_horizon_gate(self) -> None:
-        with course_session_v3.execution_admission(
-            self.session_root
-        ) as admission:
-            closure_identity = deepcopy(admission.identity)
-            self.session_identity = deepcopy(admission.identity)
+    def _construct_planning_for_identity(
+        self, closure_identity: Mapping[str, Any]
+    ) -> None:
+        closure_identity = deepcopy(dict(closure_identity))
+        self.session_identity = deepcopy(closure_identity)
 
         def confirmation_gate(history, confirmation, _now):
             plan = history.plan(
@@ -316,6 +361,38 @@ class ContinuousCollectionExecutionRuntime:
             site_timezone=self.site.timezone,
             confirmation_gate=confirmation_gate,
         )
+
+    def _construct_planning_with_horizon_gate(self) -> None:
+        with course_session_v3.execution_admission(
+            self.session_root
+        ) as admission:
+            closure_identity = deepcopy(admission.identity)
+        self._construct_planning_for_identity(closure_identity)
+
+    def _activate_sealed_evidence_unlocked(self) -> None:
+        sealed = course_session_v3.read_sealed_execution_status(
+            self.session_root
+        )
+        if sealed["recovery_status"] not in _SEALED_RECOVERY:
+            raise RuntimeError("sealed evidence status changed during open")
+        self._sealed_evidence = sealed
+        if self.planning is None:
+            self._construct_planning_for_identity(sealed["identity"])
+        else:
+            self.session_identity = deepcopy(sealed["identity"])
+        self.driver_state = "PROTECTED"
+        self._stop.set()
+
+    def _detect_sealed_unlocked(self) -> bool:
+        if self._sealed_evidence is not None:
+            return True
+        recovery = course_session_v3.structural_recovery_status(
+            self.session_root
+        )
+        if recovery not in _SEALED_RECOVERY:
+            return False
+        self._activate_sealed_evidence_unlocked()
+        return True
 
     def _publish_status(self) -> None:
         device = self._require_device()
@@ -408,9 +485,35 @@ class ContinuousCollectionExecutionRuntime:
                 )
                 admissions.append((task, request))
         return [
-            device.admit(task, request, crash_hook=self.crash_hook)
+            self._admit_unlocked(device, task, request)
             for task, request in admissions
         ]
+
+    def _admit_unlocked(
+        self,
+        device: SimulatorBackedTaskDevice,
+        task: TaskRequest,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Admit once and expose the post-durable-acceptance crash boundary."""
+
+        receipt = device.admit(task, request, crash_hook=self.crash_hook)
+        with course_session_v3.execution_admission(
+            self.session_root
+        ) as admission:
+            row = admission.store.replay()["executions"][
+                receipt["execution_id"]
+            ]
+        if row["edge_evidence"]["accepted"] and self.crash_hook is not None:
+            self.crash_hook(
+                "after_device_acceptance",
+                {
+                    "execution_id": receipt["execution_id"],
+                    "request_id": receipt["request_id"],
+                    "receipt": deepcopy(receipt),
+                },
+            )
+        return receipt
 
     def _materialize_new_tasks_unlocked(self) -> list[dict[str, Any]]:
         planning_owner = self._require_planning()
@@ -484,11 +587,21 @@ class ContinuousCollectionExecutionRuntime:
                 )
                 admissions.append((task, request))
         return [
-            device.admit(task, request, crash_hook=self.crash_hook)
+            self._admit_unlocked(device, task, request)
             for task, request in admissions
         ]
 
     def _read_collection_executions_unlocked(self) -> dict[str, Any]:
+        if self._detect_sealed_unlocked():
+            result = course_session_v3.read_sealed_execution_evidence(
+                self.session_root,
+                server_time_utc=utc_text(self.wall_clock()),
+            )
+            self._sealed_evidence = {
+                key: value for key, value in result.items()
+                if key != "snapshot"
+            }
+            return result["snapshot"]
         return course_session_v3.read_execution_snapshot(
             self.session_root, server_time_utc=utc_text(self.wall_clock())
         )
@@ -497,6 +610,8 @@ class ContinuousCollectionExecutionRuntime:
         if self.failure is not None:
             self.driver_state = "FAILED"
             self._stop.set()
+            return
+        if self._detect_sealed_unlocked():
             return
         runtime = self._runtime_status_unlocked()
         snapshot = self._read_collection_executions_unlocked()
@@ -533,7 +648,11 @@ class ContinuousCollectionExecutionRuntime:
             self.driver_state = "STARTING"
             try:
                 self._prepare_root()
-                self._initialize_or_repair_v3()
+                recovery = self._initialize_or_repair_v3()
+                if recovery in _SEALED_RECOVERY:
+                    self._activate_sealed_evidence_unlocked()
+                    self.started = True
+                    return
                 self._start_device_and_reconcile()
                 self._start_gateway_and_publisher()
                 self._construct_planning_with_horizon_gate()
@@ -635,6 +754,15 @@ class ContinuousCollectionExecutionRuntime:
     def collection_execution_request(self, request_id: str) -> dict[str, Any]:
         with self._lock:
             self._require_started()
+            if self._detect_sealed_unlocked():
+                result = course_session_v3.read_sealed_execution_request(
+                    self.session_root, request_id
+                )
+                self._sealed_evidence = {
+                    key: value for key, value in result.items()
+                    if key != "receipt"
+                }
+                return result["receipt"]
             if self.session_root.is_symlink():
                 raise ValueError("V3 session root must not be a symlink")
             with course_session_v3._lock(
@@ -658,7 +786,7 @@ class ContinuousCollectionExecutionRuntime:
         with self._lock:
             self._require_started()
             planning = self._require_planning()
-            if self.gateway is None:
+            if self.gateway is None and self._sealed_evidence is None:
                 raise RuntimeError("continuous Edge gateway is unavailable")
             simulation_now = self._simulation_clock_unlocked()
             edge = list_view(
@@ -666,10 +794,18 @@ class ContinuousCollectionExecutionRuntime:
                 self.config,
                 now=simulation_now,
             )
-            gateway_failure = self.gateway.failure
+            gateway_failure = (
+                None if self.gateway is None else self.gateway.failure
+            )
             failure = self.failure
             if failure is None and gateway_failure is not None:
                 failure = str(gateway_failure)
+            if failure is None and self.driver_state in _DRIVER_DONE:
+                failure = {
+                    "PROTECTED": "continuous execution authorization is protected",
+                    "FAILED": "continuous collection execution runtime failed",
+                    "ENDED": "continuous collection execution session has ended",
+                }[self.driver_state]
             result = planning.schedules.snapshot(simulation_now)
             result.update(
                 {
@@ -688,10 +824,8 @@ class ContinuousCollectionExecutionRuntime:
                         **self._runtime_status_unlocked(),
                         "driver_state": self.driver_state,
                         "fixed_confirmation": False,
-                        "accepts_new_confirmations": (
-                            self.failure is None
-                            and self.driver_state not in _DRIVER_DONE
-                        ),
+                        "accepts_new_confirmations": self.driver_state
+                        in {"RUNNING", "PAUSED"},
                         "accepts_new_schedules": False,
                     },
                     "devices": edge["devices"],
@@ -707,14 +841,27 @@ class ContinuousCollectionExecutionRuntime:
             )
             return result
 
+    def _require_write_state_unlocked(self, surface: str) -> None:
+        if self.failure is None and self.driver_state in {"RUNNING", "PAUSED"}:
+            return
+        detail = self.failure or {
+            "PROTECTED": "continuous execution authorization is protected",
+            "FAILED": "continuous collection execution runtime failed",
+            "ENDED": "continuous collection execution session has ended",
+        }.get(self.driver_state, "continuous collection execution is unavailable")
+        code = f"{surface}_unavailable"
+        if surface == "planning" and self.driver_state == "ENDED":
+            code = "planning_conflict"
+        raise SiteAgentError(code, detail)
+
     def route_planning(
         self, method: str, path: str, body: dict[str, Any]
     ) -> dict[str, Any]:
         with self._lock:
             self._require_started()
             planning = self._require_planning()
-            if method == "POST" and self.failure is not None:
-                raise SiteAgentError("planning_unavailable", self.failure)
+            if method == "POST":
+                self._require_write_state_unlocked("planning")
             try:
                 return planning.route(method, path, body)
             except SiteAgentError as exc:
@@ -736,11 +883,70 @@ class ContinuousCollectionExecutionRuntime:
     def route_task_operations(
         self, method: str, path: str, body: dict[str, Any]
     ) -> dict[str, Any]:
-        del body
         with self._lock:
             self._require_started()
             if method == "GET" and path == "/api/v0/task-ops":
                 return self.task_operations_snapshot()
+            if method != "POST":
+                raise SiteAgentError(
+                    "not_found", "unknown continuous task operations route"
+                )
+            self._require_write_state_unlocked("task_ops")
+            if path == "/api/v0/task-ops/schedules":
+                raise SiteAgentError(
+                    "task_ops_conflict",
+                    "direct schedule creation is not installed; confirm a "
+                    "Planning plan",
+                )
+            prefix = "/api/v0/task-ops/"
+            parts = path[len(prefix) :].split("/") if path.startswith(prefix) else []
+            planning = self._require_planning()
+            try:
+                if (
+                    len(parts) == 3
+                    and parts[0] == "schedules"
+                    and parts[2] == "cancel"
+                ):
+                    if set(body) != {"operator"}:
+                        raise SiteAgentError(
+                            "invalid_request",
+                            "schedule cancellation requires operator",
+                        )
+                    return planning.schedules.cancel(
+                        parts[1], body["operator"], self._simulation_clock_unlocked()
+                    )
+                if (
+                    len(parts) == 3
+                    and parts[0] == "notifications"
+                    and parts[2] in {"acknowledge", "resolve"}
+                ):
+                    if set(body) != {"operator", "note"}:
+                        raise SiteAgentError(
+                            "invalid_request",
+                            "notification handling requires operator and note",
+                        )
+                    handler = (
+                        planning.schedules.acknowledge
+                        if parts[2] == "acknowledge"
+                        else planning.schedules.resolve
+                    )
+                    return handler(
+                        parts[1],
+                        body["operator"],
+                        body["note"],
+                        self._simulation_clock_unlocked(),
+                    )
+            except PreconditionFailed as exc:
+                raise SiteAgentError(
+                    "task_ops_conflict", f"{exc.code}: {exc.detail}"
+                ) from exc
+            except SiteAgentError:
+                raise
+            except Exception as exc:
+                self._fail_unlocked(exc)
+                raise SiteAgentError(
+                    "task_ops_unavailable", self.failure or str(exc)
+                ) from exc
             raise SiteAgentError(
                 "not_found", "unknown continuous task operations route"
             )
@@ -769,6 +975,7 @@ class ContinuousCollectionExecutionRuntime:
         self.device = None
         self.planning = None
         self.session_identity = None
+        self._sealed_evidence = None
         self._process_lock = None
         self.started = False
 
@@ -784,8 +991,84 @@ class ContinuousCollectionExecutionRuntime:
                 self.driver_state = "STOPPED"
 
 
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--initialize", action="store_true")
+    parser.add_argument("--port", type=int, default=8767)
+    parser.add_argument("--driver-interval", type=float, default=6.0)
+    parser.add_argument(
+        "--console",
+        type=Path,
+        default=SIM_ROOT.parent / "apps/site-agent-console/out",
+    )
+    parser.add_argument(
+        "--api-only",
+        action="store_true",
+        help="serve the local API without requiring a console export",
+    )
+    args = parser.parse_args(argv)
+
+    runtime = ContinuousCollectionExecutionRuntime(
+        args.out,
+        initialize=args.initialize,
+        step_interval_s=args.driver_interval,
+    )
+    service = None
+    server = None
+    stop = threading.Event()
+    try:
+        # Initialization must precede creation of the sibling Site Agent root:
+        # --initialize requires a new empty continuous evidence directory.
+        runtime.start()
+        service = SiteAgentService.launch(
+            runs_root=args.out / "site-agent",
+            site_id=SITE_ID,
+            deployment_id=DEPLOYMENT_ID,
+            workflow_id=RANGE_OPS_WORKFLOW_ID,
+            seam=service_composition_seam(),
+        )
+        server = SiteAgentApiServer(
+            service,
+            port=args.port,
+            console_dir=None if args.api_only else args.console,
+            **runtime.api_callbacks(),
+        )
+        server.start_background()
+        runtime.start_driver()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(sig, lambda _sig, _frame: stop.set())
+        print(
+            json.dumps(
+                {
+                    "url": server.url,
+                    "disclaimer": DISCLAIMER,
+                    "transport": "in_memory",
+                    "scope": "continuous Planning collection tasks",
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        while not stop.wait(0.5):
+            # Keep read APIs online after ending, protection or fail-stop.
+            pass
+        return 0
+    finally:
+        if server is not None:
+            server.shutdown()
+        runtime.close()
+        if service is not None:
+            service.stop()
+
+
 __all__ = [
     "ContinuousCollectionExecutionRuntime",
     "MARKER",
     "classify_continuous_runtime",
+    "main",
 ]
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

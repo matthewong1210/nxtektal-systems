@@ -133,7 +133,7 @@ def confirm_outbox(v3):
         v3.store.confirm_outbox(row["outbox_id"], "edge-" + row["outbox_id"])
 
 
-def accepted_request(v3, tmp_path, *, cycle_minutes=None):
+def accepted_request(v3, tmp_path, *, cycle_minutes=None, accepted=True):
     """Create verified Planning/Edge inputs; execution remains simulator-owned."""
     identity = v3.identity
     epoch = identity["session_epoch_utc"]
@@ -180,8 +180,53 @@ def accepted_request(v3, tmp_path, *, cycle_minutes=None):
     binding = v3.store.bind_confirmed_tasks(planning, edge.read(), identity, now)[0]
     request = v3.execution_api.make_request(binding, "execution-request-001", due, expiry)
     v3.store.submit(request)
-    v3.store.record_acceptance(request["execution_id"], "edge-accepted-001")
+    if accepted:
+        v3.store.record_acceptance(request["execution_id"], "edge-accepted-001")
     return request
+
+
+def sealed_root(runner, root, compiled, *, status, accepted=True):
+    """Build a real published prefix, then add a later protected overlay."""
+    runner.run(root, config(runner, compiled))
+    v3 = session(runner, root, compiled=compiled)
+    v3.recover()
+    request = accepted_request(v3, root, accepted=accepted)
+    if accepted and status == "EDGE_WITHOUT_COMMIT":
+        v3.advance()
+        write_record(root / "state.json", runner._state(v3, "OUTBOX_PENDING"))
+        confirm_outbox(v3)
+
+    published_now = read_record(root / "state.json")["now_sim_t_s"]
+    evidence_now = published_now + 60
+    if status == "EDGE_WITHOUT_COMMIT":
+        v3.store.record_edge_evidence(
+            request["execution_id"],
+            terminal_states=["FAILED", "SUCCEEDED"],
+            event_ids=["edge-conflict-failed", "edge-conflict-succeeded"],
+            now_sim_t_s=evidence_now,
+        )
+    elif status == "REPLAY_MISMATCH":
+        replayed = v3.store.replay()
+        recovery = v3.store.recovery_state()
+        decision = v3.store.arbitrate(
+            v3._policy_action(),
+            published_now,
+            v3.runtime_view(replayed["executions"]),
+        )
+        pending = v3.store.prepare_tick(
+            decision,
+            previous_cursor=recovery["tick_sequence"],
+            previous_digest=recovery["replay_digest"],
+        )
+        v3.store.record_replay_failure(
+            runner.digest(pending),
+            now_sim_t_s=evidence_now,
+            observed_digest="e" * 64,
+        )
+    else:
+        raise AssertionError(f"unsupported sealed status: {status}")
+    assert v3.store.recovery_state()["status"] == status
+    return v3, request, published_now, evidence_now
 
 
 def candidate_execution(v3, request):
@@ -264,6 +309,23 @@ def test_pause_is_business_state_not_wall_read_health(runner, tmp_path, monkeypa
     assert snapshot["session_state"] == "PAUSED"
     assert snapshot["server_time_utc"] == "2030-01-01T00:00:00Z"
     assert snapshot["simulation_time_utc"] == simulation_utc(active, before)
+
+
+def test_completed_session_state_precedes_pause_control(
+        runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(end_minute=3)
+    cfg = config(runner, compiled, advance_steps=10)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    completed = runner.run(tmp_path, cfg)
+    assert completed["status"] == "SESSION_COMPLETE"
+
+    runner.set_paused(tmp_path, True)
+    runtime = runner.read_runtime_status(tmp_path, "picker-01")
+    snapshot = runner.read_execution_snapshot(
+        tmp_path, server_time_utc="2030-01-01T00:00:00Z")
+    assert runtime["paused"] is True
+    assert runtime["session_state"] == "ENDED"
+    assert snapshot["session_state"] == "ENDED"
 
 
 def test_runtime_status_is_locked_detached_and_read_neutral(runner, tmp_path, monkeypatch):
@@ -456,6 +518,196 @@ def test_structural_recovery_status_reads_cursor_stale_without_replay(
         for path in tmp_path.rglob("*")
         if path.is_file()
     } == before
+
+
+@pytest.mark.parametrize(
+    ("status", "terminal"),
+    [
+        ("EDGE_WITHOUT_COMMIT", ("INCONCLUSIVE", "TERMINAL_CONFLICT")),
+        ("REPLAY_MISMATCH", ("INCONCLUSIVE", "REPLAY_MISMATCH")),
+    ],
+)
+def test_sealed_evidence_read_uses_published_cursor_without_runtime_replay(
+    runner, tmp_path, monkeypatch, status, terminal
+):
+    compiled = compiled_fixture()
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    _v3, request, published_now, evidence_now = sealed_root(
+        runner, tmp_path, compiled, status=status
+    )
+    before = {
+        str(path.relative_to(tmp_path)): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    }
+
+    def forbid_runtime(*_args, **_kwargs):
+        pytest.fail("sealed evidence must not construct a simulator runtime")
+
+    monkeypatch.setattr(runner.RangeOpsEnv, "__init__", forbid_runtime)
+    result = runner.read_sealed_execution_evidence(
+        tmp_path, server_time_utc="2030-01-01T00:00:00Z"
+    )
+    receipt = runner.read_sealed_execution_request(
+        tmp_path, request["request_id"]
+    )
+
+    assert result["recovery_status"] == receipt["recovery_status"] == status
+    assert result["current_engine_match"] is True
+    assert result["identity"] == read_record(tmp_path / "identity.json")
+    assert result["control"] == {"paused": False}
+    assert result["session_state"] == "ACTIVE"
+    assert result["published_now_sim_t_s"] == published_now
+    assert result["published_simulation_time_utc"] == simulation_utc(
+        result["identity"], published_now
+    )
+    assert result["evidence_now_sim_t_s"] == evidence_now
+    assert result["snapshot"]["now_sim_t_s"] == evidence_now
+    assert result["snapshot"]["simulation_time_utc"] == simulation_utc(
+        result["identity"], evidence_now
+    )
+    assert (
+        result["snapshot"]["executions"][0]["state"],
+        result["snapshot"]["executions"][0]["reason"],
+    ) == terminal
+    assert receipt["receipt"]["request_id"] == request["request_id"]
+    assert receipt["published_now_sim_t_s"] == published_now
+    assert receipt["evidence_now_sim_t_s"] == evidence_now
+    assert {
+        str(path.relative_to(tmp_path)): path.read_bytes()
+        for path in tmp_path.rglob("*")
+        if path.is_file()
+    } == before
+
+
+@pytest.mark.parametrize("tamper", ["step", "digest", "overlay_time"])
+def test_sealed_evidence_rejects_saved_cursor_not_matching_committed_prefix(
+    runner, tmp_path, monkeypatch, tamper
+):
+    compiled = compiled_fixture()
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    _v3, _request, _published_now, evidence_now = sealed_root(
+        runner, tmp_path, compiled, status="EDGE_WITHOUT_COMMIT"
+    )
+    saved = read_record(tmp_path / "state.json")
+    if tamper == "step":
+        saved["step"] += 1
+    elif tamper == "digest":
+        saved["replay_digest"] = "e" * 64
+    else:
+        saved["now_sim_t_s"] = evidence_now
+        saved["simulation_time_utc"] = simulation_utc(saved, evidence_now)
+    write_record(tmp_path / "state.json", saved)
+
+    with pytest.raises(ValueError, match="validated execution prefix"):
+        runner.read_sealed_execution_evidence(
+            tmp_path, server_time_utc="2030-01-01T00:00:00Z"
+        )
+
+
+def test_sealed_request_receipt_does_not_require_list_closure(
+    runner, tmp_path, monkeypatch
+):
+    compiled = compiled_fixture()
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    _v3, request, published_now, evidence_now = sealed_root(
+        runner,
+        tmp_path,
+        compiled,
+        status="REPLAY_MISMATCH",
+        accepted=False,
+    )
+
+    with pytest.raises(runner.CollectionExecutionError, match="acceptance"):
+        runner.read_sealed_execution_evidence(
+            tmp_path, server_time_utc="2030-01-01T00:00:00Z"
+        )
+    status = runner.read_sealed_execution_status(tmp_path)
+    assert status["recovery_status"] == "REPLAY_MISMATCH"
+    assert status["published_now_sim_t_s"] == published_now
+    assert status["evidence_now_sim_t_s"] == evidence_now
+    result = runner.read_sealed_execution_request(
+        tmp_path, request["request_id"]
+    )
+    assert result["receipt"]["request_id"] == request["request_id"]
+    assert result["published_now_sim_t_s"] == published_now
+    assert result["evidence_now_sim_t_s"] == evidence_now
+
+
+def test_sealed_evidence_allows_historical_engine_identity(
+    runner, tmp_path, monkeypatch
+):
+    compiled = compiled_fixture()
+    historical_digest = "1" * 64
+    with monkeypatch.context() as historical:
+        historical.setattr(
+            runner, "compile_session", lambda _: deepcopy(compiled)
+        )
+        historical.setattr(
+            runner, "engine_fingerprint", lambda: historical_digest
+        )
+        _v3, _request, _published_now, _evidence_now = sealed_root(
+            runner, tmp_path, compiled, status="EDGE_WITHOUT_COMMIT"
+        )
+
+    result = runner.read_sealed_execution_evidence(
+        tmp_path, server_time_utc="2030-01-01T00:00:00Z"
+    )
+    assert result["identity"]["engine_digest"] == historical_digest
+    assert result["current_engine_match"] is False
+    with pytest.raises(ValueError, match="engine/config/identity changed"):
+        runner.read_execution_snapshot(
+            tmp_path, server_time_utc="2030-01-01T00:00:00Z"
+        )
+
+    identity = read_record(tmp_path / "identity.json")
+    state = read_record(tmp_path / "state.json")
+    identity["engine_digest"] = "A" * 64
+    state["engine_digest"] = "A" * 64
+    write_record(tmp_path / "identity.json", identity)
+    write_record(tmp_path / "state.json", state)
+    with pytest.raises(ValueError, match="invalid persisted V3 engine identity"):
+        runner.read_sealed_execution_status(tmp_path)
+
+
+def test_sealed_evidence_uses_initialized_prefix_before_any_commit(
+    runner, tmp_path, monkeypatch
+):
+    compiled = compiled_fixture()
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    with pytest.raises(Crash, match="before_prepare"):
+        runner.run(
+            tmp_path,
+            config(runner, compiled),
+            crash_hook=crash_at("before_prepare"),
+        )
+    v3 = session(runner, tmp_path, compiled=compiled)
+    v3.recover()
+    request = accepted_request(v3, tmp_path)
+    recovery = v3.store.recovery_state()
+    pending = v3.store.prepare_tick(
+        v3.store.arbitrate(
+            v3._policy_action(),
+            v3.env.sim.now,
+            v3.runtime_view(v3.store.replay()["executions"]),
+        ),
+        previous_cursor=recovery["tick_sequence"],
+        previous_digest=recovery["replay_digest"],
+    )
+    v3.store.record_replay_failure(
+        runner.digest(pending),
+        now_sim_t_s=v3.env.sim.now + 60,
+        observed_digest="e" * 64,
+    )
+
+    result = runner.read_sealed_execution_evidence(
+        tmp_path, server_time_utc="2030-01-01T00:00:00Z"
+    )
+    assert result["published_now_sim_t_s"] == v3.env.sim.now == 60
+    assert result["evidence_now_sim_t_s"] == 120
+    assert result["snapshot"]["executions"][0]["request_id"] == (
+        request["request_id"]
+    )
 
 
 def test_runtime_continuation_omits_collect_and_only_handoffs_after_boundary(runner, tmp_path):
@@ -782,6 +1034,96 @@ def test_committed_outbox_unconfirmed_is_replayed_not_confirmed_or_restarted(run
     assert after["status"] == "COMMITTED_OUTBOX_UNCONFIRMED"
     assert after["unconfirmed_outbox"] == before
     assert len(recovered.store.replay_plan()) == 1
+
+
+def test_paused_run_refreshes_only_committed_outbox_state_without_advancing(
+        runner, tmp_path, monkeypatch):
+    compiled = compiled_fixture(collection_blocked=True)
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    v3.recover()
+    accepted_request(v3, tmp_path)
+    with pytest.raises(Crash, match="after_cursor"):
+        v3.advance(crash_hook=crash_at("after_cursor"))
+
+    durable_before = deepcopy(v3.store.replay())
+    plan_before = deepcopy(v3.store.replay_plan())
+    runtime_digest_before = v3.runtime_digest()
+    ledger_before = (
+        v3.env.sim.ledger.total,
+        v3.env.sim.ledger.counts(),
+    )
+    journal_path = tmp_path / "collection-execution.jsonl"
+    journal_before = journal_path.read_bytes()
+    assert v3.store.recovery_state()["status"] == (
+        "COMMITTED_OUTBOX_UNCONFIRMED"
+    )
+
+    runner.set_paused(tmp_path, True)
+    paused = runner.run(tmp_path)
+    refreshed = read_record(tmp_path / "state.json")
+    assert paused["status"] == "PAUSED"
+    assert json.loads((tmp_path / "control.json").read_text()) == {
+        "paused": True
+    }
+    assert refreshed["status"] == "OUTBOX_PENDING"
+    assert refreshed["step"] == durable_before["tick_sequence"]
+    assert refreshed["replay_digest"] == durable_before["replay_digest"]
+    assert refreshed["now_sim_t_s"] == durable_before["now_sim_t_s"]
+    assert refreshed["unconfirmed_outbox"] == len(
+        v3.store.recovery_state()["unconfirmed_outbox"]
+    )
+    assert journal_path.read_bytes() == journal_before
+
+    verified = session(runner, tmp_path, compiled=compiled)
+    verified.recover()
+    assert verified.store.replay() == durable_before
+    assert verified.store.replay_plan() == plan_before
+    assert verified.runtime_digest() == runtime_digest_before
+    assert (
+        verified.env.sim.ledger.total,
+        verified.env.sim.ledger.counts(),
+    ) == ledger_before
+
+
+@pytest.mark.parametrize(
+    ("boundary", "expected_status"),
+    [
+        ("after_prepare", "PREPARED_NO_COMMIT"),
+        ("after_commit", "COMMITTED_CURSOR_STALE"),
+    ],
+)
+def test_paused_run_does_not_repair_other_recovery_states(
+        runner, tmp_path, monkeypatch, boundary, expected_status):
+    compiled = compiled_fixture(collection_blocked=True)
+    cfg = config(runner, compiled)
+    monkeypatch.setattr(runner, "compile_session", lambda _: deepcopy(compiled))
+    runner.run(tmp_path, cfg)
+    v3 = session(runner, tmp_path, compiled=compiled)
+    v3.recover()
+    accepted_request(v3, tmp_path)
+    with pytest.raises(Crash, match=boundary):
+        v3.advance(crash_hook=crash_at(boundary))
+    assert v3.store.recovery_state()["status"] == expected_status
+
+    state_path = tmp_path / "state.json"
+    journal_path = tmp_path / "collection-execution.jsonl"
+    saved_before = state_path.read_bytes()
+    journal_before = journal_path.read_bytes()
+    plan_before = deepcopy(v3.store.replay_plan())
+    runner.set_paused(tmp_path, True)
+    paused = runner.run(tmp_path)
+
+    assert paused["status"] == "PAUSED"
+    assert json.loads((tmp_path / "control.json").read_text()) == {
+        "paused": True
+    }
+    assert state_path.read_bytes() == saved_before
+    assert journal_path.read_bytes() == journal_before
+    assert v3.store.recovery_state()["status"] == expected_status
+    assert v3.store.replay_plan() == plan_before
 
 
 def test_prepared_recovery_policy_mismatch_is_durably_sealed(runner, tmp_path):

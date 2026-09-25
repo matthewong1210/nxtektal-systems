@@ -694,16 +694,7 @@ def _state(session, status):
     return result
 
 
-def _load_root(root, config):
-    stored = validate_config(read_json(root / "config.json"))
-    if config is not None and validate_config(config) != stored:
-        raise ValueError("existing V3 session configuration is immutable")
-    compiled = read_record(root / "compiled.json")
-    identity = read_record(root / "identity.json")
-    expected = build_identity(stored, compiled)
-    if identity != expected:
-        raise ValueError("session engine/config/identity changed; preserve evidence and create a new V3 root")
-    state = read_record(root / "state.json")
+def _validate_root_state(compiled, identity, state):
     if (type(state) is not dict or set(state) != _STATE_FIELDS
             or any(state[key] != identity[key] for key in _STATE_IDENTITY_KEYS)
             or state["compiled_digest"] != digest(compiled)):
@@ -719,6 +710,47 @@ def _load_root(root, config):
             or type(state["unconfirmed_outbox"]) is not int
             or state["unconfirmed_outbox"] < 0):
         raise ValueError("invalid persisted V3 state")
+
+
+def _load_evidence_root(root):
+    """Validate persisted identity using its recorded engine fingerprint.
+
+    This is deliberately separate from the live-runtime loader: archival
+    evidence remains verifiable after a binary upgrade, while every path that
+    can replay, admit, or advance still requires the current engine identity.
+    """
+
+    stored = validate_config(read_json(root / "config.json"))
+    compiled = read_record(root / "compiled.json")
+    identity = read_record(root / "identity.json")
+    if (type(identity) is not dict
+            or type(identity.get("engine_digest")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", identity["engine_digest"]) is None):
+        raise ValueError("invalid persisted V3 engine identity")
+    expected = build_identity(
+        stored, compiled, engine_digest=identity["engine_digest"]
+    )
+    if identity != expected:
+        raise ValueError("session engine/config/identity changed; preserve evidence and create a new V3 root")
+    state = read_record(root / "state.json")
+    _validate_root_state(compiled, identity, state)
+    return (
+        stored,
+        compiled,
+        state,
+        identity,
+        identity["engine_digest"] == engine_fingerprint(),
+    )
+
+
+def _load_root(root, config):
+    stored, compiled, state, _identity, current_engine_match = (
+        _load_evidence_root(root)
+    )
+    if config is not None and validate_config(config) != stored:
+        raise ValueError("existing V3 session configuration is immutable")
+    if not current_engine_match:
+        raise ValueError("session engine/config/identity changed; preserve evidence and create a new V3 root")
     return stored, compiled, state
 
 
@@ -729,14 +761,18 @@ def _read_control(root):
     return control
 
 
-def _validate_saved_cursor(saved, session, recovery, now_sim_t_s):
+def _session_state(*, paused, ended):
+    return "ENDED" if ended else "PAUSED" if paused else "ACTIVE"
+
+
+def _validate_saved_identity_cursor(saved, identity, recovery, now_sim_t_s):
     if saved.get("status") not in _STATE_STATUSES:
         raise ValueError("invalid persisted V3 session status")
     expected = {
         "step": recovery["tick_sequence"],
         "now_sim_t_s": now_sim_t_s,
         "simulation_time_utc": execution_api.simulation_utc(
-            session.identity, now_sim_t_s),
+            identity, now_sim_t_s),
         "replay_digest": recovery["replay_digest"],
     }
     current_unconfirmed = len(recovery["unconfirmed_outbox"])
@@ -745,6 +781,12 @@ def _validate_saved_cursor(saved, session, recovery, now_sim_t_s):
             or type(saved_unconfirmed) is not int
             or not current_unconfirmed <= saved_unconfirmed):
         raise ValueError("persisted V3 state differs from the validated execution prefix")
+
+
+def _validate_saved_cursor(saved, session, recovery, now_sim_t_s):
+    _validate_saved_identity_cursor(
+        saved, session.identity, recovery, now_sim_t_s
+    )
 
 
 def _validate_saved_runtime(saved, session, recovery):
@@ -801,6 +843,71 @@ def _validated_restart_runtime(root):
     return session, saved, control
 
 
+def _sealed_evidence_context_unlocked(root):
+    _config, compiled, saved, identity, current_engine_match = (
+        _load_evidence_root(root)
+    )
+    control = _read_control(root)
+    store = CollectionExecutionStore(
+        root / "collection-execution.jsonl",
+        identity,
+        policy_id=POLICY_ID,
+    )
+    recovery = store.recovery_state()
+    recovery_status = recovery["status"]
+    if recovery_status not in {"EDGE_WITHOUT_COMMIT", "REPLAY_MISMATCH"}:
+        raise ReplayMismatch(
+            "V3 session has no protected sealed evidence projection"
+        )
+    replayed = store.replay()
+    cursor = {
+        "tick_sequence": recovery["tick_sequence"],
+        "replay_digest": recovery["replay_digest"],
+    }
+    cursor_matches = replayed["cursor"] == cursor
+    initialized_prefix = (
+        recovery["tick_sequence"] == 0 and replayed["cursor"] is None
+    )
+    if not (cursor_matches or initialized_prefix):
+        raise ValueError(
+            "persisted V3 state differs from the validated execution prefix"
+        )
+    plan = replayed["replay_plan"]
+    if plan:
+        committed = plan[-1]["committed"]
+        if (len(plan) != recovery["tick_sequence"]
+                or committed["tick_sequence"] != recovery["tick_sequence"]
+                or committed["replay_digest"] != recovery["replay_digest"]):
+            raise ReplayMismatch("sealed committed cursor is inconsistent")
+        published_now_sim_t_s = committed["result"]["now_sim_t_s"]
+    else:
+        scenario = RangeOpsScenario.model_validate(compiled["scenario"])
+        published_now_sim_t_s = scenario.hours.open_minute * 60
+    _validate_saved_identity_cursor(
+        saved, identity, recovery, published_now_sim_t_s
+    )
+    evidence_now_sim_t_s = replayed["now_sim_t_s"]
+    if evidence_now_sim_t_s < published_now_sim_t_s:
+        raise ReplayMismatch("sealed evidence clock precedes published cursor")
+    session_state = _session_state(
+        paused=control["paused"],
+        ended=saved["status"] == "SESSION_COMPLETE",
+    )
+    metadata = {
+        "identity": deepcopy(identity),
+        "control": deepcopy(control),
+        "session_state": session_state,
+        "recovery_status": recovery_status,
+        "evidence_now_sim_t_s": evidence_now_sim_t_s,
+        "published_now_sim_t_s": published_now_sim_t_s,
+        "published_simulation_time_utc": execution_api.simulation_utc(
+            identity, published_now_sim_t_s
+        ),
+        "current_engine_match": current_engine_match,
+    }
+    return store, metadata
+
+
 def structural_recovery_status(root) -> str:
     """Read only the durable store recovery class without simulator replay."""
 
@@ -808,8 +915,9 @@ def structural_recovery_status(root) -> str:
     if root.is_symlink():
         raise ValueError("V3 session root must not be a symlink")
     with _lock(root / ".session.lock"):
-        config, compiled, _ = _load_root(root, None)
-        identity = build_identity(config, compiled)
+        _config, _compiled, _saved, identity, _current_engine_match = (
+            _load_evidence_root(root)
+        )
         store = CollectionExecutionStore(
             root / "collection-execution.jsonl",
             identity,
@@ -875,12 +983,27 @@ def run(root, config=None, *, crash_hook=None):
             saved = _state(session, "INITIALIZED")
             write_record(state_path, saved)
         control = _read_control(root)
+        session = None
+        paused_outbox_repair = False
         if control["paused"]:
-            return {**saved, "status": "PAUSED"}
-        session = V3Session(root, config, compiled)
+            candidate = V3Session(root, config, compiled)
+            if candidate.store.recovery_state()["status"] != (
+                "COMMITTED_OUTBOX_UNCONFIRMED"
+            ):
+                return {**saved, "status": "PAUSED"}
+            session = candidate
+            paused_outbox_repair = True
+        if session is None:
+            session = V3Session(root, config, compiled)
         started = time.monotonic()
         recovery = session._recover_unlocked()
-        if recovery["status"] == "COMMITTED_OUTBOX_UNCONFIRMED":
+        if paused_outbox_repair:
+            if recovery["status"] != "COMMITTED_OUTBOX_UNCONFIRMED":
+                raise ReplayMismatch(
+                    "paused outbox repair changed the recovery state"
+                )
+            status_name = "OUTBOX_PENDING"
+        elif recovery["status"] == "COMMITTED_OUTBOX_UNCONFIRMED":
             status_name = "OUTBOX_PENDING"
         else:
             status_name = "SESSION_COMPLETE" if session.env.sim.facility_closed else "CHUNK_COMPLETE"
@@ -913,7 +1036,7 @@ def run(root, config=None, *, crash_hook=None):
         state = _state(session, status_name)
         # Store commit/cursor fsyncs precede this disposable external cursor.
         write_record(state_path, state)
-        return state
+        return {**state, "status": "PAUSED"} if paused_outbox_repair else state
 
 
 @contextmanager
@@ -947,6 +1070,44 @@ def restart_reconciliation(root):
         )
 
 
+def read_sealed_execution_status(root):
+    """Read validated sealed metadata without requiring list closure."""
+
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        _store, result = _sealed_evidence_context_unlocked(root)
+        return result
+
+
+def read_sealed_execution_evidence(root, *, server_time_utc):
+    """Read a closed protected projection without constructing a simulator."""
+
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        store, result = _sealed_evidence_context_unlocked(root)
+        result["snapshot"] = store.sealed_evidence_snapshot(
+            server_time_utc=server_time_utc,
+            session_state=result["session_state"],
+        )
+        return result
+
+
+def read_sealed_execution_request(root, request_id):
+    """Read one durable receipt from a structurally sealed V3 root."""
+
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("V3 session root must not be a symlink")
+    with _lock(root / ".session.lock"):
+        store, result = _sealed_evidence_context_unlocked(root)
+        result["receipt"] = store.sealed_request_result(request_id)
+        return result
+
+
 def read_execution_snapshot(root, *, server_time_utc):
     """Return one validated read-only projection without exposing its store."""
     root = Path(root)
@@ -954,8 +1115,10 @@ def read_execution_snapshot(root, *, server_time_utc):
         raise ValueError("V3 session root must not be a symlink")
     with _lock(root / ".session.lock"):
         session, saved, control = _validated_read_runtime(root)
-        session_state = ("PAUSED" if control["paused"] else
-                         "ENDED" if saved["status"] == "SESSION_COMPLETE" else "ACTIVE")
+        session_state = _session_state(
+            paused=control["paused"],
+            ended=saved["status"] == "SESSION_COMPLETE",
+        )
         return session.store.snapshot(
             server_time_utc=server_time_utc, session_state=session_state)
 
@@ -990,10 +1153,9 @@ def read_runtime_status(root, robot_id):
             raise ReplayMismatch("bound runtime robot is missing or ambiguous")
         robot = robots[0]
         paused = control["paused"]
-        session_state = (
-            "PAUSED" if paused else
-            "ENDED" if session.env.sim.facility_closed else
-            "ACTIVE"
+        session_state = _session_state(
+            paused=paused,
+            ended=session.env.sim.facility_closed,
         )
         activity = robot["activity"].upper()
         return {

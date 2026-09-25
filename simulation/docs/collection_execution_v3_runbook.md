@@ -204,9 +204,9 @@ replace that evidence.
 
 The deterministic fixture produces these values.  Paths, process IDs and
 wall-clock read time are excluded from the causal identities. The canonical
-witness and fixed identities were regenerated on 2026-09-26 after the continuous
-admission primitives changed the source-based engine fingerprint; the fixed
-3C policy, actions and 600-ball result remain unchanged.
+witness and fixed identities were regenerated on 2026-09-26 after the paused
+recovery and lifecycle-precedence fix changed the source-based engine
+fingerprint; the fixed 3C policy, actions and 600-ball result remain unchanged.
 
 | Field | Expected value |
 |---|---|
@@ -217,21 +217,21 @@ admission primitives changed the source-based engine fingerprint; the fixed
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `15a668d05cbb1638199686959f31bab865505d11c70880fa3030b07132776466` |
+| `engine_digest` | `b3e31f4904a3e58713474a87c879be3480f5ece6bc6b5bd6302311baabba0d29` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `95a60572b9bea8146bc85ad7b5ea82e8eb3ccd27490e9b2a993a6ec1aecab074` |
-| `execution_id` | `16e4ed5b0d1ab37ebdaffce03e8e786917fceb829f8fc4d630210b2eb83dc5db` |
-| `attempt_id` | `attempt-16e4ed5b0d1ab37ebdaffce03e8e786917fceb829f8fc4d630210b2eb83dc5db` |
-| `assignment_id` | `assignment-c11d10cdab897c82f81ca43dfb7c9266fd600d149924c7a3d2bd82bf81852300` |
-| request digest | `bdd21fef6c1c7e792d56fb888f71802dfd4c98df519567a597077260f58b19e3` |
-| request high-water digest | `7bfbcff70bafc7362e2052b198ac996f9f73db4185255e07edf26d31be79c144` |
+| `binding_id` | `ba7a5c30b5e76a4a3ef365269a9de3544bdd063f2c54c2dda300be9eef8922f9` |
+| `execution_id` | `b7ca35768dce624e48e16de3768a2f9a49aa42f54eff8239273b09a3ec6d806a` |
+| `attempt_id` | `attempt-b7ca35768dce624e48e16de3768a2f9a49aa42f54eff8239273b09a3ec6d806a` |
+| `assignment_id` | `assignment-713bdc41fc512419d45f4f684ab86e094166463c5722da3d9091ab288a94e6b5` |
+| request digest | `7f17324e747f3f1a49fbfec56fc9b8b246e79182b0caa2bdbbe4b5df54a9cd7b` |
+| request high-water digest | `b8a37f7c70cf8856bc2e3a1527c60cb1ec2facda75a5b15d641adfa15d2f6e9e` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED` / `UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600` to runtime robot `R1` |
 | `unload_quantity.balls` | `600` to bound station `H1` |
-| final assignment `event_digest` | `ff95ac52b016a7cd2dccd8c8f3048e1c7615d73359e86630658f157564232c10` |
-| final `replay_digest` | `b77824498c840ee144a20426c6cacff251ab1cb92aff2271ecc5c16bd8b61df4` |
+| final assignment `event_digest` | `b628d26337220e4c96833351b9009f1f91568e44bb419081c419baeece4bede9` |
+| final `replay_digest` | `f1bd715bb1143fd8270939aa94171196f08510e44d9695fc665adc8bdadee2ad` |
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not
 invent aliases for them: the real session identity is the
@@ -255,23 +255,23 @@ The observed causal timeline is:
 | Planning results | `planning.outcomes=[]`; no outcome was synthesized |
 
 The start event ID is
-`assignment-event-5639ffc5d92e4f1bd8b953be952b389a93d4652adfcd4faffdc89460985771e7`.
+`assignment-event-1029d48f558cd223990027787ab58f13561df0c62f1d2de0bded0d902f0635e2`.
 The collection-exit event ID is
-`assignment-event-d4dcfd7e84932ea8899d798983d6b9a7046f0519546707b412c7cc32111c00b9`.
+`assignment-event-e729c6caa1958e7ba86fcca85b9d912475d804eb9ce040b9284bff135ecadccf`.
 The unload event ID is
-`assignment-event-f1f4312889dcfa1c5702ee05c130fb62579f42bdb5e1979e1775b25d4fdea6e6`;
+`assignment-event-b2d3229ae19d274d66b405d2e730d4164a8555adc9e7a2e1d006635257085672`;
 the terminal event ID is
-`assignment-event-0be9f72206b429580978c949af7f1af29465f62e6036f7dd80746b3004b7dc32`.
+`assignment-event-9aac5838e82188589ed792d5724c2d932d5ad5dc350eb64f433ea3754bcf53fd`.
 The read projection retains all fifteen raw source event IDs and the six Edge
 record IDs rather than collapsing the evidence to the 600-ball summary.
 Those Edge record IDs in the observed normal loop are:
 
 ```text
-rec_6f4495a156910164c950e0cf
-rec_85a9265d4fd693e960872012
-rec_c3a0bdd1c5d526a88f967993
-rec_d9a8a855ffbd4bce9797c610
-rec_dcf1b056cde77f71f618c29e
+rec_1c2fa2aed779de9fe9ba5215
+rec_4a9d45f9de8bb044c8f9e7c5
+rec_4f0e7960fdbb03d02f762db1
+rec_6a350192bc19830abdd936de
+rec_8f3bb8e191900c2bd926ccc6
 rec_fbf9d67c03833c163d455189
 ```
 
