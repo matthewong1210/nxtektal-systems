@@ -22,8 +22,15 @@ const CAPABILITIES_EXAMPLES = join(
   import.meta.dirname, "..", "..", "..", "simulation", "docs", "contracts",
   "pilot-dispatch-v0", "service-capabilities", "examples",
 );
+const CAPABILITIES_V2_EXAMPLES = join(
+  import.meta.dirname, "..", "..", "..", "simulation", "docs", "contracts",
+  "pilot-dispatch-v0", "service-capabilities-v2", "examples",
+);
 const capabilityExample = (name: string): unknown =>
   JSON.parse(readFileSync(join(CAPABILITIES_EXAMPLES, `${name}.json`), "utf-8"));
+const continuousCapabilities = JSON.parse(
+  readFileSync(join(CAPABILITIES_V2_EXAMPLES, "continuous-v3-execution.json"), "utf-8"),
+) as Record<string, unknown>;
 const originalTz = process.env.TZ;
 afterEach(() => { if (originalTz === undefined) delete process.env.TZ; else process.env.TZ = originalTz; });
 
@@ -60,6 +67,22 @@ describe("task operations contracts", () => {
     const parsed = parseTaskOps({ ...taskOpsFixture(), service_capabilities: legacyCapabilities });
     expect(taskOpsCapabilities(parsed)).toEqual({ declared: true, ...legacyCapabilities });
     for (const operation of TASK_OPS_WRITE_OPERATIONS) expect(taskOpsSupports(parsed, operation)).toBe(true);
+  });
+  it("validates continuous V3 v2 capabilities without opening direct schedule creation", () => {
+    const parsed = parseTaskOps({ ...taskOpsFixture(), service_capabilities: continuousCapabilities });
+    expect(taskOpsCapabilities(parsed).mode).toBe("CONTINUOUS_V3_EXECUTION");
+    expect(taskOpsSupports(parsed, "planning_confirmations_create")).toBe(true);
+    expect(taskOpsSupports(parsed, "schedules_create")).toBe(false);
+    expect(taskOpsSupports(parsed, "schedules_cancel")).toBe(true);
+  });
+  it("rejects cross-version modes and mode-inconsistent matrices", () => {
+    const fixedAsV2 = { ...fixedV3Capabilities, schema: "nxt-pilot-dispatch/service-capabilities/v2" };
+    const continuousAsV1 = { ...continuousCapabilities, schema: "nxt-pilot-dispatch/service-capabilities/v1" };
+    const openedDirectSchedule = structuredClone(continuousCapabilities);
+    (openedDirectSchedule.operations as Record<string, unknown>).schedules_create = "SUPPORTED";
+    for (const capabilities of [fixedAsV2, continuousAsV1, openedDirectSchedule]) {
+      expect(() => parseTaskOps({ ...taskOpsFixture(), service_capabilities: capabilities })).toThrow(ManagerApiError);
+    }
   });
   it("keeps an undeclared historical payload readable but grants no write capability", () => {
     const historical = taskOpsFixture() as TaskOpsView["data"] & Record<string, unknown>;

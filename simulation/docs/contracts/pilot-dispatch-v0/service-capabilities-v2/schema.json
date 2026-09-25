@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nxtektal.local/contracts/pilot-dispatch-v0/service-capabilities/v2",
+  "title": "Pilot dispatch service capabilities v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mode", "operations"],
+  "properties": {
+    "schema": { "const": "nxt-pilot-dispatch/service-capabilities/v2" },
+    "mode": { "const": "CONTINUOUS_V3_EXECUTION" },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planning_inputs_create",
+        "planning_plans_create",
+        "planning_confirmations_create",
+        "planning_outcomes_create",
+        "schedules_create",
+        "schedules_cancel",
+        "notifications_acknowledge",
+        "notifications_resolve"
+      ],
+      "properties": {
+        "planning_inputs_create": { "const": "SUPPORTED" },
+        "planning_plans_create": { "const": "SUPPORTED" },
+        "planning_confirmations_create": { "const": "SUPPORTED" },
+        "planning_outcomes_create": { "const": "SUPPORTED" },
+        "schedules_create": { "const": "UNAVAILABLE" },
+        "schedules_cancel": { "const": "SUPPORTED" },
+        "notifications_acknowledge": { "const": "SUPPORTED" },
+        "notifications_resolve": { "const": "SUPPORTED" }
+      }
+    }
+  }
+}
