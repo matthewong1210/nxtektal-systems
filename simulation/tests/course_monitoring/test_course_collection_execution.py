@@ -319,6 +319,155 @@ def test_binding_is_content_addressed_and_reads_cycle_at_binding_time(api, tmp_p
     assert conform(store)["executions"][0]["raw_quantity"]["balls"] is None
 
 
+def test_binding_uses_confirmation_historical_input_after_newer_revision(api, tmp_path):
+    from nxt_edge_task.schedules import normalized_schedule
+    from nxt_pilot_ops.planning_contracts import utc_text
+    from tests.pilot_ops.test_planning import planning_operations, confirmed_plan_request, input_request
+
+    operations = planning_operations(tmp_path / "planning")
+    payload = confirmed_plan_request(operations)
+    confirmation = operations.route("POST", "/api/v1/planning/confirmations", payload)["record"]
+    operations.recover()
+    second = input_request()
+    second.update(request_id="newer-input", expected_revision=1)
+    second["zones"][0]["zone_id"] = operations.context["zone_ids"][0]
+    second["zones"][0]["cycle_minutes"]["value"].update(travel=3, collect=7, **{"return": 3, "unload": 3})
+    operations.route("POST", "/api/v1/planning/inputs", second)
+
+    # Inject verified historical TASK_CREATED evidence after revision 2. This
+    # is a binding replay test, not an assertion that the due-time gate admits
+    # a superseded plan (its existing current-input rule remains unchanged).
+    schedule = normalized_schedule(confirmation["schedule"], operations.config, operations.facts)
+    task = TaskRequest.build(site_id=schedule["site_id"], deployment_id=schedule["deployment_id"],
+        simulation_env_id=schedule["simulation_env_id"], target_robot_id=schedule["robot_id"],
+        target_incarnation="fixture-incarnation-001", task_type="COLLECT_BALLS_ZONE",
+        zone_id=schedule["zone_id"], issued_at_utc=schedule["due_at_utc"],
+        expires_at_utc=schedule["expires_at_utc"], progress_window_s=schedule["progress_window_s"],
+        issued_by="SIMULATION_TEST_ENTRY:" + schedule["operator"])
+    operations.journal.append(RecordSpec("task_created", "EDGE", utc_text(operations.clock()),
+        {"task_id": task.task_id, "schedule_id": confirmation["schedule_id"], "request": task.to_dict()}))
+    planning = operations.execution_binding_snapshot(operations.clock())
+    identity, _, _ = inputs(tmp_path / "identity")
+    identity.update(site_id=operations.config.site_id, deployment_id=operations.config.deployment_id,
+                    session_epoch_utc=utc_text(operations.clock()))
+    identity["runtime_bindings"][0]["zone_id"] = schedule["zone_id"]
+    planning["input_records"].reverse()  # selection is by exact revision/digest, never order
+    requirements = api.derive_execution_requirements(plan=planning["plans"][0],
+        input_records=planning["input_records"], session_identity=identity,
+        evidence_at_utc=planning["confirmations"][0]["task_created_at_utc"])
+    assert requirements["cycle_evidence"]["input_revision"] == 1
+    assert requirements["cycle_evidence"]["cycle_minutes"] == {"travel": 1, "collect": 1, "return": 1, "unload": 1}
+    assert requirements["max_execution_s"] == 240
+    assert planning["latest_input"]["revision"] == 2
+    store = api.CollectionExecutionStore(tmp_path / "execution.jsonl", identity)
+    binding = store.bind_confirmed_task(planning, operations.journal.read(), identity, 0, task_id=task.task_id)
+    assert binding["cycle_evidence"] == requirements["cycle_evidence"]
+    assert binding["task_created_at_utc"] == planning["confirmations"][0]["task_created_at_utc"]
+
+
+@pytest.mark.parametrize("fault", ["missing_input", "wrong_digest", "duplicate_input", "missing_mapping", "duplicate_mapping"])
+def test_execution_requirements_reject_missing_or_ambiguous_sources(api, tmp_path, fault):
+    identity, planning, _ = inputs(tmp_path)
+    sources = [planning["latest_input"]]
+    if fault == "missing_input": sources = []
+    if fault == "wrong_digest": sources[0]["input_digest"] = "b" * 64
+    if fault == "duplicate_input": sources *= 2
+    if fault == "missing_mapping": identity["runtime_bindings"] = []
+    if fault == "duplicate_mapping": identity["runtime_bindings"] *= 2
+    with pytest.raises(api.CollectionExecutionError):
+        api.derive_execution_requirements(plan=planning["plans"][0], input_records=sources,
+            session_identity=identity, evidence_at_utc=planning["confirmations"][0]["task_created_at_utc"])
+
+
+@pytest.mark.parametrize(("observed", "expires", "accepted"), [
+    ("2026-09-16T00:01:00Z", "2026-09-16T00:01:00Z", True),
+    ("2026-09-16T00:01:01Z", "2026-09-16T00:02:00Z", False),
+    ("2026-09-16T00:00:00Z", "2026-09-16T00:00:59Z", False),
+])
+def test_execution_requirements_cycle_validity_and_four_stage_ceiling(api, tmp_path, observed, expires, accepted):
+    identity, planning, _ = inputs(tmp_path)
+    source = planning["latest_input"]
+    cycle = source["zones"][0]["cycle_minutes"]
+    cycle.update(observed_at_utc=observed, valid_until_utc=expires)
+    cycle["value"].update(travel=1, collect=1.1, **{"return": 1, "unload": 1, "wash": 100, "supply": 100})
+    args = dict(plan=planning["plans"][0], input_records=[source], session_identity=identity,
+                evidence_at_utc="2026-09-16T00:01:00Z")
+    if not accepted:
+        with pytest.raises(api.CollectionExecutionError, match="stale or future"):
+            api.derive_execution_requirements(**args)
+    else:
+        assert api.derive_execution_requirements(**args)["max_execution_s"] == 300
+
+
+@pytest.mark.parametrize(("limit", "accepted"), [(660, True), (661, False)])
+def test_session_horizon_includes_exact_end(api, tmp_path, limit, accepted):
+    identity, _, _ = inputs(tmp_path)
+    identity["session_end_sim_t_s"] = 720
+    args = dict(start_at_utc="2026-09-16T00:01:00Z", max_execution_s=limit, session_identity=identity)
+    if accepted:
+        assert api.require_session_horizon(**args) is None
+    else:
+        with pytest.raises(api.CollectionExecutionError, match="session horizon"):
+            api.require_session_horizon(**args)
+
+
+def test_request_id_is_derived_only_from_binding_id(api):
+    binding_id = "a" * 64
+    expected = "exec_req_" + digest({"schema": "nxt-collection-execution-request-id/v1",
+        "kind": "EXECUTE_BOUND_COLLECTION", "binding_id": binding_id})[:24]
+    assert api.request_id_for_binding(binding_id) == expected
+    assert api.request_id_for_binding("b" * 64) != expected
+
+
+@pytest.mark.parametrize("binding_id", [None, 64, "", "a" * 63, "a" * 65])
+def test_request_id_rejects_invalid_binding_id(api, binding_id):
+    with pytest.raises(api.CollectionExecutionError, match="invalid binding ID"):
+        api.request_id_for_binding(binding_id)
+
+
+def test_single_task_binding_is_exact_and_ignores_other_confirmations(api, tmp_path):
+    identity, planning, records = inputs(tmp_path)
+    task_id = planning["confirmations"][0]["task_id"]
+    expected = api.bind_confirmed_tasks(planning, records, identity, 60)[0]
+    planning["confirmations"].append({"task_id": "unrelated-not-yet-bindable"})
+    assert api.bind_confirmed_task(planning, records, identity, 60, task_id=task_id) == expected
+    with pytest.raises(api.CollectionExecutionError, match="one confirmed planning source"):
+        api.bind_confirmed_task(planning, records, identity, 60, task_id="unknown")
+    planning["confirmations"].append(deepcopy(planning["confirmations"][0]))
+    with pytest.raises(api.CollectionExecutionError, match="one confirmed planning source"):
+        api.bind_confirmed_task(planning, records, identity, 60, task_id=task_id)
+
+
+def test_single_task_store_retry_returns_persisted_binding_after_clock_advances(api, tmp_path):
+    identity, planning, records = inputs(tmp_path)
+    task_id = planning["confirmations"][0]["task_id"]
+    planning["confirmations"].append({"task_id": "unrelated-not-yet-bindable"})
+    store = api.CollectionExecutionStore(tmp_path / "execution.jsonl", identity)
+    first = store.bind_confirmed_task(planning, records, identity, 60, task_id=task_id)
+    before = store.journal.path.read_bytes(), store.journal.anchor_path.read_bytes()
+    reopened = api.CollectionExecutionStore(store.journal.path, identity)
+    again = reopened.bind_confirmed_task(planning, records, identity, 120, task_id=task_id)
+    assert again == first
+    assert api.request_id_for_binding(again["binding_id"]) == api.request_id_for_binding(first["binding_id"])
+    assert (store.journal.path.read_bytes(), store.journal.anchor_path.read_bytes()) == before
+    planning["latest_input"]["zones"][0]["cycle_minutes"]["value"]["collect"] += 1
+    with pytest.raises(api.CollectionExecutionError, match="bound differently"):
+        reopened.bind_confirmed_task(planning, records, identity, 120, task_id=task_id)
+    assert (store.journal.path.read_bytes(), store.journal.anchor_path.read_bytes()) == before
+
+
+@pytest.mark.parametrize("fault", ["planning_schema", "session_schema", "clock"])
+def test_empty_batch_still_validates_its_evidence_boundary(api, tmp_path, fault):
+    identity, planning, records = inputs(tmp_path)
+    planning["confirmations"] = []
+    now = 60
+    if fault == "planning_schema": planning["schema"] = "nxt-planning/unknown"
+    if fault == "session_schema": identity["schema"] = "nxt-whole-course-session/v2"
+    if fault == "clock": now = -1
+    with pytest.raises(api.CollectionExecutionError):
+        api.bind_confirmed_tasks(planning, records, identity, now)
+
+
 def test_binding_accepts_planning_seconds_and_keeps_its_frozen_window(api, tmp_path):
     identity, planning, records = inputs(tmp_path / "fixture")
     schedule = planning["confirmations"][0]["schedule"]

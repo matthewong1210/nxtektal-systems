@@ -8,7 +8,7 @@ the canonical/fsynced persistence mechanism, not as a new Edge business owner.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timedelta
 import hashlib
@@ -16,6 +16,7 @@ import json
 import math
 from pathlib import Path
 import re
+from typing import Any
 
 from nxt_edge_task.contracts import TaskRequest, TaskEvent
 from nxt_edge_task.journal import JsonlJournal, RecordSpec, JournalRecord, JournalIntegrityError
@@ -143,7 +144,70 @@ def _identity(identity):
     _require(type(identity["control_interval_s"]) is int and identity["control_interval_s"] > 0, "positive control interval required")
 
 
+def derive_execution_requirements(
+    *, plan: Mapping[str, Any], input_records: Sequence[Mapping[str, Any]],
+    session_identity: Mapping[str, Any], evidence_at_utc: str,
+) -> dict[str, Any]:
+    """Derive the bounded cycle from one exact retained Planning input."""
+    s = primitive(session_identity)
+    _identity(s)
+    selected = plan["selection"]
+    sources = [source for source in input_records if source["revision"] == plan["input_revision"]
+               and source["input_digest"] == plan["input_digest"]]
+    _require(len(sources) == 1, "plan must reference one historical input")
+    source = sources[0]
+    zones = [row for row in source["zones"] if (row["robot_id"], row["zone_id"])
+             == (selected["robot_id"], selected["zone_id"])]
+    mappings = [row for row in s.get("runtime_bindings", []) if (row["robot_id"], row["zone_id"])
+                == (selected["robot_id"], selected["zone_id"])]
+    _require(len(zones) == len(mappings) == 1, "unique explicit robot/zone binding required")
+    mapping = mappings[0]
+    _require(mapping["handoff_station_id"] == s["station_ids"][0], "bound station is not sole station")
+    e = zones[0].get("cycle_minutes")
+    _require(isinstance(e, dict) and isinstance(e.get("value"), dict), "missing cycle evidence")
+    _require(_utc(e["observed_at_utc"]) <= _utc(evidence_at_utc) <= _utc(e["valid_until_utc"]), "stale or future cycle evidence")
+    cycle = {k: e["value"][k] for k in ("travel", "collect", "return", "unload")}
+    evidence = {k: e[k] for k in ("source_kind", "source_ref", "observed_at_utc", "valid_until_utc")}
+    evidence.update(input_record_id=source["request_id"], input_revision=source["revision"], cycle_minutes=cycle,
+                    derivation_rule="CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1")
+    _validate(evidence, "CycleEvidence")
+    limit = math.ceil(sum(cycle.values()) * 60 / s["control_interval_s"]) * s["control_interval_s"]
+    return {"runtime_binding": mapping, "cycle_evidence": evidence, "max_execution_s": limit}
+
+
+def require_session_horizon(
+    *, start_at_utc: str, max_execution_s: float, session_identity: Mapping[str, Any],
+) -> None:
+    selected_end = _utc(start_at_utc) + timedelta(seconds=max_execution_s)
+    session_end = _utc(session_identity["session_epoch_utc"]) + timedelta(seconds=session_identity["session_end_sim_t_s"])
+    _require(selected_end <= session_end, "confirmed collection cannot finish inside the active V3 session horizon")
+
+
+def request_id_for_binding(binding_id: str) -> str:
+    _require(isinstance(binding_id, str) and len(binding_id) == 64, "invalid binding ID")
+    return "exec_req_" + digest({"schema": "nxt-collection-execution-request-id/v1",
+        "kind": "EXECUTE_BOUND_COLLECTION", "binding_id": binding_id})[:24]
+
+
 def bind_confirmed_tasks(planning_snapshot, edge_records, session_identity, now_sim_t_s):
+    _identity(session_identity)
+    _require(planning_snapshot.get("schema") == "nxt-planning/v1"
+             and planning_snapshot.get("environment") == "SIMULATION", "unsupported planning evidence")
+    simulation_utc(session_identity, now_sim_t_s)
+    confirmations = [c for c in planning_snapshot["confirmations"] if c.get("task_id") is not None]
+    _require(len({c["confirmation_id"] for c in confirmations}) == len(confirmations), "duplicate confirmation")
+    bindings = [bind_confirmed_task(planning_snapshot, edge_records, session_identity, now_sim_t_s,
+                                   task_id=c["task_id"]) for c in confirmations]
+    return sorted(bindings, key=lambda b: b["binding_id"])
+
+
+def bind_confirmed_task(planning_snapshot, edge_records, session_identity, now_sim_t_s, *, task_id: str) -> dict:
+    matches = [c for c in planning_snapshot["confirmations"] if c.get("task_id") == task_id]
+    _require(len(matches) == 1, "task must have one confirmed planning source")
+    return _binding_for_confirmation(planning_snapshot, edge_records, session_identity, now_sim_t_s, matches[0])
+
+
+def _binding_for_confirmation(planning_snapshot, edge_records, session_identity, now_sim_t_s, confirmation):
     """Bind an already verified PlanningOperations snapshot to verified Edge records.
 
     session_identity adds explicit station_ids/runtime_bindings to SESSION_KEYS
@@ -156,76 +220,57 @@ def bind_confirmed_tasks(planning_snapshot, edge_records, session_identity, now_
     _require(p.get("schema") == "nxt-planning/v1" and p.get("environment") == "SIMULATION", "unsupported planning evidence")
     bound = simulation_utc(s, now_sim_t_s)
     records = [r.to_dict() if hasattr(r, "to_dict") else primitive(r) for r in edge_records]
-    result, seen = [], set()
-    for c in p["confirmations"]:
-        if c.get("task_id") is None:
-            continue
-        _require(c["confirmation_id"] not in seen, "duplicate confirmation")
-        seen.add(c["confirmation_id"])
-        matched = [r for r in records if r["record_kind"] == "task_created" and r["payload"].get("task_id") == c["task_id"]]
-        _require(len(matched) == 1, "exact TASK_CREATED evidence required")
-        rec = matched[0]
-        try:
-            task = TaskRequest.from_dict(rec["payload"]["request"])
-        except ValueError as exc:
-            raise CollectionExecutionError("conflict", "invalid task content") from exc
-        schedule = c["schedule"]
-        _require(rec["payload"].get("schedule_id") == c["schedule_id"] and task.task_id == c["task_id"], "task/schedule identity mismatch")
-        for key, expected in {"site_id": s["site_id"], "deployment_id": s["deployment_id"],
-                              "target_robot_id": schedule["robot_id"], "zone_id": schedule["zone_id"],
-                              "task_type": "COLLECT_BALLS_ZONE", "issued_by": "SIMULATION_TEST_ENTRY:" + schedule["operator"]}.items():
-            _require(getattr(task, key) == expected, "task differs from frozen confirmation: " + key)
-        # Planning v1 preserves the manager's valid RFC3339 spelling while
-        # ScheduleService canonicalizes the admitted TaskRequest to
-        # microseconds.  These are clock instants, not content aliases: only
-        # semantic UTC equality is compatible, and the frozen Planning strings
-        # remain the binding/request window below.
-        for task_key, schedule_key in (
-            ("issued_at_utc", "due_at_utc"),
-            ("expires_at_utc", "expires_at_utc"),
-        ):
-            _require(
-                _utc(getattr(task, task_key)) == _utc(schedule[schedule_key]),
-                "task differs from frozen confirmation: " + task_key,
-            )
-        _require(schedule["admission_reference"] == c["confirmation_id"], "confirmation link mismatch")
-        created = rec["recorded_at_utc"]
-        _require(_utc(task.issued_at_utc) <= _utc(created) < _utc(task.expires_at_utc) and _utc(created) <= _utc(bound), "binding precedes valid task creation")
-        _require(c.get("task_created_at_utc") == created, "planning task evidence differs")
-        plans = [v for v in p["plans"] if v["plan_id"] == c["plan_id"] and v["version"] == c["plan_version"]]
-        _require(len(plans) == 1, "exact plan revision required")
-        plan = plans[0]
-        _require(plan["input_revision"] == c["input_revision"] and all(plan["selection"][k] == schedule[k] for k in ("robot_id", "zone_id")) and plan["selection"]["start_at_utc"] == schedule["due_at_utc"], "plan confirmation mismatch")
-        sources = p.get("input_records", [p.get("latest_input")])
-        sources = [v for v in sources if v is not None and v["revision"] == c["input_revision"]]
-        _require(len(sources) == 1 and sources[0]["input_digest"] == plan["input_digest"], "exact retained input revision required")
-        source = sources[0]
-        zones = [v for v in source["zones"] if (v["robot_id"], v["zone_id"]) == (task.target_robot_id, task.zone_id)]
-        mappings = [v for v in s.get("runtime_bindings", []) if (v["robot_id"], v["zone_id"]) == (task.target_robot_id, task.zone_id)]
-        _require(len(zones) == len(mappings) == 1, "unique explicit robot/zone binding required")
-        mapping = mappings[0]
-        _require(mapping["handoff_station_id"] == s["station_ids"][0], "bound station is not sole station")
-        e = zones[0].get("cycle_minutes")
-        _require(isinstance(e, dict) and isinstance(e.get("value"), dict), "missing cycle evidence")
-        _require(_utc(e["observed_at_utc"]) <= _utc(bound) <= _utc(e["valid_until_utc"]), "stale or future cycle evidence")
-        cycle = {k: e["value"][k] for k in ("travel", "collect", "return", "unload")}
-        evidence = {k: e[k] for k in ("source_kind", "source_ref", "observed_at_utc", "valid_until_utc")}
-        evidence.update(input_record_id=source["request_id"], input_revision=source["revision"], cycle_minutes=cycle,
-                        derivation_rule="CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1")
-        _validate(evidence, "CycleEvidence")
-        limit = math.ceil(sum(cycle.values()) * 60 / s["control_interval_s"]) * s["control_interval_s"]
-        b = {k: s[k] for k in (*SESSION_KEYS, "site_id", "deployment_id", "commissioned_site_digest")}
-        b.update({k: c[k] for k in ("plan_id", "plan_version", "confirmation_id", "schedule_id", "task_id")})
-        b.update({k: mapping[k] for k in ("robot_id", "zone_id", "runtime_robot_id", "runtime_zone_id", "handoff_station_id")})
-        b.update(schema="nxt-collection-execution-binding/v1", environment="SIMULATION", task_content_digest=task.content_digest(),
-                 incarnation=task.target_incarnation, max_execution_s=limit, cycle_evidence=evidence,
-                 handoff_binding_mode="SOLE_SCENARIO_STATION_V1", bound_at_sim_t_s=now_sim_t_s,
-                 bound_at_utc=bound, task_created_at_utc=created)
-        b["binding_id"] = digest(b)
-        _validate(b, "Binding")
-        result.append(b)
-    _require(len({b["task_id"] for b in result}) == len(result), "duplicate task binding")
-    return sorted(result, key=lambda b: b["binding_id"])
+    c = primitive(confirmation)
+    matched = [r for r in records if r["record_kind"] == "task_created" and r["payload"].get("task_id") == c["task_id"]]
+    _require(len(matched) == 1, "exact TASK_CREATED evidence required")
+    rec = matched[0]
+    try:
+        task = TaskRequest.from_dict(rec["payload"]["request"])
+    except ValueError as exc:
+        raise CollectionExecutionError("conflict", "invalid task content") from exc
+    schedule = c["schedule"]
+    _require(rec["payload"].get("schedule_id") == c["schedule_id"] and task.task_id == c["task_id"], "task/schedule identity mismatch")
+    for key, expected in {"site_id": s["site_id"], "deployment_id": s["deployment_id"],
+                          "target_robot_id": schedule["robot_id"], "zone_id": schedule["zone_id"],
+                          "task_type": "COLLECT_BALLS_ZONE", "issued_by": "SIMULATION_TEST_ENTRY:" + schedule["operator"]}.items():
+        _require(getattr(task, key) == expected, "task differs from frozen confirmation: " + key)
+    # Planning v1 preserves the manager's valid RFC3339 spelling while
+    # ScheduleService canonicalizes the admitted TaskRequest to
+    # microseconds.  These are clock instants, not content aliases: only
+    # semantic UTC equality is compatible, and the frozen Planning strings
+    # remain the binding/request window below.
+    for task_key, schedule_key in (
+        ("issued_at_utc", "due_at_utc"),
+        ("expires_at_utc", "expires_at_utc"),
+    ):
+        _require(
+            _utc(getattr(task, task_key)) == _utc(schedule[schedule_key]),
+            "task differs from frozen confirmation: " + task_key,
+        )
+    _require(schedule["admission_reference"] == c["confirmation_id"], "confirmation link mismatch")
+    created = rec["recorded_at_utc"]
+    _require(_utc(task.issued_at_utc) <= _utc(created) < _utc(task.expires_at_utc) and _utc(created) <= _utc(bound), "binding precedes valid task creation")
+    _require(c.get("task_created_at_utc") == created, "planning task evidence differs")
+    plans = [v for v in p["plans"] if v["plan_id"] == c["plan_id"] and v["version"] == c["plan_version"]]
+    _require(len(plans) == 1, "exact plan revision required")
+    plan = plans[0]
+    _require(plan["input_revision"] == c["input_revision"] and all(plan["selection"][k] == schedule[k] for k in ("robot_id", "zone_id")) and plan["selection"]["start_at_utc"] == schedule["due_at_utc"], "plan confirmation mismatch")
+    requirements = derive_execution_requirements(
+        plan=plan,
+        input_records=p.get("input_records", [p["latest_input"]] if p.get("latest_input") is not None else []),
+        session_identity=s, evidence_at_utc=bound,
+    )
+    mapping, evidence, limit = (requirements[k] for k in ("runtime_binding", "cycle_evidence", "max_execution_s"))
+    b = {k: s[k] for k in (*SESSION_KEYS, "site_id", "deployment_id", "commissioned_site_digest")}
+    b.update({k: c[k] for k in ("plan_id", "plan_version", "confirmation_id", "schedule_id", "task_id")})
+    b.update({k: mapping[k] for k in ("robot_id", "zone_id", "runtime_robot_id", "runtime_zone_id", "handoff_station_id")})
+    b.update(schema="nxt-collection-execution-binding/v1", environment="SIMULATION", task_content_digest=task.content_digest(),
+             incarnation=task.target_incarnation, max_execution_s=limit, cycle_evidence=evidence,
+             handoff_binding_mode="SOLE_SCENARIO_STATION_V1", bound_at_sim_t_s=now_sim_t_s,
+             bound_at_utc=bound, task_created_at_utc=created)
+    b["binding_id"] = digest(b)
+    _validate(b, "Binding")
+    return b
 
 
 def make_request(binding, request_id, due_at_utc, expires_at_utc):
@@ -715,6 +760,32 @@ class CollectionExecutionStore:
             return specs
         self.journal.append_via(build)
         return bindings
+
+    def bind_confirmed_task(self, planning_snapshot, edge_records, session_identity, now_sim_t_s, *, task_id: str) -> dict:
+        """Bind only this task; exact retries retain the original binding time."""
+        _require(primitive(session_identity) == self.session_identity, "session identity conflict")
+        result = {}
+
+        def build(records):
+            state = self._replay(records)
+            matches = [b for b in state["bindings"].values() if b["task_id"] == task_id]
+            _require(len(matches) <= 1, "task already bound differently")
+            bound_at = matches[0]["bound_at_sim_t_s"] if matches else now_sim_t_s
+            binding = bind_confirmed_task(planning_snapshot, edge_records, session_identity, bound_at, task_id=task_id)
+            _require(not matches or matches == [binding], "task already bound differently")
+            result.update(matches[0] if matches else binding)
+            if matches:
+                return []
+            _require(state["replay_failure"] is None, "session sealed against new authorization")
+            confirmation = next(c for c in planning_snapshot["confirmations"] if c.get("task_id") == task_id)
+            specs = [] if records else [self._spec("session", {"identity": self.session_identity, "policy_id": self.policy_id}, now_sim_t_s)]
+            specs.append(self._spec("binding", binding, now_sim_t_s))
+            specs.append(self._spec("binding_window", dict(binding_id=binding["binding_id"],
+                due_at_utc=confirmation["schedule"]["due_at_utc"], expires_at_utc=confirmation["schedule"]["expires_at_utc"]), now_sim_t_s))
+            return specs
+
+        self.journal.append_via(build)
+        return result
 
     def submit(self, request):
         request = primitive(request)

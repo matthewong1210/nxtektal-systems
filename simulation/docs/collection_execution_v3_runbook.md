@@ -203,7 +203,10 @@ replace that evidence.
 ## Expected fixed identity and result
 
 The deterministic fixture produces these values.  Paths, process IDs and
-wall-clock read time are excluded from the causal identities.
+wall-clock read time are excluded from the causal identities. The canonical
+witness and fixed identities were regenerated on 2026-09-26 after the continuous
+admission primitives changed the source-based engine fingerprint; the fixed
+3C policy, actions and 600-ball result remain unchanged.
 
 | Field | Expected value |
 |---|---|
@@ -214,21 +217,21 @@ wall-clock read time are excluded from the causal identities.
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `3cee4145eb43601983f7653986ea08f23cc7d9e2d38f07b52d3205b15f4285d4` |
+| `engine_digest` | `15a668d05cbb1638199686959f31bab865505d11c70880fa3030b07132776466` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `69022a89af3c9af6a1ac9b784a65792751f280bf9316c0b7c9fb8924a0f7324d` |
-| `execution_id` | `9897f0595e165eb9d9289c99e7031aa95148ec15f4fea9e2da72284f5698b045` |
-| `attempt_id` | `attempt-9897f0595e165eb9d9289c99e7031aa95148ec15f4fea9e2da72284f5698b045` |
-| `assignment_id` | `assignment-435920baf49834445be1ee65964eca376b835bfb0e7fabfb997b7d9ef4e840ba` |
-| request digest | `a495e1a9772344a3ed7432a471b6734d14fbcc9f13b3f897742a0eeb72270652` |
-| request high-water digest | `2e33837679597df262884bc9bba3e0785ba4cf873bf0e01b749c59cd98196a63` |
+| `binding_id` | `95a60572b9bea8146bc85ad7b5ea82e8eb3ccd27490e9b2a993a6ec1aecab074` |
+| `execution_id` | `16e4ed5b0d1ab37ebdaffce03e8e786917fceb829f8fc4d630210b2eb83dc5db` |
+| `attempt_id` | `attempt-16e4ed5b0d1ab37ebdaffce03e8e786917fceb829f8fc4d630210b2eb83dc5db` |
+| `assignment_id` | `assignment-c11d10cdab897c82f81ca43dfb7c9266fd600d149924c7a3d2bd82bf81852300` |
+| request digest | `bdd21fef6c1c7e792d56fb888f71802dfd4c98df519567a597077260f58b19e3` |
+| request high-water digest | `7bfbcff70bafc7362e2052b198ac996f9f73db4185255e07edf26d31be79c144` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED` / `UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600` to runtime robot `R1` |
 | `unload_quantity.balls` | `600` to bound station `H1` |
-| final assignment `event_digest` | `9854c593c73e5cfb2cac7b8473b27252587c5679f8fcea38a526db6561e8ca86` |
-| final `replay_digest` | `0fa0d4b05ecd31eebe6015bee02537783a3fe6f15974b867c3f166e386a3904d` |
+| final assignment `event_digest` | `ff95ac52b016a7cd2dccd8c8f3048e1c7615d73359e86630658f157564232c10` |
+| final `replay_digest` | `b77824498c840ee144a20426c6cacff251ab1cb92aff2271ecc5c16bd8b61df4` |
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not
 invent aliases for them: the real session identity is the
@@ -252,23 +255,23 @@ The observed causal timeline is:
 | Planning results | `planning.outcomes=[]`; no outcome was synthesized |
 
 The start event ID is
-`assignment-event-18d7216946ad4452ae383eadaab4403d6f26dcafe97f04181dddd43dc2386659`.
+`assignment-event-5639ffc5d92e4f1bd8b953be952b389a93d4652adfcd4faffdc89460985771e7`.
 The collection-exit event ID is
-`assignment-event-bb821656f4736a4a6bb13a3b0ed88a93083bba8a4606c7d7681de531fe4a500d`.
+`assignment-event-d4dcfd7e84932ea8899d798983d6b9a7046f0519546707b412c7cc32111c00b9`.
 The unload event ID is
-`assignment-event-edb101951ee19e5a8eabeff3a003645bf88dbe4bec6927c7975fd8d0278a0ec6`;
+`assignment-event-f1f4312889dcfa1c5702ee05c130fb62579f42bdb5e1979e1775b25d4fdea6e6`;
 the terminal event ID is
-`assignment-event-32a688b95a97dc27b4b830b7c4bf71a9d002452bdc413729c513156d88cc09b5`.
+`assignment-event-0be9f72206b429580978c949af7f1af29465f62e6036f7dd80746b3004b7dc32`.
 The read projection retains all fifteen raw source event IDs and the six Edge
 record IDs rather than collapsing the evidence to the 600-ball summary.
 Those Edge record IDs in the observed normal loop are:
 
 ```text
-rec_8ac950670da1c6dadef62b69
-rec_9d44bb5b3bf1bd68cb30c132
-rec_b1b716efec02c049ed1ad2df
-rec_cdc720107f96f8f453e2eb50
-rec_e05be6aa7801439016291583
+rec_6f4495a156910164c950e0cf
+rec_85a9265d4fd693e960872012
+rec_c3a0bdd1c5d526a88f967993
+rec_d9a8a855ffbd4bce9797c610
+rec_dcf1b056cde77f71f618c29e
 rec_fbf9d67c03833c163d455189
 ```
 
