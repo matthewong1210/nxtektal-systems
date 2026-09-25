@@ -214,21 +214,21 @@ wall-clock read time are excluded from the causal identities.
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `6c5b3c8406304a48ef8910a368f7fb7d24c35d2bd00c89c4981b38a400c74131` |
+| `engine_digest` | `3cee4145eb43601983f7653986ea08f23cc7d9e2d38f07b52d3205b15f4285d4` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `45c1c687bd766535b64471aaaaa16c5bca3be4ec4810e22bee330b8af932b183` |
-| `execution_id` | `f6a8ed06ae68ffe36a941abc3b4763b17cd699e74069fac1e5e041366346d7d9` |
-| `attempt_id` | `attempt-f6a8ed06ae68ffe36a941abc3b4763b17cd699e74069fac1e5e041366346d7d9` |
-| `assignment_id` | `assignment-3bc3c03294671642f4825a8a5bfd619b8c85c16c338a5daf32d3764b6997665d` |
-| request digest | `dfa579f944f6db85512ae674976e6b5680e52b9281c5579cdbe61cee7d04e1c6` |
-| request high-water digest | `bb8d0ce02097474e90d70ab7431ca291feda44e61d1fc70c1e7d166735719318` |
+| `binding_id` | `69022a89af3c9af6a1ac9b784a65792751f280bf9316c0b7c9fb8924a0f7324d` |
+| `execution_id` | `9897f0595e165eb9d9289c99e7031aa95148ec15f4fea9e2da72284f5698b045` |
+| `attempt_id` | `attempt-9897f0595e165eb9d9289c99e7031aa95148ec15f4fea9e2da72284f5698b045` |
+| `assignment_id` | `assignment-435920baf49834445be1ee65964eca376b835bfb0e7fabfb997b7d9ef4e840ba` |
+| request digest | `a495e1a9772344a3ed7432a471b6734d14fbcc9f13b3f897742a0eeb72270652` |
+| request high-water digest | `2e33837679597df262884bc9bba3e0785ba4cf873bf0e01b749c59cd98196a63` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED` / `UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600` to runtime robot `R1` |
 | `unload_quantity.balls` | `600` to bound station `H1` |
-| final assignment `event_digest` | `cad049df3f1be7e1f51270bee6ccee298407ae5afc2064ca0722f279bd84e23d` |
-| final `replay_digest` | `4783b289d33daf2f3bc09563726d35edd07f82e48e417f2940ec4b32532bfc5d` |
+| final assignment `event_digest` | `9854c593c73e5cfb2cac7b8473b27252587c5679f8fcea38a526db6561e8ca86` |
+| final `replay_digest` | `0fa0d4b05ecd31eebe6015bee02537783a3fe6f15974b867c3f166e386a3904d` |
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not
 invent aliases for them: the real session identity is the
@@ -252,23 +252,23 @@ The observed causal timeline is:
 | Planning results | `planning.outcomes=[]`; no outcome was synthesized |
 
 The start event ID is
-`assignment-event-77f04423218f84e1781ed9b1636f968e2e0e744783060b74ecb67a3b94aae827`.
+`assignment-event-18d7216946ad4452ae383eadaab4403d6f26dcafe97f04181dddd43dc2386659`.
 The collection-exit event ID is
-`assignment-event-81515e140285cfe0cad8ec409d36c5dd5e19a7c6d3be199a6210a4cd110ad0cc`.
+`assignment-event-bb821656f4736a4a6bb13a3b0ed88a93083bba8a4606c7d7681de531fe4a500d`.
 The unload event ID is
-`assignment-event-fbc70ad71939471c37a630086834d324209242a2dadd9268ca2e038cbcff0f5d`;
+`assignment-event-edb101951ee19e5a8eabeff3a003645bf88dbe4bec6927c7975fd8d0278a0ec6`;
 the terminal event ID is
-`assignment-event-085580c4f92d8f3eb906839ab5275e98475483c8b64153e30957d2cd8e269903`.
+`assignment-event-32a688b95a97dc27b4b830b7c4bf71a9d002452bdc413729c513156d88cc09b5`.
 The read projection retains all fifteen raw source event IDs and the six Edge
 record IDs rather than collapsing the evidence to the 600-ball summary.
 Those Edge record IDs in the observed normal loop are:
 
 ```text
-rec_4893376da211d23ff1da2cca
-rec_7f7f498b52823deadbd22a11
-rec_92669c32c41f839f9171f8a9
-rec_c3a88a5882f1cfc5c8ef16db
-rec_d03d5e98428c32b97e3bfc9d
+rec_8ac950670da1c6dadef62b69
+rec_9d44bb5b3bf1bd68cb30c132
+rec_b1b716efec02c049ed1ad2df
+rec_cdc720107f96f8f453e2eb50
+rec_e05be6aa7801439016291583
 rec_fbf9d67c03833c163d455189
 ```
 

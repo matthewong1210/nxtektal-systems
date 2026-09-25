@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from nxt_edge_task.contracts import TaskRequest, TaskEvent, EventKind
-from nxt_edge_task.journal import JsonlJournal, RecordSpec, JournalIntegrityError
+from nxt_edge_task.journal import JsonlJournal, JournalRecord, RecordSpec, JournalIntegrityError
 from nxt_range_ops.core.assignment_evidence import AssignmentCandidate, AssignmentEvidence
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -63,6 +63,49 @@ def setup(api, tmp_path):
     return store, binding, request
 
 
+def setup_without_acceptance(api, tmp_path):
+    identity, planning, edge_records = inputs(tmp_path / "binding")
+    store = api.CollectionExecutionStore(tmp_path / "execution.jsonl", identity)
+    binding = store.bind_confirmed_tasks(
+        planning, edge_records, identity, 60
+    )[0]
+    request = api.make_request(
+        binding,
+        "request-preacceptance",
+        "2026-09-16T00:01:00Z",
+        "2026-09-16T00:05:00Z",
+    )
+    store.submit(request)
+    return store, binding, request
+
+
+def append_incarnation_rejection(tmp_path, request, **overrides):
+    values = dict(
+        site_id="synthetic-site",
+        deployment_id="synthetic-sim",
+        simulation_env_id="fixture",
+        task_id=request["task_id"],
+        robot_id="picker-01",
+        boot_id="fixture-incarnation-002-2",
+        boot_sequence=2,
+        event_sequence=0,
+        kind=EventKind.REJECTED,
+        reason_code="incarnation_mismatch",
+        detail="request targets a prior device incarnation",
+        reported_at_utc="2026-09-16T00:01:00Z",
+        phase=None,
+    )
+    values.update(overrides)
+    event = TaskEvent(**values)
+    journal = JsonlJournal(tmp_path / "device.jsonl")
+    return journal.append(RecordSpec(
+        "task_event_persisted",
+        "DEVICE",
+        event.reported_at_utc,
+        {"event": event.to_dict()},
+    ))
+
+
 WAIT = {"name": "Wait", "index": 0, "robot_id": None, "target_id": None}
 COLLECT = {"name": "AssignCollection", "index": 1, "robot_id": "R1", "target_id": "NEAR_LEFT"}
 UNLOAD = {"name": "SendToHandoff", "index": 2, "robot_id": "R1", "target_id": None}
@@ -111,6 +154,161 @@ def restart(store, req, tmp_path, *, running, now=120):
     record = journal.append(RecordSpec("task_event_persisted","DEVICE",event.reported_at_utc,{"event":event.to_dict()}))
     store.record_device_restart_outcome(req["execution_id"],record,now_sim_t_s=now)
     return record
+
+
+def test_preacceptance_incarnation_rejection_projects_verified_identity_terminal(api, tmp_path):
+    store, _binding, request = setup_without_acceptance(api, tmp_path)
+    edge_record = append_incarnation_rejection(tmp_path, request)
+
+    store.record_preacceptance_rejection(
+        request["execution_id"], edge_record, now_sim_t_s=60
+    )
+
+    record = conform(store)["executions"][0]
+    assert (record["state"], record["reason"], record["stage"]) == (
+        "REJECTED", "IDENTITY_CONFLICT", "TERMINAL"
+    )
+    assert record["started_sim_t_s"] is None
+    assert record["execution_deadline_sim_t_s"] is None
+    assert record["terminal_sim_t_s"] == 60
+    assert record["assignment_id"] is None
+    assert record["actions"] == []
+    assert record["raw_quantity"]["status"] == "NOT_REACHED"
+    assert record["unload_quantity"]["status"] == "NOT_REACHED"
+    assert record["raw_quantity"]["balls"] is None
+    assert record["unload_quantity"]["balls"] is None
+    assert record["edge_evidence"] == {
+        "task_id": request["task_id"],
+        "accepted": False,
+        "verified": True,
+        "effective_state": "REJECTED",
+        "reason": "incarnation_mismatch",
+        "terminal_states": ["REJECTED"],
+        "event_ids": [edge_record.record_id],
+        "result_verification": "VERIFIED",
+    }
+    assert record["conflicts"]["incarnation_mismatch"] is True
+    assert record["device_protection"] == {
+        "protected": True,
+        "reasons": ["INCARNATION_MISMATCH"],
+        "authorization_blocked": True,
+    }
+
+
+def test_preacceptance_incarnation_rejection_is_record_idempotent(api, tmp_path):
+    store, _binding, request = setup_without_acceptance(api, tmp_path)
+    edge_record = append_incarnation_rejection(tmp_path, request)
+    store.record_preacceptance_rejection(
+        request["execution_id"], edge_record, now_sim_t_s=60
+    )
+    before = store.journal.path.read_bytes()
+
+    store.record_preacceptance_rejection(
+        request["execution_id"], edge_record, now_sim_t_s=60
+    )
+
+    assert store.journal.path.read_bytes() == before
+    reopened = api.CollectionExecutionStore(store.journal.path, store.session_identity)
+    assert conform(reopened) == conform(store)
+
+
+def test_preacceptance_rejection_retry_rejects_boolean_record_sequence_alias(api, tmp_path):
+    store, _binding, request = setup_without_acceptance(api, tmp_path)
+    edge_record = append_incarnation_rejection(tmp_path, request)
+    store.record_preacceptance_rejection(
+        request["execution_id"], edge_record, now_sim_t_s=60
+    )
+    before = store.journal.path.read_bytes()
+    malformed = JournalRecord(
+        edge_record.schema_version,
+        True,
+        edge_record.record_id,
+        edge_record.record_kind,
+        edge_record.origin,
+        edge_record.recorded_at_utc,
+        edge_record.payload,
+    )
+
+    with pytest.raises(api.CollectionExecutionError):
+        store.record_preacceptance_rejection(
+            request["execution_id"], malformed, now_sim_t_s=60
+        )
+
+    assert store.journal.path.read_bytes() == before
+
+
+def test_preacceptance_rejection_retry_rejects_boolean_event_sequence_alias(api, tmp_path):
+    store, _binding, request = setup_without_acceptance(api, tmp_path)
+    edge_record = append_incarnation_rejection(tmp_path, request)
+    store.record_preacceptance_rejection(
+        request["execution_id"], edge_record, now_sim_t_s=60
+    )
+    before = store.journal.path.read_bytes()
+    payload = edge_record.to_dict()["payload"]
+    payload["event"]["event_sequence"] = False
+    malformed = JournalRecord(
+        edge_record.schema_version,
+        edge_record.sequence,
+        edge_record.record_id,
+        edge_record.record_kind,
+        edge_record.origin,
+        edge_record.recorded_at_utc,
+        payload,
+    )
+
+    with pytest.raises(api.CollectionExecutionError):
+        store.record_preacceptance_rejection(
+            request["execution_id"], malformed, now_sim_t_s=60
+        )
+
+    assert store.journal.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"event_sequence": 1},
+        {"reason_code": "invalid_request"},
+        {"boot_id": "fixture-incarnation-001-2"},
+        {"robot_id": "picker-02"},
+        {"site_id": "other-site"},
+        {"deployment_id": "other-deployment"},
+        {"task_id": "task_" + "a" * 24},
+    ],
+)
+def test_preacceptance_rejection_near_misses_fail_without_append(api, tmp_path, overrides):
+    store, _binding, request = setup_without_acceptance(api, tmp_path)
+    edge_record = append_incarnation_rejection(tmp_path, request, **overrides)
+    before = store.journal.path.read_bytes()
+
+    with pytest.raises(api.CollectionExecutionError):
+        store.record_preacceptance_rejection(
+            request["execution_id"], edge_record, now_sim_t_s=60
+        )
+
+    assert store.journal.path.read_bytes() == before
+
+
+def test_preacceptance_rejection_refuses_a_second_record_id(api, tmp_path):
+    store, _binding, request = setup_without_acceptance(api, tmp_path)
+    first = append_incarnation_rejection(tmp_path / "first", request)
+    second = append_incarnation_rejection(
+        tmp_path / "second",
+        request,
+        detail="same verified rejection carried by a different record",
+    )
+    assert first.record_id != second.record_id
+    store.record_preacceptance_rejection(
+        request["execution_id"], first, now_sim_t_s=60
+    )
+    before = store.journal.path.read_bytes()
+
+    with pytest.raises(api.CollectionExecutionError):
+        store.record_preacceptance_rejection(
+            request["execution_id"], second, now_sim_t_s=60
+        )
+
+    assert store.journal.path.read_bytes() == before
 
 
 def test_binding_is_content_addressed_and_reads_cycle_at_binding_time(api, tmp_path):

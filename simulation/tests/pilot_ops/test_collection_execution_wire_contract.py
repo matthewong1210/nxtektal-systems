@@ -273,7 +273,51 @@ def relations(data):
                     assert runtime["collection_exit_reason"] == "HUMAN_ASSISTANCE_REQUIRED"
         # Conflict overlays retain the causal runtime exit; they never rewrite
         # a preemption/fault into success or discard its required protection.
+        raw, unload = record["raw_quantity"], record["unload_quantity"]
         flags = record["conflicts"]
+        true_conflicts = [name for name, enabled in flags.items() if enabled]
+        known_identity_conflict = (
+            record["state"] == "REJECTED"
+            and record["reason"] == "IDENTITY_CONFLICT"
+            and record["stage"] == "TERMINAL"
+            and start is None
+            and deadline is None
+            and record["assignment_id"] is None
+            and not record["actions"]
+            and raw["status"] == unload["status"] == "NOT_REACHED"
+            and raw["balls"] is unload["balls"] is None
+            and raw["assignment_id"] is unload["assignment_id"] is None
+            and raw["source_event_ids"] == unload["source_event_ids"] == []
+            and raw["event_digest"] is unload["event_digest"] is None
+            and not runtime["start_admitted"]
+            and not runtime["assignment_accepted"]
+            and not runtime["assignment_terminal"]
+            and runtime["collection_exit_reason"] is None
+            and runtime["event_sequence_complete"] is True
+            and runtime["event_start_sequence"] is None
+            and runtime["event_end_sequence"] is None
+            and runtime["event_digest"] is None
+            and runtime["conservation_passed"] is None
+            and runtime["payload_parity_passed"] is None
+            and edge["accepted"] is False
+            and edge["verified"] is True
+            and edge["effective_state"] == "REJECTED"
+            and edge["reason"] == "incarnation_mismatch"
+            and edge["terminal_states"] == ["REJECTED"]
+            and len(edge["event_ids"]) == 1
+            and edge["result_verification"] == "VERIFIED"
+            and protection == {"protected": True, "reasons": ["INCARNATION_MISMATCH"],
+                               "authorization_blocked": True}
+            and true_conflicts == ["incarnation_mismatch"]
+        )
+        identity_conflict_claim = (
+            record["reason"] == "IDENTITY_CONFLICT"
+            or edge["reason"] == "incarnation_mismatch"
+            or flags["incarnation_mismatch"]
+            or "INCARNATION_MISMATCH" in protection["reasons"]
+        )
+        if identity_conflict_claim:
+            assert known_identity_conflict, "contradictory pre-acceptance identity conflict"
         conflict_overlay = record["state"] == "INCONCLUSIVE" and (
             (record["reason"] == "TERMINAL_CONFLICT" and flags["terminal_conflict"])
             or (record["reason"] == "REPLAY_MISMATCH" and flags["replay_mismatch"]))
@@ -294,7 +338,6 @@ def relations(data):
             assert runtime["collection_exit_reason"] == "EXECUTION_TIMEOUT"
             assert start is not None and end is not None and end == deadline
             assert record["state"] in ("PARTIAL", "FAILED", "INCONCLUSIVE")
-        raw, unload = record["raw_quantity"], record["unload_quantity"]
         for quantity, milestone in ((raw, "RAW_COLLECTED_TO_ROBOT"), (unload, "UNLOADED_TO_STATION")):
             assert quantity["milestone"] == milestone
             destination = binding["runtime_robot_id"] if milestone == "RAW_COLLECTED_TO_ROBOT" else binding["handoff_station_id"]
@@ -385,7 +428,7 @@ def relations(data):
                 assert runtime["assignment_terminal"]
             else:
                 assert raw["balls"] is None
-        if any(record["conflicts"].values()):
+        if any(record["conflicts"].values()) and not known_identity_conflict:
             assert record["state"] == "INCONCLUSIVE"
             assert record["device_protection"]["protected"]
         if edge["effective_state"] == "CONFLICT":
@@ -1036,6 +1079,39 @@ def parity_case(kind):
     return snapshot(kind + ".json")
 
 
+def preacceptance_identity_conflict_case():
+    data = parity_case("pending")
+    record = data["executions"][0]
+    record.update(
+        state="REJECTED",
+        stage="TERMINAL",
+        reason="IDENTITY_CONFLICT",
+        terminal_sim_t_s=60,
+        assignment_id=None,
+        started_sim_t_s=None,
+        execution_deadline_sim_t_s=None,
+        actions=[],
+        success_display_allowed=False,
+    )
+    record["edge_evidence"] = {
+        "task_id": record["task_id"],
+        "accepted": False,
+        "verified": True,
+        "effective_state": "REJECTED",
+        "reason": "incarnation_mismatch",
+        "terminal_states": ["REJECTED"],
+        "event_ids": ["device-record-preacceptance"],
+        "result_verification": "VERIFIED",
+    }
+    record["device_protection"] = {
+        "protected": True,
+        "reasons": ["INCARNATION_MISMATCH"],
+        "authorization_blocked": True,
+    }
+    record["conflicts"]["incarnation_mismatch"] = True
+    return data
+
+
 def change_fields(value, changes):
     for path, replacement in changes.items():
         parts = path.split(".")
@@ -1046,6 +1122,30 @@ def change_fields(value, changes):
             target[int(parts[-1])] = replacement
         else:
             target[parts[-1]] = replacement
+
+
+def test_preacceptance_identity_conflict_accepts_exact_verified_rejection(schema):
+    data = preacceptance_identity_conflict_case()
+    validate_snapshot(schema, data)
+    record = data["executions"][0]
+    assert (record["state"], record["reason"]) == ("REJECTED", "IDENTITY_CONFLICT")
+    assert record["conflicts"]["incarnation_mismatch"] is True
+
+
+@pytest.mark.parametrize("changes", [
+    {"state": "INCONCLUSIVE"},
+    {"started_sim_t_s": 60},
+    {"assignment_id": "assignment-illegal"},
+    {"conflicts.terminal_conflict": True},
+    {"runtime_evidence.event_sequence_complete": False},
+    {"raw_quantity.source_event_ids": ["runtime-evidence"],
+     "raw_quantity.event_digest": "a" * 64},
+])
+def test_preacceptance_identity_conflict_rejects_contradictory_evidence(schema, changes):
+    data = preacceptance_identity_conflict_case()
+    change_fields(data["executions"][0], changes)
+    with pytest.raises((AssertionError, ValidationError)):
+        validate_snapshot(schema, data)
 
 
 @pytest.mark.parametrize(("kind", "changes"), [

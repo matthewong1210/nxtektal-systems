@@ -300,6 +300,54 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
   requireEvidence((runtime.event_start_sequence === null) === (runtime.event_end_sequence === null));
   if (runtime.event_start_sequence !== null) requireEvidence(runtime.event_end_sequence! >= runtime.event_start_sequence && runtime.event_digest !== null);
   requireEvidence(edge.task_id === r.task_id && p.protected === (p.reasons.length > 0) && (!p.protected || p.authorization_blocked));
+  const trueConflicts = Object.entries(r.conflicts)
+    .filter(([, enabled]) => enabled)
+    .map(([name]) => name);
+  const knownIdentityConflict =
+    r.state === "REJECTED" &&
+    r.reason === "IDENTITY_CONFLICT" &&
+    r.stage === "TERMINAL" &&
+    start === null &&
+    deadline === null &&
+    r.assignment_id === null &&
+    r.actions.length === 0 &&
+    raw.status === "NOT_REACHED" &&
+    unload.status === "NOT_REACHED" &&
+    raw.balls === null &&
+    unload.balls === null &&
+    raw.assignment_id === null &&
+    unload.assignment_id === null &&
+    raw.source_event_ids.length === 0 &&
+    unload.source_event_ids.length === 0 &&
+    raw.event_digest === null &&
+    unload.event_digest === null &&
+    !runtime.start_admitted &&
+    !runtime.assignment_accepted &&
+    !runtime.assignment_terminal &&
+    runtime.collection_exit_reason === null &&
+    runtime.event_sequence_complete === true &&
+    runtime.event_start_sequence === null &&
+    runtime.event_end_sequence === null &&
+    runtime.event_digest === null &&
+    runtime.conservation_passed === null &&
+    runtime.payload_parity_passed === null &&
+    edge.accepted === false &&
+    edge.verified === true &&
+    edge.effective_state === "REJECTED" &&
+    edge.reason === "incarnation_mismatch" &&
+    edge.terminal_states.length === 1 &&
+    edge.terminal_states[0] === "REJECTED" &&
+    edge.event_ids.length === 1 &&
+    edge.result_verification === "VERIFIED" &&
+    p.protected &&
+    p.authorization_blocked &&
+    p.reasons.length === 1 &&
+    p.reasons[0] === "INCARNATION_MISMATCH" &&
+    trueConflicts.length === 1 &&
+    trueConflicts[0] === "incarnation_mismatch";
+  const identityConflictClaim = r.reason === "IDENTITY_CONFLICT" || edge.reason === "incarnation_mismatch" ||
+    r.conflicts.incarnation_mismatch || p.reasons.includes("INCARNATION_MISMATCH");
+  if (identityConflictClaim) requireEvidence(knownIdentityConflict);
   const terminals = new Set(edge.terminal_states);
   const conflict = terminals.size > 1 || r.conflicts.terminal_conflict || r.conflicts.replay_mismatch;
   requireEvidence(edge.verified === (edge.result_verification === "VERIFIED"));
@@ -329,7 +377,7 @@ function validateRecord(r: ExecutionRecord, b: Binding, s: CollectionExecutionsS
   } else if (r.state === "FAILED") requireEvidence(edge.effective_state === "FAILED" && raw.status !== "INCOMPLETE" &&
     unload.status !== "INCOMPLETE" && runtime.event_sequence_complete &&
     (start === null ? raw.balls === null : raw.status === "COMPLETE" && raw.balls === 0 && runtime.assignment_terminal));
-  if (Object.values(r.conflicts).some(Boolean)) requireEvidence(r.state === "INCONCLUSIVE" && p.protected);
+  if (trueConflicts.length > 0 && !knownIdentityConflict) requireEvidence(r.state === "INCONCLUSIVE" && p.protected);
   if (r.reason === "POLICY_SLOT_MISSED") requireEvidence(r.state === "MISSED" && start === null && end !== null && end >= r.latest_start_sim_t_s && edge.reason === "unknown:policy_slot_missed");
   if (r.reason === "SAFETY_REJECTED") requireEvidence(r.state === "REJECTED" && start === null && edge.reason === "unknown:safety_rejected" && r.actions.some((a) => a.safety_shield === "REJECTED"));
   if (r.reason === "INSUFFICIENT_SESSION_HORIZON" || edge.reason === "unknown:insufficient_session_horizon") {

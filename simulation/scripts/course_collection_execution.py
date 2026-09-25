@@ -18,14 +18,14 @@ from pathlib import Path
 import re
 
 from nxt_edge_task.contracts import TaskRequest, TaskEvent
-from nxt_edge_task.journal import JsonlJournal, RecordSpec, JournalIntegrityError
+from nxt_edge_task.journal import JsonlJournal, RecordSpec, JournalRecord, JournalIntegrityError
 
 ARBITER = "WAIT_ONLY_NON_PREEMPTIVE_V1"
 SESSION_KEYS = ("series_id", "session_id", "round_id", "round_index", "engine_digest", "config_digest",
                 "session_epoch_utc", "control_interval_s", "session_end_sim_t_s")
 RECORD_KINDS = frozenset({"session", "binding", "binding_window", "request", "receipt", "accepted", "action_prepared",
                           "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence", "replay_failure",
-                          "committed_replay_failure"})
+                          "committed_replay_failure", "preacceptance_rejection"})
 TERMINALS = {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
 _OUTBOX_PHASE_ORDER = {
     "collecting": 0,
@@ -57,9 +57,13 @@ def primitive(value):
     return value
 
 
+def canonical(value):
+    return json.dumps(primitive(value), sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode()
+
+
 def digest(value):
-    return hashlib.sha256(json.dumps(primitive(value), sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(canonical(value)).hexdigest()
 
 
 def _validate(value, name):
@@ -287,6 +291,86 @@ def _terminal(r, state, reason, now):
     if reason in ("ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"): _protect(r, reason)
 
 
+def _apply_preacceptance_rejection(state, payload):
+    _require(set(payload) == {"execution_id", "now_sim_t_s", "edge_record"}, "invalid pre-acceptance rejection")
+    execution_id = payload["execution_id"]
+    _require(execution_id in state["executions"], "unknown execution")
+    _require(execution_id not in state["preacceptance_rejections"], "duplicate pre-acceptance rejection")
+    _require(state["replay_failure"] is None, "session sealed by replay mismatch")
+    now = payload["now_sim_t_s"]
+    _require(type(now) in (int, float) and math.isfinite(now) and now >= state["now_sim_t_s"],
+             "pre-acceptance rejection clock regression")
+
+    evidence = payload["edge_record"]
+    record_keys = {"schema_version", "sequence", "record_id", "record_kind", "origin", "recorded_at_utc", "payload"}
+    _require(isinstance(evidence, dict) and set(evidence) == record_keys, "verified device JournalRecord required")
+    _require(evidence["schema_version"] == "nxt-edge-task/journal/v1"
+             and type(evidence["sequence"]) is int and evidence["sequence"] > 0
+             and evidence["record_kind"] == "task_event_persisted"
+             and evidence["origin"] == "DEVICE"
+             and isinstance(evidence["payload"], dict) and set(evidence["payload"]) == {"event"},
+             "persisted device task event required")
+    expected_record_id = "rec_" + digest({
+        "sequence": evidence["sequence"],
+        "record_kind": evidence["record_kind"],
+        "origin": evidence["origin"],
+        "recorded_at_utc": evidence["recorded_at_utc"],
+        "payload": evidence["payload"],
+    })[:24]
+    _require(evidence["record_id"] == expected_record_id, "device record identity mismatch")
+    try:
+        event = TaskEvent.from_dict(evidence["payload"]["event"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CollectionExecutionError("conflict", "invalid pre-acceptance task event") from exc
+    _require(evidence["recorded_at_utc"] == event.reported_at_utc, "device record/event clock mismatch")
+    _require(event.event_sequence == 0 and event.kind.value == "REJECTED"
+             and event.reason_code == "incarnation_mismatch" and event.phase is None,
+             "not an incarnation-mismatch request rejection")
+
+    r = state["executions"][execution_id]
+    b = state["bindings"][r["binding_id"]]
+    _require(event.task_id == r["task_id"] and event.robot_id == b["robot_id"]
+             and event.site_id == b["site_id"] and event.deployment_id == b["deployment_id"],
+             "pre-acceptance rejection identity mismatch")
+    _require(event.incarnation != r["incarnation"], "rejection does not prove a different incarnation")
+    _require(execution_id not in state["accepted"] and r["state"] == "PENDING"
+             and r["stage"] == "WAITING_FOR_POLICY_SLOT" and r["reason"] is None
+             and r["started_sim_t_s"] is None and r["execution_deadline_sim_t_s"] is None
+             and r["terminal_sim_t_s"] is None and r["assignment_id"] is None
+             and not r["actions"] and state["pending_prepared"] is None,
+             "rejection arrived after execution authorization")
+    _require(r["runtime_evidence"] == {
+        "start_admitted": False, "assignment_accepted": False, "assignment_terminal": False,
+        "collection_exit_reason": None, "event_sequence_complete": True,
+        "event_start_sequence": None, "event_end_sequence": None, "event_digest": None,
+        "conservation_passed": None, "payload_parity_passed": None,
+    }, "rejection contradicts runtime evidence")
+    _require(r["edge_evidence"] == {
+        "task_id": r["task_id"], "accepted": False, "verified": False,
+        "effective_state": "CREATED", "reason": None, "terminal_states": [],
+        "event_ids": [], "result_verification": "UNVERIFIED",
+    }, "rejection contradicts prior Edge evidence")
+    _require(not any(r["conflicts"].values()) and r["device_protection"] == {
+        "protected": False, "reasons": [], "authorization_blocked": False,
+    }, "rejection follows an existing conflict")
+    for quantity in (r["raw_quantity"], r["unload_quantity"]):
+        _require(quantity["status"] == "NOT_REACHED" and quantity["balls"] is None
+                 and quantity["assignment_id"] is None and not quantity["source_event_ids"]
+                 and quantity["event_digest"] is None,
+                 "rejection contradicts quantity evidence")
+    record_id = evidence["record_id"]
+    _require(all(existing["edge_record"]["record_id"] != record_id
+                 for existing in state["preacceptance_rejections"].values()),
+             "duplicate pre-acceptance rejection record")
+
+    _terminal(r, "REJECTED", "IDENTITY_CONFLICT", now)
+    r["edge_evidence"].update(reason="incarnation_mismatch", event_ids=[record_id])
+    r["conflicts"]["incarnation_mismatch"] = True
+    _protect(r, "INCARNATION_MISMATCH")
+    state["preacceptance_rejections"][execution_id] = deepcopy(payload)
+    state["now_sim_t_s"] = now
+
+
 def _runtime(r, snapshot, now, *, prefix_complete=True):
     """Only correlated actual-transfer events establish quantities."""
     e = primitive(snapshot)
@@ -368,7 +452,7 @@ class CollectionExecutionStore:
         self.journal.append_via(build)
 
     def _replay(self, records):
-        state = dict(bindings={}, windows={}, requests={}, receipts={}, executions={}, accepted=set(), tick_sequence=0,
+        state = dict(bindings={}, windows={}, requests={}, receipts={}, executions={}, accepted=set(), preacceptance_rejections={}, tick_sequence=0,
                      replay_digest=digest({"session": self.session_identity, "policy_id": self.policy_id, "arbiter": ARBITER}),
                      pending_prepared=None, commits={}, outbox={}, confirmed={}, blocked_outbox=set(), cursor=None, now_sim_t_s=0,
                      request_high_water=digest([]), edge_without_commit=False, replay_plan=[], replay_failure=None)
@@ -423,6 +507,8 @@ class CollectionExecutionStore:
                 state["accepted"].add(p["execution_id"])
                 r["edge_evidence"].update(accepted=True, effective_state="ACCEPTED", verified=True, result_verification="VERIFIED")
                 r["edge_evidence"]["event_ids"].append(p["event_id"])
+            elif kind == "preacceptance_rejection":
+                _apply_preacceptance_rejection(state, p)
             elif kind == "action_prepared":
                 _require(state["replay_failure"] is None, "session sealed by replay mismatch")
                 _require(state["pending_prepared"] is None and p["tick_sequence"] == state["tick_sequence"] + 1
@@ -681,6 +767,31 @@ class CollectionExecutionStore:
             _require(state["replay_failure"] is None, "session sealed against new authorization")
             _require(state["executions"][execution_id]["state"] not in TERMINALS, "acceptance after terminal execution")
             return [self._spec("accepted", dict(execution_id=execution_id, event_id=event_id), state["now_sim_t_s"])]
+        self.journal.append_via(build)
+
+    def record_preacceptance_rejection(
+        self,
+        execution_id: str,
+        edge_record: JournalRecord,
+        *,
+        now_sim_t_s: float,
+    ) -> None:
+        _require(isinstance(edge_record, JournalRecord), "verified device JournalRecord required")
+        payload = {
+            "execution_id": execution_id,
+            "now_sim_t_s": now_sim_t_s,
+            "edge_record": edge_record.to_dict(),
+        }
+
+        def build(records):
+            state = self._replay(records)
+            existing = state["preacceptance_rejections"].get(execution_id)
+            if existing is not None:
+                _require(canonical(existing) == canonical(payload), "conflicting pre-acceptance rejection")
+                return []
+            _apply_preacceptance_rejection(state, payload)
+            return [self._spec("preacceptance_rejection", payload, now_sim_t_s)]
+
         self.journal.append_via(build)
 
     def arbitrate(self, original_action, now_sim_t_s, runtime_view):
