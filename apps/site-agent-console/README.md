@@ -26,7 +26,7 @@ session is PAUSED. While that read is fresh, the task panel's schedule form
 compares dates with the shared simulation clock
 (`collectionExecutionSimulationNow`) instead of the wall clock; a stale
 reading disables scheduling. Service mode and write availability come only
-from the validated `nxt-pilot-dispatch/service-capabilities/v1` block; a
+from the validated `nxt-pilot-dispatch/service-capabilities/v1` or `/v2` block; a
 missing block is `UNDECLARED` and grants no write. The explicit
 `LEGACY_PILOT_DISPATCH` mode retains the legacy wall-clock scheduling rule,
 while `FIXED_V3_EXECUTION` identifies the simulator-backed session.
@@ -36,6 +36,28 @@ directly dispatched submit is refused before any request; `UNDECLARED` keeps
 records readable and withholds every write; SUPPORTED still passes the shared
 15-second health gate, request validation, busy state and record-level
 preconditions such as a notification's `can_resolve`.
+Continuous collection v4 adds the `nxt-pilot-dispatch/service-capabilities/v2`
+declaration with its single mode `CONTINUOUS_V3_EXECUTION`, shown as
+`CONTINUOUS V3 SESSION`. Its frozen v2 matrix installs the four Planning writes
+(operating input, plan, confirmation, outcome), pending schedule cancellation
+and notification acknowledgement and resolution, and withholds only direct
+schedule creation: a confirmed Planning plan creates the bound schedule, so the
+schedule form stays disabled with exactly that reason while the cancellation
+form of a pending schedule remains available. Under this mode the execution
+panel shows every execution record of the session as its own card in the
+service's array order — never re-sorted by state, time or priority — so a
+SUCCEEDED history record and a RUNNING or PENDING record appear together, and a
+terminal record never marks the session ENDED; the session state comes only
+from the snapshot. The panel stays entirely read-only: its only control
+re-reads the projection, and it adds no start, stop, rerun or recover action
+and no execution POST. A declared SUPPORTED operation still passes the shared
+15-second scheduler health gate, the busy state, request validation and each
+record's own conditions, and a Planning request with an unknown outcome keeps
+its request ID, body and draft through capability, health and freshness changes
+and is recovered GET-first by that ID. The tests read the backend-generated
+two-task witness
+`simulation/tests/fixtures/continuous-collection-v4/two-task-active.json`
+directly through the same strict parser.
 The task panel names its device source only as the service reports it and
 does not infer a device kind from the transport. The integrated V3 service
 serves the static console and the read-only execution route from one process;

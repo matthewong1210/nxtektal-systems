@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parseCollectionExecutions, type CollectionExecutionsSnapshot } from "../lib/collection-executions";
+import { parseCollectionExecutions, type CollectionExecutionsSnapshot, type QuantityEvidence } from "../lib/collection-executions";
 
 export const EXAMPLE_NAMES = [
   "success",
@@ -134,4 +134,50 @@ export function witnessData(): Record<string, unknown> {
 }
 export function witnessSnapshot(): CollectionExecutionsSnapshot {
   return parseCollectionExecutions(witnessData());
+}
+
+/** Backend-generated witness of the continuous V4 two-task loop (Task 6,
+ * fixture `two-task-active.json`): one SUCCEEDED history record and one
+ * RUNNING record, in the service's own array order (which is not the
+ * business order). It is read directly from the checked-in file and passes
+ * through the real parser; nothing is copied, rewritten, re-identified or
+ * reordered here, and it is still a fixture, not a live service read. */
+const CONTINUOUS_WITNESS = join(import.meta.dirname, "..", "..", "..", "simulation", "tests", "fixtures", "continuous-collection-v4", "two-task-active.json");
+export function continuousTwoTaskWitnessData(): Record<string, unknown> {
+  return JSON.parse(readFileSync(CONTINUOUS_WITNESS, "utf8")) as Record<string, unknown>;
+}
+export function continuousTwoTaskWitness(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(continuousTwoTaskWitnessData());
+}
+
+/** The same two-task session at an earlier instant, before the second task
+ * started: that record is accepted but still waiting for its policy slot
+ * (PENDING, no start, no assignment, no ledger evidence), the terminal
+ * record is untouched, and every identity and the array order are the
+ * witness's own. Derived with the parser's PENDING rules (the recipe of
+ * `pendingSnapshot`); left unparsed so a scripted service can serve it. */
+export function continuousTwoTaskPendingData(): Record<string, unknown> {
+  const s = continuousTwoTaskWitnessData() as unknown as Mutable;
+  const running = s.executions.find((record) => record.state === "RUNNING");
+  if (!running) throw new Error("the two-task witness has no RUNNING record to rewind");
+  // After both bindings exist (31200 s) and before the second request's latest start (31380 s).
+  s.now_sim_t_s = 31260;
+  s.simulation_time_utc = "2026-09-16T08:41:00Z";
+  running.state = "PENDING";
+  running.stage = "WAITING_FOR_POLICY_SLOT";
+  running.started_sim_t_s = null;
+  running.execution_deadline_sim_t_s = null;
+  running.assignment_id = null;
+  running.actions = [];
+  running.edge_evidence.effective_state = "ACCEPTED";
+  running.runtime_evidence = {
+    ...running.runtime_evidence,
+    start_admitted: false, assignment_accepted: false, assignment_terminal: false, collection_exit_reason: null,
+    event_start_sequence: null, event_end_sequence: null, event_digest: null, conservation_passed: null, payload_parity_passed: null,
+  };
+  const notReached = (quantity: QuantityEvidence): QuantityEvidence =>
+    ({ ...quantity, status: "NOT_REACHED", balls: null, assignment_id: null, source_event_ids: [], event_digest: null });
+  running.raw_quantity = notReached(running.raw_quantity);
+  running.unload_quantity = notReached(running.unload_quantity);
+  return s as unknown as Record<string, unknown>;
 }

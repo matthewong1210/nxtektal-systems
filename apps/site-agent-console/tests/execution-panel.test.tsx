@@ -39,6 +39,12 @@ describe("session strip: connection freshness, simulation clock and session stat
     expect(html).not.toContain("SESSION PAUSED");
   });
 
+  it("introduces the panel as following confirmed collection tasks (plural, source-neutral) and never as one preset task", () => {
+    const html = clean(render(view(exampleSnapshot("success"))));
+    expect(html).toContain("Follow confirmed collection tasks through this simulated session: admission, durable request, device acceptance, start, collection, unloading and terminal evidence.");
+    expect(html).not.toContain("Follow one confirmed collection task");
+  });
+
   it("marks a PAUSED session on the simulation clock while the service read is fresh", () => {
     const html = clean(render(view(pausedSnapshot())));
     expect(html).toContain("SESSION PAUSED");
@@ -290,6 +296,8 @@ describe("task panel: source-neutral device copy and the shared simulation clock
     const { taskOpsFixture } = await import("./task-ops-fixtures");
     const html = clean(renderToStaticMarkup(<DispatchView view={{ ...INITIAL_TASK_OPS_VIEW, data: taskOpsFixture(), loading: false }} actions={actions} />));
     expect(html).toContain("Transport in_memory");
+    expect(html).toContain("Review collection schedules, follow task progress, and record staff handling in one place.");
+    expect(html).not.toContain("Schedule a collection, follow its progress");
     expect(html).toContain("not inferred here");
     expect(html).toContain("No physical robot or CE82A is connected");
     expect(html).not.toContain("protocol double");
@@ -328,5 +336,88 @@ describe("simulationClockFor never falls back to the wall clock once a V3 snapsh
     expect(simulationClockFor(view(data)).status).toBe("fresh");
     expect(simulationClockFor(view(data, { nowMs: 31_000 })).status).toBe("stale");
     expect(simulationClockFor(view(data, { error: "fetch failed" })).status).toBe("stale");
+  });
+});
+
+describe("continuous V4: the backend-generated two-task witness, read directly and rendered in service order", () => {
+  const CARD_ATTRIBUTE = /data-testid="execution-record-card"[^>]*data-execution-id="([a-f0-9]{64})"/g;
+  const cardOrder = (html: string) => [...html.matchAll(CARD_ATTRIBUTE)].map((match) => match[1]);
+  const cardHtml = (html: string, executionId: string) => {
+    const start = html.indexOf(`data-execution-id="${executionId}"`);
+    expect(start, executionId).toBeGreaterThan(-1);
+    const next = html.indexOf('data-testid="execution-record-card"', start + 1);
+    return html.slice(start, next === -1 ? undefined : next);
+  };
+  const RUNNING_ID = "125688930584b23999ff42f630c60f77f7daef28019dfb65c033db17151a3a24";
+  const SUCCEEDED_ID = "75ac1b88002c03ecdec352ed27d9c306893ac4c29674c891eac1ddf96808f215";
+
+  it("passes the frozen witness through the real parser with its exact replay digest, ACTIVE session, clock and two records", async () => {
+    const { continuousTwoTaskWitness } = await import("./execution-fixtures");
+    const witness = continuousTwoTaskWitness();
+    expect(witness.replay_digest).toBe("c9d746864edf6765da7c2f94dc2f7fff4c6fc6850501f63fd4965419a64880f9");
+    expect(witness.session_state).toBe("ACTIVE");
+    expect(witness.now_sim_t_s).toBe(31800);
+    expect(witness.session_id).toBe("collection-execution-session-v3");
+    // The service array order: the RUNNING record first, the earlier SUCCEEDED record second.
+    expect(witness.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([
+      [RUNNING_ID, "RUNNING", "RAW_COLLECTED_TO_ROBOT", 296, 0],
+      [SUCCEEDED_ID, "SUCCEEDED", "TERMINAL", 600, 600],
+    ]);
+  });
+
+  it("renders one locatable card per execution in exactly the witness's array order, with RUNNING and SUCCEEDED on screen together", async () => {
+    const { continuousTwoTaskWitness } = await import("./execution-fixtures");
+    const witness = continuousTwoTaskWitness();
+    const html = clean(render(view(witness)));
+    expect(cardOrder(html)).toEqual(witness.executions.map((row) => row.execution_id));
+    expect(cardOrder(html)).toEqual([RUNNING_ID, SUCCEEDED_ID]);
+    expect((html.match(/class="dispatch-record exec-record"/g) ?? []).length).toBe(2);
+    const running = cardHtml(html, RUNNING_ID);
+    expect(running).toContain("task_51b158a10d9deba0b1aae545");
+    expect(running).toMatch(/badge-info">RUNNING</);
+    expect(running).toContain("Balls on the robot (milestone)");
+    expect(running).toContain("296 balls · ledger-backed (COMPLETE)");
+    expect(running).toContain("0 balls · ledger-backed (COMPLETE)");
+    expect(running).toContain("Started at t = 31200 s");
+    expect(running).toContain("does not establish success");
+    expect(running).not.toContain("SUCCEEDED");
+    const succeeded = cardHtml(html, SUCCEEDED_ID);
+    expect(succeeded).toContain("task_e67abab7fe5666824af72300");
+    expect(succeeded).toMatch(/badge-ok">SUCCEEDED</);
+    expect((succeeded.match(/600 balls · ledger-backed/g) ?? []).length).toBe(2);
+    expect(succeeded).toContain("Ended at t = 30118.034 s");
+    expect(succeeded).toContain("success_display_allowed");
+    expect(succeeded).not.toContain("RUNNING");
+  });
+
+  it("keeps the session ACTIVE from the snapshot: one terminal record never ends the session, and the only control re-reads", async () => {
+    const { continuousTwoTaskWitness } = await import("./execution-fixtures");
+    const html = clean(render(view(continuousTwoTaskWitness())));
+    expect(html).toContain("SESSION ACTIVE");
+    expect(html).toContain("t = 31800 s");
+    expect(html).toContain("2026-09-16T08:50:00 UTC");
+    expect(html).not.toContain("SESSION ENDED");
+    expect(html).not.toContain("The session has ended");
+    const buttons = [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]);
+    expect(buttons).toEqual(["Retry execution read"]);
+    expect(html).not.toMatch(/<button[^>]*>[^<]*(start|stop|rerun|recover|resume|cancel)[^<]*<\/button>/i);
+    expect(html).not.toContain("Follow one confirmed collection task");
+  });
+
+  it("parses the rewound PENDING instant of the same session with the same identities and order, still ACTIVE", async () => {
+    const { continuousTwoTaskPendingData, continuousTwoTaskWitness } = await import("./execution-fixtures");
+    const { parseCollectionExecutions } = await import("../lib/collection-executions");
+    const earlier = parseCollectionExecutions(continuousTwoTaskPendingData());
+    const witness = continuousTwoTaskWitness();
+    expect(earlier.executions.map((row) => row.execution_id)).toEqual(witness.executions.map((row) => row.execution_id));
+    expect(earlier.executions.map((row) => row.state)).toEqual(["PENDING", "SUCCEEDED"]);
+    expect(earlier.session_state).toBe("ACTIVE");
+    expect(earlier.now_sim_t_s).toBe(31260);
+    expect(earlier.executions[1]).toEqual(witness.executions[1]); // the terminal record is byte-for-byte the witness's
+    const html = clean(render(view(earlier)));
+    expect(cardOrder(html)).toEqual(witness.executions.map((row) => row.execution_id));
+    expect(cardHtml(html, RUNNING_ID)).toContain("Not started yet · waiting for a policy slot");
+    expect(cardHtml(html, RUNNING_ID)).not.toContain("balls · ledger-backed");
+    expect(html).toContain("SESSION ACTIVE");
   });
 });

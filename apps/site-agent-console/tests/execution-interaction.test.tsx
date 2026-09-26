@@ -16,7 +16,7 @@ import { PilotOperations } from "../components/PilotOperations";
 import { API_SCHEMA, DISCLAIMER } from "../lib/api";
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
 import { localTimeToUtc, type TaskOpsSnapshot } from "../lib/task-ops";
-import { endedData, exampleData, humanAssistanceData, withRound, witnessData } from "./execution-fixtures";
+import { continuousTwoTaskPendingData, continuousTwoTaskWitness, continuousTwoTaskWitnessData, endedData, exampleData, humanAssistanceData, withRound, witnessData } from "./execution-fixtures";
 import { taskOpsFixture } from "./task-ops-fixtures";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -516,5 +516,85 @@ describe("3C acceptance: the schedule form uses the shared simulation clock whil
     expect(text()).toContain(requestId!);
     expect(input("-UNLOADED-quantity").value).toBe("480");
     expect(buttonNamed("Recover by request ID")?.disabled).toBe(false);
+  });
+});
+
+describe("continuous V4: two executions arrive through polling in service order and the panel stays read-only", () => {
+  const cards = () => [...panel()!.querySelectorAll<HTMLElement>('[data-testid="execution-record-card"]')];
+  const cardIds = () => cards().map((card) => card.getAttribute("data-execution-id"));
+  const cardById = (executionId: string) => {
+    const card = cards().find((item) => item.getAttribute("data-execution-id") === executionId);
+    if (!card) throw new Error(`no card for ${executionId}`);
+    return card;
+  };
+  const TERMINAL_ID = "75ac1b88002c03ecdec352ed27d9c306893ac4c29674c891eac1ddf96808f215";
+  const SECOND_ID = "125688930584b23999ff42f630c60f77f7daef28019dfb65c033db17151a3a24";
+  const routeRequests = (service: ReturnType<typeof scriptedService>) => service.state.requests.filter((r) => r.path.startsWith("/api/v1/collection-executions"));
+
+  it("keeps the terminal card's displayed evidence unchanged while the other card moves from PENDING to RUNNING, and the session stays ACTIVE", async () => {
+    const service = scriptedService();
+    const expectedOrder = continuousTwoTaskWitness().executions.map((row) => row.execution_id);
+    service.state.executions = continuousTwoTaskPendingData();
+    await mount(service);
+    expect(cardIds()).toEqual(expectedOrder);
+    expect(cardById(SECOND_ID).textContent).toContain("PENDING");
+    expect(cardById(SECOND_ID).textContent).toContain("Not started yet · waiting for a policy slot");
+    expect(cardById(TERMINAL_ID).textContent).toContain("SUCCEEDED");
+    expect(cardById(TERMINAL_ID).textContent).toContain("600 balls · ledger-backed (COMPLETE)");
+    const terminalBefore = cardById(TERMINAL_ID).innerHTML;
+    expect(panelText()).toContain("SESSION ACTIVE");
+    expect(panelText()).not.toContain("SESSION ENDED");
+    expect(execReads(service)).toHaveLength(1);
+
+    service.state.executions = continuousTwoTaskWitnessData(); // the next poll: the second task has started
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(execReads(service)).toHaveLength(2);
+    expect(cardIds()).toEqual(expectedOrder); // service order, never re-sorted by state or time
+    expect(cardById(TERMINAL_ID).innerHTML).toBe(terminalBefore);
+    expect(cardById(SECOND_ID).textContent).toContain("RUNNING");
+    expect(cardById(SECOND_ID).textContent).toContain("Started at t = 31200 s");
+    expect(cardById(SECOND_ID).textContent).toContain("296 balls · ledger-backed (COMPLETE)");
+    expect(cardById(SECOND_ID).textContent).not.toContain("PENDING");
+    expect(panelText()).toContain("SESSION ACTIVE");
+    expect(panelText()).toContain("t = 31800 s");
+    expect(panelText()).not.toContain("SESSION ENDED");
+    expect(panelText()).not.toContain("The session has ended");
+    // Only serial GETs of the read-only route; no execution mutation of any kind was attempted.
+    expect(routeRequests(service).map((r) => `${r.method} ${r.path}`)).toEqual(["GET /api/v1/collection-executions", "GET /api/v1/collection-executions"]);
+    expect(service.state.requests.filter((r) => r.method !== "GET")).toHaveLength(0);
+    expect([...panel()!.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry execution read"]);
+  });
+
+  it("polls the two-task session on one serial 5 s loop, keeps the last two-card snapshot through a failed read, and stops on unmount", async () => {
+    const service = scriptedService();
+    const expectedOrder = continuousTwoTaskWitness().executions.map((row) => row.execution_id);
+    service.state.executions = continuousTwoTaskWitnessData();
+    await mount(service);
+    expect(cardIds()).toEqual(expectedOrder);
+    expect(execReads(service)).toHaveLength(1);
+    service.state.execMode = "hang";
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(service.state.hung).toHaveLength(1);
+    await tick(2 * COLLECTION_EXECUTIONS_POLL_MS);
+    expect(service.state.hung).toHaveLength(1); // one in-flight read at a time
+    service.state.execMode = "ok";
+    service.releaseHung();
+    await tick(50);
+    expect(panelText()).toContain("READ FRESH");
+    service.state.execMode = "network";
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("READ STALE");
+    expect(panelText()).toContain("fetch failed");
+    expect(cardIds()).toEqual(expectedOrder); // the last successful two-card snapshot is retained
+    expect(cardById(SECOND_ID).textContent).toContain("RUNNING");
+    expect(panelText()).toContain("SESSION ACTIVE");
+    expect(routeRequests(service).every((r) => r.method === "GET")).toBe(true);
+    const before = execReads(service).length;
+    await act(async () => {
+      root.unmount();
+    });
+    await vi.advanceTimersByTimeAsync(3 * COLLECTION_EXECUTIONS_POLL_MS);
+    expect(execReads(service)).toHaveLength(before);
+    root = createRoot(container); // afterEach unmounts this empty root
   });
 });

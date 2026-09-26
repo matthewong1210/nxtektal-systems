@@ -220,7 +220,7 @@ export function DispatchView({ view, actions, health, simulationClock = NO_SIMUL
   const count = data?.notifications.filter((item) => item.status !== "RESOLVED").length ?? 0;
   return (
     <Section title="Pilot task operations" aside={<><Badge tone="sim">SIMULATION</Badge><ServiceModeBadge capabilities={capabilities} />{health !== undefined ? <Badge tone={schedulerAllowsWrites(health) ? "ok" : health.status === "unknown" ? "warn" : "bad"}>{schedulerHealthLabel(health)}</Badge> : data ? <Badge tone={statusTone(data.scheduler.state)}>{data.scheduler.state}</Badge> : null}</>}>
-      <p className="sim-note">Schedule a collection, follow its progress, and record staff handling in one place.</p>
+      <p className="sim-note">Review collection schedules, follow task progress, and record staff handling in one place.</p>
       <p className="fineprint dispatch-boundary">Local simulation. No physical robot or CE82A is connected. The task device kind (a rehearsal double or the simulator-backed V3 device) is set by the service composition and is not inferred here. Advice acceptance below remains a separate workflow record.</p>
       {modeText ? <p className="fineprint dispatch-capabilities">{modeText}</p> : null}
       {view.unavailable ? <div className="dispatch-service-note" role="status"><Badge tone="muted">UNAVAILABLE</Badge>

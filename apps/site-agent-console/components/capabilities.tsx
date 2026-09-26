@@ -37,6 +37,11 @@ export function capabilityBlocker(capabilities: CapabilityInput, operation: Task
     if (capabilities.mode === "FIXED_V3_EXECUTION") {
       return `${label} is not installed on this service: it runs a preset single-task demonstration (FIXED_V3_EXECUTION) whose one planning confirmation and execution are fixed.`;
     }
+    if (capabilities.mode === "CONTINUOUS_V3_EXECUTION" && operation === "schedules_create") {
+      // The declared matrix withholds exactly this operation: the bound schedule
+      // is created by a confirmed Planning plan, not by a direct form.
+      return "Direct scheduling is unavailable because a confirmed Planning plan creates the bound schedule.";
+    }
     return `${label} is not installed on this service (${capabilities.mode}).`;
   }
   return null;

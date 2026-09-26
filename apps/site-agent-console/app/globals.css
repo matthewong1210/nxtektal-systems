@@ -263,8 +263,13 @@ body {
 .panel-aside {
   margin-left: auto;
   display: flex;
+  /* Three nowrap badges (service mode + health) exceed a 320 px viewport
+     unless the aside itself may wrap onto a second row. */
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .panel-body {
