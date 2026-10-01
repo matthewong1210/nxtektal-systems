@@ -10,6 +10,23 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-25-continuous-collection-v4-design.md`
 
+**Implementation status (2026-10-01):** Tasks 1–7 are implemented and locally
+verified through code head `27fcea2d4639dc695f57bd342998803967ecbd09`.
+Task 8 fresh HTTP reproduction, restart reproduction, and isolated GET-purity
+proof are complete; normative full-suite verification, final independent review,
+documentation commit, and clean-head verification remain in progress. The branch
+is local and unmerged.
+
+| Task | Implementation commit(s) |
+|---|---|
+| 1 | `c11d44c3da575ed7f2a1c48275108125e3d55aca` |
+| 2 | `253322991cc9a84de3409e8bc1d715e2b2e0ec99` |
+| 3 | `ea779f80836428f40f61b7c8cc4d163c66a9823a` |
+| 4 | `d322856271927542e81e7cc88b88f2579c25c9d0` |
+| 5 | `dc1e521c4d35ec771bca83c45ab02bbf34ee0e7a` |
+| 6 | `d755934cebdb423bc77e04dcae076cc4cc1ce238` |
+| 7 | `907a5a1de521968bbd899e535eba1e70f32eb84d`, `a897467b2c3a1689ce6d4f14599e8f581d87473b`, `49d78729c38d3be5e57afe54c4f683ae4ec2bcc8`, `27fcea2d4639dc695f57bd342998803967ecbd09` |
+
 ## Global Constraints
 
 - Start implementation from the docs-only plan-delivery commit named in the handoff for this file; verify its parent is exact design commit `de18e58ccce0907f7c0365c33fa6400b5069bc12`. Use a new worktree `/private/tmp/nxtektal-continuous-collection-v4-impl` on branch `codex/continuous-collection-v4`.
@@ -70,7 +87,7 @@
 - Consumes: existing `task_ops_service_capabilities(mode)` and `parseTaskOps(value)` behavior for capability v1.
 - Produces: `TaskOpsServiceMode = "FIXED_V3_EXECUTION" | "LEGACY_PILOT_DISPATCH" | "CONTINUOUS_V3_EXECUTION"`; `TaskOpsServiceCapabilities` as a v1/v2 discriminated union; an exact v2 fixture used by Tasks 5-7.
 
-- [ ] **Step 1: Add failing Python contract tests without changing the v1 assertions**
+- [x] **Step 1: Add failing Python contract tests without changing the v1 assertions**
 
 Add a second contract root and these assertions to `test_task_ops_capabilities_contract.py`:
 
@@ -120,7 +137,7 @@ def test_service_producer_keeps_v1_exact_and_emits_only_the_exact_v2_mode():
         task_ops_service_capabilities("AUTO_DETECT")
 ```
 
-- [ ] **Step 2: Add failing TypeScript cross-version tests**
+- [x] **Step 2: Add failing TypeScript cross-version tests**
 
 Load both contract directories in `task-ops.test.ts`, then assert the only valid schema/mode combinations:
 
@@ -152,7 +169,7 @@ it("rejects cross-version modes and mode-inconsistent matrices", () => {
 });
 ```
 
-- [ ] **Step 3: Run the focused tests and verify RED**
+- [x] **Step 3: Run the focused tests and verify RED**
 
 Run from `simulation/`:
 
@@ -170,7 +187,7 @@ npm test -- tests/task-ops.test.ts
 
 Expected: failure because `parseTaskOps` rejects v2.
 
-- [ ] **Step 4: Add the exact schema, fixture, and Python producer branch**
+- [x] **Step 4: Add the exact schema, fixture, and Python producer branch**
 
 Write `schema.json` as the closed single-mode contract:
 
@@ -249,7 +266,7 @@ def task_ops_service_capabilities(mode: TaskOpsServiceMode) -> dict[str, object]
     return {"schema": schema, "mode": mode, "operations": dict(operations)}
 ```
 
-- [ ] **Step 5: Make the TypeScript capability type a strict discriminated union**
+- [x] **Step 5: Make the TypeScript capability type a strict discriminated union**
 
 Use exact schema/mode pairing in `task-ops.ts`:
 
@@ -275,7 +292,7 @@ export type TaskOpsServiceMode = TaskOpsServiceCapabilities["mode"];
 
 Add `CONTINUOUS_V3_OPERATIONS`, then make `validServiceCapabilities` select an expected matrix only for these three exact pairs. Unknown schema, cross-version mode, extra key, missing key, or matrix drift returns `false`.
 
-- [ ] **Step 6: Run focused and compatibility tests**
+- [x] **Step 6: Run focused and compatibility tests**
 
 Run the two focused commands from Step 3. Then run from `apps/site-agent-console/`:
 
@@ -285,7 +302,7 @@ npm run typecheck
 
 Expected: all pass, and existing v1 tests remain unchanged and green.
 
-- [ ] **Step 7: Commit the contract layer**
+- [x] **Step 7: Commit the contract layer**
 
 ```bash
 git add simulation/docs/contracts/pilot-dispatch-v0/service-capabilities-v2 simulation/scripts/task_ops_service_capabilities.py simulation/tests/site_agent/test_task_ops_capabilities_contract.py apps/site-agent-console/lib/task-ops.ts apps/site-agent-console/tests/task-ops.test.ts
@@ -306,7 +323,7 @@ git commit -m "feat(task-ops): define continuous service capabilities"
 - Consumes: a verified `JsonlJournal` `JournalRecord` whose payload contains an Edge `TaskEvent` with `event_sequence == 0`, `kind == REJECTED`, and `reason_code == "incarnation_mismatch"`.
 - Produces: `CollectionExecutionStore.record_preacceptance_rejection(execution_id, edge_record, *, now_sim_t_s) -> None`; internal record kind `preacceptance_rejection`; a single exact relational-parser exception for the resulting `REJECTED/IDENTITY_CONFLICT` shape.
 
-- [ ] **Step 1: Add failing V3 store tests for projection, idempotency, and near misses**
+- [x] **Step 1: Add failing V3 store tests for projection, idempotency, and near misses**
 
 Build the mismatch event with existing `TaskEvent` and `JsonlJournal` helpers, then assert this exact public projection:
 
@@ -393,7 +410,7 @@ def test_preacceptance_incarnation_rejection_projects_verified_identity_terminal
 
 Add two more tests that retry the same record ID and prove journal bytes stay unchanged, then submit a different record ID or a near-miss event and prove a fail-closed exception with no append.
 
-- [ ] **Step 2: Add failing Python-oracle and TypeScript-parser tests for the one legal conflict shape**
+- [x] **Step 2: Add failing Python-oracle and TypeScript-parser tests for the one legal conflict shape**
 
 Pin the exact exception and reject all close variants:
 
@@ -462,7 +479,7 @@ it("rejects contradictory preacceptance incarnation rejection evidence", () => {
 });
 ```
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 Run from `simulation/`:
 
@@ -478,7 +495,7 @@ npm test -- tests/collection-executions-contract.test.ts
 
 Expected: the store method is absent and both strict readers reject the approved identity-conflict shape.
 
-- [ ] **Step 4: Add the internal journal record and replay projection**
+- [x] **Step 4: Add the internal journal record and replay projection**
 
 Add `"preacceptance_rejection"` to `RECORD_KINDS` and initialize `state["preacceptance_rejections"]` as an execution-ID keyed mapping in `_replay()`. Add the public method with a payload that stores only causal facts:
 
@@ -510,7 +527,7 @@ def record_preacceptance_rejection(
 
 Implement `_apply_preacceptance_rejection` once and call it from both the write-time validation and `_replay()`. It must validate the record kind, exact event shape, binding/task/site/deployment/robot identity, differing incarnation, monotonic clock, absence of acceptance/start/assignment/action/quantity/prepared intent, and uniqueness of record ID before applying the exact projection from Step 1.
 
-- [ ] **Step 5: Add the exact conflict exception to both relational readers**
+- [x] **Step 5: Add the exact conflict exception to both relational readers**
 
 In the Python oracle and TypeScript parser, define `knownIdentityConflict` as true only when every approved field matches and `incarnation_mismatch` is the sole true conflict. Apply the existing “any conflict means INCONCLUSIVE” rule only when this predicate is false:
 
@@ -536,7 +553,7 @@ if (trueConflicts.length > 0 && !knownIdentityConflict && record.state !== "INCO
 
 Keep schema version, frozen examples, and every other conflict rule unchanged. Document in the v1 README the distinction between request-time identity refusal and a durable attempt closed by verified device rejection.
 
-- [ ] **Step 6: Run focused contract tests and typecheck**
+- [x] **Step 6: Run focused contract tests and typecheck**
 
 Run the commands from Step 3, then from `apps/site-agent-console/`:
 
@@ -546,7 +563,7 @@ npm run typecheck
 
 Expected: all pass; `schema.json` is unchanged.
 
-- [ ] **Step 7: Commit the durable rejection projection**
+- [x] **Step 7: Commit the durable rejection projection**
 
 ```bash
 git add simulation/scripts/course_collection_execution.py simulation/docs/contracts/collection-execution-v1/README.md simulation/tests/course_monitoring/test_course_collection_execution.py simulation/tests/pilot_ops/test_collection_execution_wire_contract.py apps/site-agent-console/lib/collection-executions.ts apps/site-agent-console/tests/collection-executions-contract.test.ts
@@ -563,7 +580,7 @@ git commit -m "fix(collection-execution): close preacceptance identity rejection
 - Consumes: `CollectionExecutionStore.record_preacceptance_rejection(execution_id, edge_record, *, now_sim_t_s)` from Task 2; existing `RobotCore.on_request()`, `TaskEvent.from_dict()`, `JsonlJournal.read()`, and `RobotCore.publish_confirmed_spec(event, when, *, record_sequence)`.
 - Produces: `SimulatorBackedTaskDevice.admit(task_request, execution_request, *, crash_hook=None)` returning the original durable receipt after either ACCEPTED or the exact terminal seq-0 rejection; startup reconciliation completes any cross-journal gap before the device reports started.
 
-- [ ] **Step 1: Add failing tests for a stale incarnation at admission**
+- [x] **Step 1: Add failing tests for a stale incarnation at admission**
 
 Create a request whose frozen target incarnation explicitly differs from the current provisioned device, then call `admit` and assert both journals and the absence of simulator work. The mismatch is a deliberate stale/re-provisioned fixture condition; an ordinary process restart does not create it:
 
@@ -605,7 +622,7 @@ def test_old_incarnation_admit_closes_seq0_rejection_without_execution(
 
 Extend the existing `_device_fixture` return values only if the journal path is not already reachable from `device`. Keep using the real `RobotCore.on_start()` path so the current provisioning-derived incarnation and incremented `boot_sequence` remain authentic; the explicit stale target above, not `on_start()`, supplies the incarnation mismatch.
 
-- [ ] **Step 2: Add failing crash-boundary, startup, conflict, and publication tests**
+- [x] **Step 2: Add failing crash-boundary, startup, conflict, and publication tests**
 
 Use a parametrized crash hook for the two named boundaries:
 
@@ -662,7 +679,7 @@ def crash_at(expected):
 
 Also add tests that two matching seq-0 records or one near-match fail closed, and that `confirm_published()` records the original device journal sequence in `confirmed_rejections`.
 
-- [ ] **Step 3: Run the device tests and verify RED**
+- [x] **Step 3: Run the device tests and verify RED**
 
 Run from `simulation/`:
 
@@ -672,7 +689,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Expected: stale-incarnation admission raises `authorization_blocked`, startup does not reconcile seq-0, and publication confirmation cannot locate the request-level event.
 
-- [ ] **Step 4: Add the exact seq-0 lookup and admission branch**
+- [x] **Step 4: Add the exact seq-0 lookup and admission branch**
 
 Add this private lookup contract:
 
@@ -708,7 +725,7 @@ def _incarnation_rejection_for(
 
 Extend `admit` with `crash_hook: Callable[[str, Mapping[str, Any]], None] | None = None`. Preserve the existing order `store.submit()` first. Reuse an existing exact rejection before calling `RobotCore.on_request()`. If the resulting device record is the exact mismatch, call the Task 2 store method, fire the two crash hooks immediately after their named durable writes, and return the existing receipt. Any other no-ACCEPTED result still fails closed.
 
-- [ ] **Step 5: Reconcile seq-0 before ordinary accepted/restart/outbox evidence**
+- [x] **Step 5: Reconcile seq-0 before ordinary accepted/restart/outbox evidence**
 
 At the beginning of `_reconcile_persisted_evidence()`, inspect every unaccepted, nonterminal execution and its frozen task request. For an exact seq-0 rejection, call:
 
@@ -722,7 +739,7 @@ admission.store.record_preacceptance_rejection(
 
 Perform this pass inside the existing restart-reconciliation transaction before `start()` may return. A duplicate exact record is a no-op; missing, duplicated, or contradictory evidence raises and keeps the service unstarted.
 
-- [ ] **Step 6: Confirm request-level publication by journal record sequence**
+- [x] **Step 6: Confirm request-level publication by journal record sequence**
 
 In `confirm_published()`, branch on `event_sequence == 0`. Parse the event, locate the same V3-confirmed device record, and call:
 
@@ -736,7 +753,7 @@ self.core.publish_confirmed_spec(
 
 Keep the existing `(boot_sequence, event_sequence)` task-event confirmation path for sequences above zero.
 
-- [ ] **Step 7: Run the full rejection seam and commit**
+- [x] **Step 7: Run the full rejection seam and commit**
 
 Run from `simulation/`:
 
@@ -770,7 +787,7 @@ git commit -m "fix(edge-task): reconcile preacceptance device rejection"
 - Consumes: verified `PlanningHistory`, session identity, historical input records, and existing `TASK_CREATED` records.
 - Produces: optional `ConfirmationGate`; `PlanningOperations.execution_binding_snapshot(now)`; `derive_execution_requirements(*, plan, input_records, session_identity, evidence_at_utc)`; `require_session_horizon(*, start_at_utc, max_execution_s, session_identity)`; single-task `bind_confirmed_task(planning_snapshot, edge_records, session_identity, now_sim_t_s, *, task_id)`; `request_id_for_binding(binding_id)`.
 
-- [ ] **Step 1: Add failing Planning tests for the optional gate and duplicate recovery**
+- [x] **Step 1: Add failing Planning tests for the optional gate and duplicate recovery**
 
 Pin call timing and definite refusal:
 
@@ -803,7 +820,7 @@ def test_confirmation_gate_conflict_appends_no_confirmation_or_schedule(tmp_path
 
 Add local helpers `planning_operations` and `confirmed_plan_request` by extracting the existing fixture construction in this test file; they must call the real input and plan routes.
 
-- [ ] **Step 2: Add failing tests for historical inputs, exact horizon, runtime mapping, and stable IDs**
+- [x] **Step 2: Add failing tests for historical inputs, exact horizon, runtime mapping, and stable IDs**
 
 The binding test must create input revision 1, its plan and confirmation, then create revision 2 before `TASK_CREATED`. Assert the first task uses revision 1 evidence:
 
@@ -855,7 +872,7 @@ def test_request_id_is_derived_only_from_binding_id(api):
     assert api.request_id_for_binding(binding_id) == expected
 ```
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 3: Run focused tests and verify RED**
 
 Run from `simulation/`:
 
@@ -865,7 +882,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Expected: the gate, internal snapshot, shared derivation, single-task binder, and stable request-ID helper are absent.
 
-- [ ] **Step 4: Add the Planning gate inside the journal builder**
+- [x] **Step 4: Add the Planning gate inside the journal builder**
 
 Add the optional constructor parameter without changing existing callers:
 
@@ -895,7 +912,7 @@ if self.confirmation_gate is not None:
 
 Because this runs inside `append_via(build)`, deterministic gate refusal appends nothing. Duplicate request recovery skips the gate and returns the original receipt.
 
-- [ ] **Step 5: Add one-read public and internal snapshot builders**
+- [x] **Step 5: Add one-read public and internal snapshot builders**
 
 Extract the existing projection body into `_snapshot_from(records, history, now)`. Implement:
 
@@ -918,7 +935,7 @@ def execution_binding_snapshot(self, now: datetime) -> dict[str, Any]:
 
 Assert the public snapshot still has no `input_records` key.
 
-- [ ] **Step 6: Extract shared requirements and add single-task binding**
+- [x] **Step 6: Extract shared requirements and add single-task binding**
 
 Move the existing input revision/digest, runtime mapping, cycle-evidence validity, four-stage duration, and control-interval ceiling into:
 
@@ -1007,7 +1024,7 @@ def bind_confirmed_task(
 
 Expose the same method on `CollectionExecutionStore`, appending only when that task has no existing binding and returning the persisted binding on an exact retry.
 
-- [ ] **Step 7: Add stable request identity and horizon validation**
+- [x] **Step 7: Add stable request identity and horizon validation**
 
 Add:
 
@@ -1042,7 +1059,7 @@ def require_session_horizon(
 
 Equality is accepted. Task 5 maps this function and missing/ambiguous runtime-binding errors to a definite `planning_conflict` before confirmation commit.
 
-- [ ] **Step 8: Run focused tests, preserve 3C behavior, and commit**
+- [x] **Step 8: Run focused tests, preserve 3C behavior, and commit**
 
 Run from `simulation/`:
 
@@ -1068,7 +1085,7 @@ git commit -m "feat(collection-execution): derive stable continuous admissions"
 - Consumes: Task 1 continuous capabilities; Task 3 device reconciliation; Task 4 gate, internal snapshot, exact binder, and request-ID helper; existing `course_session_v3.execution_admission()` and `course_session_v3.run()`.
 - Produces: `ContinuousCollectionExecutionRuntime` with `start`, `start_driver`, `tick`, `close`, an optional deterministic `crash_hook`, read callbacks, Planning/task-operation routing, and a separate CLI/marker.
 
-- [ ] **Step 1: Add failing marker and fixed-service isolation tests**
+- [x] **Step 1: Add failing marker and fixed-service isolation tests**
 
 Assert the new root only accepts its own marker and cannot open fixed evidence:
 
@@ -1095,7 +1112,7 @@ def test_v4_marker_is_isolated_from_fixed_3c_root(tmp_path):
 
 Also assert `--initialize` rejects a nonempty directory, a second process lock fails, and `test_collection_execution_service.py` stays green.
 
-- [ ] **Step 2: Add failing classifier and one-driver tests**
+- [x] **Step 2: Add failing classifier and one-driver tests**
 
 Cover empty ACTIVE, all-history-terminal ACTIVE, PAUSED, PROTECTED, clean ENDED, and ENDED-with-nonterminal through a pure `classify_continuous_runtime(runtime_status, executions)` helper. Pin the done set:
 
@@ -1129,7 +1146,7 @@ def test_only_one_background_driver_can_start(tmp_path):
 
 Use the pure helper only for the state table. Use a real V3 root and deterministic wall clock for the one-driver lifecycle test.
 
-- [ ] **Step 3: Add a failing materialization-order test**
+- [x] **Step 3: Add a failing materialization-order test**
 
 Instrument the real owner calls and assert one iteration follows this exact trace:
 
@@ -1153,7 +1170,7 @@ assert trace == [
 
 Assert the V3 admission context has exited before `device.admit`, and `course_session_v3.run()` is called exactly once.
 
-- [ ] **Step 4: Run the new service tests and verify RED**
+- [x] **Step 4: Run the new service tests and verify RED**
 
 Run from `simulation/`:
 
@@ -1163,7 +1180,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Expected: import failure because the V4 service does not exist.
 
-- [ ] **Step 5: Create the separate marker, process lock, runtime shell, and gate closure**
+- [x] **Step 5: Create the separate marker, process lock, runtime shell, and gate closure**
 
 Define:
 
@@ -1205,7 +1222,7 @@ def confirmation_gate(history, confirmation, _now):
 
 Pass `confirmation_gate` to `PlanningOperations`. Do not read the mutable runtime or wall clock inside this closure.
 
-- [ ] **Step 6: Implement startup reconciliation before reads become available**
+- [x] **Step 6: Implement startup reconciliation before reads become available**
 
 Inside `start()`, keep `self.started` false until startup reconciliation completes. Private helpers validate component presence rather than calling the public `_require_started()` guard. Use a private `_read_collection_executions_unlocked()` for startup classification; public GET wrappers continue to require `started == True`.
 
@@ -1236,7 +1253,7 @@ self.started = True
 
 `_resume_bound_admissions_unlocked()` may only complete a binding/request that was durable before this process started; it cannot bind a new `TASK_CREATED`. For an ordinary same-incarnation process restart it resumes the one stable request/receipt/attempt and may reach ACCEPTED/PENDING. If the current device was explicitly re-provisioned or otherwise has a verified different incarnation, it generates or reuses the one seq-0 rejection required to close the stale authorization. Consuming and publishing an already committed outbox is recovery of prior causal evidence, not a new simulator action, so it completes before the state gate. `_return_read_only_if_not_running()` sets `started = True` and returns for a verified PAUSED, PROTECTED, ENDED, or classifier-derived FAILED state; those states expose GETs but do not call Planning recover, schedule tick, new-task binding, or V3 run. An integrity, storage, gateway, or reconciliation exception still closes components, keeps `started == False`, and exposes no partial snapshot.
 
-- [ ] **Step 7: Implement incremental binding and stable admission without nested V3 locks**
+- [x] **Step 7: Implement incremental binding and stable admission without nested V3 locks**
 
 Use detached Planning and Edge values. First add `_resume_bound_admissions_unlocked()` to reconstruct the stable request for every existing nonterminal, unaccepted binding; collect `(TaskRequest, execution_request)` pairs under the V3 lock, then call `device.admit` only after the lock exits. This closes binding-before-request and request-before-device crashes even when the session is PAUSED.
 
@@ -1288,7 +1305,7 @@ def _materialize_new_tasks_unlocked(self) -> list[dict[str, Any]]:
 
 The list comprehension runs after the context exits. Exact retries return original receipts. A same-incarnation pre-acceptance process restart resumes that stable admission without a second attempt; an explicit different-incarnation device closes through Task 3's exact rejection path.
 
-- [ ] **Step 8: Implement classifier and one driver iteration**
+- [x] **Step 8: Implement classifier and one driver iteration**
 
 Classifier rules must be explicit. Add the pure function and have `_classify_unlocked()` read the private verified snapshot, call it, and own the stop/failure side effects:
 
@@ -1311,7 +1328,7 @@ def classify_continuous_runtime(runtime, executions) -> str:
 
 `tick()` holds the outer `RLock`, returns immediately for PAUSED/done/failure, otherwise performs the exact Step 3 trace. Any unexpected exception latches `FAILED` and stops the thread; no action is automatically retried in the same process.
 
-- [ ] **Step 9: Add architecture guards and run the focused runtime tests**
+- [x] **Step 9: Add architecture guards and run the focused runtime tests**
 
 Add the new file to `SERVICE_SCRIPTS`. Assert it imports no `MockRobotDevice`, physical transport stack, browser package, or second simulation advancement path. Run from `simulation/`:
 
@@ -1321,7 +1338,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Expected: all pass and fixed 3C behavior is unchanged.
 
-- [ ] **Step 10: Commit the runtime foundation**
+- [x] **Step 10: Commit the runtime foundation**
 
 ```bash
 git add simulation/scripts/course_collection_execution_v4_service.py simulation/tests/site_agent/test_continuous_collection_execution_service.py simulation/tests/site_agent/test_architecture.py
@@ -1340,7 +1357,7 @@ git commit -m "feat(collection-execution): add continuous v4 runtime"
 - Consumes: Task 5 runtime and existing `SiteAgentApiServer` callback injection.
 - Produces: real HTTP Planning/task-ops/execution routes for the continuous mode; deterministic two-task witness; CLI `python -m scripts.course_collection_execution_v4_service`.
 
-- [ ] **Step 1: Add a failing real-HTTP two-task test**
+- [x] **Step 1: Add a failing real-HTTP two-task test**
 
 Use the existing local `call`, `serve`, deterministic `WallClock`, and Planning request builders. The test must create the second Planning chain while the first execution is still RUNNING:
 
@@ -1407,7 +1424,7 @@ def test_http_accepts_second_confirmation_while_first_runs_and_executes_both(
 
 Define `post_planning_chain` in the test file to issue actual POSTs for input, plan, and confirmation, always using returned `plan_id`, version, and request receipts; return the committed confirmation record as a dictionary. Define `advance_until` to call `runtime.tick()` no more than `maximum_ticks` and fail with the final snapshot if the predicate never becomes true. Define ledger totals from the V3 replayed runtime, not execution quantities.
 
-- [ ] **Step 2: Add failing idempotency, restart, and GET-purity assertions**
+- [x] **Step 2: Add failing idempotency, restart, and GET-purity assertions**
 
 Extend the scenario to assert:
 
@@ -1425,7 +1442,7 @@ for row in executions:
 
 Repeat each original POST body, call `_materialize_new_tasks_unlocked()` twice, and assert no count changes. Inject one response-lost-after-fsync error for input, plan, and confirmation in separate cases; recover each by the original Planning `request_id` GET before resending the identical body, and prove a changed body with that ID conflicts. Hash all evidence files before and after repeated task-ops, Planning, execution-list, and execution-request GETs; hashes must match. Close and reopen the runtime after the first terminal but before the second due time; the second task must finish with unchanged IDs and no second execution attempt.
 
-- [ ] **Step 3: Add failing composition crash-boundary recovery tests**
+- [x] **Step 3: Add failing composition crash-boundary recovery tests**
 
 Cover every accepted-spec boundary with real journals:
 
@@ -1518,7 +1535,7 @@ def test_accepted_or_running_restart_fail_stops_without_duplicate_move(
 
 These tests retain the established accepted/running restart fail-stop rule. They must not reinterpret a stable incarnation as authority to continue an already accepted authorization after its device process restarts.
 
-- [ ] **Step 4: Add failing overlap, horizon, pause, protection, and session-end tests**
+- [x] **Step 4: Add failing overlap, horizon, pause, protection, and session-end tests**
 
 Cover these outcomes with real owners:
 
@@ -1539,7 +1556,7 @@ ordinary task terminal -> no automatic Planning outcome, wash, supply, or invent
 
 For the second-task low-ball case, assert actual ledger quantities and conservation. Accept its causal terminal (`SUCCEEDED`, `PARTIAL`, or `FAILED`) only when the state matches its real assignment terminal; never replace the quantity or require 600 balls.
 
-- [ ] **Step 5: Add failing synchronization-barrier tests for both route races**
+- [x] **Step 5: Add failing synchronization-barrier tests for both route races**
 
 Use `threading.Barrier(2)` to release two threads simultaneously. For confirmation versus tick, require exactly one durable confirmation and allow materialization either in that tick or the next. For cancellation versus dispatch, assert the only legal final states:
 
@@ -1559,7 +1576,7 @@ assert not (
 
 Run each race repeatedly against fresh roots. All route calls and `tick()` must acquire the same runtime `RLock`; tests may not bypass the public route methods.
 
-- [ ] **Step 6: Run the integrated service tests and verify RED**
+- [x] **Step 6: Run the integrated service tests and verify RED**
 
 Run from `simulation/`:
 
@@ -1569,7 +1586,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 
 Expected: continuous write routes, CLI callbacks, and two-task evidence are incomplete.
 
-- [ ] **Step 7: Install the exact route matrix with dynamic fail-closed gates**
+- [x] **Step 7: Install the exact route matrix with dynamic fail-closed gates**
 
 `route_planning` must permit GET in every started state. POST input/plan/confirmation/outcome delegates to `PlanningOperations` while state is ACTIVE or PAUSED; PROTECTED, FAILED, and ENDED return explicit `planning_unavailable` or `planning_conflict` without mutation.
 
@@ -1592,7 +1609,7 @@ raise SiteAgentError("not_found", "unknown task operations route")
 
 Before any POST delegate, block PROTECTED, FAILED, or ENDED. Preserve `ScheduleService.cancel()` pending-only behavior; DISPATCHED cancellation returns a conflict and cannot revoke Edge or simulator authorization.
 
-- [ ] **Step 8: Expose static v2 capability and dynamic runtime health**
+- [x] **Step 8: Expose static v2 capability and dynamic runtime health**
 
 `task_operations_snapshot()` must emit:
 
@@ -1611,7 +1628,7 @@ result.update({
 
 The capability matrix never changes with health. Set `scheduler.state` to `FAILED` with a concrete detail for PROTECTED, FAILED, or ENDED so existing browser health gates close. PAUSED stays a healthy read and does not claim that the business clock is moving.
 
-- [ ] **Step 9: Add API callbacks and CLI without an execution mutation route**
+- [x] **Step 9: Add API callbacks and CLI without an execution mutation route**
 
 Return this callback set:
 
@@ -1628,7 +1645,7 @@ def api_callbacks(self) -> dict[str, Callable]:
 
 Add CLI flags `--out`, `--initialize`, `--port`, `--driver-interval`, `--console`, and `--api-only`, matching the fixed service ergonomics while instantiating only the continuous runtime. Do not add any collection-execution POST callback.
 
-- [ ] **Step 10: Generate and freeze the real two-task intermediate witness**
+- [x] **Step 10: Generate and freeze the real two-task intermediate witness**
 
 Run the deterministic test runtime to the point where execution 1 is terminal, execution 2 is PENDING or RUNNING, and session state is ACTIVE. With fixed wall clock, write the exact `nxt-collection-executions/v1` response data to:
 
@@ -1638,7 +1655,7 @@ simulation/tests/fixtures/continuous-collection-v4/two-task-active.json
 
 Add a backend test that regenerates the snapshot and compares canonical JSON bytes to the file. Validate the same file with the Python schema/relations oracle. This fixture is the only multi-task witness consumed by Task 7.
 
-- [ ] **Step 11: Run backend integration and commit**
+- [x] **Step 11: Run backend integration and commit**
 
 Run from `simulation/`:
 
@@ -1671,7 +1688,7 @@ git commit -m "feat(collection-execution): serve continuous planning tasks"
 - Consumes: Task 1 strict `TaskOpsServiceCapabilities` union and Task 6 real witness fixture.
 - Produces: continuous-mode badge/copy, correct operation gates, and multi-card read-only UI tests. It does not add execution actions, sorting, or new wire parsing.
 
-- [ ] **Step 1: Add failing static capability-panel tests**
+- [x] **Step 1: Add failing static capability-panel tests**
 
 Load `continuous-v3-execution.json` through the real Task 1 parser. Assert:
 
@@ -1687,11 +1704,11 @@ expect(screen.getByRole("button", { name: "Cancel schedule" })).toBeEnabled();
 
 Keep scheduler-health, form-validity, busy state, and record-level conditions in their fixtures so each assertion isolates the capability gate.
 
-- [ ] **Step 2: Add failing mounted interaction tests for all eight operations**
+- [x] **Step 2: Add failing mounted interaction tests for all eight operations**
 
 Use a v2 continuous declaration and assert that input, plan, confirmation, outcome, pending cancellation, notification acknowledge, and notification resolve call only their existing endpoints. For notification resolution, prove `SUPPORTED` still leaves the control disabled when `condition_active=true` or `can_resolve=false`. Force a direct schedule submit and assert zero POST. Then change scheduler health to FAILED and assert every write is blocked despite `SUPPORTED`. Preserve Planning UNKNOWN request ID, body, and draft across the capability/health transition.
 
-- [ ] **Step 3: Add failing multi-execution witness tests**
+- [x] **Step 3: Add failing multi-execution witness tests**
 
 Load only `simulation/tests/fixtures/continuous-collection-v4/two-task-active.json` through `parseCollectionExecutions`. Assert service order and session state:
 
@@ -1711,11 +1728,11 @@ expect(screen.getByRole("button", { name: "Retry execution read" })).toBeInTheDo
 
 If `ExecutionRecordCard` has no test ID, add only `data-testid="execution-record-card"` and `data-execution-id={record.execution_id}`; do not create UI state from these attributes.
 
-- [ ] **Step 4: Add a failing polling transition test**
+- [x] **Step 4: Add a failing polling transition test**
 
 Script two valid responses: first execution terminal plus second PENDING, then first unchanged plus second RUNNING or terminal. Assert the first card remains byte-equivalent in displayed evidence, the session does not become ENDED after the first terminal, and the fetch mock records only GET calls to `/api/v1/collection-executions`.
 
-- [ ] **Step 5: Run the focused UI tests and verify RED**
+- [x] **Step 5: Run the focused UI tests and verify RED**
 
 Run from `apps/site-agent-console/`:
 
@@ -1725,7 +1742,7 @@ npm test -- tests/capabilities-panel.test.tsx tests/capabilities-interaction.tes
 
 Expected: continuous mode has no presentation case and the old singular copy fails.
 
-- [ ] **Step 6: Add continuous mode copy without changing the gate plumbing**
+- [x] **Step 6: Add continuous mode copy without changing the gate plumbing**
 
 Add exact switch cases in `capabilities.tsx`:
 
@@ -1742,7 +1759,7 @@ Service mode CONTINUOUS_V3_EXECUTION: confirmed Planning plans create sequential
 
 For only `schedules_create` in continuous mode, `capabilityBlocker` must say direct scheduling is unavailable because a confirmed Planning plan creates the bound schedule. Do not infer support from `runtime`, transport, or HTTP success.
 
-- [ ] **Step 7: Make execution and schedule copy source-neutral and plural**
+- [x] **Step 7: Make execution and schedule copy source-neutral and plural**
 
 Change the execution introduction to:
 
@@ -1752,7 +1769,7 @@ Follow confirmed collection tasks through this simulated session: admission, dur
 
 Change the Dispatch introduction to describe reviewing schedules and task progress. Keep `data.executions.map(...)` exactly in service order, retain the sole `Retry execution read` read action, and add no sort, priority, schedule-create workaround, or execution mutation.
 
-- [ ] **Step 8: Run focused and full console verification**
+- [x] **Step 8: Run focused and full console verification**
 
 Run from `apps/site-agent-console/`:
 
@@ -1767,7 +1784,7 @@ npm run smoke
 
 Expected: all pass; lint has no new warnings. Render the witness at desktop and 320 px and verify no horizontal overflow. Change CSS only if this render fails.
 
-- [ ] **Step 9: Commit the presentation layer**
+- [x] **Step 9: Commit the presentation layer**
 
 ```bash
 git add apps/site-agent-console/components/capabilities.tsx apps/site-agent-console/components/execution/CollectionExecutionPanel.tsx apps/site-agent-console/components/DispatchPanel.tsx apps/site-agent-console/tests/execution-fixtures.ts apps/site-agent-console/tests/capabilities-panel.test.tsx apps/site-agent-console/tests/capabilities-interaction.test.tsx apps/site-agent-console/tests/execution-panel.test.tsx apps/site-agent-console/tests/execution-interaction.test.tsx apps/site-agent-console/README.md apps/site-agent-console/app/globals.css
@@ -1785,17 +1802,23 @@ git commit -m "feat(console): present continuous collection sessions"
 - Consumes: the completed runtime, CLI, capability/parser, and UI commits.
 - Produces: exact local reproduction instructions, verified evidence IDs/digests/counts, explicit remaining limits, and a reviewed local implementation branch.
 
-- [ ] **Step 1: Write the runbook with exact fresh and resume commands**
+- [x] **Step 1: Write the runbook with exact fresh and resume commands**
 
-Document these commands from `simulation/`:
+Document these commands from `simulation/`. `--initialize` requires a newly
+empty evidence root; create logs, request bodies, and HTTP responses outside it:
 
 ```bash
-UV_CACHE_DIR=/private/tmp/nxtektal-uv-cache uv run --no-sync python -B -m scripts.course_collection_execution_v4_service --out /private/tmp/nxt-continuous-v4-proof --initialize --port 8774 --driver-interval 6
+PROOF_ROOT="$(mktemp -d /private/tmp/nxt-continuous-v4-proof.XXXXXX)"
+PROOF_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service.XXXXXX.log)"
+UV_CACHE_DIR=/private/tmp/nxtektal-uv-cache \
+uv run --no-sync python -B -m scripts.course_collection_execution_v4_service \
+  --out "$PROOF_ROOT" --initialize --port 8774 --driver-interval 6 \
+  >"$PROOF_LOG" 2>&1
 ```
 
 After a clean stop, document the same command without `--initialize`. Include the API URL, expected marker schema, capability mode, how to submit two Planning chains, how to identify both request IDs, and how to distinguish raw collection, unloading, Planning outcome, wash, and supply evidence.
 
-- [ ] **Step 2: Run a fresh real HTTP reproduction and capture concrete evidence**
+- [x] **Step 2: Run a fresh real HTTP reproduction and capture concrete evidence**
 
 From an empty proof root, submit the first chain, wait for RUNNING, submit the second chain, and observe both terminals without restarting. Record in the runbook:
 
@@ -1815,9 +1838,15 @@ driver/session state after the first and second terminal
 
 Report the second task's actual causal terminal and quantity; do not normalize it to the first task's result.
 
-- [ ] **Step 3: Reproduce restart and read purity**
+- [x] **Step 3: Reproduce restart and read purity**
 
 Stop after the first terminal and before the second due time, resume the same root, and finish the second task. Verify IDs and quantities match the uninterrupted deterministic expectation. Hash the evidence tree, issue every GET route repeatedly, hash again, and record equality in the runbook.
+
+For the GET-purity phase, stop the normal six-second driver cleanly and restart
+the same root without `--initialize` using `--driver-interval 3600`. Compute the
+durable hash before the first background tick, perform two rounds of all 11 GET
+routes, and compute it after each round. This isolates reads from normal ACTIVE
+session writes.
 
 - [ ] **Step 4: Run the normative backend suites**
 
@@ -1850,7 +1879,8 @@ Expected: tests, typecheck, build, smoke, and audit pass; lint has no new warnin
 Follow `.agent/workflows/testing.md`, `.agent/workflows/review.md`, and `.agent/workflows/hygiene.md`. At minimum run:
 
 ```bash
-python3 .github/scripts/verify_repository.py
+uv run --no-project --python 3.13.14 python -B \
+  .github/scripts/verify_repository.py
 git diff --check
 git status --short
 ```
@@ -1867,6 +1897,15 @@ Inspect the two artifacts in that exact directory, then remove only that tempora
 - [ ] **Step 7: Request two independent reviews and resolve every finding**
 
 Use one reviewer for architecture/safety and one for React/contract behavior. Give both reviewers the exact base `de18e58ccce0907f7c0365c33fa6400b5069bc12`, current head, approved spec, and this plan. The architecture reviewer must check owner boundaries, lock ordering, restart evidence, one-step/one-policy behavior, and GET purity. The UI reviewer must check strict v2 parsing, operation gates, multi-card order, stale-read behavior, and absence of execution writes. Apply validated findings with focused failing tests and repeat the affected verification commands.
+
+Current record: the Task 7 contract/behavior and UI reviews examined the
+`907a5a1de521968bbd899e535eba1e70f32eb84d` presentation head. Their validated
+findings were closed by `a897467b2c3a1689ce6d4f14599e8f581d87473b`,
+`49d78729c38d3be5e57afe54c4f683ae4ec2bcc8`, and
+`27fcea2d4639dc695f57bd342998803967ecbd09`. The restart/GET-purity evidence also
+received an independent read-only review with no findings. The two final Task 8
+architecture/safety and React/contract reviews of the complete documentation
+head are still pending, so this step remains unchecked.
 
 - [ ] **Step 8: Update design status, plan checkboxes, and commit documentation**
 
