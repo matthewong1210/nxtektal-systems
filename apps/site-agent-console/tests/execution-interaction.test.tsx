@@ -16,7 +16,19 @@ import { PilotOperations } from "../components/PilotOperations";
 import { API_SCHEMA, DISCLAIMER } from "../lib/api";
 import type { ConfirmationRecord, InputRecord, OutcomeRecord, PlanRecord, PlanningSnapshot } from "../lib/planning";
 import { localTimeToUtc, type TaskOpsSnapshot } from "../lib/task-ops";
-import { continuousTwoTaskPendingData, continuousTwoTaskWitness, continuousTwoTaskWitnessData, endedData, exampleData, humanAssistanceData, withRound, witnessData } from "./execution-fixtures";
+import {
+  continuousTwoTaskPending,
+  continuousTwoTaskPendingData,
+  continuousTwoTaskRunningAfterRecovery,
+  continuousTwoTaskRunningAfterRecoveryData,
+  continuousTwoTaskWitness,
+  continuousTwoTaskWitnessData,
+  endedData,
+  exampleData,
+  humanAssistanceData,
+  withRound,
+  witnessData,
+} from "./execution-fixtures";
 import { taskOpsFixture } from "./task-ops-fixtures";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -550,12 +562,21 @@ describe("continuous V4: two executions arrive through polling in service order 
 
   it("keeps the terminal card's displayed evidence unchanged while the other card moves from PENDING to RUNNING, and the session stays ACTIVE", async () => {
     const service = scriptedService();
-    const expectedOrder = continuousTwoTaskWitness().executions.map((row) => row.execution_id);
+    const pending = continuousTwoTaskPending();
+    const running = continuousTwoTaskRunningAfterRecovery();
+    const pendingOrder = pending.executions.map((row) => row.execution_id);
+    const runningOrder = running.executions.map((row) => row.execution_id);
+    expect(pendingOrder).toEqual([TERMINAL_ID, SECOND_ID]);
+    expect(runningOrder).toEqual([SECOND_ID, TERMINAL_ID]);
+    expect(new Set(pendingOrder)).toEqual(new Set(runningOrder));
+    expect(pending.session_state).toBe("ACTIVE");
+    expect(running.session_state).toBe("ACTIVE");
     service.state.executions = continuousTwoTaskPendingData();
     await mount(service);
-    expect(cardIds()).toEqual(expectedOrder);
+    expect(cardIds()).toEqual(pendingOrder);
     expect(cardById(SECOND_ID).textContent).toContain("PENDING");
     expect(cardById(SECOND_ID).textContent).toContain("Not started yet · waiting for a policy slot");
+    expect(cardById(SECOND_ID).textContent).not.toContain("balls · ledger-backed");
     expect(cardById(TERMINAL_ID).textContent).toContain("SUCCEEDED");
     expect(cardById(TERMINAL_ID).textContent).toContain("600 balls · ledger-backed (COMPLETE)");
     const terminalBefore = cardById(TERMINAL_ID).innerHTML;
@@ -563,10 +584,10 @@ describe("continuous V4: two executions arrive through polling in service order 
     expect(panelText()).not.toContain("SESSION ENDED");
     expect(execReads(service)).toHaveLength(1);
 
-    service.state.executions = continuousTwoTaskWitnessData(); // the next poll: the second task has started
+    service.state.executions = continuousTwoTaskRunningAfterRecoveryData();
     await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
     expect(execReads(service)).toHaveLength(2);
-    expect(cardIds()).toEqual(expectedOrder); // service order, never re-sorted by state or time
+    expect(cardIds()).toEqual(runningOrder); // each response keeps its own service order
     expect(cardById(TERMINAL_ID).innerHTML).toBe(terminalBefore);
     expect(cardById(SECOND_ID).textContent).toContain("RUNNING");
     expect(cardById(SECOND_ID).textContent).toContain("Started at t = 31200 s");

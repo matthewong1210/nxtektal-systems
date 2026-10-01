@@ -404,20 +404,48 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     expect(html).not.toContain("Follow one confirmed collection task");
   });
 
-  it("parses the rewound PENDING instant of the same session with the same identities and order, still ACTIVE", async () => {
-    const { continuousTwoTaskPendingData, continuousTwoTaskWitness } = await import("./execution-fixtures");
-    const { parseCollectionExecutions } = await import("../lib/collection-executions");
-    const earlier = parseCollectionExecutions(continuousTwoTaskPendingData());
-    const witness = continuousTwoTaskWitness();
-    expect(earlier.executions.map((row) => row.execution_id)).toEqual(witness.executions.map((row) => row.execution_id));
-    expect(earlier.executions.map((row) => row.state)).toEqual(["PENDING", "SUCCEEDED"]);
-    expect(earlier.session_state).toBe("ACTIVE");
-    expect(earlier.now_sim_t_s).toBe(31260);
-    expect(earlier.executions[1]).toEqual(witness.executions[1]); // the terminal record is byte-for-byte the witness's
-    const html = clean(render(view(earlier)));
-    expect(cardOrder(html)).toEqual(witness.executions.map((row) => row.execution_id));
+  it("strictly parses the backend-generated PENDING response in its own service order", async () => {
+    const { continuousTwoTaskPending } = await import("./execution-fixtures");
+    const pending = continuousTwoTaskPending();
+    expect(pending.replay_digest).toBe("a7501d28b183e11a457d18b070d58360249d3d24a87159979e288aa8bad095bc");
+    expect(pending.session_state).toBe("ACTIVE");
+    expect(pending.now_sim_t_s).toBe(31200);
+    expect(pending.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([
+      [SUCCEEDED_ID, "SUCCEEDED", "TERMINAL", 600, 600],
+      [RUNNING_ID, "PENDING", "WAITING_FOR_POLICY_SLOT", null, null],
+    ]);
+    const html = clean(render(view(pending)));
+    expect(cardOrder(html)).toEqual([SUCCEEDED_ID, RUNNING_ID]);
     expect(cardHtml(html, RUNNING_ID)).toContain("Not started yet · waiting for a policy slot");
     expect(cardHtml(html, RUNNING_ID)).not.toContain("balls · ledger-backed");
     expect(html).toContain("SESSION ACTIVE");
+  });
+
+  it("strictly parses the backend-generated recovery response in its own service order", async () => {
+    const { continuousTwoTaskRunningAfterRecovery } = await import("./execution-fixtures");
+    const running = continuousTwoTaskRunningAfterRecovery();
+    expect(running.replay_digest).toBe("22363af0ad815a17e58842fa1b8142d2c2a204db55236719f0f87c160cf3c953");
+    expect(running.session_state).toBe("ACTIVE");
+    expect(running.now_sim_t_s).toBe(31800);
+    expect(running.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([
+      [RUNNING_ID, "RUNNING", "RAW_COLLECTED_TO_ROBOT", 296, 0],
+      [SUCCEEDED_ID, "SUCCEEDED", "TERMINAL", 600, 600],
+    ]);
+    const html = clean(render(view(running)));
+    expect(cardOrder(html)).toEqual([RUNNING_ID, SUCCEEDED_ID]);
+    expect(cardHtml(html, RUNNING_ID)).toContain("Started at t = 31200 s");
+    expect(cardHtml(html, RUNNING_ID)).toContain("296 balls · ledger-backed (COMPLETE)");
+    expect(html).toContain("SESSION ACTIVE");
+  });
+
+  it("keeps the shared execution identities and the terminal execution structurally equal across the causal pair", async () => {
+    const { continuousTwoTaskPending, continuousTwoTaskRunningAfterRecovery } = await import("./execution-fixtures");
+    const pending = continuousTwoTaskPending();
+    const running = continuousTwoTaskRunningAfterRecovery();
+    expect(new Set(pending.executions.map((row) => row.execution_id))).toEqual(new Set(running.executions.map((row) => row.execution_id)));
+    const pendingTerminal = pending.executions.find((row) => row.execution_id === SUCCEEDED_ID);
+    const runningTerminal = running.executions.find((row) => row.execution_id === SUCCEEDED_ID);
+    expect(pendingTerminal).toBeDefined();
+    expect(runningTerminal).toEqual(pendingTerminal);
   });
 });
