@@ -42,6 +42,15 @@ CONTINUOUS_TWO_TASK_WITNESS = (
     SIMULATION_ROOT
     / "tests/fixtures/continuous-collection-v4/two-task-active.json"
 )
+CONTINUOUS_TWO_TASK_PENDING_WITNESS = (
+    SIMULATION_ROOT
+    / "tests/fixtures/continuous-collection-v4/two-task-pending.json"
+)
+CONTINUOUS_TWO_TASK_RECOVERY_RUNNING_WITNESS = (
+    SIMULATION_ROOT
+    / "tests/fixtures/continuous-collection-v4/"
+    "two-task-running-after-recovery.json"
+)
 SCHEMA = json.loads(
     (SIMULATION_ROOT / "docs/contracts/collection-execution-v1/schema.json").read_text()
 )
@@ -153,6 +162,116 @@ def test_continuous_two_task_witness_is_canonical_and_relation_valid():
     ) == 1
     assert len({row["execution_id"] for row in snapshot["executions"]}) == 2
     assert len({row["request_id"] for row in snapshot["executions"]}) == 2
+    assert snapshot["replay_digest"] == (
+        "c9d746864edf6765da7c2f94dc2f7fff4c6fc6850501f63fd4965419a64880f9"
+    )
+
+
+def _canonical_continuous_witness(path: Path) -> dict:
+    raw = path.read_bytes()
+    assert raw.endswith(b"\n")
+    assert b"\n" not in raw[:-1]
+    snapshot = json.loads(raw)
+    assert raw == (
+        json.dumps(
+            snapshot,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode()
+    assert execution_api.parse_collection_execution_read_contract(
+        snapshot, "ExecutionSnapshot"
+    ) == snapshot
+    _assert_wire_contract(snapshot)
+    return snapshot
+
+
+def test_continuous_recovery_witnesses_form_one_causal_pending_to_running_pair():
+    pending = _canonical_continuous_witness(
+        CONTINUOUS_TWO_TASK_PENDING_WITNESS
+    )
+    running = _canonical_continuous_witness(
+        CONTINUOUS_TWO_TASK_RECOVERY_RUNNING_WITNESS
+    )
+
+    assert pending["now_sim_t_s"] == 31200
+    assert running["now_sim_t_s"] == 31800
+    assert pending["simulation_time_utc"] == "2026-09-16T08:40:00Z"
+    assert running["simulation_time_utc"] == "2026-09-16T08:50:00Z"
+    assert pending["replay_digest"] != running["replay_digest"]
+    for key in (
+        "schema",
+        "environment",
+        "series_id",
+        "session_id",
+        "round_id",
+        "round_index",
+        "session_epoch_utc",
+        "session_end_sim_t_s",
+        "control_interval_s",
+        "config_digest",
+        "engine_digest",
+        "session_state",
+    ):
+        assert pending[key] == running[key]
+    for key in ("bindings", "requests", "receipts"):
+        assert pending[key] == running[key]
+
+    pending_rows = {
+        row["execution_id"]: row for row in pending["executions"]
+    }
+    running_rows = {
+        row["execution_id"]: row for row in running["executions"]
+    }
+    assert pending_rows.keys() == running_rows.keys()
+    terminal_id = next(
+        execution_id
+        for execution_id, row in pending_rows.items()
+        if row["state"] in execution_api.TERMINALS
+    )
+    pending_id = next(
+        execution_id
+        for execution_id, row in pending_rows.items()
+        if row["state"] == "PENDING"
+    )
+    assert pending_rows[terminal_id] == running_rows[terminal_id]
+
+    before = pending_rows[pending_id]
+    after = running_rows[pending_id]
+    for key in (
+        "execution_id",
+        "attempt_id",
+        "binding_id",
+        "request_id",
+        "task_id",
+        "session_id",
+        "round_id",
+        "incarnation",
+        "runtime_robot_id",
+        "runtime_zone_id",
+        "handoff_station_id",
+        "eligible_sim_t_s",
+        "latest_start_sim_t_s",
+        "max_execution_s",
+        "policy_id",
+        "arbiter_version",
+    ):
+        assert before[key] == after[key]
+    assert before["stage"] == "WAITING_FOR_POLICY_SLOT"
+    assert before["started_sim_t_s"] is None
+    assert before["assignment_id"] is None
+    assert before["actions"] == []
+    assert before["raw_quantity"]["status"] == "NOT_REACHED"
+    assert before["unload_quantity"]["status"] == "NOT_REACHED"
+    assert after["state"] == "RUNNING"
+    assert after["started_sim_t_s"] == 31200
+    assert after["assignment_id"] is not None
+    assert after["actions"]
+    assert set(before["edge_evidence"]["event_ids"]) < set(
+        after["edge_evidence"]["event_ids"]
+    )
 
 
 def _iso(identity, seconds):

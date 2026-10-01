@@ -50,6 +50,14 @@ TWO_TASK_ACTIVE_WITNESS = (
     Path(__file__).resolve().parents[1]
     / "fixtures/continuous-collection-v4/two-task-active.json"
 )
+TWO_TASK_PENDING_WITNESS = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures/continuous-collection-v4/two-task-pending.json"
+)
+TWO_TASK_RECOVERY_RUNNING_WITNESS = (
+    Path(__file__).resolve().parents[1]
+    / "fixtures/continuous-collection-v4/two-task-running-after-recovery.json"
+)
 
 
 def call(server, method, path, body=None):
@@ -1065,6 +1073,117 @@ def test_real_http_accepts_second_confirmation_while_first_runs_and_executes_bot
         assert direct["error"]["code"] == "task_ops_conflict"
         assert direct["error"]["detail"] == (
             "direct schedule creation is not installed; confirm a Planning plan"
+        )
+    finally:
+        server.shutdown()
+        service.stop()
+        runtime.close()
+
+
+def test_two_task_recovery_fixtures_regenerate_from_consecutive_http_data(
+    tmp_path, launch
+):
+    root = tmp_path / "witness"
+    runtime = ContinuousCollectionExecutionRuntime(
+        root, initialize=True, wall_clock=WallClock()
+    )
+    runtime.start()
+    service, server = serve(runtime, launch, tmp_path / "witness-http")
+    try:
+        first = post_planning_chain(
+            server, revision=1, start_at_utc="2026-09-16T08:10:00Z"
+        )["record"]
+        advance_until(
+            runtime,
+            lambda snapshot: execution_for_confirmation(snapshot, first)["state"]
+            == "RUNNING",
+            maximum_ticks=3,
+        )
+        second = post_planning_chain(
+            server,
+            revision=2,
+            start_at_utc="2026-09-16T08:40:00Z",
+            inventory_clean_balls=3000,
+        )["record"]
+        before_due_recovery = advance_until(
+            runtime,
+            lambda snapshot: (
+                execution_for_confirmation(snapshot, first)["state"]
+                in TERMINAL_EXECUTIONS
+                and snapshot["now_sim_t_s"] == 31200
+                and snapshot["session_state"] == "ACTIVE"
+            ),
+            maximum_ticks=3,
+        )
+        assert len(before_due_recovery["executions"]) == 1
+    finally:
+        server.shutdown()
+        service.stop()
+        runtime.close()
+
+    runtime = ContinuousCollectionExecutionRuntime(
+        root, initialize=False, wall_clock=WallClock()
+    )
+    runtime.start()
+    service, server = serve(
+        runtime, launch, tmp_path / "witness-recovery-http"
+    )
+    try:
+        status, response = call(
+            server, "GET", "/api/v1/collection-executions"
+        )
+        assert status == 200
+        pending = response["data"]
+        first_pending = execution_for_confirmation(pending, first)
+        second_pending = execution_for_confirmation(pending, second)
+        assert pending["now_sim_t_s"] == 31200
+        assert first_pending["state"] in TERMINAL_EXECUTIONS
+        assert second_pending["state"] == "PENDING"
+        assert second_pending["started_sim_t_s"] is None
+        assert second_pending["assignment_id"] is None
+        assert second_pending["actions"] == []
+        assert second_pending["raw_quantity"]["balls"] is None
+        assert second_pending["unload_quantity"]["balls"] is None
+        pending_canonical = (
+            json.dumps(
+                pending,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            + "\n"
+        ).encode()
+        assert TWO_TASK_PENDING_WITNESS.read_bytes() == pending_canonical
+
+        runtime.tick()
+        status, response = call(
+            server, "GET", "/api/v1/collection-executions"
+        )
+        assert status == 200
+        active = response["data"]
+        first_active = execution_for_confirmation(active, first)
+        second_active = execution_for_confirmation(active, second)
+        assert active["now_sim_t_s"] == 31800
+        assert first_active["execution_id"] == first_pending["execution_id"]
+        assert second_active["execution_id"] == second_pending["execution_id"]
+        assert first_active == first_pending
+        assert first_active["state"] in TERMINAL_EXECUTIONS
+        assert second_active["state"] == "RUNNING"
+        assert set(second_pending["edge_evidence"]["event_ids"]) < set(
+            second_active["edge_evidence"]["event_ids"]
+        )
+        active_canonical = (
+            json.dumps(
+                active,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            + "\n"
+        ).encode()
+        assert (
+            TWO_TASK_RECOVERY_RUNNING_WITNESS.read_bytes()
+            == active_canonical
         )
     finally:
         server.shutdown()

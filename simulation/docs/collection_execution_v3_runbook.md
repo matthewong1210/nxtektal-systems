@@ -455,6 +455,40 @@ rejection, human-assistance protection, and a running-device restart that
 becomes unknown without re-executing the old authorization.  These are
 isolated simulation-service tests, not physical-device evidence.
 
+## Continuous V4 two-task fixture evidence
+
+The continuous service owns three canonical two-task witnesses under
+`tests/fixtures/continuous-collection-v4/`.  They are exact read-only Manager
+API data from the V4 owner path, not hand-edited projections:
+
+- `two-task-active.json` remains the uninterrupted Task 6 witness at
+  `now_sim_t_s=31800.0` with replay digest
+  `c9d746864edf6765da7c2f94dc2f7fff4c6fc6850501f63fd4965419a64880f9`;
+- `two-task-pending.json` is the first GET after a real process recovery at
+  `now_sim_t_s=31200.0`.  Recovery has durably admitted the second task, but no
+  policy action or assignment exists, so its state is `PENDING` and both
+  quantities are contract `NOT_REACHED`/`null`; and
+- `two-task-running-after-recovery.json` is the next GET after exactly one
+  owner tick at `now_sim_t_s=31800.0`, where that same execution is `RUNNING`.
+
+The pending and recovery-running files form the causal polling pair.  Their
+series/session/round, bindings, requests, receipts and execution identities are
+equal; the already-terminal first execution is byte-identical; and the second
+execution retains its accepted Edge evidence while adding the start/runtime
+evidence produced by the next tick.  A process recovery is part of this pair,
+so its later Edge record IDs and replay digest intentionally differ from the
+uninterrupted Task 6 witness.  Do not mix `two-task-pending.json` with
+`two-task-active.json` to simulate one polling history.
+
+`test_two_task_recovery_fixtures_regenerate_from_consecutive_http_data`
+recreates both recovery files from a fresh durable root and compares the exact
+canonical bytes returned through `SiteAgentApiServer`; the separate active
+fixture test continues to regenerate the original uninterrupted witness.
+`test_continuous_recovery_witnesses_form_one_causal_pending_to_running_pair`
+also applies the strict Python parser, JSON Schema and cross-record relation
+checks to both files before checking their cross-snapshot identity and evidence
+evolution.
+
 ## Frozen 20-case acceptance matrix
 
 The executable manifest is
