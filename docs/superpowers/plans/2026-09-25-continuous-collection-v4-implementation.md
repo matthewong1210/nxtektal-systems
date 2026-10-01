@@ -13,10 +13,9 @@
 **Implementation status (2026-10-02):** Tasks 1–7 are implemented and locally
 verified through code head `27fcea2d4639dc695f57bd342998803967ecbd09`.
 Task 8 fresh HTTP reproduction, restart reproduction, isolated GET-purity proof,
-normative backend/Console/package/repository verification, and the Next 16.3.8
-production-security patch are complete. Final independent review, documentation
-status commit, and clean-head focused verification remain in progress. The
-branch is local and unmerged.
+normative backend/Console/package/repository verification, the Next 16.3.8
+production-security patch, two independent final reviews, and clean-head focused
+verification are complete. The branch is local and unmerged.
 
 | Task | Implementation commit(s) |
 |---|---|
@@ -29,6 +28,7 @@ branch is local and unmerged.
 | 7 | `907a5a1de521968bbd899e535eba1e70f32eb84d`, `a897467b2c3a1689ce6d4f14599e8f581d87473b`, `49d78729c38d3be5e57afe54c4f683ae4ec2bcc8`, `27fcea2d4639dc695f57bd342998803967ecbd09` |
 | 8 draft evidence/runbook | `e985fbfdbf9a6662ba0d5d4b143e389693833400` |
 | Next production-security patch | `1ea895013784c9cb3731f96902cda65699003ff8` |
+| 8 verified documentation | `e35c984b27c0233a9a7c0b98c37cd72431cb5fa1` |
 
 ## Global Constraints
 
@@ -1927,20 +1927,24 @@ distribution membership verifier; 111 repository-policy tests passed with
 loopback enabled; the repository verifier passed 732 paths and 89 Markdown
 files. The temporary distribution directory was removed.
 
-- [ ] **Step 7: Request two independent reviews and resolve every finding**
+- [x] **Step 7: Request two independent reviews and resolve every finding**
 
 Use one reviewer for architecture/safety and one for React/contract behavior. Give both reviewers the exact base `de18e58ccce0907f7c0365c33fa6400b5069bc12`, current head, approved spec, and this plan. The architecture reviewer must check owner boundaries, lock ordering, restart evidence, one-step/one-policy behavior, and GET purity. The UI reviewer must check strict v2 parsing, operation gates, multi-card order, stale-read behavior, and absence of execution writes. Apply validated findings with focused failing tests and repeat the affected verification commands.
 
-Current record: the Task 7 contract/behavior and UI reviews examined the
+Record: the Task 7 contract/behavior and UI reviews examined the
 `907a5a1de521968bbd899e535eba1e70f32eb84d` presentation head. Their validated
 findings were closed by `a897467b2c3a1689ce6d4f14599e8f581d87473b`,
 `49d78729c38d3be5e57afe54c4f683ae4ec2bcc8`, and
 `27fcea2d4639dc695f57bd342998803967ecbd09`. The restart/GET-purity evidence also
-received an independent read-only review with no findings. The two final Task 8
-architecture/safety and React/contract reviews of the complete documentation
-head are still pending, so this step remains unchecked.
+received an independent read-only review with no findings. Two final Task 8
+reviews then examined exact range `de18e58c..e35c984b`: architecture/safety and
+React/contract/security/docs both returned APPROVED with no Critical, Important,
+or Minor findings. The latter also produced a sealed local security scan with
+zero findings. Its lack of an independent Site Agent 320 px real-browser or
+assistive-technology pass remains a disclosed manual coverage gap, not a contract
+finding.
 
-- [ ] **Step 8: Update design status, plan checkboxes, and commit documentation**
+- [x] **Step 8: Update design status, plan checkboxes, and commit documentation**
 
 Change the design status from design-only to an implementation record that names the final commits and verified scope. Keep physical robots, cameras, cross-session rollover, multiple robots/stations, automatic Planning outcomes, washing, and supply explicitly unimplemented.
 
@@ -1949,6 +1953,16 @@ git add simulation/docs/continuous_collection_execution_v4_runbook.md docs/super
 git commit -m "docs(collection-execution): document continuous v4 operation"
 ```
 
-- [ ] **Step 9: Perform the final clean-head verification**
+Observed documentation commits: `e985fbf` established the runbook and evidence
+record; `e35c984` incorporated final verification results and fixed the reviewed
+Darwin `mktemp`, bounded-readiness, phase-log, and revision-supersession guidance.
+
+- [x] **Step 9: Perform the final clean-head verification**
 
 Re-run the focused V4 backend test, the focused capability/execution console tests, repository verifier, and `git diff --check` after the documentation commit. Confirm `git status --short` is empty. Keep the branch local and unmerged for user review.
+
+Observed after `e35c984`: focused backend 85 passed in 679.25 seconds; focused
+capability/collection-execution Console tests passed 6 files / 439 tests;
+repository verification passed 732 paths / 89 Markdown files; both diff checks
+passed and the worktree was clean. The final status-only documentation commit
+does not alter runtime, contract, fixture, dependency, or command content.

@@ -474,6 +474,7 @@ Console 已实现以下最小变化：
 | Task 7 最终修正 | `27fcea2d4639dc695f57bd342998803967ecbd09` | causal continuous execution snapshot tests |
 | Task 8 运行手册初稿 | `e985fbfdbf9a6662ba0d5d4b143e389693833400` | fresh、restart、GET-purity 操作与实跑证据 |
 | 依赖安全修正 | `1ea895013784c9cb3731f96902cda65699003ff8` | 两个 Next 应用从 16.3.5 升到 16.3.8，关闭生产依赖 Critical |
+| Task 8 验证文档 | `e35c984b27c0233a9a7c0b98c37cd72431cb5fa1` | 完整验证记录、可执行 runbook 修正与 review 输入 |
 
 最终文档状态提交在本记录之后创建，因此这里不预写未来 SHA。以上提交均为本地、未
 推送、未合并。Task 7 的合同/行为与 UI 两路独立复核提出的有效问题已分别通过上述
@@ -533,8 +534,12 @@ audit 均通过，production vulnerabilities 均为 0。Operational Replay 的 1
 responsive/browser fallback 验证也通过。完整审计仍各报告一个只存在于开发依赖图的
 transitive `brace-expansion` High，不属于生产图，也未在这次 Next 修正中扩大依赖范围。
 
-最终两路独立 review 与 clean-head focused verification 仍在本记录创建时进行；其结论
-必须在最终状态提交中按实际结果补写。
+完整文档头 `e35c984` 经两路独立 review：architecture/safety 与
+React/contract/security/docs 均为 APPROVED，无 Critical、Important 或 Minor finding；
+sealed local security scan 为 0 findings。该文档提交之后的 clean-head focused
+verification 为 backend 85 passed、Console contract/UI 6 files / 439 tests、repository
+verifier 通过，`git diff --check` 与工作树检查均干净。Site Agent Console 没有另做
+独立 320 px 真浏览器或辅助技术检查，这属于已披露的手工覆盖缺口，不改变合同验收。
 
 ## 17. 原实施分层建议（历史）
 
