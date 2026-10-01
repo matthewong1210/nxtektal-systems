@@ -10,12 +10,13 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-25-continuous-collection-v4-design.md`
 
-**Implementation status (2026-10-01):** Tasks 1–7 are implemented and locally
+**Implementation status (2026-10-02):** Tasks 1–7 are implemented and locally
 verified through code head `27fcea2d4639dc695f57bd342998803967ecbd09`.
-Task 8 fresh HTTP reproduction, restart reproduction, and isolated GET-purity
-proof are complete; normative full-suite verification, final independent review,
-documentation commit, and clean-head verification remain in progress. The branch
-is local and unmerged.
+Task 8 fresh HTTP reproduction, restart reproduction, isolated GET-purity proof,
+normative backend/Console/package/repository verification, and the Next 16.3.8
+production-security patch are complete. Final independent review, documentation
+status commit, and clean-head focused verification remain in progress. The
+branch is local and unmerged.
 
 | Task | Implementation commit(s) |
 |---|---|
@@ -26,6 +27,8 @@ is local and unmerged.
 | 5 | `dc1e521c4d35ec771bca83c45ab02bbf34ee0e7a` |
 | 6 | `d755934cebdb423bc77e04dcae076cc4cc1ce238` |
 | 7 | `907a5a1de521968bbd899e535eba1e70f32eb84d`, `a897467b2c3a1689ce6d4f14599e8f581d87473b`, `49d78729c38d3be5e57afe54c4f683ae4ec2bcc8`, `27fcea2d4639dc695f57bd342998803967ecbd09` |
+| 8 draft evidence/runbook | `e985fbfdbf9a6662ba0d5d4b143e389693833400` |
+| Next production-security patch | `1ea895013784c9cb3731f96902cda65699003ff8` |
 
 ## Global Constraints
 
@@ -1809,18 +1812,31 @@ empty evidence root; create logs, request bodies, and HTTP responses outside it:
 
 ```bash
 PROOF_ROOT="$(mktemp -d /private/tmp/nxt-continuous-v4-proof.XXXXXX)"
-PROOF_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service.XXXXXX.log)"
+REQUEST_ROOT="$(mktemp -d /private/tmp/nxt-continuous-v4-requests.XXXXXX)"
+FRESH_SERVICE_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service-fresh.log.XXXXXX)"
+RESTART_SERVICE_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service-restart.log.XXXXXX)"
+PURITY_SERVICE_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service-purity.log.XXXXXX)"
 UV_CACHE_DIR=/private/tmp/nxtektal-uv-cache \
 uv run --no-sync python -B -m scripts.course_collection_execution_v4_service \
   --out "$PROOF_ROOT" --initialize --port 8774 --driver-interval 6 \
-  >"$PROOF_LOG" 2>&1
+  >"$FRESH_SERVICE_LOG" 2>&1 &
+SERVICE_PID=$!
 ```
 
-After a clean stop, document the same command without `--initialize`. Include the API URL, expected marker schema, capability mode, how to submit two Planning chains, how to identify both request IDs, and how to distinguish raw collection, unloading, Planning outcome, wash, and supply evidence.
+After a clean stop, document the same command without `--initialize`, redirecting
+to `RESTART_SERVICE_LOG`; the isolated GET-purity start must redirect to
+`PURITY_SERVICE_LOG`. Include the API URL, expected marker schema, capability
+mode, how to submit two Planning chains, how to identify both request IDs, and
+how to distinguish raw collection, unloading, Planning outcome, wash, and supply
+evidence.
 
 - [x] **Step 2: Run a fresh real HTTP reproduction and capture concrete evidence**
 
-From an empty proof root, submit the first chain, wait for RUNNING, submit the second chain, and observe both terminals without restarting. Record in the runbook:
+From an empty proof root, submit the first chain, wait until its execution is
+observed `RUNNING`, submit the second chain, and observe both terminals without
+restarting. This is a required ordering barrier: posting even the revision-2
+input before the first schedule dispatches and reaches observed `RUNNING` can
+cause the first schedule to be rejected as superseded. Record in the runbook:
 
 ```text
 series_id, session_id, round_id
@@ -1848,7 +1864,7 @@ durable hash before the first background tick, perform two rounds of all 11 GET
 routes, and compute it after each round. This isolates reads from normal ACTIVE
 session writes.
 
-- [ ] **Step 4: Run the normative backend suites**
+- [x] **Step 4: Run the normative backend suites**
 
 Run from `simulation/`:
 
@@ -1859,7 +1875,11 @@ uv run --no-sync python -B scripts/validate_configs.py
 
 Expected: all tests pass and config validation reports zero errors and zero warnings.
 
-- [ ] **Step 5: Run the normative console suites**
+Observed on 2026-10-02 with the locked all-extras Python 3.13.14 environment:
+3,218 tests passed in 1,190.82 seconds; configuration validation reported 0
+errors and 0 warnings.
+
+- [x] **Step 5: Run the normative console suites**
 
 Run from `apps/site-agent-console/`:
 
@@ -1874,7 +1894,15 @@ npm audit --omit=dev
 
 Expected: tests, typecheck, build, smoke, and audit pass; lint has no new warnings.
 
-- [ ] **Step 6: Run repository, package, and hygiene verification**
+Observed on local Node v25.8.2 / npm 11.11.1 after the security patch: Site
+Agent Console passed 26 files / 658 tests, typecheck, production build, and HTTP
+smoke; lint reported 0 errors and the two unchanged warnings; production audit
+reported 0 vulnerabilities. The same patch was independently checked in
+Operational Replay: 7 files / 81 tests, typecheck, lint, production build, HTTP
+smoke, production audit 0, and its full responsive/browser fallback verifier all
+passed.
+
+- [x] **Step 6: Run repository, package, and hygiene verification**
 
 Follow `.agent/workflows/testing.md`, `.agent/workflows/review.md`, and `.agent/workflows/hygiene.md`. At minimum run:
 
@@ -1893,6 +1921,11 @@ uv build --out-dir "$build_dir"
 ```
 
 Inspect the two artifacts in that exact directory, then remove only that temporary directory. Confirm the working tree contains only the intended V4 files before the documentation commit.
+
+Observed: the sdist and wheel built outside the repository and passed the
+distribution membership verifier; 111 repository-policy tests passed with
+loopback enabled; the repository verifier passed 732 paths and 89 Markdown
+files. The temporary distribution directory was removed.
 
 - [ ] **Step 7: Request two independent reviews and resolve every finding**
 

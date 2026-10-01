@@ -472,8 +472,10 @@ Console 已实现以下最小变化：
 | Task 7 review fixes | `a897467b2c3a1689ce6d4f14599e8f581d87473b` | Console review gaps |
 | Task 7 causal fixtures | `49d78729c38d3be5e57afe54c4f683ae4ec2bcc8` | producer-backed pending recovery pair |
 | Task 7 最终修正 | `27fcea2d4639dc695f57bd342998803967ecbd09` | causal continuous execution snapshot tests |
+| Task 8 运行手册初稿 | `e985fbfdbf9a6662ba0d5d4b143e389693833400` | fresh、restart、GET-purity 操作与实跑证据 |
+| 依赖安全修正 | `1ea895013784c9cb3731f96902cda65699003ff8` | 两个 Next 应用从 16.3.5 升到 16.3.8，关闭生产依赖 Critical |
 
-Task 8 的文档提交在本记录之后创建，因此这里不预写未来 SHA。以上提交均为本地、未
+最终文档状态提交在本记录之后创建，因此这里不预写未来 SHA。以上提交均为本地、未
 推送、未合并。Task 7 的合同/行为与 UI 两路独立复核提出的有效问题已分别通过上述
 三个修正提交关闭。
 
@@ -515,11 +517,24 @@ finding；复核重新计算了 25 个 source event ID 与两项 event digest。
 因果 ID、source events、稳定/可变字段和哈希算法见
 [V4 运行手册](../../../simulation/docs/continuous_collection_execution_v4_runbook.md)。
 
-### 16.4 尚待 Task 8 收尾
+### 16.4 Task 8 验证记录
 
-以上记录只陈述已完成的真实 HTTP、restart 与 read-purity proof。完整 Python、配置、
-package、Console、repository/hygiene、浏览器以及最终两路独立 review 仍以 Task 8 实际
-命令结果为准；完成前不在本设计中复制旧测试数量或预写通过结论。
+2026-10-02 使用 locked all-extras Python 3.13.14 环境完成全量验证：3,218 项测试通过；
+配置检查 0 errors / 0 warnings；sdist 与 wheel 在仓库外构建并通过 package membership
+检查。Site Agent Console 为 26 files / 658 tests，通过 typecheck、production build、
+HTTP smoke，lint 为 0 errors / 2 个既有 warnings。仓库政策测试 111 项通过，repository
+verifier 检查 732 个路径和 89 个 Markdown 文件通过。
+
+验证期间生产审计发现两个 Next 应用均直接锁定受
+`GHSA-vcvr-r3jv-pc5j` 影响的 `next@16.3.5`。依赖安全提交 `1ea8950` 将 `next` 与
+`eslint-config-next` 精确升级到 16.3.8；Site Agent Console 保持 658/658，Operational
+Replay 保持 81/81，两个应用的 typecheck、lint、build、HTTP smoke 和 production
+audit 均通过，production vulnerabilities 均为 0。Operational Replay 的 12-scene
+responsive/browser fallback 验证也通过。完整审计仍各报告一个只存在于开发依赖图的
+transitive `brace-expansion` High，不属于生产图，也未在这次 Next 修正中扩大依赖范围。
+
+最终两路独立 review 与 clean-head focused verification 仍在本记录创建时进行；其结论
+必须在最终状态提交中按实际结果补写。
 
 ## 17. 原实施分层建议（历史）
 

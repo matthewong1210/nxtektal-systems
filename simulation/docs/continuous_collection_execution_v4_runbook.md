@@ -72,7 +72,9 @@ initialization fail.
 ```bash
 PROOF_ROOT="$(mktemp -d /private/tmp/nxt-continuous-v4-proof.XXXXXX)"
 REQUEST_ROOT="$(mktemp -d /private/tmp/nxt-continuous-v4-requests.XXXXXX)"
-PROOF_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service.XXXXXX.log)"
+FRESH_SERVICE_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service-fresh.log.XXXXXX)"
+RESTART_SERVICE_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service-restart.log.XXXXXX)"
+PURITY_SERVICE_LOG="$(mktemp /private/tmp/nxt-continuous-v4-service-purity.log.XXXXXX)"
 PORT=8774
 ```
 
@@ -164,7 +166,7 @@ uv run --no-sync python -B -m scripts.course_collection_execution_v4_service \
   --initialize \
   --port "$PORT" \
   --driver-interval 6 \
-  >"$PROOF_LOG" 2>&1 &
+  >"$FRESH_SERVICE_LOG" 2>&1 &
 SERVICE_PID=$!
 ```
 
@@ -187,13 +189,39 @@ start again from a new empty root. Prepare requests before starting the service
 and automate the first three POSTs to avoid this race. A human demonstration may
 use `--driver-interval 30`, but the recorded proof below used `6`.
 
-This bounded readiness loop records the response outside the evidence root and
-submits immediately. If the simulated time check fails, stop and create a new
-root rather than continuing with a missed schedule:
+This readiness loop makes at most 50 attempts, caps each HTTP request at one
+second, records the response outside the evidence root, and submits immediately.
+Every failure path checks the child process, stops it if necessary, waits for it,
+and prints the last response and service log. If the simulated time check fails,
+create a new root rather than continuing with a missed schedule:
 
 ```bash
-while true; do
-  if curl --silent --show-error \
+fail_fresh_startup() {
+  failure_message="$1"
+  echo "$failure_message" >&2
+  if kill -0 "$SERVICE_PID" 2>/dev/null; then
+    kill -INT "$SERVICE_PID"
+  fi
+  service_exit=0
+  wait "$SERVICE_PID" || service_exit=$?
+  echo "service exit status: $service_exit" >&2
+  if [ -s "$REQUEST_ROOT/ready-task-ops.json" ]; then
+    echo "last task-ops response:" >&2
+    cat "$REQUEST_ROOT/ready-task-ops.json" >&2
+  fi
+  echo "last 80 service log lines ($FRESH_SERVICE_LOG):" >&2
+  tail -n 80 "$FRESH_SERVICE_LOG" >&2
+  exit 1
+}
+
+READINESS_ATTEMPTS=50
+readiness_attempt=1
+ready=0
+while [ "$readiness_attempt" -le "$READINESS_ATTEMPTS" ]; do
+  if ! kill -0 "$SERVICE_PID" 2>/dev/null; then
+    fail_fresh_startup "service exited before API readiness"
+  fi
+  if curl --fail --silent --show-error --max-time 1 \
       "http://127.0.0.1:$PORT/api/v0/task-ops" \
       >"$REQUEST_ROOT/ready-task-ops.json" &&
     jq -e '
@@ -203,19 +231,25 @@ while true; do
       .data.scheduler.state == "RUNNING" and
       .data.runtime.session_state == "ACTIVE"
     ' "$REQUEST_ROOT/ready-task-ops.json" >/dev/null; then
-    jq -e '
-      .data.runtime.simulation_time_utc == "2026-09-16T08:10:00Z"
-    ' "$REQUEST_ROOT/ready-task-ops.json" >/dev/null || {
-      echo "missed the 08:10 admission window; use a new root" >&2
-      kill -INT "$SERVICE_PID"
-      wait "$SERVICE_PID"
-      exit 1
-    }
-    post_chain 001
+    simulation_time_utc="$(jq -er '.data.runtime.simulation_time_utc' \
+      "$REQUEST_ROOT/ready-task-ops.json")" ||
+      fail_fresh_startup "ready response lacks simulation_time_utc"
+    if [ "$simulation_time_utc" != "2026-09-16T08:10:00Z" ]; then
+      fail_fresh_startup \
+        "missed the 08:10 admission window (observed $simulation_time_utc); use a new root"
+    fi
+    post_chain 001 || fail_fresh_startup "chain 1 submission failed"
+    ready=1
     break
   fi
   sleep 0.1
+  readiness_attempt=$((readiness_attempt + 1))
 done
+
+if [ "$ready" -ne 1 ]; then
+  fail_fresh_startup \
+    "service was not API-ready after $READINESS_ATTEMPTS attempts"
+fi
 ```
 
 Verify the marker after readiness:
@@ -294,7 +328,11 @@ The chain-1 RUNNING predicate is:
 - `raw_quantity.balls > 0`;
 - the entire snapshot contains at most one `RUNNING` execution.
 
-Only after this predicate is observed, submit chain 2:
+Only after this predicate is observed, submit chain 2. This ordering starts with
+the chain-2 input POST: revision 2 supersedes revision 1 for dispatch, so posting
+the second input before the first schedule is dispatched and observed `RUNNING`
+can cause the first schedule to be rejected as superseded. The `RUNNING`
+observation is the barrier that makes it safe to post the entire second chain:
 
 ```bash
 post_chain 002
@@ -456,7 +494,7 @@ uv run --no-sync python -B -m scripts.course_collection_execution_v4_service \
   --out "$PROOF_ROOT" \
   --port "$PORT" \
   --driver-interval 6 \
-  >"$PROOF_LOG" 2>&1 &
+  >"$RESTART_SERVICE_LOG" 2>&1 &
 SERVICE_PID=$!
 ```
 
@@ -518,7 +556,7 @@ uv run --no-sync python -B -m scripts.course_collection_execution_v4_service \
   --port "$PORT" \
   --driver-interval 3600 \
   --api-only \
-  >"$PROOF_LOG" 2>&1 &
+  >"$PURITY_SERVICE_LOG" 2>&1 &
 SERVICE_PID=$!
 ```
 
@@ -638,7 +676,7 @@ does not admit, start, stop, or rerun an execution.
 
 ## 14. Verification record
 
-| Verification | Result recorded for this runbook draft |
+| Verification | Result recorded for this implementation |
 |---|---|
 | fresh real HTTP, one process, two Planning chains | PASS on 2026-10-01; exit 0; no deviations |
 | restart before second due, same durable root | PASS on 2026-10-01; all three processes exit 0 |
@@ -646,12 +684,24 @@ does not admit, start, stop, or rerun an execution.
 | durable tree before/between/after GETs | PASS; identical 12-file digest |
 | causal cross-checks and unique IDs | PASS |
 | conservation / payload parity | PASS for both executions |
-| full Python, config, package, console, repository, and independent final review | Task 8 final verification in progress; record only after the commands complete |
+| locked all-extras Python suite | PASS on 2026-10-02; 3,218 passed in 1,190.82 s |
+| configuration validation | PASS; 0 errors, 0 warnings |
+| Python distribution | PASS; sdist and wheel built outside the repository and their package membership verified |
+| Site Agent Console | PASS; 26 files / 658 tests, typecheck, production build, and HTTP smoke; lint 0 errors / 2 unchanged warnings |
+| Operational Replay dependency regression | PASS; 7 files / 81 tests, typecheck, lint, production build, HTTP smoke, and the 12-scene responsive/browser fallback verification |
+| production npm audit | PASS; 0 vulnerabilities in both Next applications after `next` and `eslint-config-next` were pinned to `16.3.8` |
+| repository policy and verifier | PASS; 111 policy tests and 732 paths / 89 Markdown files |
+| final independent reviews | pending on the complete Task 8 documentation head |
 
-The real HTTP proof used Python 3.13.14. It was a local run, not CI. Final suite
-counts, Node version, dependency-audit result, package artifacts, and independent
-review results belong in the final Task 8 delivery record; this runbook does not
-copy older test totals.
+The real HTTP proof and normative Python run used Python 3.13.14. Frontend
+verification used local Node v25.8.2 and npm 11.11.1. These were local runs,
+not CI. The initial production audit found the critical
+`GHSA-vcvr-r3jv-pc5j` advisory in `next@16.3.5`; local commit `1ea8950` upgrades
+both Next applications and their matching lint configuration to `16.3.8`, after
+which both production audits report zero vulnerabilities. A supplemental full
+audit still reports one transitive, development-only `brace-expansion` High in
+each application; it is outside the production graph and was not silently
+rewritten as part of the Next security patch.
 
 ## 15. Troubleshooting
 
