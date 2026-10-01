@@ -78,6 +78,7 @@ function deferred<T>() {
 function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable" = "confirmed") {
   const state = {
     scheduler: { state: "RUNNING" as "RUNNING" | "FAILED", detail: null as string | null },
+    schedules: taskOpsFixture().schedules,
     notifications: taskOpsFixture().notifications,
     outcomes: [] as OutcomeRecord[],
     committed: new Map<string, OutcomeRecord>(),
@@ -85,7 +86,9 @@ function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable
     attempts: [] as { path: string; body: Record<string, unknown> }[],
     reads: [] as string[],
     planningPostMode: "ok" as "ok" | "network",
+    planningPostGate: null as ReturnType<typeof deferred<void>> | null,
     lookupGate: null as ReturnType<typeof deferred<void>> | null,
+    taskPostGate: null as ReturnType<typeof deferred<void>> | null,
     counter: 0,
     /** Set by a confirmation POST: the planning view then carries the confirmation and its schedule. */
     confirmed: false,
@@ -98,7 +101,7 @@ function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable
       headers: { "Content-Type": "application/json" },
     });
   const taskOps = (): Record<string, unknown> => {
-    const base = taskOpsFixture({ scheduler: { ...state.scheduler }, notifications: state.notifications }) as TaskOpsSnapshot & Record<string, unknown>;
+    const base = taskOpsFixture({ scheduler: { ...state.scheduler }, schedules: state.schedules, notifications: state.notifications }) as TaskOpsSnapshot & Record<string, unknown>;
     if (mode === "undeclared") delete base.service_capabilities;
     else base.service_capabilities = declarationFor(mode);
     return base;
@@ -133,6 +136,8 @@ function scriptedService(mode: Mode, planningVariant: "confirmed" | "confirmable
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
       state.attempts.push({ path: input, body });
       if (input === "/api/v1/planning/outcomes" && state.planningPostMode === "network") throw new TypeError("fetch failed");
+      if (input.startsWith("/api/v1/planning/") && state.planningPostGate !== null) await state.planningPostGate.promise;
+      if (input.startsWith("/api/v0/task-ops/") && state.taskPostGate !== null) await state.taskPostGate.promise;
       state.posts.push({ path: input, body });
       if (input === "/api/v1/planning/inputs") return receipt(body, { ...inputRecord, revision: inputRecord.revision + 1, request_id: body.request_id });
       if (input === "/api/v1/planning/plans") return receipt(body, { ...readyPlan, request: body as unknown as PlanRecord["request"] });
@@ -423,6 +428,15 @@ describe("undeclared service: readable, every write withheld", () => {
 });
 
 describe("continuous V3 service (capability v2): Planning confirmation creates the bound schedule; every installed write keeps its own endpoint and gates", () => {
+  it("uses source-neutral copy when a continuous session has no schedule records", async () => {
+    const service = scriptedService("continuous");
+    service.state.schedules = [];
+    await mount(service);
+    expect(text()).toContain("No schedule records yet.");
+    expect(text()).not.toContain("Add one dated collection task above.");
+    expect(text()).toContain(CONTINUOUS_SCHEDULE_REASON);
+  });
+
   it("shows the continuous mode, enables Planning, pending cancellation and acknowledgement, and withholds only direct scheduling with the Planning reason", async () => {
     const service = scriptedService("continuous", "confirmable");
     await mount(service);
@@ -512,22 +526,59 @@ describe("continuous V3 service (capability v2): Planning confirmation creates t
     expect(service.state.posts.map((post) => post.path)).toEqual(["/api/v0/task-ops/notifications/notification-1/resolve"]);
   });
 
-  it("SUPPORTED never replaces the 15-second health gate: a FAILED scheduler withholds every installed write and its direct submit, and RUNNING releases them", async () => {
+  it("health alone gates ready input, plan, confirmation, cancellation and acknowledgement controls, then RUNNING releases them", async () => {
     const service = scriptedService("continuous", "confirmable");
     await mount(service);
     await setValue(input("schedule-1-cancel"), "operator-a");
     await fillNotification();
-    expect(buttonNamed("Save revision 2")?.disabled).toBe(false);
-    expect(buttonNamed("Cancel schedule")?.disabled).toBe(false);
+    const ready = ["Save revision 2", "Ask for the system suggestion", "Confirm plan version 1", "Cancel schedule", "Acknowledge"];
+    for (const label of ready) expect(buttonNamed(label)?.disabled, `${label} before FAILED`).toBe(false);
+
+    service.state.scheduler = { state: "FAILED", detail: "journal unreadable" };
+    await tick(TASK_OPS_POLL_MS + 50);
+    expect(text()).toContain("SCHEDULER FAILED");
+    expect(text()).toContain("CONTINUOUS V3 SESSION");
+    for (const label of ready) expect(buttonNamed(label)?.disabled, `${label} while FAILED`).toBe(true);
+    await submit(container.querySelector<HTMLFormElement>("form.planning-form"));
+    await submit(newPlanForm());
+    await submit(container.querySelector<HTMLFormElement>("form.dispatch-cancel"));
+    for (const label of ["Confirm plan version 1", "Acknowledge"]) {
+      await act(async () => {
+        buttonNamed(label)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(10);
+      });
+    }
+    expect(service.state.attempts).toHaveLength(0);
+
+    service.state.scheduler = { state: "RUNNING", detail: null };
+    await tick(TASK_OPS_POLL_MS + 50);
+    expect(text()).toContain("SCHEDULER RUNNING");
+    for (const label of ready) expect(buttonNamed(label)?.disabled, `${label} after RUNNING`).toBe(false);
+  });
+
+  it("health alone gates a ready outcome and resolvable notification while FAILED, then RUNNING releases both", async () => {
+    const service = scriptedService("continuous");
+    service.state.notifications = [{
+      ...taskOpsFixture().notifications[0],
+      condition_active: false,
+      can_resolve: true,
+    }];
+    await mount(service);
+    await click("Record UNLOADED");
+    await fillOutcomeForm("UNLOADED", "480");
+    await fillNotification();
+    expect(buttonNamed("Save UNLOADED result")?.disabled).toBe(false);
+    expect(buttonNamed("Resolve notification")?.disabled).toBe(false);
+    expect(buttonNamed("Acknowledge")?.disabled).toBe(false);
     service.state.scheduler = { state: "FAILED", detail: "journal unreadable" };
     await tick(TASK_OPS_POLL_MS + 50);
     expect(text()).toContain("SCHEDULER FAILED");
     expect(text()).toContain("CONTINUOUS V3 SESSION"); // the declaration itself did not change
-    for (const label of ["Save revision 2", "Ask for the system suggestion", "Confirm plan version 1", "Schedule simulated collection", "Cancel schedule", "Acknowledge", "Resolve notification"]) {
+    for (const label of ["Save UNLOADED result", "Acknowledge", "Resolve notification"]) {
       expect(buttonNamed(label)?.disabled, label).toBe(true);
     }
-    for (const form of [...container.querySelectorAll<HTMLFormElement>("form")]) await submit(form); // input, plan, schedule and cancel forms
-    for (const label of ["Confirm plan version 1", "Acknowledge", "Resolve notification"]) {
+    await submit([...container.querySelectorAll<HTMLFormElement>("form.planning-form")].at(-1)!);
+    for (const label of ["Acknowledge", "Resolve notification"]) {
       await act(async () => {
         buttonNamed(label)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
         await vi.advanceTimersByTimeAsync(50);
@@ -537,11 +588,85 @@ describe("continuous V3 service (capability v2): Planning confirmation creates t
     service.state.scheduler = { state: "RUNNING", detail: null };
     await tick(TASK_OPS_POLL_MS + 50);
     expect(text()).toContain("SCHEDULER RUNNING");
-    expect(buttonNamed("Save revision 2")?.disabled).toBe(false);
-    expect(buttonNamed("Cancel schedule")?.disabled).toBe(false);
+    expect(buttonNamed("Save UNLOADED result")?.disabled).toBe(false);
     expect(buttonNamed("Acknowledge")?.disabled).toBe(false);
-    expect(buttonNamed("Schedule simulated collection")?.disabled).toBe(true); // still withheld by the declaration alone
+    expect(buttonNamed("Resolve notification")?.disabled).toBe(false);
     expect(service.state.attempts).toHaveLength(0);
+  });
+
+  it("planning busy alone gates every ready installed planning write until the pending mutation settles", async () => {
+    const service = scriptedService("continuous");
+    service.state.planningPostGate = deferred<void>();
+    await mount(service);
+    await click("Record UNLOADED");
+    await fillOutcomeForm("UNLOADED", "480");
+    for (const label of ["Save revision 2", "Ask for the system suggestion", "Save UNLOADED result"]) {
+      expect(buttonNamed(label)?.disabled, `${label} before busy`).toBe(false);
+    }
+
+    await click("Save revision 2");
+    expect(service.state.attempts.map((attempt) => attempt.path)).toEqual(["/api/v1/planning/inputs"]);
+    expect(buttonNamed("Saving…")?.disabled).toBe(true);
+    for (const label of ["Ask for the system suggestion", "Save UNLOADED result"]) {
+      expect(buttonNamed(label)?.disabled, `${label} while busy`).toBe(true);
+    }
+    for (const label of ["Ask for the system suggestion", "Save UNLOADED result"]) {
+      await act(async () => {
+        buttonNamed(label)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(10);
+      });
+    }
+    expect(service.state.attempts.map((attempt) => attempt.path)).toEqual(["/api/v1/planning/inputs"]);
+
+    const gate = service.state.planningPostGate;
+    service.state.planningPostGate = null;
+    await act(async () => {
+      gate!.resolve();
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(text()).toContain("SAVED");
+    for (const label of ["Ask for the system suggestion", "Save UNLOADED result"]) {
+      expect(buttonNamed(label)?.disabled, `${label} after busy`).toBe(false);
+    }
+  });
+
+  it("task-ops busy alone gates every ready installed task write until the pending mutation settles", async () => {
+    const service = scriptedService("continuous");
+    service.state.notifications = [{
+      ...taskOpsFixture().notifications[0],
+      condition_active: false,
+      can_resolve: true,
+    }];
+    service.state.taskPostGate = deferred<void>();
+    await mount(service);
+    await setValue(input("schedule-1-cancel"), "operator-a");
+    await fillNotification();
+    for (const label of ["Cancel schedule", "Acknowledge", "Resolve notification"]) {
+      expect(buttonNamed(label)?.disabled, `${label} before busy`).toBe(false);
+    }
+
+    await click("Cancel schedule");
+    expect(service.state.attempts.map((attempt) => attempt.path)).toEqual(["/api/v0/task-ops/schedules/schedule-1/cancel"]);
+    for (const label of ["Cancel schedule", "Acknowledge", "Resolve notification"]) {
+      expect(buttonNamed(label)?.disabled, `${label} while busy`).toBe(true);
+    }
+    for (const label of ["Acknowledge", "Resolve notification"]) {
+      await act(async () => {
+        buttonNamed(label)!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        await vi.advanceTimersByTimeAsync(10);
+      });
+    }
+    expect(service.state.attempts.map((attempt) => attempt.path)).toEqual(["/api/v0/task-ops/schedules/schedule-1/cancel"]);
+
+    const gate = service.state.taskPostGate;
+    service.state.taskPostGate = null;
+    await act(async () => {
+      gate!.resolve();
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    for (const label of ["Cancel schedule", "Acknowledge", "Resolve notification"]) {
+      expect(buttonNamed(label)?.disabled, `${label} after busy`).toBe(false);
+    }
   });
 });
 

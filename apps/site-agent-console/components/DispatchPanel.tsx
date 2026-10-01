@@ -256,7 +256,7 @@ export function DispatchView({ view, actions, health, simulationClock = NO_SIMUL
               <p className="fineprint mono">{schedule.schedule_id}</p>
               <p className="fineprint mono">Task: {schedule.task_id ?? "Not created"}</p>
               {schedule.status === "SCHEDULED" ? (cancelBlock === null ? <CancelSchedule id={schedule.schedule_id} disabled={disabled} cancel={actions.cancel} /> : <CapabilityNote capabilities={capabilities} operation="schedules_cancel" />) : null}
-            </article>) : <EmptyNote>No schedules yet. Add one dated collection task above.</EmptyNote>}</div>
+            </article>) : <EmptyNote>No schedule records yet.</EmptyNote>}</div>
           </div>
           <div className="dispatch-column"><div className="dispatch-subhead"><h3 className="subhead">Local notification inbox</h3><Badge tone={count ? "warn" : "muted"}>{count} UNRESOLVED</Badge></div>
             <p className="fineprint dispatch-inbox-note">Notifications appear in this page while it is open. Email, text messages and remote alerts are not connected.</p>

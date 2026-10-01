@@ -48,7 +48,7 @@ panel shows every execution record of the session as its own card in the
 service's array order — never re-sorted by state, time or priority — so a
 SUCCEEDED history record and a RUNNING or PENDING record appear together, and a
 terminal record never marks the session ENDED; the session state comes only
-from the snapshot. The panel stays entirely read-only: its only control
+from the snapshot. The panel stays entirely read-only: its only action button
 re-reads the projection, and it adds no start, stop, rerun or recover action
 and no execution POST. A declared SUPPORTED operation still passes the shared
 15-second scheduler health gate, the busy state, request validation and each

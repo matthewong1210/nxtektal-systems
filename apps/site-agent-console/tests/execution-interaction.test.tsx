@@ -38,6 +38,7 @@ function scriptedService() {
     executions: exampleData("success"),
     execMode: "ok" as ExecMode,
     hung: [] as ((response: Response) => void)[],
+    executionSignals: [] as AbortSignal[],
     reads: [] as string[],
     requests: [] as { method: string; path: string }[],
     outcomes: [] as OutcomeRecord[],
@@ -71,6 +72,7 @@ function scriptedService() {
     }
     if (input === "/api/v1/collection-executions") {
       if (method !== "GET") return envelope(405, { code: "collection_execution_invalid_request", detail: "read-only namespace" });
+      if (init?.signal) state.executionSignals.push(init.signal);
       if (state.execMode === "network") throw new TypeError("fetch failed");
       if (state.execMode === "missing") return envelope(404, { code: "collection_execution_not_found", detail: "route not connected" });
       if (state.execMode === "hang") return new Promise<Response>((resolve) => { state.hung.push(resolve); });
@@ -238,16 +240,31 @@ describe("read-only collection execution panel mounted in PilotOperations", () =
     expect(execReads(service).length).toBeGreaterThanOrEqual(3);
   });
 
-  it("stops reading on unmount", async () => {
+  it("aborts an in-flight read on unmount, drops its late completion, and schedules no later poll", async () => {
     const service = scriptedService();
     await mount(service);
+    service.state.execMode = "hang";
     await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(service.state.hung).toHaveLength(1);
+    const signal = service.state.executionSignals.at(-1);
+    expect(signal).toBeDefined();
+    expect(signal!.aborted).toBe(false);
     const before = execReads(service).length;
     await act(async () => {
       root.unmount();
     });
-    await vi.advanceTimersByTimeAsync(3 * COLLECTION_EXECUTIONS_POLL_MS);
+    expect(signal!.aborted).toBe(true);
+    expect(container.textContent).toBe("");
+    service.state.execMode = "ok";
+    service.state.executions = endedData();
+    service.releaseHung(); // a non-cooperative fetch completes after unmount
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(3 * COLLECTION_EXECUTIONS_POLL_MS);
+    });
     expect(execReads(service)).toHaveLength(before);
+    expect(container.textContent).toBe("");
+    expect(vi.getTimerCount()).toBe(0);
     root = createRoot(container); // afterEach unmounts this empty root
   });
 
