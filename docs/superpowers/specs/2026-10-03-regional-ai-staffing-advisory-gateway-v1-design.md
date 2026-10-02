@@ -8,7 +8,7 @@
 
 设计分支：`codex/ai-advisory-gateway-v1-design`
 
-状态：**DESIGN ONLY — NOT IMPLEMENTED — 等待用户审阅。**
+状态：**APPROVED FOR IMPLEMENTATION PLANNING — NOT IMPLEMENTED — 用户于 2026-10-03 批准设计。**
 
 ## 1. 结论
 
@@ -497,13 +497,18 @@ provider 密钥或 route 缺失时 roster、exception、读取和人工响应仍
 
 | 路由 | 作用 |
 |---|---|
+| `GET /api/v1/staffing` | 用组合根 UTC audit clock 与部署时区返回权威当前 `service_date` 的完整 projection |
 | `GET /api/v1/staffing/dates/{service_date}` | roster、活动异常、effective plan、生成状态、有效候选和响应的只读 projection |
 | `POST /api/v1/staffing/roster-imports` | 写入一份完整、严格验证的 roster revision |
 | `POST /api/v1/staffing/exceptions` | 写入极简异常，返回 durable receipt |
 | `POST /api/v1/staffing/exceptions/{id}/cancel` | 追加取消记录，不删除原异常 |
+| `POST /api/v1/staffing/exceptions/{id}/correct` | 以单条复合事件同时引用旧异常并提交 replacement |
 | `POST /api/v1/staffing/suggestions` | 原子 reserve 异步 generation，返回 `202` durable receipt |
 | `POST /api/v1/staffing/suggestions/{id}/accept\|modify\|reject` | 写入唯一经理终态响应 |
 | `GET /api/v1/staffing/requests/{operation_kind}/{request_id}` | 按操作命名空间恢复 durable receipt/state |
+
+Console 首次加载必须先读取 `GET /api/v1/staffing`；浏览器不得以自己的时钟或时区猜测
+当前服务日。异常更正使用独立 `correct` 路由，以兑现 §7.2 所定义的单条复合事件语义。
 
 每个 mutating route 都要求 `request_id` 和适用的 expected revision。异常提交与模型生成
 是两个 durable 操作；Console 先确保异常已提交，再由经理显式请求建议。断网期间记录的
@@ -823,3 +828,14 @@ Planning/Edge/机器人执行，或自动满足未声明的劳动规则，必须
 目标为约 8–10 个工作日出现可点击的纵向演示，4–5 周形成可试用的本地 pilot；生产
 多站点、认证、数据治理和正式 HR 集成仍需独立阶段。该时间是范围估算，不是验证过的
 交付承诺。
+
+## 20. 已批准的实施计划
+
+本设计按依赖边界拆成三份实施计划：
+
+- `docs/superpowers/plans/2026-10-03-regional-model-gateway-v1.md`；
+- `docs/superpowers/plans/2026-10-03-staffing-advisory-domain-v1.md`；
+- `docs/superpowers/plans/2026-10-03-staffing-advisory-integration-console-v1.md`。
+
+前两份可并行实施；第三份必须在两者公共合同通过后执行。设计批准不等于实现完成，
+在上述计划通过测试、审查和验收之前，本文件继续保持 `NOT IMPLEMENTED`。
