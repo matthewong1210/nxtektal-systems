@@ -1,0 +1,1 @@
+{"id":"msg_001","stop_reason":"tool_use","content":[{"type":"tool_use","id":"toolu_001","name":"emit_structured_output","input":{"result":[]}}],"usage":{"input_tokens":10,"output_tokens":4}}

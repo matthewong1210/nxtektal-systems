@@ -1,0 +1,1 @@
+{"id":"kimi_req_001","choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"{\"result\":[]}"}}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}

@@ -26,3 +26,13 @@ __all__ = [
     "Provider", "ProviderConfig", "TokenUsage", "canonical_json",
     "decode_validated_json", "stable_digest",
 ]
+
+from .adapters import AdapterOutcome, PreparedRequest, ProviderAdapter
+from .kimi import KimiAdapter
+from .openai import OpenAIAdapter
+from .anthropic import AnthropicAdapter
+
+__all__ += [
+    "AdapterOutcome", "PreparedRequest", "ProviderAdapter", "KimiAdapter",
+    "OpenAIAdapter", "AnthropicAdapter",
+]
