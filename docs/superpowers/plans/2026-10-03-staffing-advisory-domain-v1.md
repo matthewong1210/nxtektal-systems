@@ -699,6 +699,7 @@ Task 1 validates direct construction for roster/time values and all five provena
 Deterministic constructor recipes (all objects are passed through `to_primitive` before `stable_digest`):
 
 - `build_staffing_exception(body, start, end)` derives `exception_id = "exception_" + stable_digest({"schema":"nxt-staffing-exception-id/v1", "request_id":body["request_id"]})[:24]`, then copies the already-validated service date, staff ID, kind, interval, and note. Changed payload under the same request ID is caught by request-digest idempotency; it does not create a second exception identity.
+- `build_replacement_exception(previous, replacement, start, end)` preserves `previous.exception_id`, `previous.service_date`, and `previous.staff_id`, then copies the already-validated replacement kind, interval, and note. A correction request ID is an operation identity only and must never create a new nested exception identity. `exception_digest(exception)` hashes `{"schema":"nxt-staffing-exception-digest/v1", "exception":exception}`. Record and correction payloads store this exact digest; cancellation stores the complete cancelled exception and needs no separate digest field.
 - `compose_staffing_basis(service_date, roster, active, plan, exception_set_revision)` sorts `active` by `(staff_id, unavailable_start, unavailable_end, exception_id)`. `exception_set_digest` hashes `{"schema":"nxt-staffing-exception-set/v1", "service_date":service_date, "exceptions":active}`. `effective_plan_digest` hashes `{"schema":"nxt-staffing-effective-plan/v1", "service_date":service_date, "revision":plan.revision, "status":plan.status, "schedule_digest":plan.schedule_digest, "effective_schedule":plan.effective_schedule, "source_sequence":plan.source_sequence, "affected_exception_ids":plan.affected_exception_ids}`. `basis_digest` hashes `{"schema":"nxt-staffing-basis/v1", "service_date":service_date, "roster_revision":roster.revision, "exception_set_revision":exception_set_revision, "effective_plan_revision":plan.revision, "roster_digest":roster.roster_digest, "exception_set_digest":exception_set_digest, "effective_plan_digest":effective_plan_digest}`. These exact values populate `StaffingBasis`.
 - `assignment_from_candidate(operation, basis, staff_id)` derives `assignment_id = "assignment_" + stable_digest({"schema":"nxt-staffing-candidate-assignment-id/v1", "basis_digest":basis.basis.basis_digest, "service_date":basis.basis.service_date, "staff_id":staff_id, "role_code":operation.role_code, "area_code":operation.area_code, "start_at":utc_text(operation.start_at), "end_at":utc_text(operation.end_at)})[:24]` and copies those semantic fields into `Assignment`.
 - Task 5 exposes `staffing_event_id(event_type, sequence, site_id, deployment_id, occurred_at_utc, causation_id, payload)`. It returns `"staffing_event_" + stable_digest({"schema":"nxt-staffing-event-id/v1", "event_type":event_type, "sequence":sequence, "site_id":site_id, "deployment_id":deployment_id, "occurred_at_utc":utc_text(occurred_at_utc), "causation_id":causation_id, "payload":payload})[:24]`. `event_from_record(body, payload)` requires the stored event ID to equal that value before constructing `StaffingEvent`; operation event builders use the same helper.
@@ -1000,6 +1001,17 @@ git commit -m "feat(staffing): validate weekly roster evidence"
 - Imports the frozen `StaffingEvent`, `StaffingHistory`, and `StaffingReceipt` contracts from the cross-task section; Task 2 must not invent local event or history shapes.
 - Implements the frozen `build_staffing_exception` and `compose_staffing_basis` recipes in `exceptions.py`/`plans.py`; `contracts.py` remains unchanged.
 
+**Stability rulings (binding wherever later pseudocode is abbreviated):**
+
+- `normalize_exception(payload, *, roster)` receives the selected complete `RosterRevision`, parses the canonical service date, checks that the revision applies, and materializes the day internally. It validates exact keys/schema, request/staff identifiers, exact nonnegative integer revisions (booleans rejected), safe operator/note, and the closed exception kind. It raises `STALE_ROSTER_REVISION` when the well-formed expected roster revision differs from `roster.revision`. Task 7 selects and passes the revision only inside the ledger-locked builder, so a caller cannot pair a day with unrelated revision metadata.
+- Task 2 owns exact pure parsers for cancellation and correction request bodies plus the three exact key sets. Those parsers validate syntax and return copied closed dictionaries; Task 7 owns active-ID lookup, `expected_exception_set_revision` comparison, and the single composite append under the ledger lock. Task 2 tests parser/normalization semantics; Task 7 tests stale CAS and history immutability.
+- A correction replacement preserves the original exception ID, service date, and staff ID, even though the correction request has a fresh request ID. It may change only kind, normalized unavailable interval, and note. Outer payload ID, previous nested ID, and replacement nested ID must agree.
+- Active exceptions use one canonical order everywhere: `(staff_id, unavailable_start, unavailable_end, exception_id)`. For one staff member on one service date, half-open adjacency is valid and overlap raises `invalid_exception_time` before append. Replay first validates and projects the global exception state across every service date, failing closed as invalid evidence for any impossible transition or overlapping stored state anywhere in the ledger; only then does it filter the requested date. A corrupt event on another date can never be hidden by date projection.
+- `effective_plan_revision` is monotonic per service date across roster replacements. The last accepted/modified complete schedule for the date is the sole candidate for the current baseline; it is usable only when its frozen basis uses the selected roster revision. If that last plan belongs to another roster revision, the state is `NO_PLAN` with its latest per-date revision retained, `effective_schedule=None`, `source_sequence=0`, and `schedule_digest=stable_digest(())`; the revision never resets to zero and an older plan is never reactivated by scanning backward. This single selector replaces any independent latest-schedule lookup and prevents mixing an old plan digest with a new roster baseline.
+- A complete empty accepted schedule is represented by `()`, never by `None`. A later correction/cancellation of an exception present in the selected plan basis marks that plan `REVIEW_REQUIRED` while retaining its schedule. A later accepted/modified plan becomes the new source and clears that review state. Rejections never change plan state.
+- Before basis construction, every active exception must name a worker with the selected roster's service-day assignment and its interval must be contained by that assignment. Roster replacement that removes the worker/shift fails closed with `unknown_staff_or_shift`; a changed shift that no longer contains the interval fails with `invalid_exception_time`. Active exceptions are never silently dropped.
+- `StaffingException`, `StaffingBasis`, `EffectivePlanState`, and `BasisSnapshot` do not provide semantic constructor validation. Task 2 builders therefore validate their complete inputs, interval awareness/minute precision, revision bounds, tuple element types, plan status/coherence, and every digest formula before returning them. `exceptions.py` imports only contracts/time/roster; `plans.py` imports contracts/exceptions/roster/serialization. Existing modules do not import the new modules.
+
 - [ ] **Step 1: Add failing tests for the exact minimal exception body**
 
 Freeze:
@@ -1019,7 +1031,7 @@ Freeze:
 }
 ```
 
-Assert `LEAVE`/`UNAVAILABLE` require `time_local: null` and normalize to the whole shift; `LATE` maps `[shift_start, arrival)`; `EARLY_DEPARTURE` maps `[departure, shift_end)`. Reject unknown staff, no shift, endpoint/outside time, seconds, stale roster, controls/surrogates, note over 500 Unicode scalars, and unknown fields.
+Assert `LEAVE`/`UNAVAILABLE` require `time_local: null` and normalize to the whole shift; `LATE` maps `[shift_start, arrival)`; `EARLY_DEPARTURE` maps `[departure, shift_end)`. Reject unknown staff, no shift, endpoint/outside time, seconds, stale roster, service-date mismatch, boolean/negative revisions, invalid schema/kind/identifier/operator, controls/surrogates, note over 500 Unicode scalars, and unknown fields. Freeze a golden `exception_digest` and prove malformed values raise `StaffingError` rather than raw enum/type exceptions.
 
 - [ ] **Step 2: Add failing active-set tests for overlap, adjacency, cancel, and correction**
 
@@ -1038,13 +1050,15 @@ Use exact cancel/correct domain inputs:
  "replacement":{"kind":"EARLY_DEPARTURE", "time_local":"15:00", "note":None}}
 ```
 
-Prove adjacent intervals coexist, overlap rejects, correction replaces visibility with one revision increment, cancellation never deletes history, and stale expected revision leaves history unchanged.
+Freeze exact key sets and strict pure parsers for both bodies. Prove adjacent intervals coexist, overlap rejects, correction preserves the original exception identity while replacing visibility, and cancellation never deletes history. Pure active-set replay and per-date revision counting live in Task 2; stale expected-revision comparison, one revision increment, and unchanged-history-on-conflict live in Task 7's locked operation tests.
 
 - [ ] **Step 3: Add failing effective-plan and sequential-basis tests**
 
-Construct roster assignments, accept a complete validated schedule, add a second exception, and assert the accepted schedule—not the original roster—is the next baseline before active exceptions split/remove it. Assert accept/modify increments plan revision; reject does not; new roster or exception changes the basis digest; cancelling an exception represented in the plan marks `REVIEW_REQUIRED` without restoring assignments.
+Construct roster assignments, accept a complete validated schedule, add a second exception, and assert the accepted schedule—not the original roster—is the next baseline before active exceptions split/remove it. Assert accept/modify advances the per-service-date plan revision; reject does not; new roster or exception changes the basis digest; cancelling or correcting an exception represented in the plan marks `REVIEW_REQUIRED` without restoring assignments.
 
 Also accept a complete empty schedule and assert the next basis keeps `effective_schedule=()` rather than falling back to the roster. After restart, cancel/correct an exception present in the accepted plan and assert `EffectivePlanState(status="REVIEW_REQUIRED")` while the stored schedule remains unchanged.
+
+Import an applicable replacement roster after a plan was accepted. Assert the old schedule and digest are not reused, state becomes `NO_PLAN` for the new roster while retaining the latest per-date revision, and the next accepted plan uses the next revision rather than resetting to one. Add a future-effective roster and prove it does not change the earlier date. Remove an actively excepted worker/shift in the selected replacement roster and assert basis construction fails closed rather than filtering the exception.
 
 - [ ] **Step 4: Run focused tests and verify RED**
 
@@ -1062,35 +1076,81 @@ Expose (using the frozen event/history contracts):
 EXCEPTION_KEYS = frozenset({"schema", "request_id", "expected_roster_revision",
                             "expected_exception_set_revision", "service_date", "staff_id",
                             "kind", "time_local", "operator", "note"})
+CANCEL_KEYS = frozenset({"schema", "request_id", "exception_id",
+                         "expected_exception_set_revision", "operator", "note"})
+CORRECT_KEYS = frozenset({"schema", "request_id", "exception_id",
+                          "expected_exception_set_revision", "operator", "replacement"})
+REPLACEMENT_KEYS = frozenset({"kind", "time_local", "note"})
 
-def normalize_exception(payload: object, *, roster: ServiceDayRoster) -> StaffingException:
+def parse_exception_cancel_request(payload: object) -> dict[str, object]: ...
+def parse_exception_correction_request(payload: object) -> dict[str, object]: ...
+
+def exception_digest(exception: StaffingException) -> str:
+    return stable_digest({
+        "schema": "nxt-staffing-exception-digest/v1",
+        "exception": exception,
+    })
+
+def normalize_exception(payload: object, *, roster: RosterRevision) -> StaffingException:
     body = require_exact_object(payload, EXCEPTION_KEYS)
-    shift = roster.assignment_for_staff(body["staff_id"])
+    service_date = validate_exception_record_body(body, roster)
+    day = materialize_service_day(roster, service_date)
+    shift = day.assignment_for_staff(body["staff_id"])
     if shift is None:
         raise StaffingError("unknown_staff_or_shift", body["staff_id"])
-    kind = ExceptionKind(body["kind"])
+    kind = parse_exception_kind(body["kind"])
     if kind in (ExceptionKind.LEAVE, ExceptionKind.UNAVAILABLE):
         if body["time_local"] is not None:
             raise StaffingError("invalid_exception_time", "whole-shift kind")
         start, end = shift.start_at, shift.end_at
     else:
-        point = resolve_local_minute(roster.service_date, body["time_local"], roster.site_timezone)
+        point = resolve_local_minute(service_date, body["time_local"], roster.site_timezone)
         start, end = (shift.start_at, point) if kind is ExceptionKind.LATE else (point, shift.end_at)
         if not shift.start_at < point < shift.end_at:
             raise StaffingError("invalid_exception_time", "outside shift")
-    return build_staffing_exception(body, start=start, end=end)
+    normalized = dict(body)
+    normalized["service_date"] = service_date
+    normalized["kind"] = kind.value
+    return build_staffing_exception(normalized, start=start, end=end)
+
+def normalize_exception_replacement(
+    body: dict[str, object], *, previous: StaffingException,
+    roster: RosterRevision,
+) -> StaffingException:
+    """Validate a parsed correction and preserve the prior exception identity."""
+    day = materialize_service_day(roster, previous.service_date)
+    validate_correction_target(body, previous, day)
+    start, end = normalize_replacement_interval(body["replacement"], previous, day)
+    return build_replacement_exception(
+        previous, body["replacement"], start=start, end=end,
+    )
+
 def active_exceptions(events: Sequence[StaffingEvent],
                       service_date: date) -> tuple[StaffingException, ...]:
+    # Validate one global visible map first; project the requested date only at the end.
     visible = {}
     for event in events:
         payload = event.payload
-        if event.event_type == "exception_recorded" and payload.service_date == service_date:
+        if event.event_type == "exception_recorded":
+            validate_replayed_record(payload)
+            if payload.exception_id in visible:
+                raise StaffingError("staffing_invalid_evidence", "duplicate exception")
             visible[payload.exception_id] = payload.exception
-        elif event.event_type == "exception_corrected" and payload.exception_id in visible:
+        elif event.event_type == "exception_corrected":
+            validate_correction_payload_coherence(payload)
+            validate_replayed_correction(payload, visible)
             visible[payload.exception_id] = payload.replacement_exception
         elif event.event_type == "exception_cancelled":
-            visible.pop(payload.exception_id, None)
-    return tuple(sorted(visible.values(), key=lambda item: (item.unavailable_start, item.exception_id)))
+            validate_cancellation_payload_coherence(payload)
+            validate_replayed_cancellation(payload, visible)
+            visible.pop(payload.exception_id)
+        else:
+            continue
+        validate_nonoverlapping_exceptions(tuple(visible.values()), replay=True)
+    ordered = tuple(sorted((item for item in visible.values()
+                            if item.service_date == service_date), key=lambda item: (
+        item.staff_id, item.unavailable_start, item.unavailable_end, item.exception_id)))
+    return ordered
 
 def exception_set_revision(events: Sequence[StaffingEvent], service_date: date) -> int:
     def affected_date(event):
@@ -1101,7 +1161,7 @@ def exception_set_revision(events: Sequence[StaffingEvent], service_date: date) 
         if event.event_type == "exception_corrected":
             if (event.payload.previous_exception.service_date
                     != event.payload.replacement_exception.service_date):
-                raise StaffingError("staffing_invalid_event", "correction changes service date")
+                raise StaffingError("staffing_invalid_evidence", "correction changes service date")
             return event.payload.replacement_exception.service_date
         return None
     return sum(1 for event in events if affected_date(event) == service_date)
@@ -1124,7 +1184,7 @@ def apply_exceptions(assignments: Sequence[Assignment],
     return tuple(sorted(result, key=lambda item: (item.start_at, item.end_at, item.staff_id, item.assignment_id)))
 ```
 
-When an exception cuts an assignment, derive split assignment IDs from the original ID and retained UTC interval. Sort by `(start_at, end_at, staff_id, assignment_id)` and never mutate input records.
+The two request parsers enforce their exact schema literals, identifiers, exact nonnegative expected revision, safe operator, and optional safe note; the correction parser also enforces the exact nested replacement keys and closed kind/time rules. The helper names abbreviated with `...` above are private validation helpers, not additional contracts. Compare cancellation/correction expected revisions only in Task 7 under the append lock. When an exception cuts an assignment, derive split assignment IDs from the original ID and retained UTC interval. Sort by `(start_at, end_at, staff_id, assignment_id)` and never mutate input records.
 
 - [ ] **Step 6: Implement effective plan precedence and basis digests**
 
@@ -1133,61 +1193,53 @@ Expose `build_staffing_basis(history, service_date) -> BasisSnapshot`. The basis
 ```python
 def build_staffing_basis(history, service_date):
     roster = select_effective_roster(roster_revisions(history), service_date)
+    day = materialize_service_day(roster, service_date)
     active = active_exceptions(history.events, service_date)
-    baseline = latest_complete_schedule(history, roster.revision, service_date)
+    validate_active_exceptions_for_roster(active, day)
+    plan = effective_plan_state(history, service_date, roster.revision)
+    baseline = plan.effective_schedule if plan.effective_schedule is not None else day.assignments
     assignments = apply_exceptions(
-        baseline if baseline is not None else materialize_service_day(roster, service_date).assignments,
-        active)
+        baseline, active)
     basis = compose_staffing_basis(
-        service_date, roster, active, effective_plan_state(history, service_date),
+        service_date, roster, active, plan,
         exception_set_revision(history.events, service_date))
-    coverage = tuple(
-        CoverageWindow(row.role_code, row.area_code,
-                       resolve_local_minute(service_date, row.start_local, roster.site_timezone),
-                       resolve_local_minute(service_date, row.end_local, roster.site_timezone),
-                       row.minimum_staff)
-        for row in roster.coverage if row.weekday == service_date.weekday())
     availability = tuple(row for row in roster.availability
                          if row.weekday == service_date.weekday())
     return BasisSnapshot(basis, roster.site_timezone, tuple(roster.workers),
                          tuple(assignments), tuple(active), availability,
-                         tuple(roster.assignment_rules), coverage, PROMPT_TEMPLATE_VERSION)
+                         tuple(roster.assignment_rules), day.coverage, PROMPT_TEMPLATE_VERSION)
 
 def roster_revisions(history: StaffingHistory) -> tuple[RosterRevision, ...]:
     return tuple(event.payload.roster for event in history.events
                  if event.event_type == "roster_imported")
 
-def latest_complete_schedule(history: StaffingHistory, roster_revision: int,
-                             service_date: date) -> tuple[Assignment, ...] | None:
-    schedules = tuple(event.payload.effective_schedule for event in history.events
-                      if event.event_type == "manager_response_committed"
-                      and event.payload.effective_schedule is not None
-                      and event.payload.basis_snapshot.basis.service_date == service_date
-                      and event.payload.basis_snapshot.basis.roster_revision == roster_revision)
-    return schedules[-1] if schedules else None
-
-def effective_plan_state(history: StaffingHistory, service_date: date) -> EffectivePlanState:
-    accepted = tuple(event.payload for event in history.events
+def effective_plan_state(history: StaffingHistory, service_date: date,
+                         roster_revision: int) -> EffectivePlanState:
+    accepted = tuple((event, event.payload) for event in history.events
                      if event.event_type == "manager_response_committed"
                      and event.payload.effective_schedule is not None
                      and event.payload.basis_snapshot.basis.service_date == service_date)
     if not accepted:
         return EffectivePlanState(0, "NO_PLAN", stable_digest(()), None, 0, ())
-    latest = accepted[-1]
-    source_sequence = next(event.sequence for event in reversed(history.events)
-                           if event.event_type == "manager_response_committed"
-                           and event.payload is latest)
+    source_event, latest = accepted[-1]
+    latest_revision = latest.effective_plan_revision
+    if latest.basis_snapshot.basis.roster_revision != roster_revision:
+        return EffectivePlanState(
+            latest_revision, "NO_PLAN", stable_digest(()), None, 0, ())
+    source_sequence = source_event.sequence
     planned_exception_ids = {item.exception_id for item in latest.basis_snapshot.exceptions}
     affected = tuple(sorted({event.payload.exception_id for event in history.events
                              if event.sequence > source_sequence
                              and event.event_type in {"exception_cancelled", "exception_corrected"}
                              and event.payload.exception_id in planned_exception_ids}))
     return EffectivePlanState(
-        latest.effective_plan_revision or 0,
+        latest.effective_plan_revision,
         "REVIEW_REQUIRED" if affected else "CURRENT",
-        latest.schedule_digest or stable_digest(()), latest.effective_schedule,
+        latest.schedule_digest, latest.effective_schedule,
         source_sequence, affected)
 ```
+
+`validate_active_exceptions_for_roster` applies the fail-closed worker/shift and containment rulings above. `effective_plan_state` validates that accepted records have non-`None` positive revisions, lowercase 64-hex schedule digests, tuple schedules, strictly increasing per-date revisions, and a schedule digest matching the stored complete schedule before selecting one. `compose_staffing_basis` revalidates the returned plan state and every component digest; no direct construction shortcut bypasses those checks.
 
 - [ ] **Step 7: Run GREEN and commit**
 
@@ -1964,8 +2016,9 @@ class StaffingOperations:
                                       site_timezone=self.site_timezone), payload, recorded_at))
     def record_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
         return self._append_request("exception-record", payload, lambda h: event_for_exception(
-            h, normalize_exception(payload, roster=materialize_service_day(
-                self._roster_for_history(h, payload), date.fromisoformat(payload["service_date"]))), payload, recorded_at))
+            h, normalize_exception(
+                payload, roster=self._roster_for_history(h, payload)),
+            payload, recorded_at))
     def cancel_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
         return self._append_request("exception-cancel", payload, lambda h: event_for_cancel(h, payload, recorded_at))
     def correct_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
@@ -2399,7 +2452,7 @@ def build_date_projection(history: StaffingHistory, service_date: date, *,
         ))
         for event in history.events if event.event_type == "manager_response_committed"
         and event.payload.basis_snapshot.basis.service_date == service_date)
-    plan = effective_plan_state(history, service_date)
+    plan = effective_plan_state(history, service_date, roster.revision)
     return DateProjection(
         site_id=roster.site_id, deployment_id=roster.deployment_id,
         service_date=service_date, site_timezone=roster.site_timezone,
