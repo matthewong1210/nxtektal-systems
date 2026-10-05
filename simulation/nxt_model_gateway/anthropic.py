@@ -26,6 +26,7 @@ class AnthropicAdapter(_BaseAdapter):
             'messages': [{'role': m.role.value, 'content': m.content} for m in messages],
             'tools': [{'name': 'emit_structured_output',
                        'description': 'Return only the JSON object requested by the caller.',
+                       'strict': True,
                        'input_schema': request.output_schema}],
             'tool_choice': {'type': 'tool', 'name': 'emit_structured_output'},
         }

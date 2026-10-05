@@ -88,6 +88,7 @@ def test_exact_messages_envelope_and_metadata():
                 'messages': [{'role': 'user', 'content': 'return an object'}],
                 'tools': [{'name': 'emit_structured_output',
                            'description': 'Return only the JSON object requested by the caller.',
+                           'strict': True,
                            'input_schema': json.loads(canonical_json(source.output_schema))}],
                 'tool_choice': {'type': 'tool', 'name': 'emit_structured_output'}}
     assert sent.endpoint == _ANTHROPIC_ENDPOINT
