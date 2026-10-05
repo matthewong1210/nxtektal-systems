@@ -12,7 +12,9 @@ import pytest
 
 from nxt_edge_task.contracts import (
     Availability,
+    EdgeTaskError,
     EventKind,
+    TaskEvent,
     TaskRequest,
     request_topic,
     stable_digest,
@@ -26,12 +28,24 @@ from nxt_edge_task.executor import (
     RobotCore,
     derive_robot_view,
 )
-from nxt_edge_task.journal import JsonlJournal, PreconditionFailed
+from nxt_edge_task.journal import JsonlJournal, PreconditionFailed, RecordSpec
 from tests.edge_task.conftest import load_config
 from tests.course_monitoring import test_course_collection_execution as execution_fixtures
 
 
 NOW = datetime(2026, 9, 16, 0, 1, tzinfo=timezone.utc)
+
+
+class CrashInjected(RuntimeError):
+    pass
+
+
+def crash_at(expected):
+    def inject(boundary, _payload):
+        if boundary == expected:
+            raise CrashInjected(boundary)
+
+    return inject
 
 
 def _started_core(tmp_path, *, initialize=True, behavior="simulator_backed"):
@@ -497,7 +511,7 @@ def _device_store(tmp_path, config, incarnation):
     return store, identity, task, request
 
 
-def _device_fixture(tmp_path, monkeypatch):
+def _device_fixture(tmp_path, monkeypatch, *, task_incarnation=None):
     from scripts import course_session_task_device as device_api
 
     config = load_config()
@@ -510,7 +524,7 @@ def _device_fixture(tmp_path, monkeypatch):
     )[:12]
     incarnation = f"boot-picker-01-{token}"
     store, identity, task, request = _device_store(
-        tmp_path, config, incarnation
+        tmp_path, config, task_incarnation or incarnation
     )
 
     @contextmanager
@@ -535,6 +549,32 @@ def _device_fixture(tmp_path, monkeypatch):
     return device_api, device, store, identity, task, request
 
 
+def _append_seq0_rejection(device, task, *, reason="incarnation_mismatch"):
+    event = TaskEvent(
+        site_id=task.site_id,
+        deployment_id=task.deployment_id,
+        simulation_env_id=task.simulation_env_id,
+        task_id=task.task_id,
+        robot_id=task.target_robot_id,
+        boot_id=device.view.boot_id,
+        boot_sequence=device.view.boot_sequence,
+        event_sequence=0,
+        kind=EventKind.REJECTED,
+        reason_code=reason,
+        detail="request rejected before task admission",
+        reported_at_utc="2026-09-16T00:01:00.000000Z",
+        phase=None,
+    )
+    return device.journal.append(
+        RecordSpec(
+            TASK_EVENT_PERSISTED,
+            "DEVICE",
+            event.reported_at_utc,
+            {"event": event.to_dict()},
+        )
+    )
+
+
 def _commit_collection(store, request):
     decision = store.arbitrate(
         execution_fixtures.WAIT, 60, execution_fixtures.view()
@@ -555,6 +595,188 @@ def _commit_collection(store, request):
     )
     store.publish_cursor(committed["tick_sequence"], committed["replay_digest"])
     return committed
+
+
+def test_old_incarnation_admit_closes_seq0_rejection_without_execution(
+    tmp_path, monkeypatch
+):
+    device_api, device, store, _identity, task, request = _device_fixture(
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
+    )
+    restarted = device_api.SimulatorBackedTaskDevice(
+        tmp_path / "session",
+        device.config,
+        "picker-01",
+        journal_path=device.journal.path,
+        initialize=False,
+    )
+    restarted.start()
+
+    receipt = restarted.admit(task, request)
+    snapshot = store.snapshot(
+        server_time_utc="2026-09-16T00:02:00Z",
+        session_state="ACTIVE",
+    )
+
+    assert receipt["execution_id"] == request["execution_id"]
+    assert [r.record_kind for r in restarted.journal.read()].count(
+        TASK_EVENT_PERSISTED
+    ) == 1
+    assert [r.record_kind for r in store.journal.read()].count(
+        "preacceptance_rejection"
+    ) == 1
+    assert snapshot["executions"][0]["state"] == "REJECTED"
+    assert snapshot["executions"][0]["actions"] == []
+    assert snapshot["executions"][0]["raw_quantity"]["status"] == "NOT_REACHED"
+    assert restarted.core.view.executions_for(task.task_id) == 0
+
+
+@pytest.mark.parametrize(
+    "boundary",
+    ["after_preacceptance_device_rejection", "after_preacceptance_v3_rejection"],
+)
+def test_preacceptance_rejection_restart_reuses_both_journals(
+    tmp_path, monkeypatch, boundary
+):
+    device_api, device, store, _identity, task, request = _device_fixture(
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
+    )
+    restarted = device_api.SimulatorBackedTaskDevice(
+        tmp_path / "session",
+        device.config,
+        "picker-01",
+        journal_path=device.journal.path,
+        initialize=False,
+    )
+    restarted.start()
+    with pytest.raises(CrashInjected, match=boundary):
+        restarted.admit(task, request, crash_hook=crash_at(boundary))
+    reopened = device_api.SimulatorBackedTaskDevice(
+        tmp_path / "session",
+        device.config,
+        "picker-01",
+        journal_path=device.journal.path,
+        initialize=False,
+    )
+    reopened.start()
+    assert store.replay()["executions"][request["execution_id"]]["state"] == "REJECTED"
+    before = (device.journal.path.read_bytes(), store.journal.path.read_bytes())
+    reopened.admit(task, request)
+    assert (device.journal.path.read_bytes(), store.journal.path.read_bytes()) == before
+    rejections = [
+        record
+        for record in device.journal.read()
+        if record.record_kind == TASK_EVENT_PERSISTED
+        and record.payload["event"]["event_sequence"] == 0
+    ]
+    assert len(rejections) == 1
+
+
+def test_duplicate_matching_seq0_rejections_fail_closed(tmp_path, monkeypatch):
+    _api, device, store, _identity, task, request = _device_fixture(
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
+    )
+    _append_seq0_rejection(device, task)
+    _append_seq0_rejection(device, task)
+    before_device = device.journal.path.read_bytes()
+
+    with pytest.raises(
+        PreconditionFailed, match="multiple seq-0 incarnation rejections"
+    ):
+        device.admit(task, request)
+
+    assert device.journal.path.read_bytes() == before_device
+    assert all(
+        record.record_kind != "preacceptance_rejection"
+        for record in store.journal.read()
+    )
+
+
+def test_near_match_seq0_rejection_fails_closed_without_second_rejection(
+    tmp_path, monkeypatch
+):
+    _api, device, store, _identity, task, request = _device_fixture(
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
+    )
+    _append_seq0_rejection(device, task, reason="deployment_mismatch")
+    before_device = device.journal.path.read_bytes()
+
+    with pytest.raises(
+        PreconditionFailed, match="conflicting seq-0 rejection exists for one task"
+    ):
+        device.admit(task, request)
+
+    assert device.journal.path.read_bytes() == before_device
+    assert all(
+        record.record_kind != "preacceptance_rejection"
+        for record in store.journal.read()
+    )
+
+
+def test_seq0_publication_confirmation_uses_device_record_sequence(
+    tmp_path, monkeypatch
+):
+    _api, device, _store, _identity, task, request = _device_fixture(
+        tmp_path,
+        monkeypatch,
+        task_incarnation="boot-picker-01-previous-device",
+    )
+    device.admit(task, request)
+    rejection_record = next(
+        record
+        for record in device.journal.read()
+        if record.record_kind == TASK_EVENT_PERSISTED
+        and record.payload["event"]["event_sequence"] == 0
+    )
+    pending = device.pending_publications()
+    assert pending == [rejection_record.payload["event"]]
+
+    device.confirm_published(pending[0])
+
+    assert rejection_record.sequence in device.view.confirmed_rejections
+    confirmation = device.journal.read()[-1]
+    assert confirmation.record_kind == "event_publish_confirmed"
+    assert confirmation.payload["record_sequence"] == rejection_record.sequence
+    before = device.journal.path.read_bytes()
+    device.confirm_published(pending[0])
+    assert device.journal.path.read_bytes() == before
+
+
+def test_seq0_rejection_after_v3_acceptance_remains_authorization_blocked(
+    tmp_path, monkeypatch
+):
+    device_api, device, store, _identity, task, request = _device_fixture(
+        tmp_path, monkeypatch
+    )
+    device.admit(task, request)
+    replacement = device_api.SimulatorBackedTaskDevice(
+        tmp_path / "session",
+        device.config,
+        "picker-01",
+        journal_path=tmp_path / "replacement-device.jsonl",
+        initialize=True,
+        provisioning_nonce=lambda: "replacement-device",
+    )
+    replacement.start()
+
+    with pytest.raises(EdgeTaskError, match="authorization_blocked"):
+        replacement.admit(task, request)
+
+    row = store.replay()["executions"][request["execution_id"]]
+    assert row["edge_evidence"]["accepted"]
+    assert all(
+        record.record_kind != "preacceptance_rejection"
+        for record in store.journal.read()
+    )
+    assert replacement.core.view.executions_for(task.task_id) == 0
 
 
 def test_device_durably_accepts_then_consumes_only_committed_outbox(tmp_path, monkeypatch):

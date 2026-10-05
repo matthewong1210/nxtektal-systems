@@ -32,6 +32,46 @@ function pending(): CollectionExecutionsSnapshot {
   r.edge_evidence.terminal_states = [];
   return s;
 }
+function preacceptanceIdentityConflictFixture(): CollectionExecutionsSnapshot {
+  const result = pending();
+  const record = result.executions[0];
+  Object.assign(record, {
+    state: "REJECTED",
+    stage: "TERMINAL",
+    reason: "IDENTITY_CONFLICT",
+    terminal_sim_t_s: 60,
+    assignment_id: null,
+    started_sim_t_s: null,
+    execution_deadline_sim_t_s: null,
+    actions: [],
+    success_display_allowed: false,
+  });
+  record.edge_evidence = {
+    task_id: record.task_id,
+    accepted: false,
+    verified: true,
+    effective_state: "REJECTED",
+    reason: "incarnation_mismatch",
+    terminal_states: ["REJECTED"],
+    event_ids: ["device-record-preacceptance"],
+    result_verification: "VERIFIED",
+  };
+  record.device_protection = {
+    protected: true,
+    reasons: ["INCARNATION_MISMATCH"],
+    authorization_blocked: true,
+  };
+  record.conflicts.incarnation_mismatch = true;
+  return result;
+}
+function withExecution(
+  source: CollectionExecutionsSnapshot,
+  patch: Partial<CollectionExecutionsSnapshot["executions"][number]>,
+) {
+  const result = structuredClone(source);
+  Object.assign(result.executions[0], patch);
+  return result;
+}
 function running(): CollectionExecutionsSnapshot {
   const s = snapshot(), r = s.executions[0];
   r.state = "RUNNING"; r.stage = "COLLECTING"; r.reason = null; r.terminal_sim_t_s = null;
@@ -84,6 +124,30 @@ function notStartedAfterRestart() {
 }
 
 describe("collection execution v1 read contract", () => {
+  it("accepts the exact verified preacceptance incarnation rejection", () => {
+    const snapshot = preacceptanceIdentityConflictFixture();
+    expect(parseCollectionExecutions(snapshot).executions[0]).toMatchObject({
+      state: "REJECTED",
+      reason: "IDENTITY_CONFLICT",
+      conflicts: { incarnation_mismatch: true },
+      edge_evidence: { accepted: false, effective_state: "REJECTED", result_verification: "VERIFIED" },
+    });
+  });
+
+  it("rejects contradictory preacceptance incarnation rejection evidence", () => {
+    const base = preacceptanceIdentityConflictFixture();
+    const variants = [
+      withExecution(base, { state: "INCONCLUSIVE" }),
+      withExecution(base, { started_sim_t_s: 60 }),
+      withExecution(base, { assignment_id: "assignment-illegal" }),
+      withExecution(base, { conflicts: { ...base.executions[0].conflicts, terminal_conflict: true } }),
+      withExecution(base, { runtime_evidence: { ...base.executions[0].runtime_evidence, event_sequence_complete: false } }),
+      withExecution(base, { raw_quantity: { ...base.executions[0].raw_quantity,
+        source_event_ids: ["runtime-evidence"], event_digest: "a".repeat(64) } }),
+    ];
+    for (const value of variants) expect(() => parseCollectionExecutions(value)).toThrow();
+  });
+
   it("classifies early handoff preemption only at the causal terminal tick", () => {
     const s = snapshot("partial-preempted"), r = s.executions[0], action = r.actions.at(-1)!;
     action.original_action.name = action.selected_action.name = "SendToHandoff";

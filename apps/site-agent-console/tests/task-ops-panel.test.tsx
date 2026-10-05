@@ -47,7 +47,7 @@ describe("pilot task panel", () => {
     const html = render(view({ data: taskOpsFixture({ tasks: {}, schedules: [], notifications: [] }) }));
     expect(html).toContain("No task evidence yet");
     expect(html).toContain("No notifications recorded");
-    expect(html).toContain("No schedules yet");
+    expect(html).toContain("No schedule records yet");
   });
 });
 

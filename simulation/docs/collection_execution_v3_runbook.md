@@ -203,7 +203,10 @@ replace that evidence.
 ## Expected fixed identity and result
 
 The deterministic fixture produces these values.  Paths, process IDs and
-wall-clock read time are excluded from the causal identities. The fixed witness was regenerated against the reconciled V3 source tree on 2026-10-05; source-derived IDs changed, while policy actions and the 600-ball result remained the same.
+wall-clock read time are excluded from the causal identities. The canonical
+witness and fixed identities were refreshed on 2026-10-05 after merging the
+V4 branch with the current main source tree. The source-based engine fingerprint
+changed; the fixed 3C policy, actions and 600-ball result remain unchanged.
 
 | Field | Expected value |
 |---|---|
@@ -214,21 +217,21 @@ wall-clock read time are excluded from the causal identities. The fixed witness 
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `739a6dd6aa48a333ccf6ca0c0b6170d4c213d4042992e84fc9e97182a81fe700` |
+| `engine_digest` | `33f7e7f3b233bc15677484b124b75918f33e94895b825ced7a261f53ad6c1a6c` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `97e983a299c3f39e3f74c681261b8eef0f243f0dfe6ca2609c5f36d3911d3eff` |
-| `execution_id` | `416d39d5efca501d69380f549bc65c54c90848939e0443f1fbd5b8745e8406ad` |
-| `attempt_id` | `attempt-416d39d5efca501d69380f549bc65c54c90848939e0443f1fbd5b8745e8406ad` |
-| `assignment_id` | `assignment-93ae0318a9b1bc810566e6fc4ac575c9aae182a36e08900cda134980d396fa92` |
-| request digest | `1bbc37722194bddee3f2d614cb5112d1006a6bf0381900d2060bec171be12dac` |
-| request high-water digest | `0aba61bef211a89345356bc2975682f237de8efd262a46641b0a3f8de2446199` |
+| `binding_id` | `dfd4bee0ebcd5aa6b38dfa468eb67a34243ba1a93209e2ece2c116f638968436` |
+| `execution_id` | `f73c5fc2b0737288e5ac0f07ac7c7729b4bfdc9afc5cb95d6de530bea38f7840` |
+| `attempt_id` | `attempt-f73c5fc2b0737288e5ac0f07ac7c7729b4bfdc9afc5cb95d6de530bea38f7840` |
+| `assignment_id` | `assignment-27cf95bc237f1cb58e121546164dada01bba9d4a1fa63853000ff17d75eef9f3` |
+| request digest | `0ff67749b6a78662846166fcca4d4fdfe605f01ce45b55635130d155ef9ada37` |
+| request high-water digest | `64a03adb65e9632a6ff53749513bca1ca81f58fc24d1f51a3a30a3cc094f05f2` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED` / `UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600` to runtime robot `R1` |
 | `unload_quantity.balls` | `600` to bound station `H1` |
-| final assignment `event_digest` | `f545ecea21c75058af83a64b1ca238ded4c0856d16adf40a21680248b27e5707` |
-| final `replay_digest` | `010da8807a4b3dc6ce03ae34d28d7d056ec613c2fe236899048990d2894065e8` |
+| final assignment `event_digest` | `97856dbe00f37edce5390c9e18d0f6ff4ad98ee82ff36dc99c346bc56b3072ab` |
+| final `replay_digest` | `42db0a9edde9ba40626da7ea69e813e05f9705a5f130f8152cb2cf5448d954a3` |
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not
 invent aliases for them: the real session identity is the
@@ -252,23 +255,23 @@ The observed causal timeline is:
 | Planning results | `planning.outcomes=[]`; no outcome was synthesized |
 
 The start event ID is
-`assignment-event-77f04423218f84e1781ed9b1636f968e2e0e744783060b74ecb67a3b94aae827`.
+`assignment-event-005ebcd69ce93eb7fdc15103bb91b5ceb96fd68afb1a451166d0a561de2af272`.
 The collection-exit event ID is
-`assignment-event-81515e140285cfe0cad8ec409d36c5dd5e19a7c6d3be199a6210a4cd110ad0cc`.
+`assignment-event-299e58aac37bcda5de61f86538df1a9b8b97cf352e9be4a70befca68388f9db7`.
 The unload event ID is
-`assignment-event-774fd03406cc084bea35558b4554ce6dbb10a658f52251d1fe8301d59929ff54`;
+`assignment-event-b026da73707b617fc7f34cd7430bd028779b3fdee6afe305536da983b49d189a`;
 the terminal event ID is
-`assignment-event-085580c4f92d8f3eb906839ab5275e98475483c8b64153e30957d2cd8e269903`.
+`assignment-event-61fbdd68eb792410aaff494555a0094936c60a984acf0d386702b82b330e0bb5`.
 The read projection retains all fifteen raw source event IDs and the six Edge
 record IDs rather than collapsing the evidence to the 600-ball summary.
 Those Edge record IDs in the observed normal loop are:
 
 ```text
-rec_0da6df1fb52b9e645766dc0d
-rec_2b8f32105baab9c9959e44ce
-rec_3a0b46f842d5fff0e0fb5f56
-rec_410890c704e3376d074efc55
-rec_d4ee4a267e15b32790b3f076
+rec_3332b9253728cdc15b7b9489
+rec_41137c342ad1258fb11f9e40
+rec_5394031196b8284bf3f3b392
+rec_9633586f9ef5ef66d3c03990
+rec_bb0a3da40b41ef6175a0a891
 rec_fbf9d67c03833c163d455189
 ```
 
@@ -451,6 +454,40 @@ failure, uncertain Planning/notification evidence writes, real SafetyShield
 rejection, human-assistance protection, and a running-device restart that
 becomes unknown without re-executing the old authorization.  These are
 isolated simulation-service tests, not physical-device evidence.
+
+## Continuous V4 two-task fixture evidence
+
+The continuous service owns three canonical two-task witnesses under
+`tests/fixtures/continuous-collection-v4/`.  They are exact read-only Manager
+API data from the V4 owner path, not hand-edited projections:
+
+- `two-task-active.json` remains the uninterrupted Task 6 witness at
+  `now_sim_t_s=31800.0` with replay digest
+  `cfecebbe163ae6eecdb93e5e8971d407f607419b121a13f32a3c434d729152d8`;
+- `two-task-pending.json` is the first GET after a real process recovery at
+  `now_sim_t_s=31200.0`.  Recovery has durably admitted the second task, but no
+  policy action or assignment exists, so its state is `PENDING` and both
+  quantities are contract `NOT_REACHED`/`null`; and
+- `two-task-running-after-recovery.json` is the next GET after exactly one
+  owner tick at `now_sim_t_s=31800.0`, where that same execution is `RUNNING`.
+
+The pending and recovery-running files form the causal polling pair.  Their
+series/session/round, bindings, requests, receipts and execution identities are
+equal; the already-terminal first execution is byte-identical; and the second
+execution retains its accepted Edge evidence while adding the start/runtime
+evidence produced by the next tick.  A process recovery is part of this pair,
+so its later Edge record IDs and replay digest intentionally differ from the
+uninterrupted Task 6 witness.  Do not mix `two-task-pending.json` with
+`two-task-active.json` to simulate one polling history.
+
+`test_two_task_recovery_fixtures_regenerate_from_consecutive_http_data`
+recreates both recovery files from a fresh durable root and compares the exact
+canonical bytes returned through `SiteAgentApiServer`; the separate active
+fixture test continues to regenerate the original uninterrupted witness.
+`test_continuous_recovery_witnesses_form_one_causal_pending_to_running_pair`
+also applies the strict Python parser, JSON Schema and cross-record relation
+checks to both files before checking their cross-snapshot identity and evidence
+evolution.
 
 ## Frozen 20-case acceptance matrix
 

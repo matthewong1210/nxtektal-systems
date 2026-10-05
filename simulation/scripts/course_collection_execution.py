@@ -8,7 +8,7 @@ the canonical/fsynced persistence mechanism, not as a new Edge business owner.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime, timedelta
 import hashlib
@@ -16,16 +16,17 @@ import json
 import math
 from pathlib import Path
 import re
+from typing import Any
 
 from nxt_edge_task.contracts import TaskRequest, TaskEvent
-from nxt_edge_task.journal import JsonlJournal, RecordSpec, JournalIntegrityError
+from nxt_edge_task.journal import JsonlJournal, RecordSpec, JournalRecord, JournalIntegrityError
 
 ARBITER = "WAIT_ONLY_NON_PREEMPTIVE_V1"
 SESSION_KEYS = ("series_id", "session_id", "round_id", "round_index", "engine_digest", "config_digest",
                 "session_epoch_utc", "control_interval_s", "session_end_sim_t_s")
 RECORD_KINDS = frozenset({"session", "binding", "binding_window", "request", "receipt", "accepted", "action_prepared",
                           "action_committed", "outbox_confirmed", "cursor", "device_restart", "edge_evidence", "replay_failure",
-                          "committed_replay_failure"})
+                          "committed_replay_failure", "preacceptance_rejection"})
 TERMINALS = {"SUCCEEDED", "PARTIAL", "REJECTED", "MISSED", "FAILED", "INCONCLUSIVE"}
 _OUTBOX_PHASE_ORDER = {
     "collecting": 0,
@@ -57,9 +58,13 @@ def primitive(value):
     return value
 
 
+def canonical(value):
+    return json.dumps(primitive(value), sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=False, allow_nan=False).encode()
+
+
 def digest(value):
-    return hashlib.sha256(json.dumps(primitive(value), sort_keys=True, separators=(",", ":"),
-                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(canonical(value)).hexdigest()
 
 
 def _validate(value, name):
@@ -139,7 +144,70 @@ def _identity(identity):
     _require(type(identity["control_interval_s"]) is int and identity["control_interval_s"] > 0, "positive control interval required")
 
 
+def derive_execution_requirements(
+    *, plan: Mapping[str, Any], input_records: Sequence[Mapping[str, Any]],
+    session_identity: Mapping[str, Any], evidence_at_utc: str,
+) -> dict[str, Any]:
+    """Derive the bounded cycle from one exact retained Planning input."""
+    s = primitive(session_identity)
+    _identity(s)
+    selected = plan["selection"]
+    sources = [source for source in input_records if source["revision"] == plan["input_revision"]
+               and source["input_digest"] == plan["input_digest"]]
+    _require(len(sources) == 1, "plan must reference one historical input")
+    source = sources[0]
+    zones = [row for row in source["zones"] if (row["robot_id"], row["zone_id"])
+             == (selected["robot_id"], selected["zone_id"])]
+    mappings = [row for row in s.get("runtime_bindings", []) if (row["robot_id"], row["zone_id"])
+                == (selected["robot_id"], selected["zone_id"])]
+    _require(len(zones) == len(mappings) == 1, "unique explicit robot/zone binding required")
+    mapping = mappings[0]
+    _require(mapping["handoff_station_id"] == s["station_ids"][0], "bound station is not sole station")
+    e = zones[0].get("cycle_minutes")
+    _require(isinstance(e, dict) and isinstance(e.get("value"), dict), "missing cycle evidence")
+    _require(_utc(e["observed_at_utc"]) <= _utc(evidence_at_utc) <= _utc(e["valid_until_utc"]), "stale or future cycle evidence")
+    cycle = {k: e["value"][k] for k in ("travel", "collect", "return", "unload")}
+    evidence = {k: e[k] for k in ("source_kind", "source_ref", "observed_at_utc", "valid_until_utc")}
+    evidence.update(input_record_id=source["request_id"], input_revision=source["revision"], cycle_minutes=cycle,
+                    derivation_rule="CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1")
+    _validate(evidence, "CycleEvidence")
+    limit = math.ceil(sum(cycle.values()) * 60 / s["control_interval_s"]) * s["control_interval_s"]
+    return {"runtime_binding": mapping, "cycle_evidence": evidence, "max_execution_s": limit}
+
+
+def require_session_horizon(
+    *, start_at_utc: str, max_execution_s: float, session_identity: Mapping[str, Any],
+) -> None:
+    selected_end = _utc(start_at_utc) + timedelta(seconds=max_execution_s)
+    session_end = _utc(session_identity["session_epoch_utc"]) + timedelta(seconds=session_identity["session_end_sim_t_s"])
+    _require(selected_end <= session_end, "confirmed collection cannot finish inside the active V3 session horizon")
+
+
+def request_id_for_binding(binding_id: str) -> str:
+    _require(isinstance(binding_id, str) and len(binding_id) == 64, "invalid binding ID")
+    return "exec_req_" + digest({"schema": "nxt-collection-execution-request-id/v1",
+        "kind": "EXECUTE_BOUND_COLLECTION", "binding_id": binding_id})[:24]
+
+
 def bind_confirmed_tasks(planning_snapshot, edge_records, session_identity, now_sim_t_s):
+    _identity(session_identity)
+    _require(planning_snapshot.get("schema") == "nxt-planning/v1"
+             and planning_snapshot.get("environment") == "SIMULATION", "unsupported planning evidence")
+    simulation_utc(session_identity, now_sim_t_s)
+    confirmations = [c for c in planning_snapshot["confirmations"] if c.get("task_id") is not None]
+    _require(len({c["confirmation_id"] for c in confirmations}) == len(confirmations), "duplicate confirmation")
+    bindings = [bind_confirmed_task(planning_snapshot, edge_records, session_identity, now_sim_t_s,
+                                   task_id=c["task_id"]) for c in confirmations]
+    return sorted(bindings, key=lambda b: b["binding_id"])
+
+
+def bind_confirmed_task(planning_snapshot, edge_records, session_identity, now_sim_t_s, *, task_id: str) -> dict:
+    matches = [c for c in planning_snapshot["confirmations"] if c.get("task_id") == task_id]
+    _require(len(matches) == 1, "task must have one confirmed planning source")
+    return _binding_for_confirmation(planning_snapshot, edge_records, session_identity, now_sim_t_s, matches[0])
+
+
+def _binding_for_confirmation(planning_snapshot, edge_records, session_identity, now_sim_t_s, confirmation):
     """Bind an already verified PlanningOperations snapshot to verified Edge records.
 
     session_identity adds explicit station_ids/runtime_bindings to SESSION_KEYS
@@ -152,76 +220,57 @@ def bind_confirmed_tasks(planning_snapshot, edge_records, session_identity, now_
     _require(p.get("schema") == "nxt-planning/v1" and p.get("environment") == "SIMULATION", "unsupported planning evidence")
     bound = simulation_utc(s, now_sim_t_s)
     records = [r.to_dict() if hasattr(r, "to_dict") else primitive(r) for r in edge_records]
-    result, seen = [], set()
-    for c in p["confirmations"]:
-        if c.get("task_id") is None:
-            continue
-        _require(c["confirmation_id"] not in seen, "duplicate confirmation")
-        seen.add(c["confirmation_id"])
-        matched = [r for r in records if r["record_kind"] == "task_created" and r["payload"].get("task_id") == c["task_id"]]
-        _require(len(matched) == 1, "exact TASK_CREATED evidence required")
-        rec = matched[0]
-        try:
-            task = TaskRequest.from_dict(rec["payload"]["request"])
-        except ValueError as exc:
-            raise CollectionExecutionError("conflict", "invalid task content") from exc
-        schedule = c["schedule"]
-        _require(rec["payload"].get("schedule_id") == c["schedule_id"] and task.task_id == c["task_id"], "task/schedule identity mismatch")
-        for key, expected in {"site_id": s["site_id"], "deployment_id": s["deployment_id"],
-                              "target_robot_id": schedule["robot_id"], "zone_id": schedule["zone_id"],
-                              "task_type": "COLLECT_BALLS_ZONE", "issued_by": "SIMULATION_TEST_ENTRY:" + schedule["operator"]}.items():
-            _require(getattr(task, key) == expected, "task differs from frozen confirmation: " + key)
-        # Planning v1 preserves the manager's valid RFC3339 spelling while
-        # ScheduleService canonicalizes the admitted TaskRequest to
-        # microseconds.  These are clock instants, not content aliases: only
-        # semantic UTC equality is compatible, and the frozen Planning strings
-        # remain the binding/request window below.
-        for task_key, schedule_key in (
-            ("issued_at_utc", "due_at_utc"),
-            ("expires_at_utc", "expires_at_utc"),
-        ):
-            _require(
-                _utc(getattr(task, task_key)) == _utc(schedule[schedule_key]),
-                "task differs from frozen confirmation: " + task_key,
-            )
-        _require(schedule["admission_reference"] == c["confirmation_id"], "confirmation link mismatch")
-        created = rec["recorded_at_utc"]
-        _require(_utc(task.issued_at_utc) <= _utc(created) < _utc(task.expires_at_utc) and _utc(created) <= _utc(bound), "binding precedes valid task creation")
-        _require(c.get("task_created_at_utc") == created, "planning task evidence differs")
-        plans = [v for v in p["plans"] if v["plan_id"] == c["plan_id"] and v["version"] == c["plan_version"]]
-        _require(len(plans) == 1, "exact plan revision required")
-        plan = plans[0]
-        _require(plan["input_revision"] == c["input_revision"] and all(plan["selection"][k] == schedule[k] for k in ("robot_id", "zone_id")) and plan["selection"]["start_at_utc"] == schedule["due_at_utc"], "plan confirmation mismatch")
-        sources = p.get("input_records", [p.get("latest_input")])
-        sources = [v for v in sources if v is not None and v["revision"] == c["input_revision"]]
-        _require(len(sources) == 1 and sources[0]["input_digest"] == plan["input_digest"], "exact retained input revision required")
-        source = sources[0]
-        zones = [v for v in source["zones"] if (v["robot_id"], v["zone_id"]) == (task.target_robot_id, task.zone_id)]
-        mappings = [v for v in s.get("runtime_bindings", []) if (v["robot_id"], v["zone_id"]) == (task.target_robot_id, task.zone_id)]
-        _require(len(zones) == len(mappings) == 1, "unique explicit robot/zone binding required")
-        mapping = mappings[0]
-        _require(mapping["handoff_station_id"] == s["station_ids"][0], "bound station is not sole station")
-        e = zones[0].get("cycle_minutes")
-        _require(isinstance(e, dict) and isinstance(e.get("value"), dict), "missing cycle evidence")
-        _require(_utc(e["observed_at_utc"]) <= _utc(bound) <= _utc(e["valid_until_utc"]), "stale or future cycle evidence")
-        cycle = {k: e["value"][k] for k in ("travel", "collect", "return", "unload")}
-        evidence = {k: e[k] for k in ("source_kind", "source_ref", "observed_at_utc", "valid_until_utc")}
-        evidence.update(input_record_id=source["request_id"], input_revision=source["revision"], cycle_minutes=cycle,
-                        derivation_rule="CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1")
-        _validate(evidence, "CycleEvidence")
-        limit = math.ceil(sum(cycle.values()) * 60 / s["control_interval_s"]) * s["control_interval_s"]
-        b = {k: s[k] for k in (*SESSION_KEYS, "site_id", "deployment_id", "commissioned_site_digest")}
-        b.update({k: c[k] for k in ("plan_id", "plan_version", "confirmation_id", "schedule_id", "task_id")})
-        b.update({k: mapping[k] for k in ("robot_id", "zone_id", "runtime_robot_id", "runtime_zone_id", "handoff_station_id")})
-        b.update(schema="nxt-collection-execution-binding/v1", environment="SIMULATION", task_content_digest=task.content_digest(),
-                 incarnation=task.target_incarnation, max_execution_s=limit, cycle_evidence=evidence,
-                 handoff_binding_mode="SOLE_SCENARIO_STATION_V1", bound_at_sim_t_s=now_sim_t_s,
-                 bound_at_utc=bound, task_created_at_utc=created)
-        b["binding_id"] = digest(b)
-        _validate(b, "Binding")
-        result.append(b)
-    _require(len({b["task_id"] for b in result}) == len(result), "duplicate task binding")
-    return sorted(result, key=lambda b: b["binding_id"])
+    c = primitive(confirmation)
+    matched = [r for r in records if r["record_kind"] == "task_created" and r["payload"].get("task_id") == c["task_id"]]
+    _require(len(matched) == 1, "exact TASK_CREATED evidence required")
+    rec = matched[0]
+    try:
+        task = TaskRequest.from_dict(rec["payload"]["request"])
+    except ValueError as exc:
+        raise CollectionExecutionError("conflict", "invalid task content") from exc
+    schedule = c["schedule"]
+    _require(rec["payload"].get("schedule_id") == c["schedule_id"] and task.task_id == c["task_id"], "task/schedule identity mismatch")
+    for key, expected in {"site_id": s["site_id"], "deployment_id": s["deployment_id"],
+                          "target_robot_id": schedule["robot_id"], "zone_id": schedule["zone_id"],
+                          "task_type": "COLLECT_BALLS_ZONE", "issued_by": "SIMULATION_TEST_ENTRY:" + schedule["operator"]}.items():
+        _require(getattr(task, key) == expected, "task differs from frozen confirmation: " + key)
+    # Planning v1 preserves the manager's valid RFC3339 spelling while
+    # ScheduleService canonicalizes the admitted TaskRequest to
+    # microseconds.  These are clock instants, not content aliases: only
+    # semantic UTC equality is compatible, and the frozen Planning strings
+    # remain the binding/request window below.
+    for task_key, schedule_key in (
+        ("issued_at_utc", "due_at_utc"),
+        ("expires_at_utc", "expires_at_utc"),
+    ):
+        _require(
+            _utc(getattr(task, task_key)) == _utc(schedule[schedule_key]),
+            "task differs from frozen confirmation: " + task_key,
+        )
+    _require(schedule["admission_reference"] == c["confirmation_id"], "confirmation link mismatch")
+    created = rec["recorded_at_utc"]
+    _require(_utc(task.issued_at_utc) <= _utc(created) < _utc(task.expires_at_utc) and _utc(created) <= _utc(bound), "binding precedes valid task creation")
+    _require(c.get("task_created_at_utc") == created, "planning task evidence differs")
+    plans = [v for v in p["plans"] if v["plan_id"] == c["plan_id"] and v["version"] == c["plan_version"]]
+    _require(len(plans) == 1, "exact plan revision required")
+    plan = plans[0]
+    _require(plan["input_revision"] == c["input_revision"] and all(plan["selection"][k] == schedule[k] for k in ("robot_id", "zone_id")) and plan["selection"]["start_at_utc"] == schedule["due_at_utc"], "plan confirmation mismatch")
+    requirements = derive_execution_requirements(
+        plan=plan,
+        input_records=p.get("input_records", [p["latest_input"]] if p.get("latest_input") is not None else []),
+        session_identity=s, evidence_at_utc=bound,
+    )
+    mapping, evidence, limit = (requirements[k] for k in ("runtime_binding", "cycle_evidence", "max_execution_s"))
+    b = {k: s[k] for k in (*SESSION_KEYS, "site_id", "deployment_id", "commissioned_site_digest")}
+    b.update({k: c[k] for k in ("plan_id", "plan_version", "confirmation_id", "schedule_id", "task_id")})
+    b.update({k: mapping[k] for k in ("robot_id", "zone_id", "runtime_robot_id", "runtime_zone_id", "handoff_station_id")})
+    b.update(schema="nxt-collection-execution-binding/v1", environment="SIMULATION", task_content_digest=task.content_digest(),
+             incarnation=task.target_incarnation, max_execution_s=limit, cycle_evidence=evidence,
+             handoff_binding_mode="SOLE_SCENARIO_STATION_V1", bound_at_sim_t_s=now_sim_t_s,
+             bound_at_utc=bound, task_created_at_utc=created)
+    b["binding_id"] = digest(b)
+    _validate(b, "Binding")
+    return b
 
 
 def make_request(binding, request_id, due_at_utc, expires_at_utc):
@@ -287,6 +336,86 @@ def _terminal(r, state, reason, now):
     if reason in ("ROBOT_FAULT", "ESTOP_LATCHED", "HUMAN_ASSISTANCE_REQUIRED"): _protect(r, reason)
 
 
+def _apply_preacceptance_rejection(state, payload):
+    _require(set(payload) == {"execution_id", "now_sim_t_s", "edge_record"}, "invalid pre-acceptance rejection")
+    execution_id = payload["execution_id"]
+    _require(execution_id in state["executions"], "unknown execution")
+    _require(execution_id not in state["preacceptance_rejections"], "duplicate pre-acceptance rejection")
+    _require(state["replay_failure"] is None, "session sealed by replay mismatch")
+    now = payload["now_sim_t_s"]
+    _require(type(now) in (int, float) and math.isfinite(now) and now >= state["now_sim_t_s"],
+             "pre-acceptance rejection clock regression")
+
+    evidence = payload["edge_record"]
+    record_keys = {"schema_version", "sequence", "record_id", "record_kind", "origin", "recorded_at_utc", "payload"}
+    _require(isinstance(evidence, dict) and set(evidence) == record_keys, "verified device JournalRecord required")
+    _require(evidence["schema_version"] == "nxt-edge-task/journal/v1"
+             and type(evidence["sequence"]) is int and evidence["sequence"] > 0
+             and evidence["record_kind"] == "task_event_persisted"
+             and evidence["origin"] == "DEVICE"
+             and isinstance(evidence["payload"], dict) and set(evidence["payload"]) == {"event"},
+             "persisted device task event required")
+    expected_record_id = "rec_" + digest({
+        "sequence": evidence["sequence"],
+        "record_kind": evidence["record_kind"],
+        "origin": evidence["origin"],
+        "recorded_at_utc": evidence["recorded_at_utc"],
+        "payload": evidence["payload"],
+    })[:24]
+    _require(evidence["record_id"] == expected_record_id, "device record identity mismatch")
+    try:
+        event = TaskEvent.from_dict(evidence["payload"]["event"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CollectionExecutionError("conflict", "invalid pre-acceptance task event") from exc
+    _require(evidence["recorded_at_utc"] == event.reported_at_utc, "device record/event clock mismatch")
+    _require(event.event_sequence == 0 and event.kind.value == "REJECTED"
+             and event.reason_code == "incarnation_mismatch" and event.phase is None,
+             "not an incarnation-mismatch request rejection")
+
+    r = state["executions"][execution_id]
+    b = state["bindings"][r["binding_id"]]
+    _require(event.task_id == r["task_id"] and event.robot_id == b["robot_id"]
+             and event.site_id == b["site_id"] and event.deployment_id == b["deployment_id"],
+             "pre-acceptance rejection identity mismatch")
+    _require(event.incarnation != r["incarnation"], "rejection does not prove a different incarnation")
+    _require(execution_id not in state["accepted"] and r["state"] == "PENDING"
+             and r["stage"] == "WAITING_FOR_POLICY_SLOT" and r["reason"] is None
+             and r["started_sim_t_s"] is None and r["execution_deadline_sim_t_s"] is None
+             and r["terminal_sim_t_s"] is None and r["assignment_id"] is None
+             and not r["actions"] and state["pending_prepared"] is None,
+             "rejection arrived after execution authorization")
+    _require(r["runtime_evidence"] == {
+        "start_admitted": False, "assignment_accepted": False, "assignment_terminal": False,
+        "collection_exit_reason": None, "event_sequence_complete": True,
+        "event_start_sequence": None, "event_end_sequence": None, "event_digest": None,
+        "conservation_passed": None, "payload_parity_passed": None,
+    }, "rejection contradicts runtime evidence")
+    _require(r["edge_evidence"] == {
+        "task_id": r["task_id"], "accepted": False, "verified": False,
+        "effective_state": "CREATED", "reason": None, "terminal_states": [],
+        "event_ids": [], "result_verification": "UNVERIFIED",
+    }, "rejection contradicts prior Edge evidence")
+    _require(not any(r["conflicts"].values()) and r["device_protection"] == {
+        "protected": False, "reasons": [], "authorization_blocked": False,
+    }, "rejection follows an existing conflict")
+    for quantity in (r["raw_quantity"], r["unload_quantity"]):
+        _require(quantity["status"] == "NOT_REACHED" and quantity["balls"] is None
+                 and quantity["assignment_id"] is None and not quantity["source_event_ids"]
+                 and quantity["event_digest"] is None,
+                 "rejection contradicts quantity evidence")
+    record_id = evidence["record_id"]
+    _require(all(existing["edge_record"]["record_id"] != record_id
+                 for existing in state["preacceptance_rejections"].values()),
+             "duplicate pre-acceptance rejection record")
+
+    _terminal(r, "REJECTED", "IDENTITY_CONFLICT", now)
+    r["edge_evidence"].update(reason="incarnation_mismatch", event_ids=[record_id])
+    r["conflicts"]["incarnation_mismatch"] = True
+    _protect(r, "INCARNATION_MISMATCH")
+    state["preacceptance_rejections"][execution_id] = deepcopy(payload)
+    state["now_sim_t_s"] = now
+
+
 def _runtime(r, snapshot, now, *, prefix_complete=True):
     """Only correlated actual-transfer events establish quantities."""
     e = primitive(snapshot)
@@ -349,6 +478,28 @@ def _runtime(r, snapshot, now, *, prefix_complete=True):
         r["edge_evidence"].update(effective_state="RUNNING")
 
 
+def _recovery_status(state):
+    return (
+        "REPLAY_MISMATCH"
+        if state["replay_failure"]
+        else "EDGE_WITHOUT_COMMIT"
+        if state["edge_without_commit"]
+        else "PREPARED_NO_COMMIT"
+        if state["pending_prepared"]
+        else "COMMITTED_CURSOR_STALE"
+        if state["tick_sequence"]
+        and (
+            state["cursor"] is None
+            or state["cursor"]["tick_sequence"] != state["tick_sequence"]
+        )
+        else "COMMITTED_OUTBOX_UNCONFIRMED"
+        if set(state["outbox"])
+        - set(state["confirmed"])
+        - set(state["blocked_outbox"])
+        else "NO_PREPARED"
+    )
+
+
 class CollectionExecutionStore:
     def __init__(self, path, session_identity, *, policy_id="JointDispatchPolicy-v1"):
         _identity(session_identity)
@@ -368,7 +519,7 @@ class CollectionExecutionStore:
         self.journal.append_via(build)
 
     def _replay(self, records):
-        state = dict(bindings={}, windows={}, requests={}, receipts={}, executions={}, accepted=set(), tick_sequence=0,
+        state = dict(bindings={}, windows={}, requests={}, receipts={}, executions={}, accepted=set(), preacceptance_rejections={}, tick_sequence=0,
                      replay_digest=digest({"session": self.session_identity, "policy_id": self.policy_id, "arbiter": ARBITER}),
                      pending_prepared=None, commits={}, outbox={}, confirmed={}, blocked_outbox=set(), cursor=None, now_sim_t_s=0,
                      request_high_water=digest([]), edge_without_commit=False, replay_plan=[], replay_failure=None)
@@ -423,6 +574,8 @@ class CollectionExecutionStore:
                 state["accepted"].add(p["execution_id"])
                 r["edge_evidence"].update(accepted=True, effective_state="ACCEPTED", verified=True, result_verification="VERIFIED")
                 r["edge_evidence"]["event_ids"].append(p["event_id"])
+            elif kind == "preacceptance_rejection":
+                _apply_preacceptance_rejection(state, p)
             elif kind == "action_prepared":
                 _require(state["replay_failure"] is None, "session sealed by replay mismatch")
                 _require(state["pending_prepared"] is None and p["tick_sequence"] == state["tick_sequence"] + 1
@@ -630,6 +783,32 @@ class CollectionExecutionStore:
         self.journal.append_via(build)
         return bindings
 
+    def bind_confirmed_task(self, planning_snapshot, edge_records, session_identity, now_sim_t_s, *, task_id: str) -> dict:
+        """Bind only this task; exact retries retain the original binding time."""
+        _require(primitive(session_identity) == self.session_identity, "session identity conflict")
+        result = {}
+
+        def build(records):
+            state = self._replay(records)
+            matches = [b for b in state["bindings"].values() if b["task_id"] == task_id]
+            _require(len(matches) <= 1, "task already bound differently")
+            bound_at = matches[0]["bound_at_sim_t_s"] if matches else now_sim_t_s
+            binding = bind_confirmed_task(planning_snapshot, edge_records, session_identity, bound_at, task_id=task_id)
+            _require(not matches or matches == [binding], "task already bound differently")
+            result.update(matches[0] if matches else binding)
+            if matches:
+                return []
+            _require(state["replay_failure"] is None, "session sealed against new authorization")
+            confirmation = next(c for c in planning_snapshot["confirmations"] if c.get("task_id") == task_id)
+            specs = [] if records else [self._spec("session", {"identity": self.session_identity, "policy_id": self.policy_id}, now_sim_t_s)]
+            specs.append(self._spec("binding", binding, now_sim_t_s))
+            specs.append(self._spec("binding_window", dict(binding_id=binding["binding_id"],
+                due_at_utc=confirmation["schedule"]["due_at_utc"], expires_at_utc=confirmation["schedule"]["expires_at_utc"]), now_sim_t_s))
+            return specs
+
+        self.journal.append_via(build)
+        return result
+
     def submit(self, request):
         request = primitive(request)
         result = {}
@@ -681,6 +860,31 @@ class CollectionExecutionStore:
             _require(state["replay_failure"] is None, "session sealed against new authorization")
             _require(state["executions"][execution_id]["state"] not in TERMINALS, "acceptance after terminal execution")
             return [self._spec("accepted", dict(execution_id=execution_id, event_id=event_id), state["now_sim_t_s"])]
+        self.journal.append_via(build)
+
+    def record_preacceptance_rejection(
+        self,
+        execution_id: str,
+        edge_record: JournalRecord,
+        *,
+        now_sim_t_s: float,
+    ) -> None:
+        _require(isinstance(edge_record, JournalRecord), "verified device JournalRecord required")
+        payload = {
+            "execution_id": execution_id,
+            "now_sim_t_s": now_sim_t_s,
+            "edge_record": edge_record.to_dict(),
+        }
+
+        def build(records):
+            state = self._replay(records)
+            existing = state["preacceptance_rejections"].get(execution_id)
+            if existing is not None:
+                _require(canonical(existing) == canonical(payload), "conflicting pre-acceptance rejection")
+                return []
+            _apply_preacceptance_rejection(state, payload)
+            return [self._spec("preacceptance_rejection", payload, now_sim_t_s)]
+
         self.journal.append_via(build)
 
     def arbitrate(self, original_action, now_sim_t_s, runtime_view):
@@ -929,25 +1133,61 @@ class CollectionExecutionStore:
 
     def recovery_state(self):
         s = self.replay()
-        status = ("REPLAY_MISMATCH" if s["replay_failure"] else "EDGE_WITHOUT_COMMIT" if s["edge_without_commit"] else "PREPARED_NO_COMMIT" if s["pending_prepared"]
-                  else "COMMITTED_CURSOR_STALE" if s["tick_sequence"] and (s["cursor"] is None or s["cursor"]["tick_sequence"] != s["tick_sequence"])
-                  else "COMMITTED_OUTBOX_UNCONFIRMED" if set(s["outbox"]) - set(s["confirmed"]) - set(s["blocked_outbox"]) else "NO_PREPARED")
+        status = _recovery_status(s)
         eid = s["pending_prepared"]["decision"]["execution_id"] if s["pending_prepared"] else None
         permitted = s["pending_prepared"] is not None and (eid is None or s["executions"][eid]["state"] not in TERMINALS)
         return dict(status=status, replay_permitted=permitted, pending_prepared=s["pending_prepared"], tick_sequence=s["tick_sequence"], replay_digest=s["replay_digest"],
                     unconfirmed_outbox=self.committed_outbox(unconfirmed_only=True), replay_failure=deepcopy(s["replay_failure"]))
 
-    def snapshot(self, *, server_time_utc, session_state="ACTIVE"):
-        """Pure read. Wall-clock read time is excluded from every persisted digest."""
+    def _snapshot_from_state(self, state, *, server_time_utc, session_state):
         _utc(server_time_utc)
-        s = self.replay()
-        _require(s["replay_failure"] is None, "session sealed by replay mismatch", "unavailable")
-        _require(all(r["edge_evidence"]["accepted"] or r["state"] in ("MISSED","REJECTED") for r in s["executions"].values()), "durable Edge acceptance not yet recorded", "unavailable")
-        _require(not set(s["outbox"]) - set(s["confirmed"]) - set(s["blocked_outbox"]), "committed outbox awaits durable Edge evidence", "unavailable")
+        _require(all(r["edge_evidence"]["accepted"] or r["state"] in ("MISSED","REJECTED") for r in state["executions"].values()), "durable Edge acceptance not yet recorded", "unavailable")
+        _require(not set(state["outbox"]) - set(state["confirmed"]) - set(state["blocked_outbox"]), "committed outbox awaits durable Edge evidence", "unavailable")
         data = {k:self.session_identity[k] for k in SESSION_KEYS}
         data.update(schema="nxt-collection-executions/v1", environment="SIMULATION", session_state=session_state,
-                    now_sim_t_s=s["now_sim_t_s"], simulation_time_utc=simulation_utc(self.session_identity, s["now_sim_t_s"]),
-                    server_time_utc=server_time_utc, replay_digest=s["replay_digest"],
-                    bindings=list(s["bindings"].values()), requests=list(s["requests"].values()), receipts=list(s["receipts"].values()), executions=list(s["executions"].values()))
+                    now_sim_t_s=state["now_sim_t_s"], simulation_time_utc=simulation_utc(self.session_identity, state["now_sim_t_s"]),
+                    server_time_utc=server_time_utc, replay_digest=state["replay_digest"],
+                    bindings=list(state["bindings"].values()), requests=list(state["requests"].values()), receipts=list(state["receipts"].values()), executions=list(state["executions"].values()))
         _validate(data, "ExecutionSnapshot")
         return deepcopy(data)
+
+    def snapshot(self, *, server_time_utc, session_state="ACTIVE"):
+        """Pure read. Wall-clock read time is excluded from every persisted digest."""
+        state = self.replay()
+        _require(state["replay_failure"] is None, "session sealed by replay mismatch", "unavailable")
+        return self._snapshot_from_state(
+            state,
+            server_time_utc=server_time_utc,
+            session_state=session_state,
+        )
+
+    def _sealed_evidence_state(self):
+        state = self.replay()
+        _require(
+            _recovery_status(state)
+            in {"EDGE_WITHOUT_COMMIT", "REPLAY_MISMATCH"},
+            "sealed evidence read requires a protected recovery state",
+            "unavailable",
+        )
+        return state
+
+    def sealed_evidence_snapshot(
+        self, *, server_time_utc, session_state="ACTIVE"
+    ):
+        """Return closed protected evidence without replaying a simulator."""
+        return self._snapshot_from_state(
+            self._sealed_evidence_state(),
+            server_time_utc=server_time_utc,
+            session_state=session_state,
+        )
+
+    def sealed_request_result(self, request_id):
+        """Read one receipt from a structurally protected journal."""
+        state = self._sealed_evidence_state()
+        receipt = state["receipts"].get(request_id)
+        _require(
+            receipt is not None,
+            "no durable receipt for request",
+            "request_not_found",
+        )
+        return deepcopy(receipt)

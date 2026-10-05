@@ -7,7 +7,7 @@ journal records and the explicit human-confirmation bridge between them.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 from urllib.parse import unquote
 
 from nxt_edge_task.cases import TASK_CREATED
@@ -25,10 +25,14 @@ from nxt_pilot_ops.serialization import to_primitive
 from nxt_site_agent import SiteAgentError
 
 
+ConfirmationGate = Callable[[PlanningHistory, Mapping[str, Any], datetime], None]
+
+
 class PlanningOperations:
     def __init__(self, journal: JsonlJournal, config, facts, clock: Callable[[], datetime],
-                 *, site_timezone: str) -> None:
+                 *, site_timezone: str, confirmation_gate: ConfirmationGate | None = None) -> None:
         self.journal, self.config, self.facts, self.clock = journal, config, facts, clock
+        self.confirmation_gate = confirmation_gate
         self.context = {
             "site_id": config.site_id, "deployment_id": config.deployment_id,
             "site_timezone": site_timezone, "zone_ids": sorted(facts.zone_ids),
@@ -119,6 +123,17 @@ class PlanningOperations:
     def snapshot(self, now: datetime) -> dict[str, Any]:
         records = self.journal.read()
         history = self.history(records)
+        return self._snapshot_from(records, history, now)
+
+    def execution_binding_snapshot(self, now: datetime) -> dict[str, Any]:
+        """Internal projection retaining exact historical inputs in one read."""
+        records = self.journal.read()
+        history = self.history(records)
+        result = self._snapshot_from(records, history, now)
+        result["input_records"] = [to_primitive(record) for record in history.records(INPUT)]
+        return result
+
+    def _snapshot_from(self, records, history: PlanningHistory, now: datetime) -> dict[str, Any]:
         result = planning_snapshot(history, self.context, now)
         rows = derive_schedules(records, self.config, self.facts)
         for c in result["confirmations"]:
@@ -152,6 +167,9 @@ class PlanningOperations:
                     body = normalized_schedule(schedule, self.config, self.facts)
                     response = prepare_confirmation(history, payload, now, schedule=schedule,
                                                     schedule_id="schedule_" + stable_digest(body)[:24])
+                if response["disposition"] != "duplicate" and self.confirmation_gate is not None:
+                    # The gate admits evidence; only the validated original is persisted.
+                    self.confirmation_gate(history, to_primitive(response["record"]), now)
             else:
                 # The pure owner validates fields; task association is supplied
                 # from this same locked, verified Edge prefix.

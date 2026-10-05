@@ -2,7 +2,9 @@ import { API_SCHEMA, ManagerApiError, type FetchLike } from "./api";
 
 export const TASK_OPS_SCHEMA = "nxt-pilot-dispatch/v0";
 export const TASK_OPS_POLL_MS = 2_000;
-export const TASK_OPS_CAPABILITIES_SCHEMA = "nxt-pilot-dispatch/service-capabilities/v1";
+export const TASK_OPS_CAPABILITIES_V1_SCHEMA = "nxt-pilot-dispatch/service-capabilities/v1";
+export const TASK_OPS_CAPABILITIES_V2_SCHEMA = "nxt-pilot-dispatch/service-capabilities/v2";
+export const TASK_OPS_CAPABILITIES_SCHEMA = TASK_OPS_CAPABILITIES_V1_SCHEMA;
 export const TASK_OPS_WRITE_OPERATIONS = [
   "planning_inputs_create",
   "planning_plans_create",
@@ -16,12 +18,19 @@ export const TASK_OPS_WRITE_OPERATIONS = [
 
 export type TaskOpsWriteOperation = (typeof TASK_OPS_WRITE_OPERATIONS)[number];
 export type TaskOpsCapabilityStatus = "SUPPORTED" | "UNAVAILABLE";
-export type TaskOpsServiceMode = "FIXED_V3_EXECUTION" | "LEGACY_PILOT_DISPATCH";
-export interface TaskOpsServiceCapabilities {
-  schema: typeof TASK_OPS_CAPABILITIES_SCHEMA;
-  mode: TaskOpsServiceMode;
-  operations: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus>;
-}
+type CapabilityOperations = Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus>;
+type V1Capabilities = {
+  schema: typeof TASK_OPS_CAPABILITIES_V1_SCHEMA;
+  mode: "FIXED_V3_EXECUTION" | "LEGACY_PILOT_DISPATCH";
+  operations: CapabilityOperations;
+};
+type V2Capabilities = {
+  schema: typeof TASK_OPS_CAPABILITIES_V2_SCHEMA;
+  mode: "CONTINUOUS_V3_EXECUTION";
+  operations: CapabilityOperations;
+};
+export type TaskOpsServiceCapabilities = V1Capabilities | V2Capabilities;
+export type TaskOpsServiceMode = TaskOpsServiceCapabilities["mode"];
 export type EffectiveTaskOpsCapabilities =
   | ({ declared: true } & TaskOpsServiceCapabilities)
   | {
@@ -143,6 +152,16 @@ const FIXED_V3_OPERATIONS: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus
 const LEGACY_OPERATIONS: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus> = Object.fromEntries(
   TASK_OPS_WRITE_OPERATIONS.map((operation) => [operation, "SUPPORTED"]),
 ) as Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus>;
+const CONTINUOUS_V3_OPERATIONS: Record<TaskOpsWriteOperation, TaskOpsCapabilityStatus> = {
+  planning_inputs_create: "SUPPORTED",
+  planning_plans_create: "SUPPORTED",
+  planning_confirmations_create: "SUPPORTED",
+  planning_outcomes_create: "SUPPORTED",
+  schedules_create: "UNAVAILABLE",
+  schedules_cancel: "SUPPORTED",
+  notifications_acknowledge: "SUPPORTED",
+  notifications_resolve: "SUPPORTED",
+};
 const UNDECLARED_OPERATIONS = Object.fromEntries(
   TASK_OPS_WRITE_OPERATIONS.map((operation) => [operation, "UNAVAILABLE"]),
 ) as Record<TaskOpsWriteOperation, "UNAVAILABLE">;
@@ -154,13 +173,19 @@ const UNDECLARED_CAPABILITIES: EffectiveTaskOpsCapabilities = {
 };
 
 function validServiceCapabilities(value: unknown): value is TaskOpsServiceCapabilities {
-  if (!object(value) || !exactKeys(value, ["schema", "mode", "operations"]) ||
-      value.schema !== TASK_OPS_CAPABILITIES_SCHEMA ||
-      !["FIXED_V3_EXECUTION", "LEGACY_PILOT_DISPATCH"].includes(String(value.mode))) return false;
+  if (!object(value) || !exactKeys(value, ["schema", "mode", "operations"])) return false;
   const operations = value.operations;
   if (!object(operations) || !exactKeys(operations, TASK_OPS_WRITE_OPERATIONS)) return false;
-  const mode = value.mode as TaskOpsServiceMode;
-  const expected = mode === "FIXED_V3_EXECUTION" ? FIXED_V3_OPERATIONS : LEGACY_OPERATIONS;
+  const expected = value.schema === TASK_OPS_CAPABILITIES_V1_SCHEMA
+    ? value.mode === "FIXED_V3_EXECUTION"
+      ? FIXED_V3_OPERATIONS
+      : value.mode === "LEGACY_PILOT_DISPATCH"
+        ? LEGACY_OPERATIONS
+        : null
+    : value.schema === TASK_OPS_CAPABILITIES_V2_SCHEMA && value.mode === "CONTINUOUS_V3_EXECUTION"
+      ? CONTINUOUS_V3_OPERATIONS
+      : null;
+  if (expected === null) return false;
   return TASK_OPS_WRITE_OPERATIONS.every((operation) =>
     ["SUPPORTED", "UNAVAILABLE"].includes(String(operations[operation])) &&
     operations[operation] === expected[operation]);

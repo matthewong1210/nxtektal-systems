@@ -275,6 +275,16 @@ tokens use its unknown: prefix, including unknown:policy_slot_missed and
 unknown:safety_rejected and unknown:insufficient_session_horizon; the V3
 reason remains its own enum.
 
+A request-time identity refusal and a durable collection attempt are distinct.
+An API request that fails identity checks before durable submission creates no
+attempt. Once a request is durable, an exact verified device-journal sequence-0
+`REJECTED/incarnation_mismatch` closes that attempt as
+`REJECTED/IDENTITY_CONFLICT`, without acceptance, assignment, actions or
+quantity evidence. Its sole conflict is `incarnation_mismatch`; authorization
+remains blocked and the causal device record ID is retained. Any near miss,
+second record ID or contradictory execution evidence fails closed rather than
+being widened into another accepted conflict shape.
+
 Conflicting terminals preserve all claims in terminal_states. Edge
 effective_state becomes CONFLICT while record.state becomes INCONCLUSIVE.
 success_display_allowed is false; device protection and authorization block

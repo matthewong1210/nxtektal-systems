@@ -1,0 +1,14 @@
+{
+  "schema": "nxt-pilot-dispatch/service-capabilities/v2",
+  "mode": "CONTINUOUS_V3_EXECUTION",
+  "operations": {
+    "planning_inputs_create": "SUPPORTED",
+    "planning_plans_create": "SUPPORTED",
+    "planning_confirmations_create": "SUPPORTED",
+    "planning_outcomes_create": "SUPPORTED",
+    "schedules_create": "UNAVAILABLE",
+    "schedules_cancel": "SUPPORTED",
+    "notifications_acknowledge": "SUPPORTED",
+    "notifications_resolve": "SUPPORTED"
+  }
+}

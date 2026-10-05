@@ -135,3 +135,42 @@ export function witnessData(): Record<string, unknown> {
 export function witnessSnapshot(): CollectionExecutionsSnapshot {
   return parseCollectionExecutions(witnessData());
 }
+
+/** Backend-generated witness of the continuous V4 two-task loop (Task 6,
+ * fixture `two-task-active.json`): one SUCCEEDED history record and one
+ * RUNNING record, in the service's own array order (which is not the
+ * business order). It is read directly from the checked-in file and passes
+ * through the real parser; nothing is copied, rewritten, re-identified or
+ * reordered here, and it is still a fixture, not a live service read. */
+const CONTINUOUS_FIXTURES = join(import.meta.dirname, "..", "..", "..", "simulation", "tests", "fixtures", "continuous-collection-v4");
+const CONTINUOUS_WITNESS = join(CONTINUOUS_FIXTURES, "two-task-active.json");
+const CONTINUOUS_PENDING = join(CONTINUOUS_FIXTURES, "two-task-pending.json");
+const CONTINUOUS_RUNNING_AFTER_RECOVERY = join(CONTINUOUS_FIXTURES, "two-task-running-after-recovery.json");
+
+const fixtureData = (path: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+
+export function continuousTwoTaskWitnessData(): Record<string, unknown> {
+  return fixtureData(CONTINUOUS_WITNESS);
+}
+export function continuousTwoTaskWitness(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(continuousTwoTaskWitnessData());
+}
+
+/** Backend-generated response immediately after the second durable request is
+ * accepted but before a recovered driver consumes its policy slot. */
+export function continuousTwoTaskPendingData(): Record<string, unknown> {
+  return fixtureData(CONTINUOUS_PENDING);
+}
+export function continuousTwoTaskPending(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(continuousTwoTaskPendingData());
+}
+
+/** Backend-generated next response after restart recovery advances the same
+ * history: the second execution is RUNNING with ledger-backed quantities. */
+export function continuousTwoTaskRunningAfterRecoveryData(): Record<string, unknown> {
+  return fixtureData(CONTINUOUS_RUNNING_AFTER_RECOVERY);
+}
+export function continuousTwoTaskRunningAfterRecovery(): CollectionExecutionsSnapshot {
+  return parseCollectionExecutions(continuousTwoTaskRunningAfterRecoveryData());
+}

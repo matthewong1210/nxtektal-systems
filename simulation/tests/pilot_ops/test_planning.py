@@ -14,6 +14,7 @@ from nxt_pilot_ops.planning_contracts import (
 )
 from nxt_pilot_ops.projection import project_stockout_minutes
 from nxt_pilot_ops.serialization import canonical_json, stable_digest
+from nxt_site_agent import SiteAgentError
 
 
 NOW = "2026-09-16T01:00:00Z"
@@ -59,6 +60,130 @@ def plan_request(**changes):
             "expected_plan_version": 0, "input_revision": 1, "operator": "Manager",
             "reason": "Review a replenishment cycle", "scope": "ONE_TASK", "valid_until_utc": END,
             "selection": None, **changes}
+
+
+def planning_operations(tmp_path, **options):
+    from nxt_edge_task.contracts import EdgeTaskConfig
+    from nxt_edge_task.journal import JsonlJournal
+    from scripts.pilot_course_a_task_fixture import admission_facts
+    from scripts.planning_operations import PlanningOperations
+
+    config_path = Path(__file__).resolve().parents[2] / "configs/edge_task/pilot-course-a.sim.example.json"
+    config = EdgeTaskConfig.from_dict(json.loads(config_path.read_text()))
+    return PlanningOperations(JsonlJournal(tmp_path / "planning.jsonl"), config,
+        admission_facts(), lambda: utc(NOW), site_timezone=CONTEXT["site_timezone"], **options)
+
+
+def confirmed_plan_request(operations):
+    source = input_request()
+    source["zones"][0]["zone_id"] = operations.context["zone_ids"][0]
+    operations.route("POST", "/api/v1/planning/inputs", source)
+    plan = operations.route("POST", "/api/v1/planning/plans", plan_request())["record"]
+    assert plan["status"] == "READY"
+    return {"schema": "nxt-planning-confirmation/v1", "request_id": "confirm-first",
+            "plan_id": plan["plan_id"], "plan_version": plan["version"], "operator": "Manager"}
+
+
+def test_confirmation_gate_runs_once_inside_new_confirmation_append(tmp_path, monkeypatch):
+    from nxt_pilot_ops.planning_workflow import CONFIRMATION, INPUT
+
+    calls, inside_builder = [], []
+
+    def gate(history, confirmation, now):
+        assert inside_builder == [True]
+        assert history.records(CONFIRMATION) == []
+        assert len(history.records(INPUT)) == 1
+        calls.append((confirmation["confirmation_id"], now))
+
+    operations = planning_operations(tmp_path, confirmation_gate=gate)
+    payload = confirmed_plan_request(operations)
+    append_via = operations.journal.append_via
+
+    def tracked_append(builder):
+        def build(records):
+            inside_builder.append(True)
+            try:
+                return builder(records)
+            finally:
+                inside_builder.pop()
+        return append_via(build)
+
+    monkeypatch.setattr(operations.journal, "append_via", tracked_append)
+    first = operations.route("POST", "/api/v1/planning/confirmations", payload)
+    before = operations.journal.path.read_bytes()
+    duplicate = operations.route("POST", "/api/v1/planning/confirmations", payload)
+    assert first["record"] == duplicate["record"]
+    assert calls == [(first["record"]["confirmation_id"], operations.clock())]
+    assert operations.journal.path.read_bytes() == before
+
+    def reject(*_args):
+        raise AssertionError("duplicate recovery must skip the gate")
+
+    reopened = planning_operations(tmp_path, confirmation_gate=reject)
+    reopened.clock = lambda: utc(END) + timedelta(days=1)
+    assert reopened.route("POST", "/api/v1/planning/confirmations", payload)["record"] == first["record"]
+    assert reopened.journal.path.read_bytes() == before
+
+
+def test_confirmation_gate_conflict_appends_no_confirmation_or_schedule(tmp_path):
+    def reject(_history, _confirmation, _now):
+        raise PlanningError("planning_conflict", "selection exceeds V3 session horizon")
+
+    operations = planning_operations(tmp_path, confirmation_gate=reject)
+    payload = confirmed_plan_request(operations)
+    before = operations.journal.path.read_bytes(), operations.journal.anchor_path.read_bytes()
+    with pytest.raises(SiteAgentError, match="session horizon") as raised:
+        operations.route("POST", "/api/v1/planning/confirmations", payload)
+    assert raised.value.code == "planning_conflict"
+    assert (operations.journal.path.read_bytes(), operations.journal.anchor_path.read_bytes()) == before
+
+
+def test_confirmation_gate_mutation_cannot_change_committed_or_returned_record(tmp_path):
+    from nxt_pilot_ops.planning_workflow import CONFIRMATION
+
+    original = []
+
+    def mutate(_history, confirmation, _now):
+        original.append(deepcopy(confirmation))
+        confirmation["schedule"]["zone_id"] = "unvalidated-zone"
+        confirmation["request"]["operator"] = "unvalidated-operator"
+
+    operations = planning_operations(tmp_path, confirmation_gate=mutate)
+    payload = confirmed_plan_request(operations)
+    response = operations.route("POST", "/api/v1/planning/confirmations", payload)
+    assert response["record"] == original[0]
+    stored = [record.to_dict()["payload"] for record in operations.journal.read()
+              if record.record_kind == CONFIRMATION]
+    assert stored == original
+    snapshot = operations.snapshot(operations.clock())
+    assert snapshot["confirmations"][0]["schedule"] == original[0]["schedule"]
+    assert operations.route("POST", "/api/v1/planning/confirmations", payload)["record"] == original[0]
+    assert len(original) == 1
+
+
+def test_public_and_internal_snapshots_read_one_verified_prefix(tmp_path, monkeypatch):
+    operations = planning_operations(tmp_path)
+    confirmed_plan_request(operations)
+    second = input_request()
+    second["zones"][0]["zone_id"] = operations.context["zone_ids"][0]
+    second.update(request_id="input-second", expected_revision=1)
+    operations.route("POST", "/api/v1/planning/inputs", second)
+    read, reads = operations.journal.read, []
+
+    def counted_read():
+        reads.append(True)
+        return read()
+
+    monkeypatch.setattr(operations.journal, "read", counted_read)
+    public = operations.snapshot(operations.clock())
+    assert len(reads) == 1
+    assert "input_records" not in public
+    internal = operations.execution_binding_snapshot(operations.clock())
+    assert len(reads) == 2
+    assert {k: v for k, v in internal.items() if k != "input_records"} == public
+    assert [r["revision"] for r in internal["input_records"]] == [1, 2]
+    internal["input_records"][0]["zones"].clear()
+    assert operations.execution_binding_snapshot(operations.clock())["input_records"][0]["zones"]
 
 
 def test_ready_scenarios_reuse_existing_stockout_projection_and_preserve_evidence():

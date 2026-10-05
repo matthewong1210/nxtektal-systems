@@ -109,9 +109,130 @@ class SimulatorBackedTaskDevice:
             )
         return matches[0]
 
+    def _incarnation_rejection_for(
+        self,
+        task_request: TaskRequest,
+    ) -> JournalRecord | None:
+        candidates = []
+        matches = []
+        for record in self.journal.read():
+            if record.record_kind != TASK_EVENT_PERSISTED:
+                continue
+            event = TaskEvent.from_dict(record.payload["event"])
+            if (
+                event.task_id == task_request.task_id
+                and event.event_sequence == 0
+                and event.kind == EventKind.REJECTED
+            ):
+                candidates.append(record)
+            if (
+                event.site_id == task_request.site_id
+                and event.deployment_id == task_request.deployment_id
+                and event.simulation_env_id == task_request.simulation_env_id
+                and event.task_id == task_request.task_id
+                and event.robot_id == task_request.target_robot_id
+                and event.incarnation != task_request.target_incarnation
+                and event.event_sequence == 0
+                and event.kind == EventKind.REJECTED
+                and event.reason_code == "incarnation_mismatch"
+            ):
+                matches.append(record)
+        if len(matches) > 1:
+            raise PreconditionFailed(
+                "conflicting_preacceptance_rejection",
+                "multiple seq-0 incarnation rejections exist for one task",
+            )
+        if candidates != matches:
+            raise PreconditionFailed(
+                "conflicting_preacceptance_rejection",
+                "conflicting seq-0 rejection exists for one task",
+            )
+        return matches[0] if matches else None
+
+    def _reconcile_preacceptance_rejections(self, admission, state) -> None:
+        records = tuple(self.journal.read())
+        for execution_id, row in state["executions"].items():
+            if row["edge_evidence"]["accepted"] or row["state"] in {
+                "SUCCEEDED",
+                "PARTIAL",
+                "REJECTED",
+                "MISSED",
+                "FAILED",
+                "INCONCLUSIVE",
+            }:
+                continue
+            binding = state["bindings"][row["binding_id"]]
+            candidates = []
+            matches = []
+            for record in records:
+                if record.record_kind != TASK_EVENT_PERSISTED:
+                    continue
+                event = TaskEvent.from_dict(record.payload["event"])
+                if (
+                    event.task_id == row["task_id"]
+                    and event.event_sequence == 0
+                    and event.kind == EventKind.REJECTED
+                ):
+                    candidates.append(record)
+                if (
+                    event.site_id == self.config.site_id
+                    and event.deployment_id == self.config.deployment_id
+                    and event.simulation_env_id == self.config.simulation_env_id
+                    and event.task_id == row["task_id"]
+                    and event.robot_id == binding["robot_id"]
+                    and event.incarnation != row["incarnation"]
+                    and event.event_sequence == 0
+                    and event.kind == EventKind.REJECTED
+                    and event.reason_code == "incarnation_mismatch"
+                ):
+                    matches.append(record)
+            if len(matches) > 1:
+                raise PreconditionFailed(
+                    "conflicting_preacceptance_rejection",
+                    "multiple seq-0 incarnation rejections exist for one task",
+                )
+            if candidates != matches:
+                raise PreconditionFailed(
+                    "conflicting_preacceptance_rejection",
+                    "conflicting seq-0 rejection exists for one task",
+                )
+            if matches:
+                admission.store.record_preacceptance_rejection(
+                    execution_id,
+                    matches[0],
+                    now_sim_t_s=admission.now_sim_t_s,
+                )
+
+    @staticmethod
+    def _record_preacceptance_rejection(
+        admission,
+        execution_id: str,
+        row: Mapping[str, Any],
+        rejection_record: JournalRecord,
+    ) -> None:
+        if (
+            row["state"] == "REJECTED"
+            and row["reason"] == "IDENTITY_CONFLICT"
+            and not row["edge_evidence"]["accepted"]
+            and rejection_record.record_id in row["edge_evidence"]["event_ids"]
+        ):
+            return
+        if row["state"] != "PENDING" or row["edge_evidence"]["accepted"]:
+            raise EdgeTaskError(
+                ErrorCode.AUTHORIZATION_BLOCKED,
+                "device rejection followed V3 execution authorization",
+            )
+        admission.store.record_preacceptance_rejection(
+            execution_id,
+            rejection_record,
+            now_sim_t_s=admission.now_sim_t_s,
+        )
+
     def _reconcile_persisted_evidence(self, admission) -> None:
         """Finish cross-journal writes from any earlier process attempt."""
 
+        state = admission.store.replay()
+        self._reconcile_preacceptance_rejections(admission, state)
         state = admission.store.replay()
         current_task_ids = {
             row["task_id"] for row in state["executions"].values()
@@ -254,9 +375,13 @@ class SimulatorBackedTaskDevice:
             raise ValueError("device process is not started")
 
     def admit(
-        self, task_request: TaskRequest, execution_request: Mapping[str, Any]
+        self,
+        task_request: TaskRequest,
+        execution_request: Mapping[str, Any],
+        *,
+        crash_hook: Callable[[str, Mapping[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
-        """Durably record the V3 request before persisting Edge ACCEPTED."""
+        """Durably close the V3 request with Edge ACCEPTED or exact rejection."""
 
         self._require_started()
         if not isinstance(task_request, TaskRequest):
@@ -275,6 +400,15 @@ class SimulatorBackedTaskDevice:
                     "execution_identity_conflict", "task/request/V3 identity differs"
                 )
             now = self._when(admission.identity, admission.now_sim_t_s)
+            rejection_record = self._incarnation_rejection_for(task_request)
+            if rejection_record is not None:
+                self._record_preacceptance_rejection(
+                    admission,
+                    execution_id,
+                    row,
+                    rejection_record,
+                )
+                return receipt
             if row["state"] in {
                 "SUCCEEDED",
                 "PARTIAL",
@@ -328,6 +462,23 @@ class SimulatorBackedTaskDevice:
                     )[0]
                 )
             )
+            rejection_record = self._incarnation_rejection_for(task_request)
+            if rejection_record is not None:
+                payload = {
+                    "execution_id": execution_id,
+                    "edge_record": rejection_record.to_dict(),
+                }
+                if crash_hook is not None:
+                    crash_hook("after_preacceptance_device_rejection", payload)
+                self._record_preacceptance_rejection(
+                    admission,
+                    execution_id,
+                    row,
+                    rejection_record,
+                )
+                if crash_hook is not None:
+                    crash_hook("after_preacceptance_v3_rejection", payload)
+                return receipt
             accepted = [
                 record
                 for record in self.journal.read()
@@ -438,6 +589,45 @@ class SimulatorBackedTaskDevice:
 
         self._require_started()
         parsed = TaskEvent.from_dict(event)
+        when = parse_utc(parsed.reported_at_utc)
+        if parsed.event_sequence == 0:
+            with execution_admission(self.session_root) as admission:
+                state = admission.store.replay()
+                records = [
+                    record
+                    for record in self.journal.read()
+                    if record.record_kind == TASK_EVENT_PERSISTED
+                    and record.payload["event"] == parsed.to_dict()
+                    and any(
+                        row["task_id"] == parsed.task_id
+                        and record.record_id in row["edge_evidence"]["event_ids"]
+                        for row in state["executions"].values()
+                    )
+                ]
+                if len(records) != 1:
+                    raise PreconditionFailed(
+                        "unknown_persisted_event",
+                        "publication does not name one V3-confirmed device rejection",
+                    )
+                record = records[0]
+                if record.sequence in self.view.confirmed_rejections:
+                    return
+                if parsed.to_dict() not in self._pending_publications_locked(admission):
+                    raise PreconditionFailed(
+                        "unknown_persisted_event",
+                        "publication does not name V3-confirmed device evidence",
+                    )
+                self._append(
+                    lambda _view: [
+                        self.core.publish_confirmed_spec(
+                            parsed.to_dict(),
+                            when,
+                            record_sequence=record.sequence,
+                        )
+                    ]
+                )
+            return
+
         key = (parsed.boot_sequence, parsed.event_sequence)
         task = self.view.tasks.get(parsed.task_id)
         if task is None or parsed.to_dict() not in task.events:
@@ -446,7 +636,6 @@ class SimulatorBackedTaskDevice:
             )
         if key in task.confirmed:
             return
-        when = parse_utc(parsed.reported_at_utc)
         with execution_admission(self.session_root) as admission:
             if parsed.to_dict() not in self._pending_publications_locked(admission):
                 raise PreconditionFailed(

@@ -9,10 +9,15 @@ import { taskOpsFixture } from "./task-ops-fixtures";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const EXAMPLES = join(import.meta.dirname, "..", "..", "..", "simulation", "docs", "contracts", "pilot-dispatch-v0", "service-capabilities", "examples");
-const declaration = (name: string) => JSON.parse(readFileSync(join(EXAMPLES, `${name}.json`), "utf8")) as TaskOpsSnapshot["service_capabilities"];
+const CONTRACT = join(import.meta.dirname, "..", "..", "..", "simulation", "docs", "contracts", "pilot-dispatch-v0");
+const EXAMPLES = join(CONTRACT, "service-capabilities", "examples");
+const EXAMPLES_V2 = join(CONTRACT, "service-capabilities-v2", "examples");
+const declaration = (name: string, directory = EXAMPLES) => JSON.parse(readFileSync(join(directory, `${name}.json`), "utf8")) as TaskOpsSnapshot["service_capabilities"];
 const fixed = () => parseTaskOps({ ...taskOpsFixture(), service_capabilities: declaration("fixed-v3-execution") });
 const legacy = () => parseTaskOps({ ...taskOpsFixture(), service_capabilities: declaration("legacy-pilot-dispatch") });
+/** The frozen v2 continuous declaration, admitted by the real parser like every other mode. */
+const continuous = () => parseTaskOps({ ...taskOpsFixture(), service_capabilities: declaration("continuous-v3-execution", EXAMPLES_V2) });
+const CONTINUOUS_SCHEDULE_REASON = "Direct scheduling is unavailable because a confirmed Planning plan creates the bound schedule.";
 const undeclared = () => {
   const historical = taskOpsFixture() as TaskOpsSnapshot & Record<string, unknown>;
   delete historical.service_capabilities;
@@ -71,6 +76,33 @@ describe("task panel under each declared mode", () => {
     expect(html).toMatch(/id="dispatch-robot"[^>]*disabled/);
     expect(html).not.toContain("Cancel schedule");
     expect(html).toContain("declares no write capabilities (UNDECLARED)");
+  });
+
+  it("continuous V3 (v2): planning, pending cancellation and notification handling are installed; only direct scheduling is withheld, with the Planning reason", () => {
+    const data = continuous();
+    const c = taskOpsCapabilities(data);
+    expect(c.declared && c.schema).toBe("nxt-pilot-dispatch/service-capabilities/v2");
+    expect(c.mode).toBe("CONTINUOUS_V3_EXECUTION");
+    for (const operation of ["planning_inputs_create", "planning_plans_create", "planning_confirmations_create", "planning_outcomes_create",
+      "schedules_cancel", "notifications_acknowledge", "notifications_resolve"] as const) {
+      expect(capabilityBlocker(c, operation), operation).toBeNull();
+    }
+    expect(capabilityBlocker(c, "schedules_create")).toBe(CONTINUOUS_SCHEDULE_REASON);
+    expect(capabilityBlocker(c, "schedules_create")).not.toContain("preset");
+    expect(serviceModeText(c)).toContain("Service mode CONTINUOUS_V3_EXECUTION: confirmed Planning plans create sequential simulated collection tasks in the active V3 session.");
+    expect(serviceModeText(c)).not.toContain("preset single-task");
+    const html = render(data, c);
+    expect(html).toContain("CONTINUOUS V3 SESSION");
+    expect(html).toContain("Service mode CONTINUOUS_V3_EXECUTION");
+    expect(html).toMatch(/id="dispatch-robot"[^>]*disabled/); // schedules_create UNAVAILABLE gates the form even though the scheduler is RUNNING
+    expect(html).toContain(CONTINUOUS_SCHEDULE_REASON);
+    expect(html).not.toContain("Direct schedule creation is not installed on this service"); // the old generic blocker; the mode text itself may say the route is not installed
+    expect(html).not.toContain("preset single-task");
+    expect(html).toContain("Cancel schedule"); // schedules_cancel SUPPORTED: the pending schedule keeps its cancellation form
+    expect(html).not.toContain("Schedule cancellation is not installed");
+    expect(html).toContain("Acknowledge");
+    expect(html).toContain("Resolving this notification never unlocks or restarts a robot"); // resolution keeps its record-level condition
+    expect(html).toContain("Review collection schedules, follow task progress, and record staff handling in one place.");
   });
 
   it("unknown (no successful read yet) withholds writes; standalone renders without a wired reading keep the old behaviour", () => {

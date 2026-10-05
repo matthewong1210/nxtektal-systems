@@ -49,7 +49,7 @@ export function CollectionExecutionView({ view, onRetry }: { view: ExecutionRead
         </>
       }
     >
-      <p className="sim-note">Follow one confirmed collection task through the simulated session: admission, durable request, device acceptance, start, collection and unloading.</p>
+      <p className="sim-note">Follow confirmed collection tasks through this simulated session: admission, durable request, device acceptance, start, collection, unloading and terminal evidence.</p>
       <p className="fineprint dispatch-boundary">
         This panel only reads recorded evidence. It cannot start, retry, recover or stop an execution, and a successful read grants no execution authority. Quantities come from the
         simulation ball ledger and are never copied into washing, supply, inventory or manager-recorded outcomes.

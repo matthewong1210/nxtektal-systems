@@ -78,7 +78,7 @@ export function ExecutionRecordCard({ record, snapshot }: { record: ExecutionRec
   const successShown = record.state === "SUCCEEDED" && record.success_display_allowed;
   const completeWithoutSuccess = !successShown && (record.raw_quantity.status === "COMPLETE" || record.unload_quantity.status === "COMPLETE");
   return (
-    <article className="dispatch-record exec-record">
+    <article className="dispatch-record exec-record" data-testid="execution-record-card" data-execution-id={record.execution_id}>
       <div className="rec-head">
         <Badge tone={state.tone}>{state.label}</Badge>
         <strong>

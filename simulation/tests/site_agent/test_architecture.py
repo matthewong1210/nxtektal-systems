@@ -135,11 +135,15 @@ SERVICE_SCRIPTS = (
     "scripts/site_agent_fixture.py",
     "scripts/site_agent_demo.py",
     "scripts/course_collection_execution_service.py",
+    "scripts/course_collection_execution_v4_service.py",
     "scripts/task_ops_service_capabilities.py",
 )
 
 COLLECTION_EXECUTION_SERVICE = (
     SIMULATION_ROOT / "scripts" / "course_collection_execution_service.py"
+)
+CONTINUOUS_COLLECTION_EXECUTION_SERVICE = (
+    SIMULATION_ROOT / "scripts" / "course_collection_execution_v4_service.py"
 )
 
 SCRIPT_BANNED_IMPORT_ROOTS = {
@@ -292,6 +296,32 @@ def test_collection_execution_service_has_one_simulator_path_and_no_mock_or_phys
         "--hardware",
     ):
         assert token not in text, f"collection service mentions {token!r}"
+
+
+def test_continuous_collection_service_has_one_v3_path_and_no_fixed_mock_physical_or_browser_path():
+    text = CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+    assert text.count("course_session_v3.run(") == 1
+    for token in (
+        "CourseCollectionExecutionDemo",
+        "CollectionExecutionServiceRuntime",
+        ".advance_once(",
+        "MockRobotDevice",
+        "PilotDispatchRuntime",
+        "RobotTaskInterface",
+        "HandoffController",
+        "apply_directive(",
+        "RangeSimulation",
+        "BallLedger",
+        "selenium",
+        "playwright",
+        "http.client",
+        "rclpy",
+        "rospy",
+        "--live",
+        "--real-robot",
+        "--hardware",
+    ):
+        assert token not in text, f"continuous collection service mentions {token!r}"
 
 
 def _import_probe(blocked_roots: tuple[str, ...]) -> subprocess.CompletedProcess:
