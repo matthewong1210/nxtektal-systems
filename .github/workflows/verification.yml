@@ -82,7 +82,7 @@ jobs:
   python-verification:
     name: python-verification
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       UV_NO_PROGRESS: "1"
     steps:
