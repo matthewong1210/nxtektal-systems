@@ -690,6 +690,7 @@ The gateway mapping is lossless and explicit: `AttemptRouteEvidence.provider`, `
 - Create: `simulation/nxt_pilot_ops/staffing/contracts.py`
 - Create: `simulation/nxt_pilot_ops/staffing/time.py`
 - Create: `simulation/nxt_pilot_ops/staffing/roster.py`
+- Modify: `simulation/nxt_pilot_ops/serialization.py`
 - Create: `simulation/tests/pilot_ops/staffing_fixtures.py`
 - Create: `simulation/tests/pilot_ops/test_staffing_time.py`
 - Create: `simulation/tests/pilot_ops/test_staffing_roster.py`
@@ -697,6 +698,8 @@ The gateway mapping is lossless and explicit: `AttemptRouteEvidence.provider`, `
 **Interfaces:**
 - Consumes: the exact `RosterImportRequest` shape (`site_timezone`, top-level `workers`, `availability`, `assignment_rules`, `regular_assignments`, and `coverage`) plus injected site/deployment identity. The domain parser accepts no legacy `timezone`, nested worker availability, or `coverage_requirements` names.
 - Produces: immutable roster revisions, deterministic service-day assignments/availability/coverage, and stable errors with no I/O.
+
+Controller clarification frozen before implementation: extend the existing canonical serializer with `date -> YYYY-MM-DD` after its `datetime` branch; preserve the exact four-field `ServiceDayRoster` and keep service-day availability as weekday-filtered `RosterRevision.availability` rows resolved by later consumers; derive `revision` as `expected_roster_revision + 1`. The roster digest excludes request/audit/CAS fields and the derived revision. It hashes the explicit normalized roster core (`schema`, identity/timezone, effective bounds, workers, availability, regular assignments, assignment rules, coverage), with stored tuples and digest arrays sharing deterministic semantic sort order. Reordering equivalent import rows therefore does not change the digest.
 
 - [ ] **Step 1: Freeze the exact normalized roster request in fixtures and failing tests**
 
@@ -776,7 +779,7 @@ class PatchKind(StrEnum):
 
 `StaffingBasis`, `StaffingException`, and `BasisSnapshot` are already frozen in the cross-task contracts above; Task 1 tests their exact field sets and constructs them only through the strict parser.
 
-Add frozen `Worker`, `AvailabilityWindow`, `WeeklyAssignment`, `AssignmentRule`, `CoverageRequirement`, `RosterRevision`, `Assignment`, `ServiceDayRoster`, and exact parser helpers. Use `to_primitive`/`canonical_json`/`stable_digest` from the existing owner; do not import outside `nxt_pilot_ops`.
+Add frozen `Worker`, `AvailabilityWindow`, `WeeklyAssignment`, `AssignmentRule`, `CoverageRequirement`, `RosterRevision`, `Assignment`, `ServiceDayRoster`, and exact parser helpers. Use `to_primitive`/`canonical_json`/`stable_digest` from the existing owner; do not import outside `nxt_pilot_ops`. Add backward-compatible `date` handling to `nxt_pilot_ops.serialization.to_primitive` after the existing `datetime` case and prove all pre-existing canonical bytes remain unchanged.
 
 ```python
 ROSTER_KEYS = frozenset({"schema", "request_id", "expected_roster_revision", "site_id", "deployment_id",
@@ -857,6 +860,8 @@ Implement `Worker.from_mapping`, `AvailabilityWindow.from_mapping`, `WeeklyAssig
 
 `ServiceDayRoster.build` converts only rows for the requested weekday into UTC-aware `CoverageWindow(role_code, area_code, start_at, end_at, minimum_staff)` values using `resolve_local_minute`; `RosterRevision.coverage` remains the weekly `CoverageRequirement` tuple.
 
+`ServiceDayRoster` intentionally has no availability field. `RosterRevision.availability` remains the immutable weekly source; Task 2 filters it to the requested weekday in `BasisSnapshot`, and validator consumers resolve those local minutes using the same service date and deployment timezone.
+
 - [ ] **Step 5: Implement DST-safe minute resolution**
 
 For both `fold=0` and `fold=1`, attach `ZoneInfo`, convert to UTC and back, and retain only candidates whose naive local value round-trips exactly. Accept only one distinct UTC instant; zero is nonexistent and two is ambiguous. Emit aware UTC instants while retaining timezone name for offset consistency checks.
@@ -920,13 +925,13 @@ def materialize_service_day(revision: RosterRevision,
     return ServiceDayRoster.build(revision, service_date, tuple(rows))
 ```
 
-Reject any request timezone unequal to the injected deployment `site_timezone`. Selection uses the highest committed revision whose effective range contains the date. Assignment ID is content-derived from `roster_revision`, `service_date`, `staff_id`, role, area, and UTC interval:
+Reject any request timezone unequal to the injected deployment `site_timezone`. Require `expected_roster_revision` to be a nonnegative integer and set the new revision to `expected_roster_revision + 1`. Normalize workers by `staff_id` (sorting unique skills and eligibility tuples), availability by `(staff_id, weekday, start_local, end_local)`, regular assignments by `(staff_id, weekday, start_local, end_local, role_code, area_code)`, rules by `(role_code, area_code)` with sorted unique required skills, and coverage by `(weekday, role_code, area_code, start_local, end_local, minimum_staff)`. Hash that exact stored content plus schema, identity/timezone, and effective bounds; exclude `request_id`, `expected_roster_revision`, `operator`, `source_ref`, and the derived revision. Selection uses the highest committed revision whose effective range contains the date. Assignment ID is content-derived from `roster_revision`, `service_date`, `staff_id`, role, area, and UTC interval:
 
 ```python
 assignment_id = "assignment_" + stable_digest({
     "roster_revision": revision.revision,
     "service_date": service_date.isoformat(),
-    "staff_id": staff.staff_id,
+    "staff_id": row.staff_id,
     "role_code": row.role_code,
     "area_code": row.area_code,
     "start_at": utc_text(start_at),
@@ -941,7 +946,8 @@ Parametrize duplicate staff, duplicate rule, unknown rule, ineligible baseline, 
 - [ ] **Step 8: Commit contracts and roster materialization**
 
 ```bash
-git add simulation/nxt_pilot_ops/staffing simulation/tests/pilot_ops/staffing_fixtures.py \
+git add simulation/nxt_pilot_ops/staffing simulation/nxt_pilot_ops/serialization.py \
+  simulation/tests/pilot_ops/staffing_fixtures.py \
   simulation/tests/pilot_ops/test_staffing_time.py simulation/tests/pilot_ops/test_staffing_roster.py
 git commit -m "feat(staffing): validate weekly roster evidence"
 ```
@@ -1091,8 +1097,10 @@ def build_staffing_basis(history, service_date):
                        resolve_local_minute(service_date, row.end_local, roster.site_timezone),
                        row.minimum_staff)
         for row in roster.coverage if row.weekday == service_date.weekday())
+    availability = tuple(row for row in roster.availability
+                         if row.weekday == service_date.weekday())
     return BasisSnapshot(basis, roster.site_timezone, tuple(roster.workers),
-                         tuple(assignments), tuple(active), tuple(roster.availability),
+                         tuple(assignments), tuple(active), availability,
                          tuple(roster.assignment_rules), coverage, PROMPT_TEMPLATE_VERSION)
 
 def roster_revisions(history: StaffingHistory) -> tuple[RosterRevision, ...]:
