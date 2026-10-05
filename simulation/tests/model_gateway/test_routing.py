@@ -647,6 +647,53 @@ def test_observer_crash_is_secret_safe_and_stops_route(phase):
     )
 
 
+@pytest.mark.parametrize("phase", ["started", "finished"])
+def test_observer_crash_has_no_context_inside_callers_exception_handler(phase):
+    calls, events = [], []
+
+    class CrashingObserver(RecordingObserver):
+        def started(self, attempt):
+            super().started(attempt)
+            if phase == "started":
+                raise ValueError("inner-observer-secret")
+
+        def finished(self, attempt):
+            super().finished(attempt)
+            if phase == "finished":
+                raise ValueError("inner-observer-secret")
+
+    primary = FakeAdapter(Provider.OPENAI, eligible_failure(), calls, events=events)
+    backup = FakeAdapter(Provider.ANTHROPIC, calls=calls, events=events)
+    model_gateway = gateway(openai=primary, anthropic=backup)
+    observer = CrashingObserver(events)
+    try:
+        raise ValueError("outer-secret")
+    except ValueError:
+        with pytest.raises(AttemptObserverError) as caught:
+            model_gateway.generate(
+                request(), RoutePolicy(DeploymentRegion.GLOBAL), observer=observer,
+            )
+    error = caught.value
+    assert (error.request_id, error.attempt_index, error.provider, error.phase) == (
+        "req-1", 0, Provider.OPENAI, phase,
+    )
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert error.__suppress_context__ is True
+    rendered = "".join(traceback.format_exception(error))
+    for secret in ("outer-secret", "inner-observer-secret"):
+        assert secret not in str(error)
+        assert secret not in repr(error)
+        assert secret not in rendered
+    assert calls == ([] if phase == "started" else [Provider.OPENAI])
+    assert primary.timeouts == ([] if phase == "started" else [12.0])
+    assert backup.timeouts == []
+    assert events == (
+        ["adapter.prepare", "observer.started:0"] if phase == "started" else
+        ["adapter.prepare", "observer.started:0", "adapter.send", "observer.finished:0"]
+    )
+
+
 @pytest.mark.parametrize("elapsed,code,providers,backup_timeout", [
     (12.001, FailureCode.READ_TIMEOUT, [Provider.OPENAI, Provider.ANTHROPIC], 7.999),
     (13.0, FailureCode.READ_TIMEOUT, [Provider.OPENAI, Provider.ANTHROPIC], 7.0),

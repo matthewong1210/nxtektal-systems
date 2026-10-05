@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import NoReturn
 
 from .adapters import AdapterOutcome, ProviderAdapter
 from .contracts import (
@@ -137,12 +138,10 @@ class ModelGateway:
                 observer.started(attempt_started)
             except Exception:
                 observer_failed = True
-            # Raise outside the handler so the original exception is not retained
-            # in __context__, even by collectors that inspect suppressed chains.
             if observer_failed:
-                raise AttemptObserverError(
+                _raise_observer_error(
                     request.request_id, index, prepared.provider, "started",
-                ) from None
+                )
             # The persisted timeout approves an upper bound. Observer time counts
             # against the overall budget; the network gets only what remains.
             before_send = self._monotonic()
@@ -172,13 +171,24 @@ class ModelGateway:
             except Exception:
                 observer_failed = True
             if observer_failed:
-                raise AttemptObserverError(
+                _raise_observer_error(
                     request.request_id, index, prepared.provider, "finished",
-                ) from None
+                )
             completed.append(record)
             if is_cn or index == 1 or outcome.failure_code not in GLOBAL_FALLBACK_CODES:
                 return _outcome_result(request, completed, outcome)
         raise AssertionError("route must terminate after its final provider")
+
+
+def _raise_observer_error(request_id: str, index: int, provider: Provider,
+                          phase: str) -> NoReturn:
+    try:
+        raise AttemptObserverError(request_id, index, provider, phase) from None
+    except AttemptObserverError as safe_error:
+        # Python attaches even a caller's active exception on the initial raise.
+        # Clear it after attachment; bare re-raise preserves the cleared context.
+        object.__setattr__(safe_error, "__context__", None)
+        raise
 
 
 def _timeout_outcome(request: GenerationRequest, code: FailureCode) -> AdapterOutcome:
