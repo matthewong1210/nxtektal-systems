@@ -59,7 +59,7 @@ class ModelGateway:
             (kimi, Provider.KIMI), (openai, Provider.OPENAI),
             (anthropic, Provider.ANTHROPIC),
         ):
-            if adapter is not None and adapter.provider != provider:
+            if adapter is not None and adapter.provider is not provider:
                 raise GatewayContractError(
                     FailureCode.PROVIDER_UNCONFIGURED,
                     "adapter provider does not match configured slot",
@@ -117,7 +117,7 @@ class ModelGateway:
                 return _local_result(request, completed, GenerationStatus.CONFIGURATION_ERROR,
                                      FailureCode.INPUT_TOO_LARGE)
             if (prepared.request_id != request.request_id
-                    or prepared.provider != adapter.provider
+                    or prepared.provider is not adapter.provider
                     or prepared.model_id != adapter.model_id
                     or prepared.input_digest != request.canonical_input_digest):
                 raise GatewayContractError(FailureCode.INVALID_PROVIDER_REQUEST,
@@ -132,9 +132,14 @@ class ModelGateway:
                 request.request_id, index, prepared.provider, prepared.model_id,
                 prepared.input_digest, timeout,
             )
+            observer_failed = False
             try:
                 observer.started(attempt_started)
             except Exception:
+                observer_failed = True
+            # Raise outside the handler so the original exception is not retained
+            # in __context__, even by collectors that inspect suppressed chains.
+            if observer_failed:
                 raise AttemptObserverError(
                     request.request_id, index, prepared.provider, "started",
                 ) from None
@@ -161,9 +166,12 @@ class ModelGateway:
                 outcome.provider_request_id, outcome.finish_reason, outcome.usage,
                 outcome.input_digest, outcome.output_digest,
             )
+            observer_failed = False
             try:
                 observer.finished(record)
             except Exception:
+                observer_failed = True
+            if observer_failed:
                 raise AttemptObserverError(
                     request.request_id, index, prepared.provider, "finished",
                 ) from None

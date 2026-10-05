@@ -23,6 +23,12 @@ from .conftest import RecordingTransport, config, request, success_bytes
 from .test_kimi_adapter import request_with_serialized_body_size
 
 
+class ForeignProvider(StrEnum):
+    KIMI = "KIMI"
+    OPENAI = "OPENAI"
+    ANTHROPIC = "ANTHROPIC"
+
+
 FAILURE_DISPOSITIONS = (
     (FailureCode.DNS_FAILURE, GenerationStatus.UNAVAILABLE, False, True),
     (FailureCode.CONNECT_TIMEOUT, GenerationStatus.UNAVAILABLE, False, True),
@@ -206,6 +212,21 @@ def test_constructor_rejects_adapter_slot_mismatch(slot):
         gateway(**{slot: FakeAdapter(wrong)})
     assert error.value.code is FailureCode.PROVIDER_UNCONFIGURED
     assert error.value.detail == "adapter provider does not match configured slot"
+
+
+@pytest.mark.parametrize("provider", list(Provider))
+@pytest.mark.parametrize("representation", ["string", "foreign_enum"])
+def test_constructor_rejects_same_value_non_provider_before_readiness(provider, representation):
+    adapter = FakeAdapter(provider)
+    adapter.provider = (
+        provider.value if representation == "string" else ForeignProvider(provider.value)
+    )
+    # Construction must fail, so readiness can never report this slot READY.
+    with pytest.raises(GatewayContractError) as caught:
+        gateway(**{provider.value.lower(): adapter})
+    assert caught.value.code is FailureCode.PROVIDER_UNCONFIGURED
+    assert caught.value.detail == "adapter provider does not match configured slot"
+    assert adapter.events == adapter.calls == adapter.timeouts == []
 
 
 def test_constructor_exposes_only_keyword_dependencies():
@@ -611,11 +632,12 @@ def test_observer_crash_is_secret_safe_and_stops_route(phase):
         "req-1", 0, Provider.OPENAI, phase,
     )
     assert error.__cause__ is None
+    assert error.__context__ is None
     assert error.__suppress_context__ is True
     rendered = "".join(traceback.format_exception(error))
     assert "secret-observer-token" not in str(error)
     assert "secret-observer-token" not in repr(error)
-    assert "ValueError: secret-observer-token" not in rendered
+    assert "secret-observer-token" not in rendered
     assert calls == ([] if phase == "started" else [Provider.OPENAI])
     assert primary.timeouts == ([] if phase == "started" else [12.0])
     assert backup.timeouts == []
@@ -728,6 +750,25 @@ def test_prepared_identity_mismatch_fails_before_observer(field, bad_value):
         )
     assert events == ["adapter.prepare"]
     assert adapter.calls == []
+
+
+@pytest.mark.parametrize("provider", ["OPENAI", ForeignProvider.OPENAI])
+def test_prepared_provider_requires_enum_identity_before_observer(provider):
+    events = []
+
+    class WrongProviderTypeAdapter(FakeAdapter):
+        def prepare(self, source):
+            return replace(super().prepare(source), provider=provider)
+
+    adapter = WrongProviderTypeAdapter(Provider.OPENAI, events=events)
+    with pytest.raises(GatewayContractError) as caught:
+        gateway(openai=adapter).generate(
+            request(), RoutePolicy(DeploymentRegion.GLOBAL), observer=RecordingObserver(events),
+        )
+    assert caught.value.code is FailureCode.INVALID_PROVIDER_REQUEST
+    assert caught.value.detail == "prepared request identity does not match route"
+    assert events == ["adapter.prepare"]
+    assert adapter.calls == adapter.timeouts == []
 
 
 def test_outcome_input_digest_mismatch_fails_before_finished_or_fallback():
