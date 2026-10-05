@@ -1060,7 +1060,7 @@ Reopen from each nonterminal state (`RESERVED`, attempt started, attempt finishe
 
 Also make the fake observer append fail at `started` and `finished`. Assert `AttemptObserverError` stops the route/fallback, the worker calls `owner.interrupt_generation(generation_id, recorded_at=clock())`, the request projects `RESULT_UNKNOWN`, and no terminal suggestion event is written. If that interruption append also fails, mark the generation worker failed closed; later generation submissions return `staffing_unavailable`, while startup recovery remains the only retry path.
 
-Return a schema-valid candidate containing an unknown worker/assignment alias and assert `commit_generation_result` writes terminal `INVALID_RESPONSE` rather than raising or leaving the generation nonterminal. Separately inject ledger/integrity I/O failures from `generation_work` and `commit_generation_result`: the worker must become failed closed, make no later queued provider call, leave any nonterminal reservation for startup recovery, and expose only generic `staffing_unavailable`. Finally, force a mismatch between `GenerationRequest.canonical_input_digest` and `generation_work().input_digest`; assert zero provider calls and the same failed-closed behavior.
+Return a schema-valid candidate containing an unknown worker/assignment alias and assert `commit_generation_result` writes terminal `INVALID_RESPONSE` rather than raising or leaving the generation nonterminal. Drive provider-specific successful envelopes through the real `KimiAdapter`, `OpenAIAdapter`, and `AnthropicAdapter` with bounded fake transports for two additional portable-schema-valid cases: one candidate with 4097 empty warnings, and candidate/operation arrays whose decoded tree exceeds 4096 occurrences while the complete HTTP response remains at or below 524,288 bytes. Each adapter must first return a successful decoded output; composition must then durably commit `INVALID_RESPONSE/invalid_provider_shape`, keep the worker healthy, and run the next queued generation. It must never surface `staffing_invalid_evidence`, enter failed-close, or leave the reservation nonterminal. This proves the 524,289-occurrence result-evidence ceiling dominates the transport limit while Task 4's later 4096-occurrence bound remains an ordinary provider-wire rejection. Separately inject ledger/integrity I/O failures from `generation_work` and `commit_generation_result`: the worker must become failed closed, make no later queued provider call, leave any nonterminal reservation for startup recovery, and expose only generic `staffing_unavailable`. Finally, force a mismatch between `GenerationRequest.canonical_input_digest` and `generation_work().input_digest`; assert zero provider calls and the same failed-closed behavior.
 
 - [ ] **Step 10: Run composition tests and verify RED**
 
@@ -1194,7 +1194,7 @@ A missing region or primary model yields no `GenerationRouteEvidence` and makes 
 
 - [ ] **Step 13: Implement `LedgerAttemptObserver`**
 
-Map gateway events to the domain's frozen evidence types and synchronously append before returning:
+Map gateway events to the domain's frozen evidence types and synchronously append before returning. Staffing composition intentionally narrows the low-level adapter protocol to the repository's canonical failure disposition table: all three built-in adapters satisfy it, and any future/custom adapter must do the same. A protocol-constructible outcome with a mismatched status/retry/security disposition, a successful KIMI/OpenAI/ANTHROPIC finish reason other than exact `stop`/`completed`/`tool_use` (including null), an orchestration-local `INPUT_TOO_LARGE`/`BACKUP_UNCONFIGURED`/`PROVIDER_UNCONFIGURED` attempt code, an impossible readiness/provider/model shape, or a timeout above the route cap is local integrity failure. The domain rejects that start/finish append; `ModelGateway` surfaces `AttemptObserverError`; the worker uses its existing at-most-once path to append durable `generation_interrupted/RESULT_UNKNOWN` and never writes a suggestion terminal for that call. Tests use only conforming fakes for normal paths and deliberately nonconforming disposition and bad/null-success-reason fakes to prove this exact interruption path. Fallback eligibility is still derived from the exact failure code, never from caller text.
 
 ```python
 def attempt_route(
@@ -2029,6 +2029,8 @@ def build_staffing_operations(state_root: Path, *, site_id: str,
     )
 ```
 
+`nonce_factory` is an explicit deterministic-test seam, not a deployment setting and never comes from CLI/environment input. Unit tests may inject fixed values; the production continuous-service caller must pass exactly `lambda: secrets.token_bytes(32)` for every newly admitted reservation. No time-, counter-, request-, configuration-, or `random`-derived nonce is allowed. Spy tests require the production factory to request 32 bytes on every call, return distinct bytes across two new reservations, and keep both the nonce and its local reuse-detection digest out of provider transports, stdout, stderr, and public projections.
+
 `with_matching_path_id` is used only for cancel/correct: it copies the payload, inserts a missing exception ID, and raises `staffing_invalid_request` if a present value disagrees. Manager response bodies remain the exact closed Task 1 wire shape; the adapter passes the decoded route value separately to `commit_manager_response(payload, suggestion_id=parts[4], recorded_at=now)`. `to_wire_receipt(owner, result)` uses `staffing_error_for_conflict` for every `ConflictReceipt`; for committed/duplicate results it calls `project_request_to_wire(owner.request_projection(receipt.operation_kind, receipt.request_id), disposition=disposition)` where `disposition` is derived only from the result variant, then validates the Task 1 triple before returning. Neither `project_date_to_wire` nor `project_request_to_wire` passes a domain mapping through wholesale. Add a table-driven test proving all four conflict codes and every listed domain error produce the literal Task 1 code/status, and an unknown/internal/integrity exception produces only generic unavailable. At construction, open the owner, append interruptions for all nonterminals, then start the worker. No mapping uses `str(error)` or an internal detail.
 
 - [ ] **Step 18: Define the bounded worker interface and admission record**
@@ -2137,6 +2139,23 @@ The domain reservation builder repeats idempotency/CAS to close the probe/write 
 Take one immutable `GenerationWorkItem`, release the condition, and implement the worker method below outside every admission/domain lock:
 
 ```python
+from types import MappingProxyType
+
+def candidate_count_hint(output: object | None) -> int:
+    try:
+        if output is None:
+            return 0
+        if type(output) not in (dict, MappingProxyType):
+            return 0
+        candidates = output.get("candidates")
+        if type(candidates) not in (list, tuple) or len(candidates) > 2:
+            return 0
+        return len(candidates)
+    except Exception:
+        # MappingProxyType may proxy a hostile custom mapping. The hint is not
+        # authoritative and must be total; never include exception text.
+        return 0
+
 def _execute(self, item: GenerationWorkItem) -> None:
     try:
         work = self._owner.generation_work(item.generation_id)
@@ -2144,7 +2163,7 @@ def _execute(self, item: GenerationWorkItem) -> None:
             self._commit_unconfigured(item, work)
             return
         canonical_input = canonical_generation_input(
-            work.provider_payload, PROMPT_TEMPLATE_VERSION,
+            work.basis_snapshot, work.provider_payload, PROMPT_TEMPLATE_VERSION,
         )
         messages = tuple(
             GenerationMessage(role=MessageRole(row["role"]), content=row["content"])
@@ -2186,10 +2205,7 @@ def _execute(self, item: GenerationWorkItem) -> None:
         self._mark_failed_closed()
         return
     try:
-        candidate_count = (
-            0 if result.output is None
-            else len(cast(Sequence[object], result.output["candidates"]))
-        )
+        candidate_count = candidate_count_hint(result.output)
         self._owner.commit_generation_result(
             item.generation_id,
             result_evidence(
@@ -2202,7 +2218,7 @@ def _execute(self, item: GenerationWorkItem) -> None:
         self._mark_failed_closed()
 ```
 
-The worker reaches this block only when `configured.route` is non-null. Wrap `generation_work`, prompt/request construction, the digest equality check, and the zero-attempt configuration terminal in the same fail-closed boundary: any unexpected construction or ledger/integrity exception performs no outbound call and stops queue promotion. `STAFFING_SUGGESTION_OUTPUT_SCHEMA` is the immutable Draft 2020-12 mapping exported by the domain projection module from the same constants as its hand-written parser; composition never copies or relaxes it. Expected provider shape or alias rejection is not an exception at this layer: `commit_generation_result` converts it to a durable `INVALID_RESPONSE` terminal. `interrupt_generation` may append exactly one `generation_interrupted` only for a nonterminal generation after `AttemptObserverError`; it never replaces a terminal outcome. `_mark_failed_closed` stores no exception text and makes future generation admission raise generic `staffing_unavailable`. `result_evidence` copies only frozen gateway fields into the domain `ResultEvidence`; it never carries messages, raw body, headers, secrets, exception text, or endpoint. Reacquire the condition only to clear active capacity and choose the next item; when failed closed, `_run` must not promote another waiting item.
+The worker reaches this block only when `configured.route` is non-null. Wrap `generation_work`, provider-wire primitive/prompt/request construction, the digest equality check, and the zero-attempt configuration terminal in the same fail-closed boundary: any unexpected construction or ledger/integrity exception performs no outbound call and stops queue promotion. `canonical_generation_input` receives both the frozen basis and provider payload so its user JSON includes the service date/IANA timezone and renders every model-facing time in the site zone with its explicit offset; composition must not serialize `provider_payload` directly through the generic UTC ledger serializer. `STAFFING_SUGGESTION_OUTPUT_SCHEMA` is the immutable portable structural mapping exported by the domain projection module; composition never copies or relaxes it. On the three built-in adapter path, structural-schema extra/forbidden fields, wrong types, missing fields, and candidate-index enum failures are rejected before this worker receives output and commit as gateway `INVALID_RESPONSE/SCHEMA_MISMATCH`. Operation allowlisting/case normalization/branch coherence, candidate/operation counts, text/code bounds, timestamp lexical rules, duplicate/non-contiguous indexes, and alias/set failures intentionally pass the common provider schema and are classified by `commit_generation_result` with their frozen lowercase domain codes. `candidate_count_hint` is a total, non-authoritative defense for direct/post-gateway corruption or a custom successful adapter result: invalid arrays or any ordinary exception from a `MappingProxyType`-wrapped custom backing mapping yield zero with no exception text; it is only copied into evidence and never authorizes a candidate. The domain owner performs one authoritative bounded detach, verifies digest and hint against that fresh tree, and uses only the same tree for decoding and terminal construction, so any earlier hint read that observed different state fails evidence validation rather than binding A's digest to B's candidate. `BaseException` is not swallowed. `interrupt_generation` may append exactly one `generation_interrupted` only for a nonterminal generation after `AttemptObserverError`; it never replaces a terminal outcome. `_mark_failed_closed` stores no exception text and makes future generation admission raise generic `staffing_unavailable`. `result_evidence` copies only frozen gateway fields into the domain `ResultEvidence`, always sets `bounded_summary=None`, and never carries messages, raw body, headers, secrets, exception text, or endpoint. Reacquire the condition only to clear active capacity and choose the next item; when failed closed, `_run` must not promote another waiting item.
 
 - [ ] **Step 21: Implement bounded shutdown**
 
@@ -2363,7 +2379,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 
 - [ ] **Step 4: Add optional construction and safe-failure callback**
 
-After `runtime.start()` and `SiteAgentService.launch()`, if state root is present, resolve/open `StaffingApiOperations`. Catch only construction/integrity failures, discard original details from outward paths, and install a callback that always raises `SiteAgentError("staffing_unavailable", "staffing evidence is unavailable")`. If no state root, pass no callback.
+After `runtime.start()` and `SiteAgentService.launch()`, if state root is present, resolve/open `StaffingApiOperations`. Import stdlib `secrets` in this composition script and construct staffing with `nonce_factory=lambda: secrets.token_bytes(32)`; this production argument is not caller-configurable. Catch only construction/integrity failures, discard original details from outward paths, and install a callback that always raises `SiteAgentError("staffing_unavailable", "staffing evidence is unavailable")`. If no state root, pass no callback.
 
 Merge independently:
 
@@ -2901,7 +2917,7 @@ assert dual_owner_importers == {ROOT / "scripts/staffing_operations.py"}
 
 - [ ] **Step 3: Add integrated privacy tests**
 
-Use sentinel staff ID `PRIVATE-STAFF-9`, name `PRIVATE-NAME-9`, note `PRIVATE-NOTE-9`, source ref `PRIVATE-SOURCE-9.csv`, and three distinct sentinel API keys. Capture fake transport requests, ledger, API JSON, stdout/stderr, exception text, and Console fixtures. Assert provider requests contain only aliases/codes/times/constraints; assert keys/raw provider body/reasoning appear nowhere, and real identity/free text appears only in the authorized local ledger/API/UI surfaces, never provider material.
+Use sentinel staff ID `PRIVATE-STAFF-9`, name `PRIVATE-NAME-9`, note `PRIVATE-NOTE-9`, source ref `PRIVATE-SOURCE-9.csv`, and three distinct sentinel API keys. Capture fake transport requests, ledger, API JSON, stdout/stderr, exception text, and Console fixtures. Assert provider requests contain only aliases/codes/times/constraints and omit the local basis, roster, exception-set, and effective-plan digest values; assert keys/raw provider body/reasoning appear nowhere, and real identity/free text appears only in the authorized local ledger/API/UI surfaces, never provider material. Confirm the same local digests remain present where required for reservation/replay integrity without crossing the transport seam. Spy on the production `secrets.token_bytes` seam across two new reservations: both calls request exactly 32 bytes, return distinct nonce values, the values themselves are never persisted, and neither they nor their local nonce digests appear in transport, stdout/stderr, public API, or Console fixtures.
 
 - [ ] **Step 4: Add provider outage and hang isolation tests**
 

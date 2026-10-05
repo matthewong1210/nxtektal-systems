@@ -299,32 +299,72 @@ provider request 只包含：
 
 - 本次 generation 专用的临时 `worker_alias` 与 `assignment_alias`；
 - canonical role/skill/area code、可工作区间、当前 advisory assignments 和显式最大分钟；
+- role/area assignment rule 及其 canonical required skill codes；
 - 当前活动异常形成的不可工作区间；
 - 冻结的最低覆盖需求；
-- `StaffingBasis` digest、输出 JSON Schema、语言和 prompt template version。
+- 服务日、站点 IANA timezone、输出 JSON Schema、语言和 prompt template version。
 
 组合根为每个已持久化的 generation reservation 注入新的 alias nonce；领域 projector 用该
-nonce 生成只在本请求有效的 alias，并把 alias 映射保存在本地 operation evidence。测试
-注入固定 nonce，生产 nonce 不复用。这里是数据最小化和假名化，不宣称匿名化：角色、
-技能、时间与异常模式仍可能构成准标识符。
+nonce 生成只在本请求有效的 alias，并把 alias 映射保存在本地 operation evidence。领域层
+保留 `bytes` 且至少 16 字节的注入合同，测试可注入固定 nonce；生产 continuous service
+必须为每次新 reservation 调用 stdlib CSPRNG `secrets.token_bytes(32)`，不得从时间、计数器、
+request ID、配置或可预测 PRNG 派生，也不得复用。nonce 本身不持久化，nonce digest 只作
+本地重复检测，两者都不进入 provider request、公开 API 或日志。这里是数据最小化和假名化，
+不宣称匿名化：角色、技能、时间与异常模式仍可能构成准标识符。
+
+`StaffingBasis`、roster、exception-set 和 effective-plan digest 只保留在本地 projection、
+reservation 与完整性校验中，不进入 provider-wire primitive 或 prompt。它们是无密钥、跨
+generation 稳定的本地关联指纹，模型既不需要它们推理，也不需要它们校验输出，因此不向
+Kimi、OpenAI 或 Anthropic 发送。
 
 明确排除：真实 `staff_id`、展示名、自由文本 role/skill/area label、电话、邮箱、自由
 文本备注、API 密钥、历史模型回答、FacilityState 原始对象、机器人状态和任何执行工具。
 
+模型输入使用专用 provider-wire primitive，而不是账本的通用 canonical serializer。所有
+assignment、availability、unavailable 和 coverage 时间先转换到冻结的站点 IANA timezone，
+再渲染成带当地显式 offset 的 RFC3339（零 offset 规范化为 `Z`）；primitive 同时携带 service date 和 IANA timezone，
+使模型能够在 `+08:00` 和 DST fold 等场景生成可被同一站点规则验证的 ADD。账本/digest 的
+通用 UTC 序列化保持不变。
+
 ### 8.3 模型输出与 patch 语义
 
-严格输出 schema 最多包含两个候选。每个候选只允许：
+领域输出协议最多包含两个候选。每个候选只允许：
 
 - 候选本地序号；
 - 最多 32 项有序 patch operation；
 - 简短理由；
 - 最多 5 项纯文本 `operational_warnings`。
 
+同一份 adapter-facing schema 必须落在三家**共同承诺的结构子集**：只使用 `type`、
+`properties`、`required`、`additionalProperties`、`items`、`anyOf`、`enum`；根是 object、
+所有 object 字段全部 required 且 `additionalProperties:false`，REMOVE/ADD 的嵌套判别联合
+使用 `anyOf` 与互斥 required-field sets；只有 candidate index 使用 enum。`operation` 在 schema
+中是 string，由 prompt 要求 canonical uppercase `ADD|REMOVE`，领域边界接受 exact ASCII
+大小写变体后归一为内部 uppercase，并要求值与字段分支一致，以容忍 Anthropic 官方记录的
+strict-output enum case drift。schema 不携带 `$schema`/引用/条件等 dialect 元数据，也不使用
+`pattern`、`maxLength`、`maxItems` 等非共同保证的约束。数量、文本长度、canonical code
+和 timestamp 词法继续由有响应字节上限的本地域解析器严格执行，因此约束没有放松，只是
+避免 provider 在接收请求时因方言不兼容直接 400。
+
+本地仍显式用 Draft 2020-12 validator 校验这份无 meta-key 的结构 schema。三家 adapter 的
+prepared-body 测试递归检查 exact schema equality/关键词 allowlist，并要求 Kimi、OpenAI 的
+schema wrapper 与 Anthropic tool definition 都设置 `strict:true`。依据是
+[Kimi response_format 指南](https://platform.kimi.com/docs/guide/response_format)及其
+[MFJS 规范](https://github.com/MoonshotAI/walle/blob/main/docs/mfjs-spec.zh.md)、
+[Anthropic Structured Outputs 限制与 enum casing 例外](https://platform.claude.com/docs/en/build-with-claude/structured-outputs#invalid-outputs)
+和 [OpenAI Structured Outputs 子集](https://developers.openai.com/api/docs/guides/structured-outputs#supported-schemas)：
+Anthropic 明确不支持 `maxLength`/`maxItems`，Kimi MFJS 未承诺 `pattern`/长度/数量关键字，
+而三家都承诺上述结构关键词。
+
 patch 只有两种 exact operation：
 
 - `REMOVE`：只含一个当前基线中的 `assignment_alias`；
 - `ADD`：只含 `worker_alias`、canonical role/area code，以及带显式 UTC offset 的
   `start_at` / `end_at`。
+
+模型应输出 canonical uppercase operation。领域只额外容忍其 ASCII 大小写变体并立即规范化；
+不接受空白、Unicode lookalike、未知值，且 `remove` 搭配 ADD 字段或 `add` 搭配 REMOVE 字段
+仍使整份 provider result 无效。
 
 移动、替换或切分必须明确表达为 `REMOVE` 后跟一个或多个 `ADD`；不允许隐式修改现有
 assignment。领域层先应用全部 REMOVE，再按数组顺序应用 ADD。未知 alias、重复
@@ -337,6 +377,24 @@ reservation，或同一候选内重复 REMOVE。不同候选可以各自引用�
 彼此独立。词法合法但 basis 中不存在的 role-area tuple、`end <= start`、非整分钟、offset
 与站点 IANA 时区不一致、落在服务日或 availability 之外等属于下一节的逐候选确定性语义
 拒绝；因此一个此类无效候选不会吞掉另一个有效候选。
+
+V1 的 provider timestamp 词法固定为
+`YYYY-MM-DDTHH:MM:SS[.1..6位小数](Z|非零±HH:MM)`，最长 32 个字符；零 offset 只允许
+大写 `Z`，显式 `+00:00`/`-00:00`、空格分隔、小写 `z`、offset 秒、超过 6 位小数、
+非法日期/时间/offset 或无 offset 均为整份响应无效。非零秒或
+小数在词法上可解码，但由确定性校验器作为逐候选的非整分钟语义拒绝。领域解码器同时
+接受原始 JSON 的 object/array 与网关验证后只读冻结的等价 object/array 表示，不接受任意
+自定义 mapping/sequence；在这个直接领域边界内，任何 shape 判断前先做有深度和节点上限
+的递归敏感键扫描，因此敏感键不会被普通 unknown-field 错误遮蔽。生产的三个 adapter
+则先执行同一结构 JSON Schema：额外/敏感字段、错误类型、缺失字段和枚举失败在网关即
+变成 `INVALID_RESPONSE/SCHEMA_MISMATCH` 并丢弃 output。共同 schema 故意不表达的 operation
+值、数量、长度、code/timestamp 词法以及跨行语义在生产路径进入领域层：未知/字段不匹配的
+operation、第三个候选、33rd operation、过长文本、非 canonical code 或候选 index 重复/不连续走小写 `invalid_provider_shape`；任何
+词法或日历/时间/offset 非法 timestamp 走小写 `invalid_provider_timestamp`；未知 alias 或
+重复 REMOVE 走小写 `invalid_candidate_set`。领域的 `provider_sensitive_key` 以及容器、循环、
+深度、节点或类型类 `invalid_provider_shape` 分支则是 direct-domain、自定义 adapter 或网关后
+本地损坏的纵深防御。领域层先把原始/冻结树在一次有界遍历中扫描并复制成 exact builtins，
+之后不再访问原容器，避免可变或恶意 `MappingProxyType` backing mapping 的二次读取竞态。
 
 模型不报告“仍未满足的最低覆盖”；最低覆盖由领域层确定性计算。warnings 只是显示文本，
 不能覆盖校验结果。只有完整 schema 校验通过后，组合根才使用本地映射还原 ID 并交给
@@ -585,6 +643,31 @@ writer process。进程内 request/worker 线程还必须共享同一个 per-led
 6. provider 已返回但 terminal 尚未 fsync 时，精确输出不可恢复；系统诚实返回
    `RESULT_UNKNOWN`，不伪造或重放。同一旧 request ID 永不再次产生 provider 调用。
 
+terminal append 前，领域 owner 必须把 `ResultEvidence` 与 reservation 和已持久化 attempts
+重新绑定：generation/request ID、canonical input digest、有序 start/finish 身份、冻结的
+route/readiness/fallback 可达矩阵、最终 attempt provenance、exact gateway failure code、
+状态/安全及重试属性、decoded output digest 和 bounded candidate-count hint 必须一致；V1 的 `bounded_summary` 固定
+为 null。成功输出 digest 必须在有深度、节点和 exact JSON 类型边界的本地 gate 后由实际
+decoded object 重算；把 A 的 evidence 与 B 的 output 配对、遗漏/替换 attempt 或篡改候选数
+均按本地 evidence corruption fail closed，不得伪装为供应商 `INVALID_RESPONSE`。相同的可
+重放约束由 ledger replay 再次执行；成功 result 在领域纵深防御中产生的四种小写解码码、
+`NO_VALID_SUGGESTION` 和 gateway 大写失败码各走独立的 terminal allowlist。生产 provider
+中共同结构 schema 可表达的错误走 gateway 大写 `SCHEMA_MISMATCH`；schema 故意省略的
+数量/长度/词法约束及跨行/语义失败按上文进入领域小写码，不把两层责任互相伪装。
+
+terminal builder 对传入的 decoded output 只做一次有界扫描和复制，并返回 fresh exact-builtins
+副本；output digest、bounded count hint、领域解码和持久化候选全部只使用这同一副本，绝不再次读取
+原 `MappingProxyType` 或其 backing mapping。这样状态型对象不能让摘要看到 A、候选解析看到 B。
+只有领域解码成功后才要求 hint 等于实际候选数；第三个候选等 parser-owned 整份响应错误使用
+冻结的 0..2 bounded hint 并进入对应小写失败码，而不是被误判为本地 evidence corruption。
+完整性扫描的 occurrence 上限独立固定为 524,289，高于 gateway transport 的 524,288-byte
+响应上限；它只证明输出可安全重算 digest，不提前执行候选数、operation 数、warning 数等业务
+约束。随后领域 decoder 对 fresh exact-builtins 副本应用 4096-occurrence 及业务上限。因此内置
+provider 返回 4097 个 warning 或其他结构合法的超大数组时，只将本次 generation 持久化为
+`INVALID_RESPONSE/invalid_provider_shape`，不得误报 `staffing_invalid_evidence`、触发 worker
+fail-close 或阻止下一项排班建议。未来若调整 transport response 上限，必须同步调整此完整性
+上限及三家 adapter 的跨层证明。
+
 因此外部调用是 at-most-once per persisted attempt，而本地 terminal commit 是 exactly-one
 or explicitly unknown；本设计不宣称跨外部 provider 的 exactly-once。HTTP 响应若在
 terminal fsync 后丢失，request GET 恢复同一 receipt。
@@ -611,6 +694,11 @@ hash chain + anchor 检测文件内部篡改和回滚到有效前缀，但不宣
 ID（如有）、状态码类别、failure code 和受限输出 hash；不得持久化 chain-of-thought、
 reasoning content 或秘密。非 canonical latency 不进入内容派生 ID。
 
+reservation 的外层 template/language 必须与 provider payload 内层值一致，template 还必须
+同时等于 frozen basis 和代码常量；canonical generation input 不接受调用方传入另一版本后
+自行重算。projection 的调试表示和错误文本不得展开真实 ID alias map、basis 备注或其他
+本地人员数据。
+
 稳定 staffing root 没有文件时等价于尚未配置，不从其他 evidence root 推导。V1 schema
 未来变化必须升版；旧记录按原版本继续可读，未知版本拒绝。
 
@@ -627,8 +715,9 @@ reasoning content 或秘密。非 canonical latency 不进入内容派生 ID。
 - provider payload 只使用每次请求的 worker/assignment alias 与 canonical code，不含真实
   员工 ID、展示名、自由文本 label 和备注；CSV 单元格与备注被视为数据，不拼成系统
   指令。这里是数据最小化/假名化，不是匿名化或不可重识别保证。
-- 输出严格 JSON schema、枚举和长度限制；展示名、备注、rationale 和 warning 在 UI 中
-  都按普通文本渲染，不解释 HTML 或 Markdown。
+- 输出先通过三家共同结构 JSON schema，candidate index enum 在 schema 中执行；operation
+  allowlist、数量、长度、code/timestamp 词法由本地域解析器执行。展示名、备注、rationale
+  和 warning 在 UI 中都按普通文本渲染，不解释 HTML 或 Markdown。
 - 模型没有工具、网络浏览、文件、数据库、HTTP callback 或执行权限。
 - staffing root 在支持的平台创建为 `0700` 目录、`0600` 文件；试点小 PC 必须启用整盘
   加密和受控 OS 账号。应用默认不把该目录上传或备份到云端；若运营方启用备份，必须
