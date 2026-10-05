@@ -12,8 +12,8 @@ Before editing:
 2. Inspect `git status --short --branch`, the current branch, and the relevant
    package's source, tests, and stable docs. Preserve unrelated worktree changes.
 3. Classify the request as `simulation/`, ROI engine, Operational Replay web
-   app, or documentation/agent infrastructure. The implementation surfaces are
-   independent.
+   app, Site Agent Console, or documentation/agent infrastructure. The four
+   implementation surfaces are independent.
 4. Read the matching files under [`.agent/context/`](.agent/context/) and
    [`.agent/workflows/`](.agent/workflows/).
 5. State the owner of every fact you will read or write. If ownership is
@@ -33,6 +33,10 @@ architectural responsibility, not an inferred person or team.
   engine. It does not depend on the Python stack.
 - `apps/operational-replay/` is an independent read-only Next.js presentation
   over exported artifacts. It owns no operational truth, advice, or execution.
+- `apps/site-agent-console/` is the static Manager Console for the local
+  fixture-backed Site Agent service. It consumes only the versioned local
+  Manager API, imports no Python or ROI implementation, holds no authoritative
+  state, and owns no truth, advice, or execution.
 - Root documentation and `.agent/` provide repository-wide governance; they are
   not another runtime surface.
 - Cross implementation boundaries only through an already documented contract.
@@ -130,8 +134,11 @@ Use, in order:
    `simulation/docs/site_runtime_design.md`,
    `simulation/docs/agent_runtime_v1.md`,
    `simulation/docs/edge_observation_v0.md`,
-   `simulation/docs/workflow_enablement_v0.md`, and
-   `simulation/docs/course_world_model_v0.md`.
+   `simulation/docs/workflow_enablement_v0.md`,
+   `simulation/docs/course_world_model_v0.md`,
+   `simulation/docs/edge_task_v0.md`,
+   `simulation/docs/site_agent_v0.md`, and
+   `simulation/docs/pilot_dispatch_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
    evidence only.
@@ -170,7 +177,8 @@ An untracked document is never repository authority by itself.
   `nxt_telemetry.observations` typing). It owns no observation, state, policy,
   recommendation, trace, workflow, memory, or execution semantics; it must not
   import simulator, commissioning, memory, twin, viewer, robot, ROS, or network
-  modules, and no existing package may import it.
+  modules. The designated `nxt_site_agent` application boundary is the only
+  package allowed to import it; no other consumer or upstream package may.
 - Keep `nxt_edge_observation` a conversion leaf (adapters plus the
   source-side at-least-once delivery cursor). It may import only
   `nxt_telemetry.observations`, and consumes commissioning's existing
@@ -200,7 +208,9 @@ An untracked document is never repository authority by itself.
   It must not import the simulator, telemetry, edge adapters, Site Runtime,
   Agent Runtime, Shadow Ops, memory, twin, viewer, robot, ROS, actuator,
   transport/field-bus, network, filesystem, subprocess, threading, wall-clock,
-  or randomness modules, and no existing package may import it. Turning a
+  or randomness modules; `nxt_site_agent` is its only designated in-package
+  consumer (report/plan verification through the public surface), and no other
+  package may import it. Turning a
   READY launch plan into the existing runtime composition belongs to
   composition roots.
 - Keep `nxt_course_world_model` an immutable spatial-truth leaf. It may
@@ -235,18 +245,42 @@ An untracked document is never repository authority by itself.
   liveness and read-time freshness), the journal high-water anchor and
   operator-provisioned identity continuity, and the protocol double's
   executor rules (persist-before-publish, evidence-derived protection,
-  restart branches, history replay).
-  It owns no facility state, observation, commissioning, advice, human
-  workflow, notification, transport, clock, or execution semantics; a task
+  restart branches, history replay). It also owns single-date UTC schedule
+  intent and local inbox acknowledgement/resolution evidence in the existing
+  Edge journal. Due-time task admission uses the same lock and existing rules;
+  the task-created record binds the schedule identity for restart idempotency.
+  Human responses cannot resolve active uncertainty, clear authorization gates,
+  or resume tasks. No recurring calendar or remote notification is implemented.
+  It owns no facility state, observation, commissioning, advice, recommendation
+  workflow, transport, clock, or physical execution semantics; a task
   request is a simulated message to a protocol double and nothing in the
   package or its scripts can move, stop, reset, or command a device. It must
   not import the simulator, telemetry, edge adapters, Site Runtime, Agent
   Runtime, Shadow Ops, memory, twin, viewer, robot, ROS, actuator,
   transport/field-bus, network, subprocess, threading, wall-clock, or
   randomness modules, and no existing package may import it. MQTT and the
-  wall clock live only in the `simulation/scripts/edge_task_*` and
-  `mock_robot_task_device.py` composition roots. Physical site-level task
-  admission remains unimplemented and unowned.
+  wall clock live only in the `simulation/scripts/edge_task_*`,
+  `mock_robot_task_device.py`, and `pilot_dispatch_demo.py` composition roots.
+  Physical site-level task admission remains unimplemented and unowned.
+- Keep `nxt_site_agent` the local fixture-backed application boundary and
+  nothing more. It may import only the public `nxt_agent_runtime`,
+  `nxt_pilot_ops`, and `nxt_workflow_enablement` surfaces; fixture composition
+  (adapter kit, feed, enablement evaluation, runtime factory) reaches it as an
+  injected composition seam from `simulation/scripts/`. It owns service
+  lifecycle, the versioned loopback-only Manager API (`nxt-site-agent/api/v0`),
+  noncanonical projections/briefing, the fixture source-cursor persistence, and
+  noncanonical service diagnostics — and no observation, state, assembly,
+  policy, recommendation, trace, workflow, ledger, checkpoint, or physical
+  command semantics. It refuses to launch without a verified READY enablement
+  report and a fixture-only Shadow Mode plan; it binds loopback only; manager
+  acceptance stays human workflow evidence. Its optional `/api/v0/task-ops`
+  callback is injected by the SIMULATION composition root and imports no task
+  package; it never derives tasks from advice. No endpoint or browser control
+  may reach a physical robot, actuator, field-bus, ROS, or emergency-stop surface; and it
+  must not import the simulator, commissioning, telemetry, edge adapters, the
+  state orchestration layer directly, memory, twin, viewer, robot, ROS,
+  subprocess, os, wall-clock, or randomness modules. No existing package may
+  import it; only composition-root scripts may.
 - Keep `nxt_edge_interventions` a stdlib-only, SIMULATION-only
   human-handling rehearsal leaf. It imports no other `nxt_*` package; the
   Edge task/device view reaches it as plain `EdgeSnapshot` data from
@@ -349,3 +383,16 @@ Reject or revise a change that:
 - Human operating manual: [`docs/AGENT_OPERATING_MANUAL.md`](docs/AGENT_OPERATING_MANUAL.md)
 - Safe-change skill: [`.agent/skills/nxtektal-change/SKILL.md`](.agent/skills/nxtektal-change/SKILL.md)
 - Review skill: [`.agent/skills/nxtektal-review/SKILL.md`](.agent/skills/nxtektal-review/SKILL.md)
+
+## Human-led planning v1 extension
+
+The local implementation is governed by
+[`simulation/docs/contracts/planning-v1/README.md`](simulation/docs/contracts/planning-v1/README.md)
+and its strict JSON Schema. `nxt_pilot_ops` owns manual planning evidence,
+scenario calculation, immutable revisions and actual-result records. Reuse its
+stockout projection; never duplicate calculations in the console. The reviewed
+composition-root bridge accepts a separate exact-version human confirmation
+and produces only a SIMULATION schedule through the existing Edge admission.
+Old recommendation acceptance remains workflow-only. The API receives a
+callback, Edge receives an opaque admission reference/gate, and neither imports
+the other's domain. No LLM, advisor or physical device gains execution access.

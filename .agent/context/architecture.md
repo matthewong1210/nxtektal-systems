@@ -138,6 +138,24 @@ fixture-backed and adds no transport, device connection, register write, or
 command surface. See
 [`simulation/docs/edge_observation_v0.md`](../../simulation/docs/edge_observation_v0.md).
 
+## Integrated local dispatch rehearsal
+
+The [Pilot Dispatch V0 gate](../../simulation/docs/pilot_dispatch_v0.md)
+composes the fixture Site Agent service and simulated Edge Task exchange in
+`simulation/scripts/pilot_dispatch_demo.py`; it adds no package. The runner
+injects an optional `/api/v0/task-ops` callback into the existing loopback API.
+The sibling packages still do not import one another, and fixture advice and
+recommendation acceptance never create tasks.
+
+`nxt_edge_task` owns single-date UTC schedules and local inbox response records
+in its existing anchored journal. Due-time admission and task creation use the
+same journal lock; the task-created record binds the schedule identity. The
+composition root owns the clock, background loop, process lock, and in-memory
+protocol doubles. Inbox acknowledgement/resolution is evidence only: active
+uncertainty cannot be resolved, and no response clears execution restrictions.
+There are no recurring schedules, remote notifications, or physical devices;
+`carrier-01` remains standby.
+
 ## Core principles
 
 ### One-way extension
@@ -173,9 +191,15 @@ coupling in named seams:
   readiness layer only as declared plain-data evidence derived by
   composition roots, and neither package imports the other
 - `nxt_edge_task` as a stdlib-only, SIMULATION-only task-exchange rehearsal
-  leaf that imports no other package; commissioned identities reach it as
-  plain admission data, and MQTT, clocks, and processes stay in the
-  `simulation/scripts/` Edge gateway, mock robot, and CLI composition roots
+  leaf that imports no other first-party package; it also owns dated schedule
+  intent and local inbox responses in the existing Edge journal. Commissioned
+  identities reach it as plain admission data; transport, clocks, and processes
+  stay in the `simulation/scripts/` composition roots
+- `nxt_site_agent` as the local application boundary over the public
+  `nxt_agent_runtime`, `nxt_pilot_ops`, and `nxt_workflow_enablement` surfaces
+  (readiness-gated service lifecycle, loopback Manager API, noncanonical
+  projections only; fixture composition and the optional task-operations
+  callback are injected from scripts)
 - `nxt_edge_interventions` as a stdlib-only, SIMULATION-only human-handling
   rehearsal leaf that imports no other package; the Edge view reaches it as
   plain `EdgeSnapshot` data, and HTTP, clocks, and processes stay in the
@@ -236,6 +260,9 @@ type:
 | Edge adapter kit single-import conversion leaf, transport/process/nondeterminism bans, and no reverse dependency | `simulation/tests/edge_observation/test_architecture.py` |
 | Workflow enablement commissioning-only imports, purity bans, no canonical-contract duplication, and no reverse dependency | `simulation/tests/workflow_enablement/test_architecture.py` |
 | Course World Model commissioning-only imports, purity/transport/execution bans, no canonical-contract duplication, and no reverse dependency | `simulation/tests/course_world_model/test_architecture.py` |
+| Edge Task stdlib-only SIMULATION contract, no reverse dependency, and script-confined transport | `simulation/tests/edge_task/test_architecture.py`, `simulation/tests/edge_task/test_scripts_guard.py` |
+| Site Agent service approved-surface imports, stdlib whitelist, execution/LLM/nondeterminism bans, script transport bans, and no reverse dependency | `simulation/tests/site_agent/test_architecture.py` |
+| Site Agent Console API-only presentation leaf: no Python/ROI imports, no robot-command vocabulary, no hidden browser persistence, `/api/v0/` only | `apps/site-agent-console/tests/boundaries.test.ts` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
 | Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |
@@ -270,3 +297,14 @@ and add a guard when changing that boundary.
   by pure contracts.
 
 See [package-map.md](package-map.md) for responsibility-by-package details.
+
+## Explicit human-confirmed planning rehearsal
+
+The [v1 shared contract](../../simulation/docs/contracts/planning-v1/README.md)
+adds dated manual evidence -> pure `nxt_pilot_ops` scenarios -> immutable plan
+version -> explicit human confirmation -> composition-root association ->
+existing SIMULATION schedule admission. The old recommendation acceptance path
+is unchanged. The root verifies planning/task linkage before any transport
+replay and revalidates freshness/version under the schedule journal lock. Four
+independent result stages remain evidence; task success never creates quantity
+or live inventory. Physical execution and authentication remain unimplemented.

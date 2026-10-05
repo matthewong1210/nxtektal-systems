@@ -59,6 +59,17 @@ class RequestHumanAssistance:
     reason: HumanAssistReason
 
 
+@dataclass(frozen=True)
+class AssignStaffWork:
+    """Reserve shared simulation staff for an observed inspection job.
+
+    Completion is inspection/rephotography labor, not turf repair or verified
+    condition evidence. The predeclared job owns duration and location labels.
+    """
+
+    job_id: str
+
+
 Directive = Union[
     Wait,
     AssignCollection,
@@ -68,6 +79,7 @@ Directive = Union[
     PauseRobot,
     ResumeRobot,
     RequestHumanAssistance,
+    AssignStaffWork,
 ]
 
 

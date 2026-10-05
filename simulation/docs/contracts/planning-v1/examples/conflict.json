@@ -1,0 +1,308 @@
+{
+  "description": "Given success input revision 1, both stale compare-and-swap and request-ID reuse with different content reject without writing.",
+  "clock_at_utc": "2026-09-16T08:01:00Z",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/inputs",
+        "schema_ref": "#/$defs/InputRequest",
+        "body": {
+          "schema": "nxt-planning-input/v1",
+          "request_id": "conflict-input-001",
+          "expected_revision": 0,
+          "site_id": "pilot-course-a",
+          "deployment_id": "pilot-a-edge-task-sim-v0",
+          "site_timezone": "Asia/Shanghai",
+          "operator": "course-manager",
+          "reason": "Attempt a stale revision update.",
+          "scope": "SHIFT",
+          "effective_at_utc": "2026-09-16T08:00:00Z",
+          "valid_until_utc": "2026-09-16T09:15:00Z",
+          "operating_window": {
+            "start_at_utc": "2026-09-16T08:00:00Z",
+            "end_at_utc": "2026-09-16T09:15:00Z"
+          },
+          "inventory_clean_balls": {
+            "value": 600,
+            "source_kind": "MEASURED",
+            "source_ref": "opening-clean-bin-count-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "demand": {
+            "value": {
+              "bucket_minutes": 10,
+              "low": [
+                5,
+                5,
+                5,
+                5,
+                5,
+                5
+              ],
+              "typical": [
+                10,
+                10,
+                10,
+                10,
+                10,
+                10
+              ],
+              "high": [
+                15,
+                15,
+                15,
+                15,
+                15,
+                15
+              ]
+            },
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-demand-assumptions-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls/minute"
+          },
+          "safety_stock_balls": {
+            "value": 200,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-safety-target-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "buffer_minutes": {
+            "value": 2,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-timing-margin-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "minutes"
+          },
+          "operations_allowed": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-work-window-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "washer_available": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-washer-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "zones": [
+            {
+              "zone_id": "Z1",
+              "robot_id": "picker-01",
+              "collection_allowed": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-zone-Z1-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "clean_yield_balls": {
+                "value": {
+                  "low": 400,
+                  "high": 500
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-zone-Z1-net-yield-estimate-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "cycle_minutes": {
+                "value": {
+                  "travel": 2,
+                  "collect": 5,
+                  "return": 2,
+                  "unload": 2,
+                  "wash": 3,
+                  "supply": 1
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-six-stage-duration-estimate-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "minutes"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "http_status": 409,
+        "schema_ref": "#/$defs/ErrorEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "error": {
+            "code": "planning_conflict",
+            "detail": "expected_revision 0 differs from current revision 1."
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:01:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/inputs",
+        "schema_ref": "#/$defs/InputRequest",
+        "body": {
+          "schema": "nxt-planning-input/v1",
+          "request_id": "demo-input-001",
+          "expected_revision": 0,
+          "site_id": "pilot-course-a",
+          "deployment_id": "pilot-a-edge-task-sim-v0",
+          "site_timezone": "Asia/Shanghai",
+          "operator": "course-manager",
+          "reason": "Different content under the original request ID.",
+          "scope": "SHIFT",
+          "effective_at_utc": "2026-09-16T08:00:00Z",
+          "valid_until_utc": "2026-09-16T09:15:00Z",
+          "operating_window": {
+            "start_at_utc": "2026-09-16T08:00:00Z",
+            "end_at_utc": "2026-09-16T09:15:00Z"
+          },
+          "inventory_clean_balls": {
+            "value": 600,
+            "source_kind": "MEASURED",
+            "source_ref": "opening-clean-bin-count-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "demand": {
+            "value": {
+              "bucket_minutes": 10,
+              "low": [
+                5,
+                5,
+                5,
+                5,
+                5,
+                5
+              ],
+              "typical": [
+                10,
+                10,
+                10,
+                10,
+                10,
+                10
+              ],
+              "high": [
+                15,
+                15,
+                15,
+                15,
+                15,
+                15
+              ]
+            },
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-demand-assumptions-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls/minute"
+          },
+          "safety_stock_balls": {
+            "value": 200,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-safety-target-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "buffer_minutes": {
+            "value": 2,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-timing-margin-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "minutes"
+          },
+          "operations_allowed": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-work-window-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "washer_available": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-washer-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "zones": [
+            {
+              "zone_id": "Z1",
+              "robot_id": "picker-01",
+              "collection_allowed": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-zone-Z1-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "clean_yield_balls": {
+                "value": {
+                  "low": 400,
+                  "high": 500
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-zone-Z1-net-yield-estimate-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "cycle_minutes": {
+                "value": {
+                  "travel": 2,
+                  "collect": 5,
+                  "return": 2,
+                  "unload": 2,
+                  "wash": 3,
+                  "supply": 1
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-six-stage-duration-estimate-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "minutes"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "http_status": 409,
+        "schema_ref": "#/$defs/ErrorEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "error": {
+            "code": "planning_conflict",
+            "detail": "request_id already identifies different content."
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:01:00Z"
+    }
+  ]
+}

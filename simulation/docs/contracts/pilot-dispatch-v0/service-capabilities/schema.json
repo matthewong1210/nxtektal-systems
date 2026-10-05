@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nxtektal.local/contracts/pilot-dispatch-v0/service-capabilities/v1",
+  "title": "Pilot dispatch service capabilities v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "mode", "operations"],
+  "properties": {
+    "schema": { "const": "nxt-pilot-dispatch/service-capabilities/v1" },
+    "mode": { "enum": ["FIXED_V3_EXECUTION", "LEGACY_PILOT_DISPATCH"] },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planning_inputs_create",
+        "planning_plans_create",
+        "planning_confirmations_create",
+        "planning_outcomes_create",
+        "schedules_create",
+        "schedules_cancel",
+        "notifications_acknowledge",
+        "notifications_resolve"
+      ],
+      "properties": {
+        "planning_inputs_create": { "$ref": "#/$defs/CapabilityStatus" },
+        "planning_plans_create": { "$ref": "#/$defs/CapabilityStatus" },
+        "planning_confirmations_create": { "$ref": "#/$defs/CapabilityStatus" },
+        "planning_outcomes_create": { "$ref": "#/$defs/CapabilityStatus" },
+        "schedules_create": { "$ref": "#/$defs/CapabilityStatus" },
+        "schedules_cancel": { "$ref": "#/$defs/CapabilityStatus" },
+        "notifications_acknowledge": { "$ref": "#/$defs/CapabilityStatus" },
+        "notifications_resolve": { "$ref": "#/$defs/CapabilityStatus" }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "mode": { "const": "FIXED_V3_EXECUTION" },
+        "operations": {
+          "properties": {
+            "planning_inputs_create": { "const": "UNAVAILABLE" },
+            "planning_plans_create": { "const": "UNAVAILABLE" },
+            "planning_confirmations_create": { "const": "UNAVAILABLE" },
+            "planning_outcomes_create": { "const": "SUPPORTED" },
+            "schedules_create": { "const": "UNAVAILABLE" },
+            "schedules_cancel": { "const": "UNAVAILABLE" },
+            "notifications_acknowledge": { "const": "SUPPORTED" },
+            "notifications_resolve": { "const": "SUPPORTED" }
+          }
+        }
+      }
+    },
+    {
+      "properties": {
+        "mode": { "const": "LEGACY_PILOT_DISPATCH" },
+        "operations": {
+          "properties": {
+            "planning_inputs_create": { "const": "SUPPORTED" },
+            "planning_plans_create": { "const": "SUPPORTED" },
+            "planning_confirmations_create": { "const": "SUPPORTED" },
+            "planning_outcomes_create": { "const": "SUPPORTED" },
+            "schedules_create": { "const": "SUPPORTED" },
+            "schedules_cancel": { "const": "SUPPORTED" },
+            "notifications_acknowledge": { "const": "SUPPORTED" },
+            "notifications_resolve": { "const": "SUPPORTED" }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "CapabilityStatus": { "enum": ["SUPPORTED", "UNAVAILABLE"] }
+  }
+}

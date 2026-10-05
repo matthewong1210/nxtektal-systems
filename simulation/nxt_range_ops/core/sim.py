@@ -1,6 +1,6 @@
 """The discrete-event operational simulator (SimPy).
 
-Models one operating day of the full ball-flow loop:
+Models an operating day, or an opt-in finite multi-day session, of the full ball-flow loop:
 
     dispenser -> customer demand -> range zones -> robot collection
     -> robot payload -> handoff/washer queue -> washing -> dispenser
@@ -15,12 +15,14 @@ from one seed; simultaneous SimPy events resolve in scheduling order, and all
 fleet iteration is in sorted-id order — so a seed plus an action sequence
 replays to an identical event log.
 
-Simulated time is seconds since midnight. The episode starts at facility
-open and ends (terminated) at facility close.
+Simulated time is seconds since day-zero midnight. Legacy episodes terminate
+at their first facility close. Session inputs keep the same resources and ledger
+across daily closing periods and terminate only at their final declared close.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Generator, Optional
 
 import numpy as np
@@ -32,8 +34,10 @@ from nxt_range_ops.config.models import (
     ZoneConfig,
 )
 from nxt_range_ops.core import ledger as ledger_mod
+from nxt_range_ops.core.assignment_evidence import AssignmentCandidate, AssignmentEvidence
 from nxt_range_ops.core.directives import (
     AssignCollection,
+    AssignStaffWork,
     Directive,
     PauseRobot,
     ReassignRobot,
@@ -54,6 +58,8 @@ from nxt_range_ops.core.entities import (
 )
 from nxt_range_ops.core.events import EventKind, EventLog
 from nxt_range_ops.core.ledger import BallLedger
+from nxt_range_ops.core.joint_inputs import validate_joint_inputs
+from nxt_range_ops.core.session_inputs import validate_observation_admission, validate_session_inputs
 from nxt_range_ops.core.metrics import OpsMetrics
 from nxt_range_ops.core.safety import SafetyShield, ShieldDecision
 from nxt_range_ops.core.skills import (
@@ -141,15 +147,54 @@ class _Station:
 
 
 class RangeSimulation:
-    """One operating day of range operations, driven by fleet directives."""
+    """Range operations driven by guarded fleet directives, with optional sessions."""
 
     def __init__(
         self,
         scenario: RangeOpsScenario,
         seed: int,
         skill_model: Optional[SkillOutcomeModel] = None,
+        *,
+        joint_inputs: dict | None = None,
+        session_inputs: dict | None = None,
+        collection_assignment_evidence: bool = False,
     ):
+        if joint_inputs is not None and session_inputs is not None:
+            raise ValueError("joint_inputs and session_inputs are mutually exclusive")
         self.scenario = scenario
+        self._assignment_evidence_enabled = collection_assignment_evidence
+        self._assignment_candidates: dict[str, AssignmentCandidate] = {}
+        self._assignments: dict[str, AssignmentEvidence] = {}
+        self._robot_assignments: dict[str, AssignmentEvidence] = {}
+        self._joint_inputs = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
+                                                  open_minute=scenario.hours.open_minute,
+                                                  close_minute=scenario.hours.close_minute)
+        self._session_inputs = validate_session_inputs(session_inputs, zone_ids=scenario.zone_ids,
+                                                      open_minute=scenario.hours.open_minute,
+                                                      close_minute=scenario.hours.close_minute)
+        if self._session_inputs is not None:
+            closed_zones = {zone.zone_id: zone.closure_windows for zone in scenario.zones
+                            if zone.closure_windows}
+            if closed_zones:
+                for index, targets in enumerate(self._session_inputs["landing_zones_by_minute"]):
+                    minute = (scenario.hours.open_minute + index) % 1440
+                    if any(any(window.contains(minute) for window in closed_zones.get(target, []))
+                           for target in set(targets)):
+                        raise ValueError("pre-sampled landing targets conflict with a declared play closure")
+        self._observation_jobs: dict[str, dict] = {}
+        self._joint_demand_history: list[dict] = []
+        self._staff_jobs = {
+            job["job_id"]: {**job, "status": "PENDING", "assigned_at_s": None,
+                            "started_at_s": None, "completed_at_s": None}
+            for job in (self._joint_inputs["staff_jobs"] if self._joint_inputs else [])
+        }
+        if self._session_inputs is not None:
+            self._staff_jobs = {
+                slot["job_id"]: {**slot, "status": "UNOBSERVED", "available_minute": None,
+                                 "deadline_minute": None, "assigned_at_s": None,
+                                 "started_at_s": None, "completed_at_s": None}
+                for slot in self._session_inputs["staff_job_slots"]
+            }
         self.seed = int(seed)
         master = np.random.default_rng(self.seed)
         (
@@ -237,8 +282,13 @@ class RangeSimulation:
         bucket_min = d.forecast_bucket_minutes
         buckets = []
         minute = h.open_minute
-        while minute < h.close_minute:
-            base = d.base_rate_at(minute + bucket_min / 2.0)
+        while minute < self.session_end_s / 60:
+            forecast_minute = minute + bucket_min / 2.0
+            if self._session_inputs is not None:
+                forecast_minute %= 1440
+            base = d.base_rate_at(forecast_minute)
+            if self._session_inputs is not None and not h.open_minute <= forecast_minute < h.close_minute:
+                base = 0.0
             noise = 1.0 + self._rng_forecast.normal(0.0, d.forecast_noise_sd)
             buckets.append(max(0.0, base * d.forecast_bias * max(0.0, noise)))
             minute += bucket_min
@@ -249,16 +299,33 @@ class RangeSimulation:
         # open take effect before the first demand draw of the day.
         for zone_id in sorted(self._zones):
             zone = self._zones[zone_id]
-            for start_min, end_min in _merge_windows(zone.cfg.closure_windows):
-                if end_min * 60.0 <= self.now:
-                    continue  # window already over before facility open
-                self.env.process(self._zone_closure_proc(zone, start_min, end_min))
+            external_inputs = self._session_inputs if self._session_inputs is not None else self._joint_inputs
+            if external_inputs is not None:
+                for window in external_inputs["collection_blocks"][zone_id]:
+                    if window["end_minute"] * 60.0 > self.now:
+                        self.env.process(self._collection_block_proc(
+                            zone, window["start_minute"], window["end_minute"]))
+            days = self._session_inputs["days"] if self._session_inputs is not None else 1
+            for day in range(days):
+                for start_min, end_min in _merge_windows(zone.cfg.closure_windows):
+                    start_min, end_min = start_min + day * 1440, end_min + day * 1440
+                    if end_min * 60.0 <= self.now:
+                        continue  # window already over before facility open
+                    self.env.process(self._zone_closure_proc(zone, start_min, end_min))
+                if (self._session_inputs is not None and day < days - 1
+                        and self.scenario.hours.close_minute < 1440 + self.scenario.hours.open_minute):
+                    self.env.process(self._collection_block_proc(
+                        zone, day * 1440 + self.scenario.hours.close_minute,
+                        (day + 1) * 1440 + self.scenario.hours.open_minute))
         for station_id in sorted(self._stations):
             station = self._stations[station_id]
-            for start_min, end_min in _merge_windows(station.cfg.outage_windows):
-                if end_min * 60.0 <= self.now:
-                    continue
-                self.env.process(self._station_outage_proc(station, start_min, end_min))
+            days = self._session_inputs["days"] if self._session_inputs is not None else 1
+            for day in range(days):
+                for start_min, end_min in _merge_windows(station.cfg.outage_windows):
+                    start_min, end_min = start_min + day * 1440, end_min + day * 1440
+                    if end_min * 60.0 <= self.now:
+                        continue
+                    self.env.process(self._station_outage_proc(station, start_min, end_min))
         self.env.process(self._demand_proc())
         self.env.process(self._washer_proc())
         self.env.process(self._sensor_proc())
@@ -280,11 +347,32 @@ class RangeSimulation:
     @property
     def facility_open(self) -> bool:
         h = self.scenario.hours
+        if self._session_inputs is not None:
+            return (not self.facility_closed
+                    and h.open_minute <= self.minute_of_day % 1440 < h.close_minute)
         return h.open_seconds <= self.now < h.close_seconds
 
     @property
     def facility_closed(self) -> bool:
-        return self.now >= self.scenario.hours.close_seconds
+        return self.now >= self.session_end_s
+
+    @property
+    def session_end_s(self) -> float:
+        """Final termination time; the legacy one-day endpoint is unchanged."""
+        days = self._session_inputs["days"] if self._session_inputs is not None else 1
+        return ((days - 1) * 1440 + self.scenario.hours.close_minute) * 60.0
+
+    @property
+    def session_progress(self) -> dict:
+        """RNG-neutral progress; daily opening is distinct from final termination."""
+        days = self._session_inputs["days"] if self._session_inputs is not None else 1
+        duration = self.session_end_s - self.scenario.hours.open_seconds
+        elapsed = min(duration, max(0.0, self.now - self.scenario.hours.open_seconds))
+        return {"days": days, "day_index": min(days - 1, int(self.minute_of_day // 1440)),
+                "minute_in_day": self.minute_of_day % 1440, "elapsed_s": elapsed,
+                "duration_s": duration, "fraction": elapsed / duration,
+                "facility_open": self.facility_open, "complete": self.facility_closed,
+                "session_end_s": self.session_end_s}
 
     def robot_or_none(self, robot_id: str) -> Optional[RobotStateSnapshot]:
         robot = self._robots.get(robot_id)
@@ -346,6 +434,141 @@ class RangeSimulation:
             self._human_staff.count,
             len(self._human_staff.queue),
         )
+
+    def collection_access_allowed(self, zone_id: str) -> bool:
+        """Current access restriction, independent from play/landing openness.
+
+        Read the half-open windows directly so an action exactly on a weather
+        boundary cannot enter before SimPy processes the corresponding event.
+        """
+        if zone_id not in self._zones:
+            return False
+        if self._session_inputs is not None:
+            return self.facility_open and not any(
+                row["start_minute"] <= self.minute_of_day < row["end_minute"]
+                for row in self._session_inputs["collection_blocks"][zone_id])
+        return self._joint_inputs is None or not any(
+            row["start_minute"] <= self.minute_of_day < row["end_minute"]
+            for row in self._joint_inputs["collection_blocks"][zone_id])
+
+    def staff_work_snapshots(self) -> list[dict]:
+        """Detached observed jobs only; future workload is never exposed here."""
+        return [dict(job) for _, job in sorted(self._staff_jobs.items())
+                if job["available_minute"] is not None and job["available_minute"] <= self.minute_of_day]
+
+    def admit_observation_job(self, job_id: str, observation_id: str, evidence_ref: str,
+                              captured_minute: int, deadline_minute: int) -> dict:
+        """Release one predeclared job from already captured synthetic evidence.
+
+        This only admits evidence into the existing runtime.  It assigns no
+        staff: the existing directive and SafetyShield remain mandatory.
+        Duplicate evidence is idempotent, even after completion; contradictory
+        retries and concurrent jobs for the same checkpoint/type fail closed.
+        """
+        if self._session_inputs is None:
+            raise ValueError("observation admission requires session_inputs")
+        request = validate_observation_admission(
+            job_id=job_id, observation_id=observation_id, evidence_ref=evidence_ref,
+            captured_minute=captured_minute, deadline_minute=deadline_minute,
+            open_minute=self.scenario.hours.open_minute, end_minute=int(self.session_end_s / 60))
+        existing = self._observation_jobs.get(observation_id)
+        if existing is not None:
+            if existing != request:
+                raise ValueError("observation_id conflicts with its admitted content")
+            return {"disposition": "duplicate", "job": deepcopy(self._staff_jobs[job_id])}
+        if captured_minute > self.minute_of_day:
+            raise ValueError("observation capture is in the future")
+        if self.facility_closed:
+            raise ValueError("session is complete; no new observation admission")
+        if job_id not in self._staff_jobs:
+            raise ValueError("unknown staff job slot")
+        job = self._staff_jobs[job_id]
+        if job["status"] != "UNOBSERVED":
+            raise ValueError("staff job slot has already been observed")
+        if any(other["checkpoint_id"] == job["checkpoint_id"]
+               and other["task_kind"] == job["task_kind"]
+               and other["status"] in {"PENDING", "ASSIGNED", "IN_PROGRESS"}
+               for other in self._staff_jobs.values()):
+            raise ValueError("an active job already exists for this checkpoint and task_kind")
+        job.update(status="PENDING", available_minute=self.minute_of_day,
+                   deadline_minute=deadline_minute, observation_id=observation_id,
+                   evidence_ref=evidence_ref, captured_minute=captured_minute)
+        self._observation_jobs[observation_id] = request
+        return {"disposition": "admitted", "job": deepcopy(job)}
+
+    def staff_work_rejection(self, job_id: str) -> str | None:
+        """Current deterministic admission for a shared-pool inspection job."""
+        if type(job_id) is not str or job_id not in self._staff_jobs:
+            return "unknown staff job"
+        job = self._staff_jobs[job_id]
+        if job["available_minute"] is None:
+            return "staff job has not been observed yet"
+        if job["available_minute"] > self.minute_of_day:
+            return "staff job has not been observed yet"
+        if job["status"] != "PENDING":
+            return "staff job has already been assigned"
+        if self.facility_closed:
+            return "facility is closed; no new staff work"
+        if self._session_inputs is not None and not self.facility_open:
+            return "outside daily operating hours; no new staff work"
+        active_course = sum(row["status"] in {"ASSIGNED", "IN_PROGRESS"}
+                            for row in self._staff_jobs.values())
+        active_assistance = self._human_staff.count - active_course
+        pending_assistance = sum(robot.awaiting_human for robot in self._robots.values())
+        # Include requests whose SimPy assistance process has not run yet.
+        # Otherwise a raw same-timestamp caller could jump the recovery queue.
+        if self._human_staff.queue or pending_assistance > active_assistance:
+            return "robot assistance is waiting for shared staff"
+        if self._human_staff.count >= self._human_staff.capacity:
+            return "shared staff are busy"
+        return None
+
+    def demand_history(self) -> list[dict]:
+        """Already simulated minute/request pairs, for evaluation only.
+
+        The legacy path returns an empty list and keeps its original random
+        draws. Joint policy observations never receive this ground truth.
+        """
+        return [dict(row) for row in self._joint_demand_history]
+
+    @property
+    def joint_metrics(self) -> dict:
+        """Evaluation-only job/zone-time metrics without changing OpsMetrics.
+
+        Work durations include the elapsed portion at episode end. Waiting
+        includes pending observed jobs; no workload is dropped for remaining
+        incomplete. Access denial is summed zone-seconds, not facility downtime.
+        """
+        now = min(self.now, self.session_end_s)
+        jobs = [job for job in self._staff_jobs.values()
+                if job["available_minute"] is not None and job["available_minute"] * 60 <= now]
+        busy_s = wait_s = late_s = 0.0
+        for job in jobs:
+            start = job["started_at_s"]
+            finish = job["completed_at_s"]
+            wait_s += max(0.0, min(now, start if start is not None else now) - job["available_minute"] * 60)
+            if start is not None:
+                busy_s += max(0.0, min(now, finish if finish is not None else now) - start)
+            late_s += max(0.0, min(now, finish if finish is not None else now) - job["deadline_minute"] * 60)
+        denied = 0.0
+        external_inputs = self._session_inputs if self._session_inputs is not None else self._joint_inputs
+        if external_inputs is not None:
+            for windows in external_inputs["collection_blocks"].values():
+                denied += sum(max(0.0, min(now, row["end_minute"] * 60)
+                                  - max(self.scenario.hours.open_seconds, row["start_minute"] * 60))
+                              for row in windows)
+        return {
+            "staff_jobs_completed": sum(job["status"] == "COMPLETED" for job in jobs),
+            "staff_jobs_pending": sum(job["status"] == "PENDING" for job in jobs),
+            "staff_jobs_in_progress": sum(job["status"] in {"ASSIGNED", "IN_PROGRESS"} for job in jobs),
+            "staff_jobs_overdue": sum((job["completed_at_s"] if job["completed_at_s"] is not None else now)
+                                      > job["deadline_minute"] * 60 for job in jobs),
+            "course_staff_busy_s": busy_s,
+            "course_staff_wait_s": wait_s,
+            "course_staff_deadline_late_s": late_s,
+            "collection_access_denied_s": denied,
+            "requested_demand_total": sum(row["requested"] for row in self._joint_demand_history),
+        }
 
     def washer_wip(self) -> int:
         return self.ledger.count(ledger_mod.WASHER)
@@ -453,9 +676,148 @@ class RangeSimulation:
             "ledger": self.ledger.counts(),
         }
 
+    def rng_state_snapshot(self) -> dict:
+        """Return detached named RNG state without advancing any generator."""
+        return {
+            "demand": deepcopy(self._rng_demand.bit_generator.state),
+            "skills": deepcopy(self._rng_skills.bit_generator.state),
+            "failures": deepcopy(self._rng_failures.bit_generator.state),
+            "sensors": deepcopy(self._rng_sensors.bit_generator.state),
+            "forecast": deepcopy(self._rng_forecast.bit_generator.state),
+        }
+
     # ------------------------------------------------------------------
     # Control interface
     # ------------------------------------------------------------------
+
+    def arm_collection_assignment(self, execution_id: str, robot_id: str, zone_id: str,
+                                  handoff_station_id: str, execution_deadline_sim_t_s: float) -> None:
+        """One-shot evidence candidate, with no action, process, or RNG effect."""
+        if not self._assignment_evidence_enabled:
+            raise RuntimeError("collection assignment evidence is disabled")
+        if not isinstance(execution_id, str) or not execution_id:
+            raise ValueError("execution_id must be nonempty")
+        if robot_id not in self._robots or zone_id not in self._zones or handoff_station_id not in self._stations:
+            raise ValueError("unknown assignment robot, zone, or station")
+        if (type(execution_deadline_sim_t_s) not in (int, float)
+                or not np.isfinite(execution_deadline_sim_t_s)
+                or execution_deadline_sim_t_s <= self.now):
+            raise ValueError("assignment deadline must be finite and in the future")
+        if execution_id in self._assignments or robot_id in self._robot_assignments:
+            raise ValueError("assignment already started or robot already leased")
+        candidate = AssignmentCandidate(execution_id, robot_id, zone_id, handoff_station_id,
+                                        float(execution_deadline_sim_t_s))
+        existing = self._assignment_candidates.get(robot_id)
+        if existing is not None and existing != candidate:
+            raise ValueError("robot already has a different assignment candidate")
+        if any(c.execution_id == execution_id and c != candidate for c in self._assignment_candidates.values()):
+            raise ValueError("execution_id already has a different candidate")
+        self._assignment_candidates[robot_id] = candidate
+
+    def disarm_collection_assignment(self, execution_id: str) -> None:
+        """Remove only an exact unstarted candidate; never alter running work."""
+        if not self._assignment_evidence_enabled:
+            raise RuntimeError("collection assignment evidence is disabled")
+        if execution_id in self._assignments:
+            raise ValueError("cannot disarm an assignment that already started")
+        for robot_id, candidate in self._assignment_candidates.items():
+            if candidate.execution_id == execution_id:
+                del self._assignment_candidates[robot_id]
+                return
+        raise ValueError("no matching unstarted assignment candidate")
+
+    def collection_assignment_snapshot(self, execution_id: str) -> dict | None:
+        evidence = self._assignments.get(execution_id)
+        return evidence.snapshot() if evidence is not None else None
+
+    def is_same_active_assignment_handoff(
+        self, directive: SendToHandoff
+    ) -> bool:
+        """Return whether ``directive`` repeats the exact live V3 handoff.
+
+        The feature gate and active-assignment map keep this false for V2.
+        A generic handoff is equivalent only when the live task itself proves
+        that it is already travelling to, queued at, or unloading at the
+        assignment's bound station.
+        """
+
+        if not self._assignment_evidence_enabled:
+            return False
+        robot = self._robots.get(directive.robot_id)
+        if robot is None or robot.task_proc is None or not robot.task_proc.is_alive:
+            return False
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None or evidence.collection_exit_reason is None:
+            return False
+        station_id = evidence.candidate.handoff_station_id
+        if directive.station_id not in (None, station_id):
+            return False
+        bound_location = ledger_mod.station_loc(station_id)
+        if robot.activity is RobotActivity.TRAVELING:
+            return robot.destination_label == bound_location
+        if robot.activity in {
+            RobotActivity.QUEUED_HANDOFF,
+            RobotActivity.UNLOADING,
+        }:
+            return robot.location_label == bound_location
+        return False
+
+    def _assignment_event(self, robot: _Robot, kind: str, **fields) -> None:
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None:
+            return
+        counts = self.ledger.counts()
+        evidence.append(kind, self.now, ledger_conserved=(sum(counts.values()) == self.ledger.total
+                                                        and all(n >= 0 for n in counts.values())),
+                        robot_payload_parity=(robot.payload_balls == counts[ledger_mod.robot_loc(robot.robot_id)]),
+                        **fields)
+
+    def _collection_exit(self, robot: _Robot, reason: str) -> None:
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None or evidence.collection_exit_reason is not None:
+            return
+        self._assignment_event(robot, "COLLECTION_EXIT", reason=reason, payload_after=robot.payload_balls)
+        if reason in ("ZONE_EMPTY", "COLLECTION_ACCESS_BLOCKED") and evidence.quantity("RAW_COLLECTED_TO_ROBOT") == 0:
+            self._terminal_assignment(robot, reason)
+
+    def _terminal_assignment(self, robot: _Robot, reason: str) -> None:
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is None:
+            return
+        if evidence.collection_exit_reason is None:
+            self._assignment_event(robot, "COLLECTION_EXIT", reason=reason, payload_after=robot.payload_balls)
+        self._assignment_event(robot, "ASSIGNMENT_TERMINAL", reason=reason, payload_after=robot.payload_balls)
+        self._robot_assignments.pop(robot.robot_id, None)
+
+    def _start_assignment(self, robot: _Robot, candidate: AssignmentCandidate) -> None:
+        evidence = AssignmentEvidence(candidate, self.now)
+        self._assignments[candidate.execution_id] = evidence
+        self._robot_assignments[robot.robot_id] = evidence
+        self._assignment_candidates.pop(robot.robot_id)
+        self._assignment_event(robot, "ASSIGNMENT_STARTED", payload_after=robot.payload_balls)
+        boundary = min(candidate.execution_deadline_sim_t_s, self.session_end_s)
+
+        def stop_at_boundary(event):
+            if self._robot_assignments.get(robot.robot_id) is not evidence:
+                return
+            reason = ("EXECUTION_TIMEOUT" if candidate.execution_deadline_sim_t_s <= self.session_end_s
+                      else "SESSION_ENDED")
+            self._terminal_assignment(robot, reason)
+            self._interrupt_task(robot, "assignment_boundary")
+            self._settle_partial_travel(robot)
+            self._settle_partial_charge(robot)
+            robot.assigned_zone = None
+            robot.destination_label = None
+            self._set_activity(robot, RobotActivity.IDLE)
+
+        # A normal Timeout at the exact run(until=...) endpoint is deferred by
+        # SimPy's urgent stop event. This boundary precedes that event and any
+        # same-time skill completion, so it is visible at the exact deadline.
+        boundary_event = simpy.Event(self.env)
+        boundary_event._ok = True
+        boundary_event._value = None
+        boundary_event.callbacks.append(stop_at_boundary)
+        self.env.schedule(boundary_event, priority=-1, delay=boundary - self.now)
 
     def apply_directive(self, directive: Directive) -> ShieldDecision:
         """Validate through the SafetyShield and, if allowed, execute.
@@ -465,6 +827,14 @@ class RangeSimulation:
         simulation directly.
         """
         decision = self.shield.check(directive)
+        candidate = (self._assignment_candidates.get(directive.robot_id)
+                     if isinstance(directive, AssignCollection) else None)
+        matching_candidate = candidate is not None and candidate.zone_id == directive.zone_id
+        if decision.allowed and matching_candidate:
+            robot = self._robots[directive.robot_id]
+            if (candidate.execution_deadline_sim_t_s <= self.now or robot.payload_balls != 0
+                    or self.ledger.count(ledger_mod.robot_loc(robot.robot_id)) != 0):
+                decision = ShieldDecision.reject(directive, "assignment requires a future deadline and empty payload")
         if not decision.allowed:
             self.metrics.unsafe_rejections += 1
             self.events.emit(
@@ -481,12 +851,43 @@ class RangeSimulation:
         if isinstance(directive, Wait):
             return decision
 
+        if isinstance(directive, AssignStaffWork):
+            job = self._staff_jobs[directive.job_id]
+            # Reserve immediately, before the process is first scheduled. Two
+            # calls at one timestamp cannot both claim the final free worker.
+            staff = self._human_staff.request()
+            if not staff.triggered:  # shield and execution run synchronously
+                staff.cancel()
+                raise RuntimeError("shared-staff admission and reservation disagreed")
+            job.update(status="ASSIGNED", assigned_at_s=self.now)
+            self.events.emit(self.now, EventKind.STAFF_WORK_ASSIGNED,
+                             job_id=directive.job_id,
+                             work_kind=job.get("task_kind", "INSPECTION_REPHOTOGRAPHY"),
+                             **({"task_kind": job["task_kind"]} if self._session_inputs is not None else {}))
+            self.env.process(self._staff_work_proc(job, staff))
+            return decision
+
         robot = self._robots[directive.robot_id]
+        if (
+            isinstance(directive, SendToHandoff)
+            and self.is_same_active_assignment_handoff(directive)
+        ):
+            return decision
+        evidence = self._robot_assignments.get(robot.robot_id)
+        if evidence is not None:
+            continuation = (isinstance(directive, SendToHandoff)
+                            and evidence.collection_exit_reason is not None
+                            and directive.station_id in (None, evidence.candidate.handoff_station_id))
+            if not continuation:
+                self._terminal_assignment(robot, "HUMAN_ASSISTANCE_REQUIRED"
+                                          if isinstance(directive, RequestHumanAssistance) else "POLICY_PREEMPTED")
         if isinstance(directive, AssignCollection):
             # Commit the zone immediately so occupancy caps see it before the
             # task process first runs.
             robot.assigned_zone = directive.zone_id
             self._start_task(robot, self._task_collect(robot, directive.zone_id))
+            if matching_candidate:
+                self._start_assignment(robot, candidate)
         elif isinstance(directive, ReassignRobot):
             self.metrics.task_switches += 1
             self.events.emit(
@@ -535,6 +936,12 @@ class RangeSimulation:
     def advance(self, dt_s: float) -> None:
         """Advance simulated time by ``dt_s`` seconds and re-check invariants."""
         target = self.now + dt_s
+        if self._session_inputs is not None:
+            if not np.isfinite(dt_s) or dt_s <= 0:
+                raise ValueError("session advances must be positive and finite")
+            target = min(target, self.session_end_s)
+            if target <= self.now:
+                return
         self.env.run(until=target)
         # simpy stops slightly early if no event sits exactly at target;
         # run(until=t) guarantees now == t, so nothing more to do here.
@@ -576,6 +983,8 @@ class RangeSimulation:
         robot.task_proc = proc
 
     def _interrupt_task(self, robot: _Robot, cause: str) -> None:
+        if cause in ("zone_closed", "collection_access_blocked"):
+            self._collection_exit(robot, "COLLECTION_ACCESS_BLOCKED")
         proc = robot.task_proc
         if proc is None:
             return
@@ -594,7 +1003,9 @@ class RangeSimulation:
             return  # state set by the failure process
         if cause == "estop":
             return  # state set by the e-stop path
-        if cause in ("zone_closed", "station_outage"):
+        if cause == "assignment_boundary":
+            return  # settled synchronously by the exact boundary event
+        if cause in ("zone_closed", "station_outage", "collection_access_blocked"):
             robot.assigned_zone = None
             robot.destination_label = None
             self._set_activity(robot, RobotActivity.IDLE)
@@ -716,6 +1127,7 @@ class RangeSimulation:
             RobotActivity.CHARGING,
         ):
             return
+        self._terminal_assignment(robot, "LOW_BATTERY")
         self._interrupt_task(robot, "failure")
         self._set_activity(robot, RobotActivity.FAILED)
         robot.health = RobotHealth.FAILED
@@ -731,6 +1143,7 @@ class RangeSimulation:
         )
 
     def _fail_robot(self, robot: _Robot, note: str, human_required: bool = True) -> None:
+        self._terminal_assignment(robot, "ROBOT_FAULT")
         self._interrupt_task(robot, "failure")
         self._set_activity(robot, RobotActivity.FAILED)
         robot.health = RobotHealth.FAILED
@@ -752,6 +1165,7 @@ class RangeSimulation:
         Only the human-intervention path clears it. The learning policy has
         no action that can trigger OR clear an e-stop.
         """
+        self._terminal_assignment(robot, "ESTOP_LATCHED")
         self._interrupt_task(robot, "estop")
         self._set_activity(robot, RobotActivity.EMERGENCY_STOPPED)
         robot.estop_latched = True
@@ -847,6 +1261,7 @@ class RangeSimulation:
         robot_key = ledger_mod.robot_loc(robot.robot_id)
         while (
             zone.is_open
+            and self.collection_access_allowed(zone_id)
             and self.ledger.count(zone_key) > 0
             and robot.payload_balls < robot.payload_capacity
             and robot.battery_frac > self.scenario.safety.hard_battery_floor_frac
@@ -863,12 +1278,22 @@ class RangeSimulation:
             )
             yield self.env.timeout(outcome.duration_s)
             self._drain(robot, outcome.energy_wh)
+            # An exact-boundary timeout may be scheduled alongside the access
+            # event. Revalidate before any conserved balls move.
+            if not zone.is_open or not self.collection_access_allowed(zone_id):
+                break
+            if robot.robot_id in self._robot_assignments and robot.battery_frac <= self.scenario.safety.hard_battery_floor_frac:
+                self._check_battery_floor(robot)
+                return
             if not outcome.success:
                 self._fail_robot(robot, f"collection failure in {zone_id}")
                 return
             moved = self.ledger.move(zone_key, robot_key, n)
             robot.payload_balls += moved
             self.metrics.balls_collected += moved
+            self._assignment_event(robot, "RAW_COLLECTED_TO_ROBOT", balls=moved,
+                                   source_location=zone_key, destination_location=robot_key,
+                                   payload_after=robot.payload_balls)
             self.events.emit(
                 self.now,
                 EventKind.COLLECT_CYCLE,
@@ -879,6 +1304,14 @@ class RangeSimulation:
             )
             if robot.health is RobotHealth.FAILED:
                 return
+        if not zone.is_open or not self.collection_access_allowed(zone_id):
+            self._collection_exit(robot, "COLLECTION_ACCESS_BLOCKED")
+        elif robot.battery_frac <= self.scenario.safety.hard_battery_floor_frac:
+            self._terminal_assignment(robot, "LOW_BATTERY")
+        elif robot.payload_balls >= robot.payload_capacity:
+            self._collection_exit(robot, "ROBOT_PAYLOAD_FULL")
+        else:
+            self._collection_exit(robot, "ZONE_EMPTY")
         robot.assigned_zone = None
         self._set_activity(robot, RobotActivity.IDLE)
         self.events.emit(
@@ -984,6 +1417,9 @@ class RangeSimulation:
                 )
                 moved = self.ledger.move(robot_key, station_key, min(n, max(0, free_now)))
                 robot.payload_balls -= moved
+                self._assignment_event(robot, "UNLOADED_TO_STATION", balls=moved, station_id=station_id,
+                                       source_location=robot_key, destination_location=station_key,
+                                       payload_after=robot.payload_balls)
                 if moved > 0:
                     self.events.emit(
                         self.now,
@@ -992,6 +1428,25 @@ class RangeSimulation:
                         station_id=station_id,
                         balls=moved,
                     )
+                evidence = self._robot_assignments.get(robot.robot_id)
+                if evidence is not None:
+                    # Keep the completed ledger transfer, but resolve its
+                    # energy-induced protection before any success terminal.
+                    self._check_battery_floor(robot)
+                    if robot.activity is RobotActivity.FAILED:
+                        return
+                if evidence is not None and robot.payload_balls == 0:
+                    raw = evidence.quantity("RAW_COLLECTED_TO_ROBOT")
+                    valid = evidence.snapshot()
+                    if station_id != evidence.candidate.handoff_station_id:
+                        reason = "POLICY_PREEMPTED"
+                    elif (raw > 0 and evidence.quantity("UNLOADED_TO_STATION") == raw
+                          and valid["ledger_conserved"] and valid["robot_payload_parity"]):
+                        reason = ("UNLOADED_ALL_COLLECTED_BALLS" if evidence.collection_exit_reason == "ROBOT_PAYLOAD_FULL"
+                                  else evidence.collection_exit_reason)
+                    else:
+                        reason = "ROBOT_FAULT"
+                    self._terminal_assignment(robot, reason)
         self._set_activity(robot, RobotActivity.IDLE)
         self._check_battery_floor(robot)
 
@@ -1041,12 +1496,21 @@ class RangeSimulation:
     def _demand_proc(self) -> Generator:
         d = self.scenario.demand
         h = self.scenario.hours
-        while self.now < h.close_seconds:
+        while self.now < self.session_end_s:
             minute = self.minute_of_day
             rate = d.true_rate_at(minute)
-            self.metrics.open_minutes_elapsed += 1.0
+            if self._session_inputs is None or self.facility_open:
+                self.metrics.open_minutes_elapsed += 1.0
             open_zones = [z for z in sorted(self._zones) if self._zones[z].is_open]
-            if rate > 0 and open_zones:
+            if self._session_inputs is not None:
+                index = int(minute) - h.open_minute
+                requested = self._session_inputs["demand_by_minute"][index]
+                self._joint_demand_history.append({"minute": int(minute), "requested": requested})
+            elif self._joint_inputs is not None:
+                index = int(minute) - h.open_minute
+                requested = self._joint_inputs["demand_by_minute"][index] if open_zones else 0
+                self._joint_demand_history.append({"minute": int(minute), "requested": requested})
+            elif rate > 0 and open_zones:
                 # With every zone closed, customers cannot hit balls at all:
                 # that is not dispenser stockout, so no demand is drawn.
                 requested = int(self._rng_demand.poisson(rate))
@@ -1057,12 +1521,18 @@ class RangeSimulation:
                 served = min(requested, available)
                 self.metrics.demand_balls_total += requested
                 if served > 0:
-                    weights = np.array(
-                        [self._zones[z].cfg.landing_weight for z in open_zones],
-                        dtype=float,
-                    )
-                    weights = weights / weights.sum()
-                    landed = self._rng_demand.multinomial(served, weights)
+                    if self._session_inputs is not None:
+                        targets = self._session_inputs["landing_zones_by_minute"][index][:served]
+                        landed = [targets.count(zone_id) for zone_id in open_zones]
+                        if sum(landed) != served:
+                            raise RuntimeError("session landing target is closed; frozen inputs disagree")
+                    else:
+                        weights = np.array(
+                            [self._zones[z].cfg.landing_weight for z in open_zones],
+                            dtype=float,
+                        )
+                        weights = weights / weights.sum()
+                        landed = self._rng_demand.multinomial(served, weights)
                     for zone_id, n in zip(open_zones, landed):
                         if n > 0:
                             self.ledger.move(
@@ -1169,6 +1639,38 @@ class RangeSimulation:
         yield self.env.timeout(max(0.0, end_minute * 60.0 - self.now))
         zone.is_open = True
         self.events.emit(self.now, EventKind.ZONE_REOPENED, zone_id=zone.zone_id)
+
+    def _collection_block_proc(self, zone: _Zone, start_minute: int,
+                               end_minute: int) -> Generator:
+        """Weather access only; customer demand and landing remain unchanged."""
+        delay = max(0.0, start_minute * 60.0 - self.now)
+        if delay > 0:
+            yield self.env.timeout(delay)
+        self.events.emit(self.now, EventKind.COLLECTION_ACCESS_BLOCKED, zone_id=zone.zone_id)
+        for robot_id in sorted(self._robots):
+            robot = self._robots[robot_id]
+            if robot.assigned_zone == zone.zone_id:
+                self._interrupt_task(robot, "collection_access_blocked")
+        yield self.env.timeout(max(0.0, end_minute * 60.0 - self.now))
+        if self._session_inputs is None or self.collection_access_allowed(zone.zone_id):
+            self.events.emit(self.now, EventKind.COLLECTION_ACCESS_RESTORED, zone_id=zone.zone_id)
+
+    def _staff_work_proc(self, job: dict, staff) -> Generator:
+        """Nonpreemptive inspection labor in the existing robot-help pool."""
+        try:
+            yield staff
+            job.update(status="IN_PROGRESS", started_at_s=self.now)
+            self.events.emit(self.now, EventKind.STAFF_WORK_STARTED, job_id=job["job_id"],
+                             work_kind=job.get("task_kind", "INSPECTION_REPHOTOGRAPHY"), hole_number=job["hole_number"],
+                             checkpoint_id=job["checkpoint_id"],
+                             **({"task_kind": job["task_kind"]} if self._session_inputs is not None else {}))
+            yield self.env.timeout(job["duration_minutes"] * 60.0)
+            job.update(status="COMPLETED", completed_at_s=self.now)
+            self.events.emit(self.now, EventKind.STAFF_WORK_COMPLETED, job_id=job["job_id"],
+                             work_kind=job.get("task_kind", "INSPECTION_REPHOTOGRAPHY"), repair_verified=False,
+                             **({"task_kind": job["task_kind"]} if self._session_inputs is not None else {}))
+        finally:
+            self._human_staff.release(staff)
 
     def _station_outage_proc(
         self, station: _Station, start_minute: int, end_minute: int

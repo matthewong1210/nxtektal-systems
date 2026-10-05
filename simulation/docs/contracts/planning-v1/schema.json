@@ -1,0 +1,1642 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nxtektal:planning:v1",
+  "title": "NXTektal human-led planning API v1",
+  "description": "Wire shapes only. README.md defines cross-field ordering, identity, freshness, compare-and-swap and replay semantics. Quantities are explicit evidence; null preserves missingness.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/InputRequest"
+    },
+    {
+      "$ref": "#/$defs/PlanRequest"
+    },
+    {
+      "$ref": "#/$defs/ConfirmationRequest"
+    },
+    {
+      "$ref": "#/$defs/OutcomeRequest"
+    },
+    {
+      "$ref": "#/$defs/SuccessEnvelope"
+    },
+    {
+      "$ref": "#/$defs/ErrorEnvelope"
+    }
+  ],
+  "$defs": {
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{1,6})?Z$"
+    },
+    "SourceKind": {
+      "enum": [
+        "MEASURED",
+        "MANUAL_ESTIMATE"
+      ]
+    },
+    "Scope": {
+      "enum": [
+        "SHIFT",
+        "DAY",
+        "ONE_TASK"
+      ]
+    },
+    "Identity": {
+      "type": "object",
+      "properties": {
+        "site_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "site_id",
+        "deployment_id"
+      ],
+      "additionalProperties": false
+    },
+    "Selection": {
+      "type": "object",
+      "properties": {
+        "zone_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "robot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "zone_id",
+        "robot_id",
+        "start_at_utc"
+      ],
+      "additionalProperties": false
+    },
+    "YieldRange": {
+      "type": "object",
+      "properties": {
+        "low": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "high": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "low",
+        "high"
+      ],
+      "additionalProperties": false
+    },
+    "CycleStages": {
+      "type": "object",
+      "properties": {
+        "travel": {
+          "type": "number",
+          "minimum": 0
+        },
+        "collect": {
+          "type": "number",
+          "minimum": 0
+        },
+        "return": {
+          "type": "number",
+          "minimum": 0
+        },
+        "unload": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wash": {
+          "type": "number",
+          "minimum": 0
+        },
+        "supply": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "travel",
+        "collect",
+        "return",
+        "unload",
+        "wash",
+        "supply"
+      ],
+      "additionalProperties": false
+    },
+    "DemandRates": {
+      "type": "object",
+      "properties": {
+        "bucket_minutes": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "low": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 1
+        },
+        "typical": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 1
+        },
+        "high": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 1
+        }
+      },
+      "required": [
+        "bucket_minutes",
+        "low",
+        "typical",
+        "high"
+      ],
+      "additionalProperties": false
+    },
+    "BallsEvidence": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "unit": {
+          "const": "balls"
+        }
+      },
+      "required": [
+        "value",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "MinutesEvidence": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "unit": {
+          "const": "minutes"
+        }
+      },
+      "required": [
+        "value",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "BooleanEvidence": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "boolean"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "unit": {
+          "const": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "DemandEvidence": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/DemandRates"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "unit": {
+          "const": "balls/minute"
+        }
+      },
+      "required": [
+        "value",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "YieldEvidence": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/YieldRange"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "unit": {
+          "const": "balls"
+        }
+      },
+      "required": [
+        "value",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "CycleEvidence": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/CycleStages"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "unit": {
+          "const": "minutes"
+        }
+      },
+      "required": [
+        "value",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "unit"
+      ],
+      "additionalProperties": false
+    },
+    "OperatingWindow": {
+      "type": "object",
+      "properties": {
+        "start_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "end_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "start_at_utc",
+        "end_at_utc"
+      ],
+      "additionalProperties": false
+    },
+    "ZoneInput": {
+      "type": "object",
+      "properties": {
+        "zone_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "robot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "collection_allowed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BooleanEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clean_yield_balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/YieldEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cycle_minutes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CycleEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "zone_id",
+        "robot_id",
+        "collection_allowed",
+        "clean_yield_balls",
+        "cycle_minutes"
+      ],
+      "additionalProperties": false
+    },
+    "InputRequest": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning-input/v1"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "site_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "site_timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "effective_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "operating_window": {
+          "$ref": "#/$defs/OperatingWindow"
+        },
+        "inventory_clean_balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BallsEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "demand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DemandEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "safety_stock_balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BallsEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "buffer_minutes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MinutesEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operations_allowed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BooleanEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "washer_available": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BooleanEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ZoneInput"
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "expected_revision",
+        "site_id",
+        "deployment_id",
+        "site_timezone",
+        "operator",
+        "reason",
+        "scope",
+        "effective_at_utc",
+        "valid_until_utc",
+        "operating_window",
+        "inventory_clean_balls",
+        "demand",
+        "safety_stock_balls",
+        "buffer_minutes",
+        "operations_allowed",
+        "washer_available",
+        "zones"
+      ],
+      "additionalProperties": false
+    },
+    "Change": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "before": {},
+        "after": {}
+      },
+      "required": [
+        "path",
+        "before",
+        "after"
+      ],
+      "additionalProperties": false
+    },
+    "InputRecord": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning-input/v1"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "site_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "site_timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "effective_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "operating_window": {
+          "$ref": "#/$defs/OperatingWindow"
+        },
+        "inventory_clean_balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BallsEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "demand": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DemandEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "safety_stock_balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BallsEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "buffer_minutes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MinutesEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operations_allowed": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BooleanEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "washer_available": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BooleanEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "zones": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ZoneInput"
+          }
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "recorded_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Change"
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "expected_revision",
+        "site_id",
+        "deployment_id",
+        "site_timezone",
+        "operator",
+        "reason",
+        "scope",
+        "effective_at_utc",
+        "valid_until_utc",
+        "operating_window",
+        "inventory_clean_balls",
+        "demand",
+        "safety_stock_balls",
+        "buffer_minutes",
+        "operations_allowed",
+        "washer_available",
+        "zones",
+        "revision",
+        "input_digest",
+        "recorded_at_utc",
+        "changes"
+      ],
+      "additionalProperties": false
+    },
+    "PlanRequest": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning-request/v1"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_plan_version": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "plan_id",
+        "expected_plan_version",
+        "input_revision",
+        "operator",
+        "reason",
+        "scope",
+        "valid_until_utc",
+        "selection"
+      ],
+      "additionalProperties": false
+    },
+    "Adjustment": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "before",
+        "after",
+        "operator",
+        "reason",
+        "scope",
+        "valid_until_utc"
+      ],
+      "additionalProperties": false
+    },
+    "Scenario": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "enum": [
+            "low",
+            "typical",
+            "high"
+          ]
+        },
+        "baseline_stockout_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "safety_stock_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "with_plan_stockout_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseline_end_balls": {
+          "type": "number"
+        },
+        "with_plan_end_balls": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "level",
+        "baseline_stockout_at_utc",
+        "safety_stock_at_utc",
+        "with_plan_stockout_at_utc",
+        "baseline_end_balls",
+        "with_plan_end_balls"
+      ],
+      "additionalProperties": false
+    },
+    "Candidate": {
+      "type": "object",
+      "properties": {
+        "zone_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "robot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eligible": {
+          "type": "boolean"
+        },
+        "exclusion_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "start_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latest_start_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supply_at_utc": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cycle_minutes": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clean_yield_balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/YieldRange"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "protects_high_demand_horizon": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "zone_id",
+        "robot_id",
+        "eligible",
+        "exclusion_reasons",
+        "start_at_utc",
+        "latest_start_at_utc",
+        "supply_at_utc",
+        "cycle_minutes",
+        "clean_yield_balls",
+        "protects_high_demand_horizon"
+      ],
+      "additionalProperties": false
+    },
+    "PlanRecord": {
+      "type": "object",
+      "properties": {
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "request": {
+          "$ref": "#/$defs/PlanRequest"
+        },
+        "input_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rules_version": {
+          "const": "human-led-ball-supply/v1"
+        },
+        "generated_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "status": {
+          "enum": [
+            "READY",
+            "MISSING_DATA",
+            "EXPIRED",
+            "INFEASIBLE"
+          ]
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "rationale": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "system_selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "selection": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Selection"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adjustment": {
+          "$ref": "#/$defs/Adjustment"
+        },
+        "scenarios": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Scenario"
+          },
+          "maxItems": 3
+        },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          }
+        },
+        "current_status": {
+          "enum": [
+            "READY",
+            "MISSING_DATA",
+            "EXPIRED",
+            "INFEASIBLE",
+            "INVALIDATED",
+            "CONFIRMED"
+          ]
+        }
+      },
+      "required": [
+        "plan_id",
+        "version",
+        "request",
+        "input_revision",
+        "input_digest",
+        "rules_version",
+        "generated_at_utc",
+        "valid_until_utc",
+        "status",
+        "missing",
+        "rationale",
+        "system_selection",
+        "selection",
+        "adjustment",
+        "scenarios",
+        "candidates"
+      ],
+      "additionalProperties": false
+    },
+    "ConfirmationRequest": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning-confirmation/v1"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "plan_id",
+        "plan_version",
+        "operator"
+      ],
+      "additionalProperties": false
+    },
+    "ScheduleCreationPayload": {
+      "type": "object",
+      "properties": {
+        "robot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "zone_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "due_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "expires_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "admission_reference": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "robot_id",
+        "zone_id",
+        "due_at_utc",
+        "expires_at_utc",
+        "operator",
+        "admission_reference"
+      ],
+      "additionalProperties": false
+    },
+    "ConfirmationRecord": {
+      "type": "object",
+      "properties": {
+        "confirmation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "request": {
+          "$ref": "#/$defs/ConfirmationRequest"
+        },
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "confirmed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "schedule_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "schedule": {
+          "$ref": "#/$defs/ScheduleCreationPayload"
+        },
+        "schedule_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "SCHEDULED",
+                "DISPATCHED",
+                "CANCELLED",
+                "REJECTED",
+                "MISSED"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "task_created_at_utc": {
+          "description": "GET snapshot projection only: verified associated Edge TASK_CREATED.recorded_at_utc; null before admission. Absent in legacy responses and durable receipts. A lower bound for actual stage starts, never proof that a stage began.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UtcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "confirmation_id",
+        "request",
+        "plan_id",
+        "plan_version",
+        "input_revision",
+        "confirmed_at_utc",
+        "schedule_id",
+        "schedule"
+      ],
+      "additionalProperties": false
+    },
+    "OutcomeRequest": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning-outcome/v1"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confirmation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "task_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stage": {
+          "enum": [
+            "COLLECTED",
+            "UNLOADED",
+            "WASHED",
+            "SUPPLIED"
+          ]
+        },
+        "quantity_balls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "started_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "completed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "source_kind": {
+          "$ref": "#/$defs/SourceKind"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supersedes_outcome_id": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "confirmation_id",
+        "task_id",
+        "operator",
+        "reason",
+        "stage",
+        "quantity_balls",
+        "started_at_utc",
+        "completed_at_utc",
+        "source_kind",
+        "source_ref",
+        "supersedes_outcome_id"
+      ],
+      "additionalProperties": false
+    },
+    "OutcomeRecord": {
+      "type": "object",
+      "properties": {
+        "outcome_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recorded_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "evidence_kind": {
+          "const": "ACTUAL_EXECUTION_RESULT"
+        },
+        "request": {
+          "$ref": "#/$defs/OutcomeRequest"
+        },
+        "plan_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "input_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schedule_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "outcome_id",
+        "recorded_at_utc",
+        "evidence_kind",
+        "request",
+        "plan_id",
+        "plan_version",
+        "input_revision",
+        "schedule_id"
+      ],
+      "additionalProperties": false
+    },
+    "MutationReceipt": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning/v1"
+        },
+        "disposition": {
+          "enum": [
+            "created",
+            "duplicate"
+          ]
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/InputRecord"
+            },
+            {
+              "$ref": "#/$defs/PlanRecord"
+            },
+            {
+              "$ref": "#/$defs/ConfirmationRecord"
+            },
+            {
+              "$ref": "#/$defs/OutcomeRecord"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "disposition",
+        "request_id",
+        "record"
+      ],
+      "additionalProperties": false
+    },
+    "Context": {
+      "type": "object",
+      "properties": {
+        "site_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "site_timezone": {
+          "type": "string",
+          "minLength": 1
+        },
+        "zone_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "robot_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "site_id",
+        "deployment_id",
+        "site_timezone",
+        "zone_ids",
+        "robot_ids"
+      ],
+      "additionalProperties": false
+    },
+    "Snapshot": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-planning/v1"
+        },
+        "environment": {
+          "const": "SIMULATION"
+        },
+        "mode": {
+          "const": "MANUAL_LED"
+        },
+        "server_time_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "context": {
+          "$ref": "#/$defs/Context"
+        },
+        "latest_input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanRecord"
+          }
+        },
+        "confirmations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConfirmationRecord"
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/OutcomeRecord"
+          }
+        }
+      },
+      "required": [
+        "schema",
+        "environment",
+        "mode",
+        "server_time_utc",
+        "context",
+        "latest_input",
+        "plans",
+        "confirmations",
+        "outcomes"
+      ],
+      "additionalProperties": false
+    },
+    "SuccessEnvelope": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-site-agent/api/v0"
+        },
+        "disclaimer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "data": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MutationReceipt"
+            },
+            {
+              "$ref": "#/$defs/Snapshot"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "disclaimer",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "planning_invalid_request",
+            "planning_not_found",
+            "planning_request_not_found",
+            "planning_conflict",
+            "planning_expired",
+            "planning_not_ready",
+            "planning_unavailable",
+            "planning_result_unknown"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "code",
+        "detail"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-site-agent/api/v0"
+        },
+        "disclaimer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "error": {
+          "$ref": "#/$defs/Error"
+        }
+      },
+      "required": [
+        "schema",
+        "disclaimer",
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

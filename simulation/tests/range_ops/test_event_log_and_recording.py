@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import hashlib
+
+import numpy as np
 
 from nxt_range_ops.env.range_ops_env import RangeOpsEnv
 from nxt_range_ops.evaluation.harness import run_episode
@@ -96,3 +99,31 @@ def test_event_log_reproducible_and_ordered():
     assert times == sorted(times)
     kinds = {e["kind"] for e in log_a}
     assert "episode_start" in kinds and "facility_closed" in kinds
+
+
+def test_v3_disabled_and_unarmed_preserve_legacy_bytes_actions_observations_rng():
+    scenario = make_scenario("noisy_inventory_sensor")
+    envs = [RangeOpsEnv(scenario), RangeOpsEnv(scenario, collection_assignment_evidence=False),
+            RangeOpsEnv(scenario, collection_assignment_evidence=True)]
+    policies = [make_baseline("inventory_threshold", scenario, env.catalog, seed=53) for env in envs]
+    states = [env.reset(seed=53) for env in envs]
+    for policy in policies:
+        policy.reset()
+    for _ in range(80):
+        actions = [policy.act(*state) for policy, state in zip(policies, states)]
+        assert actions == [actions[0]] * 3
+        results = [env.step(action) for env, action in zip(envs, actions)]
+        for result in results[1:]:
+            assert result[1:4] == results[0][1:4]
+            for key in results[0][0]:
+                np.testing.assert_array_equal(result[0][key], results[0][0][key])
+        states = [(result[0], result[4]) for result in results]
+    for env in envs:
+        encoded = json.dumps(env.sim.events.to_dicts(), sort_keys=True, separators=(",", ":")).encode()
+        # Frozen from the pre-V3 implementation at c0dbc08, same scenario,
+        # seed, policy and 80 decisions. This catches shared legacy drift too.
+        assert hashlib.sha256(encoded).hexdigest() == "57dce932530e621ef1444fd023f19f5dc933f7dbd87794ca10054dbb14ccae5f"
+        assert env.collection_assignment_snapshot("unused") is None
+        assert env.sim.metrics == envs[0].sim.metrics
+        for name in ("_rng_demand", "_rng_skills", "_rng_failures", "_rng_sensors", "_rng_forecast"):
+            assert getattr(env.sim, name).bit_generator.state == getattr(envs[0].sim, name).bit_generator.state

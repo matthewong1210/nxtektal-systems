@@ -20,6 +20,8 @@ range-ops = [
     "numpy>=1.26",
     "pyarrow>=16.0",
 ]
+# CPU synthetic camera scripts; no renderer/image library enters core packages.
+course-camera = ["pillow>=12.3,<13", "numpy>=1.26"]
 # Streamlit demo viewer (nxt_range_demo) — presentation only, reads exported
 # bundles from nxt_range_viewer; no simulator dependency.
 demo = [
@@ -70,6 +72,11 @@ build-backend = "hatchling.build"
 # features, controlled map revisions, and the deterministic read-only Map
 # Query Service. It owns no commissioning, state, readiness, projection,
 # navigation, or execution semantics.
+# nxt_site_agent is the local, fixture-backed Pilot Site Agent application
+# boundary: readiness-gated service lifecycle around the existing Agent
+# Runtime, the versioned loopback-only Manager API, and noncanonical
+# projections. It owns no observation, state, policy, recommendation,
+# trace, workflow, ledger, checkpoint, or physical command semantics.
 # nxt_edge_task is the SIMULATION-only Edge <-> robot task-exchange rehearsal
 # contract: versioned wire messages, the Edge task/device journal derivation,
 # and the protocol double's executor rules. It is stdlib-only, imports no
@@ -79,7 +86,7 @@ build-backend = "hatchling.build"
 # state, reminder/escalation rules, and the loopback test-receiver receipt
 # rules. It is stdlib-only, imports no other nxt_* package, and owns no
 # task, device, transport, real notification, recovery, or execution semantics.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement", "nxt_course_world_model", "nxt_edge_task", "nxt_edge_interventions"]
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement", "nxt_course_world_model", "nxt_edge_task", "nxt_edge_interventions", "nxt_site_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

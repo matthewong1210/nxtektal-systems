@@ -12,6 +12,7 @@ logging, and evaluation.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Callable, Optional
 
 import gymnasium as gym
@@ -20,6 +21,8 @@ from gymnasium import spaces
 
 from nxt_range_ops.config.models import RangeOpsScenario
 from nxt_range_ops.core.entities import RobotActivity, RobotHealth
+from nxt_range_ops.core.joint_inputs import validate_joint_inputs
+from nxt_range_ops.core.session_inputs import validate_session_inputs
 from nxt_range_ops.core.sim import RangeSimulation
 from nxt_range_ops.core.skills import SkillOutcomeModel
 from nxt_range_ops.env.actions import ActionCatalog
@@ -30,7 +33,7 @@ _HEALTH_ORDER = list(RobotHealth)
 
 
 class RangeOpsEnv(gym.Env):
-    """Centralized fleet-operations environment over one operating day."""
+    """Fleet operations over a legacy day or an opt-in finite multi-day session."""
 
     metadata = {"render_modes": []}
 
@@ -40,11 +43,25 @@ class RangeOpsEnv(gym.Env):
         skill_model_factory: Optional[
             Callable[[RangeOpsScenario], SkillOutcomeModel]
         ] = None,
+        *,
+        joint_inputs: dict | None = None,
+        session_inputs: dict | None = None,
+        collection_assignment_evidence: bool = False,
     ):
         super().__init__()
+        if joint_inputs is not None and session_inputs is not None:
+            raise ValueError("joint_inputs and session_inputs are mutually exclusive")
         self.scenario = scenario
+        self._collection_assignment_evidence = collection_assignment_evidence
+        self._joint_inputs = validate_joint_inputs(joint_inputs, zone_ids=scenario.zone_ids,
+                                                  open_minute=scenario.hours.open_minute,
+                                                  close_minute=scenario.hours.close_minute)
+        self._session_inputs = validate_session_inputs(session_inputs, zone_ids=scenario.zone_ids,
+                                                      open_minute=scenario.hours.open_minute,
+                                                      close_minute=scenario.hours.close_minute)
         self._skill_model_factory = skill_model_factory
-        self.catalog = ActionCatalog(scenario)
+        self.catalog = ActionCatalog(scenario, joint_inputs=self._joint_inputs,
+                                     session_inputs=self._session_inputs)
         self.sim: Optional[RangeSimulation] = None
         self._episode_seed: Optional[int] = None
         self._steps = 0
@@ -108,7 +125,9 @@ class RangeOpsEnv(gym.Env):
             if self._skill_model_factory is not None
             else None
         )
-        self.sim = RangeSimulation(self.scenario, self._episode_seed, skill_model)
+        self.sim = RangeSimulation(self.scenario, self._episode_seed, skill_model,
+                                   joint_inputs=self._joint_inputs, session_inputs=self._session_inputs,
+                                   collection_assignment_evidence=self._collection_assignment_evidence)
         self._steps = 0
         self._metrics_prev = self.sim.metrics.copy()
         obs = self._build_obs()
@@ -121,6 +140,8 @@ class RangeOpsEnv(gym.Env):
     def step(self, action: int) -> tuple[dict, float, bool, bool, dict]:
         if self.sim is None:
             raise RuntimeError("call reset() before step()")
+        if self._session_inputs is not None and self.sim.facility_closed:
+            raise RuntimeError("the finite session has already completed")
         directive = self.catalog.decode(action)
         # Non-bypassable: apply_directive re-validates via the SafetyShield.
         decision = self.sim.apply_directive(directive)
@@ -144,6 +165,47 @@ class RangeOpsEnv(gym.Env):
             truncated=truncated,
         )
         return obs, total, terminated, truncated, info
+
+    def arm_collection_assignment(self, execution_id: str, robot_id: str, zone_id: str,
+                                  handoff_station_id: str, execution_deadline_sim_t_s: float) -> None:
+        """Register a candidate only; the selected action still enters via step()."""
+        if self.sim is None:
+            raise RuntimeError("call reset() before arming an assignment")
+        self.sim.arm_collection_assignment(execution_id, robot_id, zone_id,
+                                          handoff_station_id, execution_deadline_sim_t_s)
+
+    def collection_assignment_snapshot(self, execution_id: str) -> dict | None:
+        if self.sim is None:
+            raise RuntimeError("call reset() before reading assignment evidence")
+        return self.sim.collection_assignment_snapshot(execution_id)
+
+    def disarm_collection_assignment(self, execution_id: str) -> None:
+        """Clear an exact unstarted candidate after its caller records rejection."""
+        if self.sim is None:
+            raise RuntimeError("call reset() before disarming an assignment")
+        self.sim.disarm_collection_assignment(execution_id)
+
+    def admit_observation_job(self, job_id: str, observation_id: str, evidence_ref: str,
+                              captured_minute: int, deadline_minute: int) -> dict:
+        """Admit observed synthetic work, without selecting or executing an action."""
+        if self.sim is None:
+            raise RuntimeError("call reset() before admitting observations")
+        return self.sim.admit_observation_job(job_id, observation_id, evidence_ref,
+                                             captured_minute, deadline_minute)
+
+    def refresh_observation_info(self) -> tuple[dict, dict]:
+        """Refresh released jobs and masks without drawing another sensed sample.
+
+        Used between an observation admission and a policy decision. Runtime
+        time, fleet and sensor samples have not advanced. Returning a detached
+        copy also prevents a caller from mutating the cached observation.
+        """
+        if self.sim is None or self._last_obs is None:
+            raise RuntimeError("call reset() before refreshing observations")
+        return deepcopy(self._last_obs), self._build_info(
+            action_taken=None, decision=None, reward_components=None,
+            terminated=self.sim.facility_closed,
+            truncated=not self.sim.facility_closed and self._steps >= self.scenario.episode.max_steps)
 
     def action_masks(self) -> np.ndarray:
         """Boolean validity mask over the flat action catalog.
@@ -175,17 +237,20 @@ class RangeOpsEnv(gym.Env):
         sensed_zones = sim.sensed_zone_counts()
         total = float(s.total_balls)
         day_len_min = (s.hours.close_minute - s.hours.open_minute) or 1
+        display_minute = (sim.minute_of_day % 1440 if self._session_inputs is not None
+                          else sim.minute_of_day)
 
         n_forecast = self.observation_space["demand_forecast"].shape[0]
         forecast = np.asarray(sim.forecast_window(), dtype=np.float32)[:n_forecast]
 
         return {
             "minute_of_day": np.array(
-                [sim.minute_of_day / 1440.0], dtype=np.float32
+                [display_minute / 1440.0], dtype=np.float32
             ),
             "minutes_to_close": np.array(
                 [
-                    max(0.0, s.hours.close_minute - sim.minute_of_day) / day_len_min
+                    (max(0.0, s.hours.close_minute - display_minute) / day_len_min
+                     if self._session_inputs is None or sim.facility_open else 0.0)
                 ],
                 dtype=np.float32,
             ),
@@ -249,7 +314,7 @@ class RangeOpsEnv(gym.Env):
         sim = self.sim
         termination_reason = None
         if terminated:
-            termination_reason = "day_complete"
+            termination_reason = "session_complete" if self._session_inputs is not None else "day_complete"
         elif truncated:
             termination_reason = "max_steps"
         info: dict[str, Any] = {
@@ -264,6 +329,16 @@ class RangeOpsEnv(gym.Env):
             "stations": [s.to_dict() for s in self._last_stations],
             "termination_reason": termination_reason,
         }
+        if self._joint_inputs is not None or self._session_inputs is not None:
+            capacity, busy, queued = sim.staff_summary()
+            info["joint_ops"] = {
+                "staff": {"capacity": capacity, "busy": busy, "queued": queued},
+                "staff_jobs": sim.staff_work_snapshots(),
+                "collection_access": {zone_id: sim.collection_access_allowed(zone_id)
+                                      for zone_id in sorted(self.scenario.zone_ids)},
+            }
+        if self._session_inputs is not None:
+            info["session_progress"] = sim.session_progress
         if action_taken is not None:
             info["action"] = action_taken
             info["action_name"] = self.catalog.name_of(action_taken)

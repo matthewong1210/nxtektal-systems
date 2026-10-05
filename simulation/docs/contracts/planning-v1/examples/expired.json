@@ -1,0 +1,33 @@
+{
+  "description": "Given the success input/plan but no confirmation, equality with plan expiry rejects confirmation. No new schedule is created.",
+  "clock_at_utc": "2026-09-16T09:10:00Z",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/confirmations",
+        "schema_ref": "#/$defs/ConfirmationRequest",
+        "body": {
+          "schema": "nxt-planning-confirmation/v1",
+          "request_id": "expired-confirm-001",
+          "plan_id": "plan_example_001",
+          "plan_version": 1,
+          "operator": "course-manager"
+        }
+      },
+      "response": {
+        "http_status": 409,
+        "schema_ref": "#/$defs/ErrorEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "error": {
+            "code": "planning_expired",
+            "detail": "The specified plan is expired at the supplied server time."
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T09:10:00Z"
+    }
+  ]
+}

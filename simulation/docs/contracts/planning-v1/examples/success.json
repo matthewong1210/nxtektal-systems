@@ -1,0 +1,1153 @@
+{
+  "description": "Ordered complete example at explicit per-record times. Content IDs are illustrative: use IDs returned by the service when replaying requests. The task is a protocol double; all four stage quantities are separate operator evidence.",
+  "clock_at_utc": "2026-09-16T08:00:00Z",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/planning"
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "environment": "SIMULATION",
+            "mode": "MANUAL_LED",
+            "server_time_utc": "2026-09-16T08:00:00Z",
+            "context": {
+              "site_id": "pilot-course-a",
+              "deployment_id": "pilot-a-edge-task-sim-v0",
+              "site_timezone": "Asia/Shanghai",
+              "zone_ids": [
+                "Z1"
+              ],
+              "robot_ids": [
+                "picker-01"
+              ]
+            },
+            "latest_input": null,
+            "plans": [],
+            "confirmations": [],
+            "outcomes": []
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:00:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/inputs",
+        "schema_ref": "#/$defs/InputRequest",
+        "body": {
+          "schema": "nxt-planning-input/v1",
+          "request_id": "demo-input-001",
+          "expected_revision": 0,
+          "site_id": "pilot-course-a",
+          "deployment_id": "pilot-a-edge-task-sim-v0",
+          "site_timezone": "Asia/Shanghai",
+          "operator": "course-manager",
+          "reason": "Opening count and explicitly estimated demand; no historical export available.",
+          "scope": "SHIFT",
+          "effective_at_utc": "2026-09-16T08:00:00Z",
+          "valid_until_utc": "2026-09-16T09:15:00Z",
+          "operating_window": {
+            "start_at_utc": "2026-09-16T08:00:00Z",
+            "end_at_utc": "2026-09-16T09:15:00Z"
+          },
+          "inventory_clean_balls": {
+            "value": 600,
+            "source_kind": "MEASURED",
+            "source_ref": "opening-clean-bin-count-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "demand": {
+            "value": {
+              "bucket_minutes": 10,
+              "low": [
+                5,
+                5,
+                5,
+                5,
+                5,
+                5
+              ],
+              "typical": [
+                10,
+                10,
+                10,
+                10,
+                10,
+                10
+              ],
+              "high": [
+                15,
+                15,
+                15,
+                15,
+                15,
+                15
+              ]
+            },
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-demand-assumptions-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls/minute"
+          },
+          "safety_stock_balls": {
+            "value": 200,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-safety-target-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "balls"
+          },
+          "buffer_minutes": {
+            "value": 2,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "manager-timing-margin-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "minutes"
+          },
+          "operations_allowed": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-work-window-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "washer_available": {
+            "value": true,
+            "source_kind": "MANUAL_ESTIMATE",
+            "source_ref": "operator-washer-check-001",
+            "observed_at_utc": "2026-09-16T08:00:00Z",
+            "valid_until_utc": "2026-09-16T09:30:00Z",
+            "unit": "boolean"
+          },
+          "zones": [
+            {
+              "zone_id": "Z1",
+              "robot_id": "picker-01",
+              "collection_allowed": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-zone-Z1-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "clean_yield_balls": {
+                "value": {
+                  "low": 400,
+                  "high": 500
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-zone-Z1-net-yield-estimate-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "cycle_minutes": {
+                "value": {
+                  "travel": 2,
+                  "collect": 5,
+                  "return": 2,
+                  "unload": 2,
+                  "wash": 3,
+                  "supply": 1
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-six-stage-duration-estimate-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "minutes"
+              }
+            }
+          ]
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-input-001",
+            "record": {
+              "schema": "nxt-planning-input/v1",
+              "request_id": "demo-input-001",
+              "expected_revision": 0,
+              "site_id": "pilot-course-a",
+              "deployment_id": "pilot-a-edge-task-sim-v0",
+              "site_timezone": "Asia/Shanghai",
+              "operator": "course-manager",
+              "reason": "Opening count and explicitly estimated demand; no historical export available.",
+              "scope": "SHIFT",
+              "effective_at_utc": "2026-09-16T08:00:00Z",
+              "valid_until_utc": "2026-09-16T09:15:00Z",
+              "operating_window": {
+                "start_at_utc": "2026-09-16T08:00:00Z",
+                "end_at_utc": "2026-09-16T09:15:00Z"
+              },
+              "inventory_clean_balls": {
+                "value": 600,
+                "source_kind": "MEASURED",
+                "source_ref": "opening-clean-bin-count-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "demand": {
+                "value": {
+                  "bucket_minutes": 10,
+                  "low": [
+                    5,
+                    5,
+                    5,
+                    5,
+                    5,
+                    5
+                  ],
+                  "typical": [
+                    10,
+                    10,
+                    10,
+                    10,
+                    10,
+                    10
+                  ],
+                  "high": [
+                    15,
+                    15,
+                    15,
+                    15,
+                    15,
+                    15
+                  ]
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-demand-assumptions-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls/minute"
+              },
+              "safety_stock_balls": {
+                "value": 200,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-safety-target-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "buffer_minutes": {
+                "value": 2,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-timing-margin-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "minutes"
+              },
+              "operations_allowed": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-work-window-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "washer_available": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-washer-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "zones": [
+                {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "collection_allowed": {
+                    "value": true,
+                    "source_kind": "MANUAL_ESTIMATE",
+                    "source_ref": "operator-zone-Z1-check-001",
+                    "observed_at_utc": "2026-09-16T08:00:00Z",
+                    "valid_until_utc": "2026-09-16T09:30:00Z",
+                    "unit": "boolean"
+                  },
+                  "clean_yield_balls": {
+                    "value": {
+                      "low": 400,
+                      "high": 500
+                    },
+                    "source_kind": "MANUAL_ESTIMATE",
+                    "source_ref": "operator-zone-Z1-net-yield-estimate-001",
+                    "observed_at_utc": "2026-09-16T08:00:00Z",
+                    "valid_until_utc": "2026-09-16T09:30:00Z",
+                    "unit": "balls"
+                  },
+                  "cycle_minutes": {
+                    "value": {
+                      "travel": 2,
+                      "collect": 5,
+                      "return": 2,
+                      "unload": 2,
+                      "wash": 3,
+                      "supply": 1
+                    },
+                    "source_kind": "MANUAL_ESTIMATE",
+                    "source_ref": "operator-six-stage-duration-estimate-001",
+                    "observed_at_utc": "2026-09-16T08:00:00Z",
+                    "valid_until_utc": "2026-09-16T09:30:00Z",
+                    "unit": "minutes"
+                  }
+                }
+              ],
+              "revision": 1,
+              "input_digest": "4c3600d256e776f0f1ea97dd5ec0c06f0c0192dc979871f0a27181f13851d059",
+              "recorded_at_utc": "2026-09-16T08:00:00Z",
+              "changes": []
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:00:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/plans",
+        "schema_ref": "#/$defs/PlanRequest",
+        "body": {
+          "schema": "nxt-planning-request/v1",
+          "request_id": "demo-plan-001",
+          "plan_id": null,
+          "expected_plan_version": 0,
+          "input_revision": 1,
+          "operator": "course-manager",
+          "reason": "Delay departure four minutes to complete the local zone check.",
+          "scope": "ONE_TASK",
+          "valid_until_utc": "2026-09-16T09:10:00Z",
+          "selection": {
+            "zone_id": "Z1",
+            "robot_id": "picker-01",
+            "start_at_utc": "2026-09-16T08:05:00Z"
+          }
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-plan-001",
+            "record": {
+              "plan_id": "plan_example_001",
+              "version": 1,
+              "request": {
+                "schema": "nxt-planning-request/v1",
+                "request_id": "demo-plan-001",
+                "plan_id": null,
+                "expected_plan_version": 0,
+                "input_revision": 1,
+                "operator": "course-manager",
+                "reason": "Delay departure four minutes to complete the local zone check.",
+                "scope": "ONE_TASK",
+                "valid_until_utc": "2026-09-16T09:10:00Z",
+                "selection": {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "start_at_utc": "2026-09-16T08:05:00Z"
+                }
+              },
+              "input_revision": 1,
+              "input_digest": "4c3600d256e776f0f1ea97dd5ec0c06f0c0192dc979871f0a27181f13851d059",
+              "rules_version": "human-led-ball-supply/v1",
+              "generated_at_utc": "2026-09-16T08:01:00Z",
+              "valid_until_utc": "2026-09-16T09:10:00Z",
+              "status": "READY",
+              "missing": [],
+              "rationale": [
+                "Explicit manual demand scenarios; conservative comparison uses high demand and low net yield.",
+                "Full replenishment includes manual unloading, washing and supply stages."
+              ],
+              "system_selection": {
+                "zone_id": "Z1",
+                "robot_id": "picker-01",
+                "start_at_utc": "2026-09-16T08:01:00Z"
+              },
+              "selection": {
+                "zone_id": "Z1",
+                "robot_id": "picker-01",
+                "start_at_utc": "2026-09-16T08:05:00Z"
+              },
+              "adjustment": {
+                "before": {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "start_at_utc": "2026-09-16T08:01:00Z"
+                },
+                "after": {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "start_at_utc": "2026-09-16T08:05:00Z"
+                },
+                "operator": "course-manager",
+                "reason": "Delay departure four minutes to complete the local zone check.",
+                "scope": "ONE_TASK",
+                "valid_until_utc": "2026-09-16T09:10:00Z"
+              },
+              "scenarios": [
+                {
+                  "level": "low",
+                  "baseline_stockout_at_utc": null,
+                  "safety_stock_at_utc": null,
+                  "with_plan_stockout_at_utc": null,
+                  "baseline_end_balls": 300,
+                  "with_plan_end_balls": 700
+                },
+                {
+                  "level": "typical",
+                  "baseline_stockout_at_utc": "2026-09-16T09:00:00Z",
+                  "safety_stock_at_utc": "2026-09-16T08:40:00Z",
+                  "with_plan_stockout_at_utc": null,
+                  "baseline_end_balls": 0,
+                  "with_plan_end_balls": 400
+                },
+                {
+                  "level": "high",
+                  "baseline_stockout_at_utc": "2026-09-16T08:40:00Z",
+                  "safety_stock_at_utc": "2026-09-16T08:26:40Z",
+                  "with_plan_stockout_at_utc": null,
+                  "baseline_end_balls": -300,
+                  "with_plan_end_balls": 100
+                }
+              ],
+              "candidates": [
+                {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "eligible": true,
+                  "exclusion_reasons": [],
+                  "start_at_utc": "2026-09-16T08:05:00Z",
+                  "latest_start_at_utc": "2026-09-16T08:09:40Z",
+                  "supply_at_utc": "2026-09-16T08:20:00Z",
+                  "cycle_minutes": 15,
+                  "clean_yield_balls": {
+                    "low": 400,
+                    "high": 500
+                  },
+                  "protects_high_demand_horizon": true
+                }
+              ]
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:01:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/confirmations",
+        "schema_ref": "#/$defs/ConfirmationRequest",
+        "body": {
+          "schema": "nxt-planning-confirmation/v1",
+          "request_id": "demo-confirm-001",
+          "plan_id": "plan_example_001",
+          "plan_version": 1,
+          "operator": "course-manager"
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-confirm-001",
+            "record": {
+              "confirmation_id": "confirmation_example_001",
+              "request": {
+                "schema": "nxt-planning-confirmation/v1",
+                "request_id": "demo-confirm-001",
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "operator": "course-manager"
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "confirmed_at_utc": "2026-09-16T08:02:00Z",
+              "schedule_id": "schedule_example_001",
+              "schedule": {
+                "robot_id": "picker-01",
+                "zone_id": "Z1",
+                "due_at_utc": "2026-09-16T08:05:00Z",
+                "expires_at_utc": "2026-09-16T08:09:40Z",
+                "operator": "planning-7c3d683a12604724916c7768",
+                "admission_reference": "confirmation_example_001"
+              }
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:02:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/outcomes",
+        "schema_ref": "#/$defs/OutcomeRequest",
+        "body": {
+          "schema": "nxt-planning-outcome/v1",
+          "request_id": "demo-outcome-001",
+          "confirmation_id": "confirmation_example_001",
+          "task_id": "task_example_001",
+          "operator": "course-operator",
+          "reason": "Recorded independently after this stage completed.",
+          "stage": "COLLECTED",
+          "quantity_balls": 520,
+          "started_at_utc": "2026-09-16T08:07:00Z",
+          "completed_at_utc": "2026-09-16T08:12:00Z",
+          "source_kind": "MEASURED",
+          "source_ref": "work-log-001-collected",
+          "supersedes_outcome_id": null
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-outcome-001",
+            "record": {
+              "outcome_id": "outcome_example_001",
+              "recorded_at_utc": "2026-09-16T08:12:00Z",
+              "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+              "request": {
+                "schema": "nxt-planning-outcome/v1",
+                "request_id": "demo-outcome-001",
+                "confirmation_id": "confirmation_example_001",
+                "task_id": "task_example_001",
+                "operator": "course-operator",
+                "reason": "Recorded independently after this stage completed.",
+                "stage": "COLLECTED",
+                "quantity_balls": 520,
+                "started_at_utc": "2026-09-16T08:07:00Z",
+                "completed_at_utc": "2026-09-16T08:12:00Z",
+                "source_kind": "MEASURED",
+                "source_ref": "work-log-001-collected",
+                "supersedes_outcome_id": null
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "schedule_id": "schedule_example_001"
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:12:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/outcomes",
+        "schema_ref": "#/$defs/OutcomeRequest",
+        "body": {
+          "schema": "nxt-planning-outcome/v1",
+          "request_id": "demo-outcome-002",
+          "confirmation_id": "confirmation_example_001",
+          "task_id": "task_example_001",
+          "operator": "course-operator",
+          "reason": "Recorded independently after this stage completed.",
+          "stage": "UNLOADED",
+          "quantity_balls": 510,
+          "started_at_utc": "2026-09-16T08:14:00Z",
+          "completed_at_utc": "2026-09-16T08:16:00Z",
+          "source_kind": "MANUAL_ESTIMATE",
+          "source_ref": "work-log-001-unloaded",
+          "supersedes_outcome_id": null
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-outcome-002",
+            "record": {
+              "outcome_id": "outcome_example_002",
+              "recorded_at_utc": "2026-09-16T08:16:00Z",
+              "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+              "request": {
+                "schema": "nxt-planning-outcome/v1",
+                "request_id": "demo-outcome-002",
+                "confirmation_id": "confirmation_example_001",
+                "task_id": "task_example_001",
+                "operator": "course-operator",
+                "reason": "Recorded independently after this stage completed.",
+                "stage": "UNLOADED",
+                "quantity_balls": 510,
+                "started_at_utc": "2026-09-16T08:14:00Z",
+                "completed_at_utc": "2026-09-16T08:16:00Z",
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "work-log-001-unloaded",
+                "supersedes_outcome_id": null
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "schedule_id": "schedule_example_001"
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:16:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/outcomes",
+        "schema_ref": "#/$defs/OutcomeRequest",
+        "body": {
+          "schema": "nxt-planning-outcome/v1",
+          "request_id": "demo-outcome-003",
+          "confirmation_id": "confirmation_example_001",
+          "task_id": "task_example_001",
+          "operator": "course-operator",
+          "reason": "Recorded independently after this stage completed.",
+          "stage": "WASHED",
+          "quantity_balls": 480,
+          "started_at_utc": "2026-09-16T08:16:00Z",
+          "completed_at_utc": "2026-09-16T08:19:00Z",
+          "source_kind": "MANUAL_ESTIMATE",
+          "source_ref": "work-log-001-washed",
+          "supersedes_outcome_id": null
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-outcome-003",
+            "record": {
+              "outcome_id": "outcome_example_003",
+              "recorded_at_utc": "2026-09-16T08:19:00Z",
+              "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+              "request": {
+                "schema": "nxt-planning-outcome/v1",
+                "request_id": "demo-outcome-003",
+                "confirmation_id": "confirmation_example_001",
+                "task_id": "task_example_001",
+                "operator": "course-operator",
+                "reason": "Recorded independently after this stage completed.",
+                "stage": "WASHED",
+                "quantity_balls": 480,
+                "started_at_utc": "2026-09-16T08:16:00Z",
+                "completed_at_utc": "2026-09-16T08:19:00Z",
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "work-log-001-washed",
+                "supersedes_outcome_id": null
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "schedule_id": "schedule_example_001"
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:19:00Z"
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/planning/outcomes",
+        "schema_ref": "#/$defs/OutcomeRequest",
+        "body": {
+          "schema": "nxt-planning-outcome/v1",
+          "request_id": "demo-outcome-004",
+          "confirmation_id": "confirmation_example_001",
+          "task_id": "task_example_001",
+          "operator": "course-operator",
+          "reason": "Recorded independently after this stage completed.",
+          "stage": "SUPPLIED",
+          "quantity_balls": 470,
+          "started_at_utc": "2026-09-16T08:19:00Z",
+          "completed_at_utc": "2026-09-16T08:20:00Z",
+          "source_kind": "MEASURED",
+          "source_ref": "work-log-001-supplied",
+          "supersedes_outcome_id": null
+        }
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "disposition": "created",
+            "request_id": "demo-outcome-004",
+            "record": {
+              "outcome_id": "outcome_example_004",
+              "recorded_at_utc": "2026-09-16T08:20:00Z",
+              "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+              "request": {
+                "schema": "nxt-planning-outcome/v1",
+                "request_id": "demo-outcome-004",
+                "confirmation_id": "confirmation_example_001",
+                "task_id": "task_example_001",
+                "operator": "course-operator",
+                "reason": "Recorded independently after this stage completed.",
+                "stage": "SUPPLIED",
+                "quantity_balls": 470,
+                "started_at_utc": "2026-09-16T08:19:00Z",
+                "completed_at_utc": "2026-09-16T08:20:00Z",
+                "source_kind": "MEASURED",
+                "source_ref": "work-log-001-supplied",
+                "supersedes_outcome_id": null
+              },
+              "plan_id": "plan_example_001",
+              "plan_version": 1,
+              "input_revision": 1,
+              "schedule_id": "schedule_example_001"
+            }
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:20:00Z"
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/planning"
+      },
+      "response": {
+        "http_status": 200,
+        "schema_ref": "#/$defs/SuccessEnvelope",
+        "body": {
+          "schema": "nxt-site-agent/api/v0",
+          "disclaimer": "SIMULATION ONLY \u2014 manual estimates and protocol doubles; no physical action or learned forecast.",
+          "data": {
+            "schema": "nxt-planning/v1",
+            "environment": "SIMULATION",
+            "mode": "MANUAL_LED",
+            "server_time_utc": "2026-09-16T08:20:00Z",
+            "context": {
+              "site_id": "pilot-course-a",
+              "deployment_id": "pilot-a-edge-task-sim-v0",
+              "site_timezone": "Asia/Shanghai",
+              "zone_ids": [
+                "Z1"
+              ],
+              "robot_ids": [
+                "picker-01"
+              ]
+            },
+            "latest_input": {
+              "schema": "nxt-planning-input/v1",
+              "request_id": "demo-input-001",
+              "expected_revision": 0,
+              "site_id": "pilot-course-a",
+              "deployment_id": "pilot-a-edge-task-sim-v0",
+              "site_timezone": "Asia/Shanghai",
+              "operator": "course-manager",
+              "reason": "Opening count and explicitly estimated demand; no historical export available.",
+              "scope": "SHIFT",
+              "effective_at_utc": "2026-09-16T08:00:00Z",
+              "valid_until_utc": "2026-09-16T09:15:00Z",
+              "operating_window": {
+                "start_at_utc": "2026-09-16T08:00:00Z",
+                "end_at_utc": "2026-09-16T09:15:00Z"
+              },
+              "inventory_clean_balls": {
+                "value": 600,
+                "source_kind": "MEASURED",
+                "source_ref": "opening-clean-bin-count-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "demand": {
+                "value": {
+                  "bucket_minutes": 10,
+                  "low": [
+                    5,
+                    5,
+                    5,
+                    5,
+                    5,
+                    5
+                  ],
+                  "typical": [
+                    10,
+                    10,
+                    10,
+                    10,
+                    10,
+                    10
+                  ],
+                  "high": [
+                    15,
+                    15,
+                    15,
+                    15,
+                    15,
+                    15
+                  ]
+                },
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-demand-assumptions-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls/minute"
+              },
+              "safety_stock_balls": {
+                "value": 200,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-safety-target-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "balls"
+              },
+              "buffer_minutes": {
+                "value": 2,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "manager-timing-margin-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "minutes"
+              },
+              "operations_allowed": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-work-window-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "washer_available": {
+                "value": true,
+                "source_kind": "MANUAL_ESTIMATE",
+                "source_ref": "operator-washer-check-001",
+                "observed_at_utc": "2026-09-16T08:00:00Z",
+                "valid_until_utc": "2026-09-16T09:30:00Z",
+                "unit": "boolean"
+              },
+              "zones": [
+                {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "collection_allowed": {
+                    "value": true,
+                    "source_kind": "MANUAL_ESTIMATE",
+                    "source_ref": "operator-zone-Z1-check-001",
+                    "observed_at_utc": "2026-09-16T08:00:00Z",
+                    "valid_until_utc": "2026-09-16T09:30:00Z",
+                    "unit": "boolean"
+                  },
+                  "clean_yield_balls": {
+                    "value": {
+                      "low": 400,
+                      "high": 500
+                    },
+                    "source_kind": "MANUAL_ESTIMATE",
+                    "source_ref": "operator-zone-Z1-net-yield-estimate-001",
+                    "observed_at_utc": "2026-09-16T08:00:00Z",
+                    "valid_until_utc": "2026-09-16T09:30:00Z",
+                    "unit": "balls"
+                  },
+                  "cycle_minutes": {
+                    "value": {
+                      "travel": 2,
+                      "collect": 5,
+                      "return": 2,
+                      "unload": 2,
+                      "wash": 3,
+                      "supply": 1
+                    },
+                    "source_kind": "MANUAL_ESTIMATE",
+                    "source_ref": "operator-six-stage-duration-estimate-001",
+                    "observed_at_utc": "2026-09-16T08:00:00Z",
+                    "valid_until_utc": "2026-09-16T09:30:00Z",
+                    "unit": "minutes"
+                  }
+                }
+              ],
+              "revision": 1,
+              "input_digest": "4c3600d256e776f0f1ea97dd5ec0c06f0c0192dc979871f0a27181f13851d059",
+              "recorded_at_utc": "2026-09-16T08:00:00Z",
+              "changes": []
+            },
+            "plans": [
+              {
+                "plan_id": "plan_example_001",
+                "version": 1,
+                "request": {
+                  "schema": "nxt-planning-request/v1",
+                  "request_id": "demo-plan-001",
+                  "plan_id": null,
+                  "expected_plan_version": 0,
+                  "input_revision": 1,
+                  "operator": "course-manager",
+                  "reason": "Delay departure four minutes to complete the local zone check.",
+                  "scope": "ONE_TASK",
+                  "valid_until_utc": "2026-09-16T09:10:00Z",
+                  "selection": {
+                    "zone_id": "Z1",
+                    "robot_id": "picker-01",
+                    "start_at_utc": "2026-09-16T08:05:00Z"
+                  }
+                },
+                "input_revision": 1,
+                "input_digest": "4c3600d256e776f0f1ea97dd5ec0c06f0c0192dc979871f0a27181f13851d059",
+                "rules_version": "human-led-ball-supply/v1",
+                "generated_at_utc": "2026-09-16T08:01:00Z",
+                "valid_until_utc": "2026-09-16T09:10:00Z",
+                "status": "READY",
+                "missing": [],
+                "rationale": [
+                  "Explicit manual demand scenarios; conservative comparison uses high demand and low net yield.",
+                  "Full replenishment includes manual unloading, washing and supply stages."
+                ],
+                "system_selection": {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "start_at_utc": "2026-09-16T08:01:00Z"
+                },
+                "selection": {
+                  "zone_id": "Z1",
+                  "robot_id": "picker-01",
+                  "start_at_utc": "2026-09-16T08:05:00Z"
+                },
+                "adjustment": {
+                  "before": {
+                    "zone_id": "Z1",
+                    "robot_id": "picker-01",
+                    "start_at_utc": "2026-09-16T08:01:00Z"
+                  },
+                  "after": {
+                    "zone_id": "Z1",
+                    "robot_id": "picker-01",
+                    "start_at_utc": "2026-09-16T08:05:00Z"
+                  },
+                  "operator": "course-manager",
+                  "reason": "Delay departure four minutes to complete the local zone check.",
+                  "scope": "ONE_TASK",
+                  "valid_until_utc": "2026-09-16T09:10:00Z"
+                },
+                "scenarios": [
+                  {
+                    "level": "low",
+                    "baseline_stockout_at_utc": null,
+                    "safety_stock_at_utc": null,
+                    "with_plan_stockout_at_utc": null,
+                    "baseline_end_balls": 300,
+                    "with_plan_end_balls": 700
+                  },
+                  {
+                    "level": "typical",
+                    "baseline_stockout_at_utc": "2026-09-16T09:00:00Z",
+                    "safety_stock_at_utc": "2026-09-16T08:40:00Z",
+                    "with_plan_stockout_at_utc": null,
+                    "baseline_end_balls": 0,
+                    "with_plan_end_balls": 400
+                  },
+                  {
+                    "level": "high",
+                    "baseline_stockout_at_utc": "2026-09-16T08:40:00Z",
+                    "safety_stock_at_utc": "2026-09-16T08:26:40Z",
+                    "with_plan_stockout_at_utc": null,
+                    "baseline_end_balls": -300,
+                    "with_plan_end_balls": 100
+                  }
+                ],
+                "candidates": [
+                  {
+                    "zone_id": "Z1",
+                    "robot_id": "picker-01",
+                    "eligible": true,
+                    "exclusion_reasons": [],
+                    "start_at_utc": "2026-09-16T08:05:00Z",
+                    "latest_start_at_utc": "2026-09-16T08:09:40Z",
+                    "supply_at_utc": "2026-09-16T08:20:00Z",
+                    "cycle_minutes": 15,
+                    "clean_yield_balls": {
+                      "low": 400,
+                      "high": 500
+                    },
+                    "protects_high_demand_horizon": true
+                  }
+                ],
+                "current_status": "CONFIRMED"
+              }
+            ],
+            "confirmations": [
+              {
+                "confirmation_id": "confirmation_example_001",
+                "request": {
+                  "schema": "nxt-planning-confirmation/v1",
+                  "request_id": "demo-confirm-001",
+                  "plan_id": "plan_example_001",
+                  "plan_version": 1,
+                  "operator": "course-manager"
+                },
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "input_revision": 1,
+                "confirmed_at_utc": "2026-09-16T08:02:00Z",
+                "schedule_id": "schedule_example_001",
+                "schedule": {
+                  "robot_id": "picker-01",
+                  "zone_id": "Z1",
+                  "due_at_utc": "2026-09-16T08:05:00Z",
+                  "expires_at_utc": "2026-09-16T08:09:40Z",
+                  "operator": "planning-7c3d683a12604724916c7768",
+                  "admission_reference": "confirmation_example_001"
+                },
+                "schedule_status": "DISPATCHED",
+                "task_id": "task_example_001",
+                "task_created_at_utc": "2026-09-16T08:05:03.123456Z"
+              }
+            ],
+            "outcomes": [
+              {
+                "outcome_id": "outcome_example_001",
+                "recorded_at_utc": "2026-09-16T08:12:00Z",
+                "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+                "request": {
+                  "schema": "nxt-planning-outcome/v1",
+                  "request_id": "demo-outcome-001",
+                  "confirmation_id": "confirmation_example_001",
+                  "task_id": "task_example_001",
+                  "operator": "course-operator",
+                  "reason": "Recorded independently after this stage completed.",
+                  "stage": "COLLECTED",
+                  "quantity_balls": 520,
+                  "started_at_utc": "2026-09-16T08:07:00Z",
+                  "completed_at_utc": "2026-09-16T08:12:00Z",
+                  "source_kind": "MEASURED",
+                  "source_ref": "work-log-001-collected",
+                  "supersedes_outcome_id": null
+                },
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "input_revision": 1,
+                "schedule_id": "schedule_example_001"
+              },
+              {
+                "outcome_id": "outcome_example_002",
+                "recorded_at_utc": "2026-09-16T08:16:00Z",
+                "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+                "request": {
+                  "schema": "nxt-planning-outcome/v1",
+                  "request_id": "demo-outcome-002",
+                  "confirmation_id": "confirmation_example_001",
+                  "task_id": "task_example_001",
+                  "operator": "course-operator",
+                  "reason": "Recorded independently after this stage completed.",
+                  "stage": "UNLOADED",
+                  "quantity_balls": 510,
+                  "started_at_utc": "2026-09-16T08:14:00Z",
+                  "completed_at_utc": "2026-09-16T08:16:00Z",
+                  "source_kind": "MANUAL_ESTIMATE",
+                  "source_ref": "work-log-001-unloaded",
+                  "supersedes_outcome_id": null
+                },
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "input_revision": 1,
+                "schedule_id": "schedule_example_001"
+              },
+              {
+                "outcome_id": "outcome_example_003",
+                "recorded_at_utc": "2026-09-16T08:19:00Z",
+                "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+                "request": {
+                  "schema": "nxt-planning-outcome/v1",
+                  "request_id": "demo-outcome-003",
+                  "confirmation_id": "confirmation_example_001",
+                  "task_id": "task_example_001",
+                  "operator": "course-operator",
+                  "reason": "Recorded independently after this stage completed.",
+                  "stage": "WASHED",
+                  "quantity_balls": 480,
+                  "started_at_utc": "2026-09-16T08:16:00Z",
+                  "completed_at_utc": "2026-09-16T08:19:00Z",
+                  "source_kind": "MANUAL_ESTIMATE",
+                  "source_ref": "work-log-001-washed",
+                  "supersedes_outcome_id": null
+                },
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "input_revision": 1,
+                "schedule_id": "schedule_example_001"
+              },
+              {
+                "outcome_id": "outcome_example_004",
+                "recorded_at_utc": "2026-09-16T08:20:00Z",
+                "evidence_kind": "ACTUAL_EXECUTION_RESULT",
+                "request": {
+                  "schema": "nxt-planning-outcome/v1",
+                  "request_id": "demo-outcome-004",
+                  "confirmation_id": "confirmation_example_001",
+                  "task_id": "task_example_001",
+                  "operator": "course-operator",
+                  "reason": "Recorded independently after this stage completed.",
+                  "stage": "SUPPLIED",
+                  "quantity_balls": 470,
+                  "started_at_utc": "2026-09-16T08:19:00Z",
+                  "completed_at_utc": "2026-09-16T08:20:00Z",
+                  "source_kind": "MEASURED",
+                  "source_ref": "work-log-001-supplied",
+                  "supersedes_outcome_id": null
+                },
+                "plan_id": "plan_example_001",
+                "plan_version": 1,
+                "input_revision": 1,
+                "schedule_id": "schedule_example_001"
+              }
+            ]
+          }
+        }
+      },
+      "server_time_utc": "2026-09-16T08:20:00Z"
+    }
+  ]
+}

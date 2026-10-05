@@ -1,0 +1,115 @@
+{
+  "description": "Conflicting task/session/binding or same request ID with different canonical content is rejected before action selection. Binding context is retained; no attempt is invented.",
+  "bodies": [
+    {
+      "schema_ref": "#/$defs/ErrorEnvelope",
+      "body": {
+        "schema": "nxt-site-agent/api/v0",
+        "disclaimer": "SIMULATION ONLY — synthetic design fixture; no physical action or implemented execution service.",
+        "error": {
+          "code": "collection_execution_conflict",
+          "detail": "The request identity disagrees with the immutable binding or its prior canonical content."
+        }
+      }
+    },
+    {
+      "schema_ref": "#/$defs/ExecutionRequest",
+      "body": {
+        "schema": "nxt-collection-execution-request/v1",
+        "environment": "SIMULATION",
+        "kind": "EXECUTE_BOUND_COLLECTION",
+        "request_id": "request-001",
+        "execution_id": "6625e3f3933169034b4be82b546d9890ed1af0b34c8eb89848f78c28ab77b11e",
+        "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
+        "session_id": "fixture-session-v3",
+        "round_id": "round-001",
+        "task_id": "task_555555555555555555555555",
+        "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+        "incarnation": "conflicting-incarnation",
+        "due_at_utc": "2026-09-16T00:01:00Z",
+        "expires_at_utc": "2026-09-16T00:05:00Z",
+        "eligible_sim_t_s": 60,
+        "latest_start_sim_t_s": 300
+      }
+    }
+  ],
+  "snapshot": {
+    "schema_ref": "#/$defs/SuccessEnvelope",
+    "body": {
+      "schema": "nxt-site-agent/api/v0",
+      "disclaimer": "SIMULATION ONLY — synthetic design fixture; no physical action or implemented execution service.",
+      "data": {
+        "schema": "nxt-collection-executions/v1",
+        "environment": "SIMULATION",
+        "series_id": "fixture-series",
+        "session_id": "fixture-session-v3",
+        "round_id": "round-001",
+        "round_index": 0,
+        "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+        "session_epoch_utc": "2026-09-16T00:00:00Z",
+        "control_interval_s": 60,
+        "session_end_sim_t_s": 3600,
+        "session_state": "ACTIVE",
+        "now_sim_t_s": 660,
+        "simulation_time_utc": "2026-09-16T00:11:00Z",
+        "server_time_utc": "2026-09-23T01:00:00Z",
+        "replay_digest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "bindings": [
+          {
+            "schema": "nxt-collection-execution-binding/v1",
+            "environment": "SIMULATION",
+            "binding_id": "16c7e3e955006146abd1a69742074625c7fe504cb7d32f3c99155c04d47852f5",
+            "site_id": "synthetic-site",
+            "deployment_id": "synthetic-sim",
+            "commissioned_site_digest": "4444444444444444444444444444444444444444444444444444444444444444",
+            "plan_id": "plan-001",
+            "plan_version": 1,
+            "confirmation_id": "confirmation-001",
+            "schedule_id": "schedule-001",
+            "task_id": "task_555555555555555555555555",
+            "task_content_digest": "6666666666666666666666666666666666666666666666666666666666666666",
+            "incarnation": "fixture-incarnation-001",
+            "robot_id": "picker-01",
+            "zone_id": "Z1",
+            "series_id": "fixture-series",
+            "session_id": "fixture-session-v3",
+            "round_id": "round-001",
+            "round_index": 0,
+            "engine_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+            "config_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+            "session_epoch_utc": "2026-09-16T00:00:00Z",
+            "control_interval_s": 60,
+            "session_end_sim_t_s": 3600,
+            "runtime_robot_id": "R1",
+            "runtime_zone_id": "NEAR_LEFT",
+            "handoff_station_id": "H1",
+            "max_execution_s": 660,
+            "cycle_evidence": {
+              "input_record_id": "input-001",
+              "input_revision": 1,
+              "source_kind": "MANUAL_ESTIMATE",
+              "source_ref": "synthetic-cycle-fixture",
+              "observed_at_utc": "2026-09-16T00:00:00Z",
+              "valid_until_utc": "2026-09-16T01:00:00Z",
+              "cycle_minutes": {
+                "travel": 2,
+                "collect": 5,
+                "return": 2,
+                "unload": 2
+              },
+              "derivation_rule": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
+            },
+            "handoff_binding_mode": "SOLE_SCENARIO_STATION_V1",
+            "bound_at_sim_t_s": 60,
+            "bound_at_utc": "2026-09-16T00:01:00Z",
+            "task_created_at_utc": "2026-09-16T00:01:00Z"
+          }
+        ],
+        "requests": [],
+        "receipts": [],
+        "executions": []
+      }
+    }
+  }
+}

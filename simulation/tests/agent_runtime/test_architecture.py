@@ -85,6 +85,9 @@ FOREIGN_SURFACE_TOKENS = (
     "nxtektal-roi",
 )
 
+# nxt_site_agent is deliberately absent: the Site Agent service shell is
+# the designated application boundary allowed to import this runtime's
+# public surface (see AGENTS.md); its own guard bans everything else.
 OTHER_PACKAGES = (
     "nxt_sim",
     "nxt_range_ops",

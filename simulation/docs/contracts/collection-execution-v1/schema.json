@@ -1,0 +1,1433 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nxtektal:collection-execution:v1",
+  "title": "SIMULATION collection execution v1 — design-only wire contract",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Binding"
+    },
+    {
+      "$ref": "#/$defs/ExecutionRequest"
+    },
+    {
+      "$ref": "#/$defs/RequestReceipt"
+    },
+    {
+      "$ref": "#/$defs/ExecutionSnapshot"
+    },
+    {
+      "$ref": "#/$defs/ExecutionRecord"
+    },
+    {
+      "$ref": "#/$defs/QuantityEvidence"
+    },
+    {
+      "$ref": "#/$defs/SuccessEnvelope"
+    },
+    {
+      "$ref": "#/$defs/ErrorEnvelope"
+    }
+  ],
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "Digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "Text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "UtcTimestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$"
+    },
+    "SimSeconds": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "Integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "PositiveInteger": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "CycleEvidence": {
+      "type": "object",
+      "properties": {
+        "input_record_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "input_revision": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "source_kind": {
+          "enum": [
+            "MEASURED",
+            "MANUAL_ESTIMATE"
+          ]
+        },
+        "source_ref": {
+          "$ref": "#/$defs/Text"
+        },
+        "observed_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "valid_until_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "cycle_minutes": {
+          "type": "object",
+          "properties": {
+            "travel": {
+              "$ref": "#/$defs/SimSeconds"
+            },
+            "collect": {
+              "$ref": "#/$defs/SimSeconds"
+            },
+            "return": {
+              "$ref": "#/$defs/SimSeconds"
+            },
+            "unload": {
+              "$ref": "#/$defs/SimSeconds"
+            }
+          },
+          "required": [
+            "travel",
+            "collect",
+            "return",
+            "unload"
+          ],
+          "additionalProperties": false
+        },
+        "derivation_rule": {
+          "const": "CEIL_TRAVEL_COLLECT_RETURN_UNLOAD_TO_CONTROL_INTERVAL_V1"
+        }
+      },
+      "required": [
+        "input_record_id",
+        "input_revision",
+        "source_kind",
+        "source_ref",
+        "observed_at_utc",
+        "valid_until_utc",
+        "cycle_minutes",
+        "derivation_rule"
+      ],
+      "additionalProperties": false
+    },
+    "Binding": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-collection-execution-binding/v1"
+        },
+        "environment": {
+          "const": "SIMULATION"
+        },
+        "binding_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "site_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "deployment_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "commissioned_site_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "plan_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "plan_version": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "confirmation_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "schedule_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "task_content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "incarnation": {
+          "$ref": "#/$defs/Id"
+        },
+        "robot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "zone_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "series_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "round_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "round_index": {
+          "$ref": "#/$defs/Integer"
+        },
+        "engine_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "config_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "session_epoch_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "control_interval_s": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "session_end_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "runtime_robot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "runtime_zone_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "handoff_station_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "max_execution_s": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "cycle_evidence": {
+          "$ref": "#/$defs/CycleEvidence"
+        },
+        "handoff_binding_mode": {
+          "const": "SOLE_SCENARIO_STATION_V1"
+        },
+        "bound_at_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "bound_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "task_created_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        }
+      },
+      "required": [
+        "schema",
+        "environment",
+        "binding_id",
+        "site_id",
+        "deployment_id",
+        "commissioned_site_digest",
+        "plan_id",
+        "plan_version",
+        "confirmation_id",
+        "schedule_id",
+        "task_id",
+        "task_content_digest",
+        "incarnation",
+        "robot_id",
+        "zone_id",
+        "series_id",
+        "session_id",
+        "round_id",
+        "round_index",
+        "engine_digest",
+        "config_digest",
+        "session_epoch_utc",
+        "control_interval_s",
+        "session_end_sim_t_s",
+        "runtime_robot_id",
+        "runtime_zone_id",
+        "handoff_station_id",
+        "max_execution_s",
+        "cycle_evidence",
+        "handoff_binding_mode",
+        "bound_at_sim_t_s",
+        "bound_at_utc",
+        "task_created_at_utc"
+      ],
+      "additionalProperties": false
+    },
+    "ExecutionRequest": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-collection-execution-request/v1"
+        },
+        "environment": {
+          "const": "SIMULATION"
+        },
+        "kind": {
+          "const": "EXECUTE_BOUND_COLLECTION"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "execution_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "binding_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "round_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "task_content_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "incarnation": {
+          "$ref": "#/$defs/Id"
+        },
+        "due_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "expires_at_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "eligible_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "latest_start_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        }
+      },
+      "required": [
+        "schema",
+        "environment",
+        "kind",
+        "request_id",
+        "execution_id",
+        "binding_id",
+        "session_id",
+        "round_id",
+        "task_id",
+        "task_content_digest",
+        "incarnation",
+        "due_at_utc",
+        "expires_at_utc",
+        "eligible_sim_t_s",
+        "latest_start_sim_t_s"
+      ],
+      "additionalProperties": false
+    },
+    "RequestReceipt": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-collection-execution-request-receipt/v1"
+        },
+        "environment": {
+          "const": "SIMULATION"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "binding_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "execution_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "sequence": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "request_log_high_water_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "durable": {
+          "const": true
+        }
+      },
+      "required": [
+        "schema",
+        "environment",
+        "request_id",
+        "request_digest",
+        "binding_id",
+        "execution_id",
+        "attempt_id",
+        "sequence",
+        "request_log_high_water_digest",
+        "durable"
+      ],
+      "additionalProperties": false
+    },
+    "QuantityEvidence": {
+      "type": "object",
+      "properties": {
+        "milestone": {
+          "enum": [
+            "RAW_COLLECTED_TO_ROBOT",
+            "UNLOADED_TO_STATION"
+          ]
+        },
+        "status": {
+          "enum": [
+            "NOT_REACHED",
+            "COMPLETE",
+            "INCOMPLETE"
+          ]
+        },
+        "balls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "const": "RANGE_SIMULATION_BALL_LEDGER"
+        },
+        "assignment_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "event_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "destination_id": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "milestone",
+        "status",
+        "balls",
+        "source",
+        "assignment_id",
+        "source_event_ids",
+        "event_digest",
+        "destination_id"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "COMPLETE"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "balls": {
+                "$ref": "#/$defs/Integer"
+              },
+              "assignment_id": {
+                "$ref": "#/$defs/Id"
+              },
+              "source_event_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Id"
+                },
+                "minItems": 1,
+                "maxItems": 10000
+              },
+              "event_digest": {
+                "$ref": "#/$defs/Digest"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "balls": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Action": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "enum": [
+            "Wait",
+            "AssignCollection",
+            "SendToHandoff",
+            "SendToCharge",
+            "PauseRobot",
+            "ResumeRobot",
+            "ReassignRobot",
+            "RequestHumanAssistance",
+            "AssignStaffWork"
+          ]
+        },
+        "index": {
+          "$ref": "#/$defs/Integer"
+        },
+        "robot_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "index",
+        "robot_id",
+        "target_id"
+      ],
+      "additionalProperties": false
+    },
+    "PendingCandidate": {
+      "type": "object",
+      "properties": {
+        "execution_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "eligible_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "latest_start_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        }
+      },
+      "required": [
+        "execution_id",
+        "eligible_sim_t_s",
+        "latest_start_sim_t_s"
+      ],
+      "additionalProperties": false
+    },
+    "ActionDecision": {
+      "type": "object",
+      "properties": {
+        "sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "original_action": {
+          "$ref": "#/$defs/Action"
+        },
+        "selected_action": {
+          "$ref": "#/$defs/Action"
+        },
+        "selection": {
+          "enum": [
+            "WAIT_SLOT",
+            "ORIGINAL_POLICY_UNCHANGED",
+            "ORIGINAL_POLICY_CONVERGED",
+            "POLICY_PREEMPTED",
+            "RUNNING_CONTINUATION"
+          ]
+        },
+        "eligible_pending": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PendingCandidate"
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        },
+        "safety_shield": {
+          "enum": [
+            "ACCEPTED",
+            "REJECTED"
+          ]
+        },
+        "safety_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Text"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sim_t_s",
+        "original_action",
+        "selected_action",
+        "selection",
+        "eligible_pending",
+        "safety_shield",
+        "safety_reason"
+      ],
+      "additionalProperties": false
+    },
+    "RuntimeEvidence": {
+      "type": "object",
+      "properties": {
+        "start_admitted": {
+          "type": "boolean"
+        },
+        "assignment_accepted": {
+          "type": "boolean"
+        },
+        "assignment_terminal": {
+          "type": "boolean"
+        },
+        "collection_exit_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "ROBOT_PAYLOAD_FULL",
+                "ZONE_EMPTY",
+                "COLLECTION_ACCESS_BLOCKED",
+                "POLICY_PREEMPTED",
+                "LOW_BATTERY",
+                "ROBOT_FAULT",
+                "ESTOP_LATCHED",
+                "HUMAN_ASSISTANCE_REQUIRED",
+                "EXECUTION_TIMEOUT",
+                "SESSION_ENDED"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_sequence_complete": {
+          "type": "boolean"
+        },
+        "event_start_sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_end_sequence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "conservation_passed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload_parity_passed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "start_admitted",
+        "assignment_accepted",
+        "assignment_terminal",
+        "collection_exit_reason",
+        "event_sequence_complete",
+        "event_start_sequence",
+        "event_end_sequence",
+        "event_digest",
+        "conservation_passed",
+        "payload_parity_passed"
+      ],
+      "additionalProperties": false
+    },
+    "EdgeEvidence": {
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "verified": {
+          "type": "boolean"
+        },
+        "effective_state": {
+          "enum": [
+            "CREATED",
+            "ACCEPTED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "REJECTED",
+            "INCONCLUSIVE",
+            "CONFLICT"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/EdgeReason"
+        },
+        "terminal_states": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "SUCCEEDED",
+              "FAILED",
+              "REJECTED",
+              "INCONCLUSIVE"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        },
+        "event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "result_verification": {
+          "enum": [
+            "VERIFIED",
+            "UNVERIFIED",
+            "CONFLICT"
+          ]
+        }
+      },
+      "required": [
+        "accepted",
+        "task_id",
+        "verified",
+        "effective_state",
+        "reason",
+        "terminal_states",
+        "event_ids",
+        "result_verification"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "result_verification": {
+                "const": "VERIFIED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "verified": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "verified": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "effective_state": {
+                "const": "CONFLICT"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "result_verification": {
+                "const": "CONFLICT"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "result_verification": {
+                "not": {
+                  "const": "CONFLICT"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "DeviceProtection": {
+      "type": "object",
+      "properties": {
+        "protected": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "RUNTIME_ACTIVE",
+              "ROBOT_FAULT",
+              "ESTOP_LATCHED",
+              "HUMAN_ASSISTANCE_REQUIRED",
+              "TERMINAL_CONFLICT",
+              "SESSION_REGRESSION",
+              "INCARNATION_MISMATCH",
+              "ORPHANED_ACTIVITY",
+              "RESTART_UNKNOWN"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 10000,
+          "uniqueItems": true
+        },
+        "authorization_blocked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "protected",
+        "reasons",
+        "authorization_blocked"
+      ],
+      "additionalProperties": false
+    },
+    "Conflicts": {
+      "type": "object",
+      "properties": {
+        "missing_events": {
+          "type": "boolean"
+        },
+        "terminal_conflict": {
+          "type": "boolean"
+        },
+        "session_round_drift": {
+          "type": "boolean"
+        },
+        "incarnation_mismatch": {
+          "type": "boolean"
+        },
+        "replay_mismatch": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "missing_events",
+        "terminal_conflict",
+        "session_round_drift",
+        "incarnation_mismatch",
+        "replay_mismatch"
+      ],
+      "additionalProperties": false
+    },
+    "ExecutionRecord": {
+      "type": "object",
+      "properties": {
+        "execution_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "binding_id": {
+          "$ref": "#/$defs/Digest"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "round_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "task_id": {
+          "$ref": "#/$defs/TaskId"
+        },
+        "incarnation": {
+          "$ref": "#/$defs/Id"
+        },
+        "runtime_robot_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "runtime_zone_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "handoff_station_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "assignment_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "enum": [
+            "PENDING",
+            "RUNNING",
+            "SUCCEEDED",
+            "PARTIAL",
+            "REJECTED",
+            "MISSED",
+            "FAILED",
+            "INCONCLUSIVE"
+          ]
+        },
+        "stage": {
+          "enum": [
+            "WAITING_FOR_POLICY_SLOT",
+            "TRAVEL_TO_COLLECTION",
+            "COLLECTING",
+            "RAW_COLLECTED_TO_ROBOT",
+            "TRAVEL_TO_UNLOAD",
+            "UNLOADING",
+            "UNLOADED_TO_STATION",
+            "TERMINAL"
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "UNLOADED_ALL_COLLECTED_BALLS",
+                "POLICY_SLOT_MISSED",
+                "INSUFFICIENT_SESSION_HORIZON",
+                "SAFETY_REJECTED",
+                "ROBOT_PAYLOAD_FULL",
+                "ZONE_EMPTY",
+                "COLLECTION_ACCESS_BLOCKED",
+                "POLICY_PREEMPTED",
+                "LOW_BATTERY",
+                "ROBOT_FAULT",
+                "ESTOP_LATCHED",
+                "HUMAN_ASSISTANCE_REQUIRED",
+                "EXECUTION_TIMEOUT",
+                "SESSION_ENDED",
+                "NOT_STARTED_AFTER_RESTART",
+                "INTERRUPTED_EXECUTION_UNKNOWN_OUTCOME",
+                "IDENTITY_CONFLICT",
+                "TERMINAL_CONFLICT",
+                "REPLAY_MISMATCH",
+                "EVIDENCE_INCOMPLETE"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "eligible_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "latest_start_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "started_sim_t_s": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SimSeconds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_deadline_sim_t_s": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SimSeconds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminal_sim_t_s": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SimSeconds"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_execution_s": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "arbiter_version": {
+          "const": "WAIT_ONLY_NON_PREEMPTIVE_V1"
+        },
+        "policy_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ActionDecision"
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        },
+        "runtime_evidence": {
+          "$ref": "#/$defs/RuntimeEvidence"
+        },
+        "edge_evidence": {
+          "$ref": "#/$defs/EdgeEvidence"
+        },
+        "raw_quantity": {
+          "$ref": "#/$defs/QuantityEvidence"
+        },
+        "unload_quantity": {
+          "$ref": "#/$defs/QuantityEvidence"
+        },
+        "device_protection": {
+          "$ref": "#/$defs/DeviceProtection"
+        },
+        "conflicts": {
+          "$ref": "#/$defs/Conflicts"
+        },
+        "reconciliation": {
+          "const": "NOT_PERFORMED"
+        },
+        "success_display_allowed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "execution_id",
+        "attempt_id",
+        "request_id",
+        "binding_id",
+        "session_id",
+        "round_id",
+        "task_id",
+        "incarnation",
+        "runtime_robot_id",
+        "runtime_zone_id",
+        "handoff_station_id",
+        "assignment_id",
+        "state",
+        "stage",
+        "reason",
+        "eligible_sim_t_s",
+        "latest_start_sim_t_s",
+        "started_sim_t_s",
+        "execution_deadline_sim_t_s",
+        "terminal_sim_t_s",
+        "max_execution_s",
+        "arbiter_version",
+        "policy_id",
+        "actions",
+        "runtime_evidence",
+        "edge_evidence",
+        "raw_quantity",
+        "unload_quantity",
+        "device_protection",
+        "conflicts",
+        "reconciliation",
+        "success_display_allowed"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "PENDING",
+                  "RUNNING"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "type": "null"
+              },
+              "terminal_sim_t_s": {
+                "type": "null"
+              },
+              "success_display_allowed": {
+                "const": false
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "stage": {
+                "const": "TERMINAL"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "terminal_sim_t_s": {
+                "$ref": "#/$defs/SimSeconds"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "SUCCEEDED"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "reason": {
+                "const": "UNLOADED_ALL_COLLECTED_BALLS"
+              },
+              "success_display_allowed": {
+                "const": true
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "reason": {
+                "not": {
+                  "const": "UNLOADED_ALL_COLLECTED_BALLS"
+                }
+              },
+              "success_display_allowed": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "raw_quantity": {
+              "properties": {
+                "milestone": {
+                  "const": "RAW_COLLECTED_TO_ROBOT"
+                }
+              }
+            },
+            "unload_quantity": {
+              "properties": {
+                "milestone": {
+                  "const": "UNLOADED_TO_STATION"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ExecutionSnapshot": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-collection-executions/v1"
+        },
+        "environment": {
+          "const": "SIMULATION"
+        },
+        "series_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "round_id": {
+          "$ref": "#/$defs/Id"
+        },
+        "round_index": {
+          "$ref": "#/$defs/Integer"
+        },
+        "engine_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "config_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "session_epoch_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "control_interval_s": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "session_end_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "session_state": {
+          "enum": [
+            "ACTIVE",
+            "PAUSED",
+            "ENDED"
+          ]
+        },
+        "now_sim_t_s": {
+          "$ref": "#/$defs/SimSeconds"
+        },
+        "simulation_time_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "server_time_utc": {
+          "$ref": "#/$defs/UtcTimestamp"
+        },
+        "replay_digest": {
+          "$ref": "#/$defs/Digest"
+        },
+        "bindings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Binding"
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        },
+        "requests": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExecutionRequest"
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        },
+        "receipts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RequestReceipt"
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        },
+        "executions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExecutionRecord"
+          },
+          "minItems": 0,
+          "maxItems": 10000
+        }
+      },
+      "required": [
+        "schema",
+        "environment",
+        "series_id",
+        "session_id",
+        "round_id",
+        "round_index",
+        "engine_digest",
+        "config_digest",
+        "session_epoch_utc",
+        "control_interval_s",
+        "session_end_sim_t_s",
+        "session_state",
+        "now_sim_t_s",
+        "simulation_time_utc",
+        "server_time_utc",
+        "replay_digest",
+        "bindings",
+        "requests",
+        "receipts",
+        "executions"
+      ],
+      "additionalProperties": false
+    },
+    "SuccessEnvelope": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-site-agent/api/v0"
+        },
+        "disclaimer": {
+          "$ref": "#/$defs/Text"
+        },
+        "data": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ExecutionSnapshot"
+            },
+            {
+              "$ref": "#/$defs/RequestReceipt"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "disclaimer",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "ErrorEnvelope": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "nxt-site-agent/api/v0"
+        },
+        "disclaimer": {
+          "$ref": "#/$defs/Text"
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "enum": [
+                "collection_execution_invalid_request",
+                "collection_execution_not_found",
+                "collection_execution_request_not_found",
+                "collection_execution_conflict",
+                "collection_execution_unavailable",
+                "collection_execution_result_unknown"
+              ]
+            },
+            "detail": {
+              "$ref": "#/$defs/Text"
+            }
+          },
+          "required": [
+            "code",
+            "detail"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "schema",
+        "disclaimer",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "EdgeReason": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "robot_faulted",
+            "estop_latched",
+            "energy_insufficient",
+            "capability_unavailable",
+            "cannot_continue",
+            "needs_manual_recharge",
+            "unsafe_return_unconfirmed",
+            "not_started_after_restart",
+            "interrupted_execution_unknown_outcome",
+            "robot_busy",
+            "task_expired",
+            "target_mismatch",
+            "site_mismatch",
+            "deployment_mismatch",
+            "simulation_env_mismatch",
+            "task_id_content_conflict",
+            "incarnation_mismatch",
+            "unsupported_task_type",
+            "unsupported_schema",
+            "invalid_request",
+            "unknown_zone"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^unknown:[A-Za-z0-9_.:-]{1,96}$"
+        }
+      ]
+    },
+    "TaskId": {
+      "type": "string",
+      "pattern": "^task_[a-f0-9]{24}$"
+    }
+  }
+}

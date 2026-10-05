@@ -30,13 +30,14 @@ workflow, testing expectations, and review standard.
 
 ## Repository reality
 
-This standalone repository has three independent implementation surfaces:
+This standalone repository has four independent implementation surfaces:
 
 | Surface | Technology | Role |
 |---|---|---|
 | `simulation/` | Python 3.11+, `uv`, Hatch, pytest | NXTektal virtual handoff, range operations, and Site OS layers |
 | `nxtektal-roi-engine/` | TypeScript, npm, Vitest | Formula-locked deterministic ROI model |
 | `apps/operational-replay/` | TypeScript, Next.js, npm, Vitest | Read-only browser storytelling over exported replay artifacts |
+| `apps/site-agent-console/` | TypeScript, Next.js, npm, Vitest | Static Manager Console over the local fixture-backed Site Agent service's Manager API |
 
 The root README is the NXTektal product and investor overview. Root
 documentation and `.agent/` form the shared governance layer; they do not add a
@@ -336,8 +337,7 @@ The executable sequence is in
 
 Use the exact commands in
 [`.agent/workflows/testing.md`](../.agent/workflows/testing.md), the single
-normative testing source. It covers all-extras Python setup, the current
-`uv.lock`/`twin`-extra gap, focused package tests, architecture guards, the full
+normative testing source. It covers all-extras Python setup, locked all-extras coverage, focused package tests, architecture guards, the full
 suite, config validation, package builds, ROI typecheck/tests/build, and root
 documentation and agent-infrastructure checks.
 
@@ -403,3 +403,15 @@ They live in the tool-neutral `.agent/skills/` tree requested for this
 repository and are not assumed to auto-register with Codex or Claude Code.
 `AGENTS.md` and `CLAUDE.md` route agents to load them explicitly; do not fork
 copies into tool-specific trees that can drift.
+
+## Human-led planning v1 handoff
+
+For the local simulation planning extension, begin with the
+[shared API contract](../simulation/docs/contracts/planning-v1/README.md),
+[architecture gate](../simulation/docs/planning_v1_architecture.md), and
+[observed validation record](../simulation/docs/planning_v1_validation.md).
+Backend and console must use the same schema/examples. Manual assumptions,
+measured input, system calculations and actual results stay distinct. New
+plan confirmation is an explicit simulation action; accepting an old Guardian
+recommendation still only records human workflow. Names are attribution, not
+access control, and no physical deployment is implemented.

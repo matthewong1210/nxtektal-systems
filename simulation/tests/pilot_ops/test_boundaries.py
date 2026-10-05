@@ -117,3 +117,33 @@ def test_ids_do_not_read_wall_clock_or_uuid() -> None:
                 assert node.func.attr not in {"now", "utcnow", "uuid4"}, path
             elif isinstance(node.func, ast.Name):
                 assert node.func.id not in {"uuid1", "uuid4"}, path
+
+
+_PLANNING_PURE_FILES = ("planning_contracts.py", "planning.py", "planning_workflow.py")
+_PLANNING_STDLIB = {"__future__", "copy", "dataclasses", "datetime", "math", "re", "typing"}
+
+
+def _planning_effects(source: str) -> list[str]:
+    violations = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            violations.extend(alias.name for alias in node.names
+                              if alias.name.split('.')[0] not in _PLANNING_STDLIB)
+        elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+            if node.module.split('.')[0] not in _PLANNING_STDLIB:
+                violations.append(node.module)
+        elif isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else (
+                node.func.attr if isinstance(node.func, ast.Attribute) else None)
+            if name in {"open", "exec", "eval", "__import__", "now", "utcnow", "uuid4", "random"}:
+                violations.append(name)
+    return violations
+
+
+def test_planning_core_remains_pure_without_storage_transport_or_execution():
+    for name in _PLANNING_PURE_FILES:
+        assert _planning_effects((SHADOW_ROOT / name).read_text()) == [], name
+
+
+def test_planning_purity_guard_negative_control():
+    assert set(_planning_effects("import os\nopen('/tmp/x', 'w')")) == {"os", "open"}
