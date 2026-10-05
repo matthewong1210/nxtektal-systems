@@ -232,6 +232,34 @@ def test_kimi_answer_fields(message, finish, code):
     assert outcome.decoded_json is None
 
 
+@pytest.mark.parametrize('refusal', [
+    '', False, True, 0, 1, 1.5, {}, {'reason': 'blocked'}, [], ['blocked'],
+])
+def test_kimi_empty_or_non_string_refusal_is_terminal_malformed(refusal):
+    body = {'choices': [{'finish_reason': 'stop', 'message': {
+        'content': '{"result":[]}', 'refusal': refusal,
+    }}]}
+    adapter, transport = make_adapter(body=canonical_json(body).encode())
+    outcome = adapter.send(adapter.prepare(request()), timeout_s=1.0)
+    assert outcome.status is GenerationStatus.INVALID_RESPONSE
+    assert outcome.failure_code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+    assert outcome.retryable is outcome.security_failure is False
+    assert outcome.decoded_json is outcome.output_digest is None
+    assert transport.calls == ['transport.post']
+
+
+def test_kimi_null_refusal_is_absent():
+    body = {'choices': [{'finish_reason': 'stop', 'message': {
+        'content': '{"result":[]}', 'refusal': None,
+    }}]}
+    adapter, transport = make_adapter(body=canonical_json(body).encode())
+    outcome = adapter.send(adapter.prepare(request()), timeout_s=1.0)
+    assert outcome.status is GenerationStatus.SUCCEEDED
+    assert outcome.decoded_json == {'result': ()}
+    assert outcome.failure_code is None
+    assert transport.calls == ['transport.post']
+
+
 def test_kimi_transport_failure_one_call():
     from nxt_model_gateway.transport import _failure
     adapter, transport = make_adapter(failure=_failure(FailureCode.READ_TIMEOUT))

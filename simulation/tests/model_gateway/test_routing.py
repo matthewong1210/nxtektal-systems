@@ -727,6 +727,62 @@ def test_late_primary_success_is_discarded_before_fallback(elapsed, code, provid
     assert_identity(result, observer)
 
 
+@pytest.mark.parametrize("code,status,security_failure", [
+    (FailureCode.PROVIDER_REFUSED, GenerationStatus.REFUSED, False),
+    (FailureCode.TLS_VERIFICATION_FAILED, GenerationStatus.SECURITY_ERROR, True),
+    (FailureCode.AUTHENTICATION_FAILED, GenerationStatus.CONFIGURATION_ERROR, False),
+])
+def test_attempt_late_terminal_primary_outcome_preserves_original_classification(
+        code, status, security_failure):
+    clock = Clock()
+    calls = []
+    primary_outcome = replace(
+        outcome(code, status, security_failure, False), retryable=False,
+    )
+    primary = FakeAdapter(
+        Provider.OPENAI, primary_outcome, calls, clock=clock, send_elapsed=13.0,
+    )
+    backup = FakeAdapter(Provider.ANTHROPIC, calls=calls, clock=clock)
+    observer = RecordingObserver()
+    result = gateway(openai=primary, anthropic=backup, monotonic=clock).generate(
+        request(), RoutePolicy(DeploymentRegion.GLOBAL), observer=observer,
+    )
+    assert calls == [Provider.OPENAI]
+    assert primary.timeouts == [12.0]
+    assert backup.timeouts == []
+    assert (result.status, result.failure_code, result.selected_provider) == (
+        status, code, Provider.OPENAI,
+    )
+    assert len(result.attempts) == 1
+    assert result.attempts[0] == observer.finished_records[0]
+    assert result.attempts[0].security_failure is security_failure
+    assert_identity(result, observer)
+
+
+def test_attempt_late_availability_failure_preserves_code_and_falls_back():
+    clock = Clock()
+    calls = []
+    primary = FakeAdapter(
+        Provider.OPENAI,
+        outcome(FailureCode.RATE_LIMITED, GenerationStatus.UNAVAILABLE, False, True),
+        calls,
+        clock=clock,
+        send_elapsed=13.0,
+    )
+    backup = FakeAdapter(Provider.ANTHROPIC, calls=calls, clock=clock)
+    observer = RecordingObserver()
+    result = gateway(openai=primary, anthropic=backup, monotonic=clock).generate(
+        request(), RoutePolicy(DeploymentRegion.GLOBAL), observer=observer,
+    )
+    assert calls == [Provider.OPENAI, Provider.ANTHROPIC]
+    assert primary.timeouts == [12.0]
+    assert backup.timeouts == [7.0]
+    assert result.attempts[0].failure_code is FailureCode.RATE_LIMITED
+    assert result.status is GenerationStatus.SUCCEEDED
+    assert result.selected_provider is Provider.ANTHROPIC
+    assert_identity(result, observer)
+
+
 @pytest.mark.parametrize("elapsed,code", [
     (8.001, FailureCode.READ_TIMEOUT),
     (20.001, FailureCode.DEADLINE_EXHAUSTED),

@@ -29,8 +29,13 @@ class KimiAdapter(_BaseAdapter):
         choice = choices[0]
         message = choice['message']
         finish = choice['finish_reason']
-        if finish == 'content_filter' or message.get('refusal'):
+        if finish == 'content_filter':
             raise _refused()
+        refusal = message.get('refusal')
+        if refusal is not None:
+            if type(refusal) is str and refusal:
+                raise _refused()
+            raise _malformed()
         if finish != 'stop' or type(message.get('content')) is not str:
             raise _malformed()
         decoded = decode_validated_json(message['content'].encode('utf-8'), schema=schema)

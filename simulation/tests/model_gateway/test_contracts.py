@@ -451,6 +451,6 @@ def test_observer_error_does_not_render_original_exception_in_traceback():
         except RuntimeError:
             raise AttemptObserverError("req-001", 0, Provider.OPENAI, "finished")
     except AttemptObserverError as error:
-        rendered = "".join(traceback.format_exception_only(error))
+        rendered = "".join(traceback.format_exception(error))
         assert "sensitive observer detail" not in rendered
         assert error.__suppress_context__ is True

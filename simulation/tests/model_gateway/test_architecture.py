@@ -3,6 +3,7 @@
 import ast
 from pathlib import Path
 import re
+import textwrap
 import tomllib
 
 import pytest
@@ -557,6 +558,42 @@ def test_gateway_is_registered_with_only_the_approved_new_core_dependency():
         "pydantic>=2.7", "pyyaml>=6.0", "jsonschema>=4.26,<5"
     ]
     assert "nxt_model_gateway" in manifest["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"]
+
+
+def test_isolated_wheel_ci_rejects_repository_provider_simulator_and_robot_stacks():
+    workflow = (REPOSITORY_ROOT / ".github/workflows/verification.yml").read_text(
+        encoding="utf-8"
+    )
+    step = workflow.split("- name: Install and import the wheel in isolation", 1)[1]
+    inline = step.split("<<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    tree = ast.parse(textwrap.dedent(inline))
+    assignments = {
+        target.id: {
+            item.value for item in ast.walk(node.value)
+            if isinstance(item, ast.Constant) and isinstance(item.value, str)
+        }
+        for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+    expected_absent = {
+        "nxt_range_agent", "nxt_range_viewer", "nxt_range_demo",
+        "openai", "anthropic", "moonshot", "requests", "httpx",
+        "simpy", "gymnasium", "pxr", "rclpy", "rospy",
+    }
+    assert assignments.get("absent") == expected_absent
+    assert any(
+        isinstance(node, ast.For)
+        and isinstance(node.iter, ast.Name)
+        and node.iter.id == "absent"
+        and any(
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "find_spec"
+            for child in ast.walk(node)
+        )
+        and any(isinstance(child, ast.Assert) for child in ast.walk(node))
+        for node in ast.walk(tree)
+    )
 
 
 def test_stable_contract_and_verification_are_registered():

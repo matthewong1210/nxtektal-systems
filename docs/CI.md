@@ -181,11 +181,15 @@ shipped = (
     "nxt_course_world_model", "nxt_edge_task", "nxt_site_agent",
     "nxt_model_gateway",
 )
-repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
+absent = (
+    "nxt_range_agent", "nxt_range_viewer", "nxt_range_demo",
+    "openai", "anthropic", "moonshot", "requests", "httpx",
+    "simpy", "gymnasium", "pxr", "rclpy", "rospy",
+)
 for name in shipped:
     import_module(name)
-for name in repository_only:
-    assert find_spec(name) is None, f"repository-only package installed: {name}"
+for name in absent:
+    assert find_spec(name) is None, f"unexpected package installed: {name}"
 print("isolated wheel imports passed:", version("nxt-sim"))
 PY
 )

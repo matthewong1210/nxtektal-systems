@@ -58,8 +58,10 @@ discovery and no redirects or automatic retry. Request bodies are limited to
 262144 bytes; responses to 524288 bytes. It sends `Connection: close` and
 `Accept-Encoding: identity`; non-identity response encoding, excessive bodies,
 ambiguous length/framing and invalid chunk framing fail closed. DNS resolution,
-connection, TLS and reads share an attempt deadline; timed-out DNS workers are
-bounded. `io` is used only to clamp HTTP parser reads, not for file access.
+connection, TLS and reads share an attempt deadline. The caller's DNS wait is
+bounded; a timed-out daemon resolver may outlive the call, but its late result
+is discarded and it has no request body or key and cannot connect or send.
+`io` is used only to clamp HTTP parser reads, not for file access.
 
 ## Provider envelopes
 
@@ -70,7 +72,7 @@ used as model output or error detail.
 
 | Provider | Request envelope | Accepted answer source |
 |---|---|---|
-| Kimi | `model`, `messages` (`role`, `content`), `max_tokens`, `response_format.type=json_schema`, `response_format.json_schema={name: structured_output, strict: true, schema: ...}`, `stream=false`; Bearer authorization | `choices[0].message.content` with `finish_reason=stop`; refusal or `content_filter` is refused |
+| Kimi | `model`, `messages` (`role`, `content`), `max_tokens`, `response_format.type=json_schema`, `response_format.json_schema={name: structured_output, strict: true, schema: ...}`, `stream=false`; Bearer authorization | `choices[0].message.content` with `finish_reason=stop`; `content_filter` or a nonempty string `message.refusal` is refused, `null`/absent is not a refusal, and any other refusal value is malformed |
 | OpenAI | `model`, `input` (`role`, `content`), `max_output_tokens`, `text.format={type: json_schema, name: structured_output, strict: true, schema: ...}`, `store=false`; Bearer authorization | `status=completed`, exactly one `output_text` in message content; optional message status must be completed; refusal blocks fail; reasoning/tool blocks are not answers and Chat Completions `choices` is rejected |
 | Anthropic | `model`, `max_tokens`, `messages`, optional single leading `system`, `tools=[{name: emit_structured_output, description: ..., input_schema: ...}]`, `tool_choice={type: tool, name: emit_structured_output}`; `x-api-key`, `anthropic-version: 2023-06-01` | `stop_reason=tool_use` and exactly one tool-use block named `emit_structured_output` with object `input`; `stop_reason=refusal` is refused; tool input is data and is never executed |
 
@@ -140,9 +142,11 @@ returns, the actual send timeout is recalculated and can shrink; it never
 exceeds that approved upper bound. An exhausted budget prevents network send
 and is recorded as `DEADLINE_EXHAUSTED` if a start was already observed.
 An adapter result returning beyond the total deadline becomes
-`DEADLINE_EXHAUSTED`; returning beyond only its attempt deadline becomes
-`READ_TIMEOUT`. Synchronous observer callbacks cannot be forcibly preempted;
-their elapsed time consumes subsequent available budget.
+`DEADLINE_EXHAUSTED`. A successful output returning beyond only its attempt
+deadline becomes `READ_TIMEOUT`; a terminal non-success returned before the
+total deadline preserves its original classification. Synchronous observer
+callbacks cannot be forcibly preempted; their elapsed time consumes subsequent
+available budget.
 
 ## Attempt observer ordering
 

@@ -157,7 +157,8 @@ class ModelGateway:
                                                "outcome input digest does not match request")
                 if returned > absolute_deadline:
                     outcome = _timeout_outcome(request, FailureCode.DEADLINE_EXHAUSTED)
-                elif returned > attempt_deadline:
+                elif (returned > attempt_deadline
+                      and outcome.status is GenerationStatus.SUCCEEDED):
                     outcome = _timeout_outcome(request, FailureCode.READ_TIMEOUT)
             record = AttemptRecord(
                 request.request_id, index, prepared.provider, prepared.model_id, outcome.status,
