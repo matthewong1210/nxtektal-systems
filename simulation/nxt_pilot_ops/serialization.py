@@ -6,7 +6,7 @@ import dataclasses
 import hashlib
 import json
 import math
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
@@ -34,6 +34,8 @@ def to_primitive(value: Any) -> Any:
         return value.value
     if isinstance(value, datetime):
         return _utc_iso(value)
+    if isinstance(value, date):
+        return value.isoformat()
     if isinstance(value, Path):
         return str(value)
     if isinstance(value, Mapping):
