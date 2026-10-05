@@ -1,0 +1,19 @@
+{
+  "schema": "nxt-edge-interventions/config/v1",
+  "site_id": "pilot-course-a",
+  "deployment_id": "pilot-a-edge-task-sim-v0",
+  "simulation_env_id": "sim-local-01",
+  "evidence_dir": "reports/edge-task-v0/interventions",
+  "receiver": {
+    "receiver_id": "local-test-receiver",
+    "host": "127.0.0.1",
+    "port": 18831,
+    "timeout_s": 2.0,
+    "evidence_dir": "reports/edge-task-v0/notifications/local-test-receiver"
+  },
+  "reminder_interval_s": 60,
+  "max_reminders": 3,
+  "notify_max_attempts": 5,
+  "notify_retry_interval_s": 5,
+  "tick_interval_s": 1.0
+}

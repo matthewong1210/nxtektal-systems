@@ -49,6 +49,7 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 | `nxt_workflow_enablement` | Workflow identity registry, shared-site gates, independent per-workflow readiness verdicts, deterministic enablement report, and fixture-only launch-plan data |
 | `nxt_course_world_model` | Immutable, versioned course spatial truth (course-local frame, elevation surface, semantic features, map revisions) and the deterministic read-only Map Query Service |
 | `nxt_edge_task` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation with dedup, ordering, terminal-conflict gate, and liveness, plus the protocol double's executor rules, dated UTC schedules, and local operator inbox; stdlib-only, no transport or physical execution surface |
+| `nxt_edge_interventions` | SIMULATION-only human-handling rehearsal over the Edge task journal: evidence-keyed cases, persisted notification intents with stable ids and bounded retries, reminder and escalation rules, loopback test-receiver receipts, and human ack/resolve records that clear no gate; stdlib-only, no transport, real notification, or execution surface |
 | `nxt_site_agent` | Local readiness-gated Site Agent service shell: loopback Manager API, noncanonical projections/briefing, fixture source-cursor persistence; fixture-backed Shadow Mode only |
 | `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
 

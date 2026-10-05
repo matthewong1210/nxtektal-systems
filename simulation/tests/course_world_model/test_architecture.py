@@ -33,6 +33,7 @@ BANNED_IMPORT_ROOTS = {
     "nxt_edge_observation",
     "nxt_workflow_enablement",
     "nxt_edge_task",
+    "nxt_edge_interventions",
     # simulation / USD / robotics stacks
     "simpy",
     "gymnasium",
@@ -182,6 +183,7 @@ OTHER_PACKAGES = (
     # course spatial truth reaches consumers only through composition
     # roots, never through the service package.
     "nxt_site_agent",
+    "nxt_edge_interventions",
 )
 
 # Package names this package's *source* may never mention, even in
@@ -194,6 +196,7 @@ FOREIGN_PACKAGE_LITERALS = (
     "nxt_workflow_enablement",
     "nxt_edge_task",
     "nxt_site_agent",
+    "nxt_edge_interventions",
 )
 
 
@@ -426,6 +429,7 @@ def test_the_package_imports_without_any_runtime_simulation_or_transport_stack()
             "nxt_edge_observation",
             "nxt_workflow_enablement",
             "nxt_edge_task",
+            "nxt_edge_interventions",
         )
     )
     assert result.returncode == 0, result.stderr

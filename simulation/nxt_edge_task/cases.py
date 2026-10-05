@@ -187,6 +187,11 @@ class TaskView:
     events_by_boot: dict[int, set[int]] = field(default_factory=dict)
     acceptance_observed: bool = False
     terminals: list[dict[str, Any]] = field(default_factory=list)
+    # The applied ASSISTANCE_REQUIRED event that put the task in
+    # BLOCKED_AWAITING_HUMAN (kind, reason, key, record id); cleared when an
+    # applied PROGRESS resumes the task.  Downstream human handling reads it
+    # as plain data instead of re-deriving it from the journal.
+    blocking_event: dict[str, Any] | None = None
     first_terminal: dict[str, Any] | None = None
     effective_result: str | None = None
     result_verification: str | None = None
@@ -309,6 +314,7 @@ class TaskView:
             "last_event_received_at_utc": None if self.last_event_received_at is None else utc_text(self.last_event_received_at),
             "last_progress_at_utc": None if self.last_progress_at is None else utc_text(self.last_progress_at),
             "expired_unconfirmed": self.expired_unconfirmed,
+            "blocking_event": None if self.blocking_event is None else dict(self.blocking_event),
             "expires_at_utc": self.request.expires_at_utc,
             "issued_by": self.request.issued_by,
             "exceptions": list(self.exceptions),
@@ -585,6 +591,17 @@ class EdgeView:
         task.applied_max = key
         task.applied.append({"kind": event.kind.value, "boot_sequence": event.boot_sequence, "event_sequence": event.event_sequence, "record_id": record.record_id})
         task.state = TaskState(payload["state_after"])
+        if event.kind is EventKind.ASSISTANCE_REQUIRED:
+            task.blocking_event = {
+                "kind": event.kind.value,
+                "boot_sequence": event.boot_sequence,
+                "event_sequence": event.event_sequence,
+                "reason_code": event.reason_code,
+                "record_id": record.record_id,
+                "received_at_utc": utc_text(when),
+            }
+        elif task.state is not TaskState.BLOCKED_AWAITING_HUMAN:
+            task.blocking_event = None
         if event.is_terminal:
             ref = _terminal_ref(event, record.record_id)
             task.terminals.append(ref)

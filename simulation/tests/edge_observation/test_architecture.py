@@ -159,6 +159,7 @@ OTHER_PACKAGES = (
     # The Site Agent service shell receives adapter diagnostics as plain
     # data from composition roots and must not import the adapter kit.
     "nxt_site_agent",
+    "nxt_edge_interventions",
 )
 
 

@@ -281,6 +281,32 @@ An untracked document is never repository authority by itself.
   state orchestration layer directly, memory, twin, viewer, robot, ROS,
   subprocess, os, wall-clock, or randomness modules. No existing package may
   import it; only composition-root scripts may.
+- Keep `nxt_edge_interventions` a stdlib-only, SIMULATION-only
+  human-handling rehearsal leaf. It imports no other `nxt_*` package; the
+  Edge task/device view reaches it as plain `EdgeSnapshot` data from
+  composition roots, and missing fields are refused rather than defaulted.
+  It owns the human-handling case lifecycle (`ASSISTANCE_REQUIRED`,
+  `DEVICE_UNREACHABLE`, `RESULT_UNCONFIRMED`, `EVIDENCE_CONFLICT`; human
+  states `OPEN`/`ACKNOWLEDGED`/`RESOLVED` with operator label, time, and
+  note), evidence-keyed case identity with recurrence and escalation rules,
+  persisted notification intents with stable ids and bounded retry state
+  (`PENDING`/`ATTEMPTING`/`UNKNOWN`/`DELIVERED`/`FAILED`/`EXHAUSTED`), the
+  loopback test-receiver receipt and duplicate rules, and its own journal
+  schemas. It owns no task, device, facility, observation, advice, or
+  execution semantics: `ack`/`resolve` are human records that clear no
+  authorization gate or conflict marker, resume no dispatch, resend no task,
+  set no device idle, and release no e-stop or unconfirmed task occupancy;
+  a receiver receipt is local persistence, not phone delivery or human
+  attention. It must not import the simulator, telemetry, edge adapters,
+  Site Runtime, Agent Runtime, Shadow Ops, memory, twin, viewer, robot, ROS,
+  actuator, transport/field-bus, network, filesystem, subprocess, threading,
+  wall-clock, or randomness modules, and no existing package may import it.
+  HTTP, the wall clock, and processes live only in the
+  `simulation/scripts/edge_intervention_*` and
+  `edge_notification_receiver_v0.py` composition roots, which read the Edge
+  journal and never write it. Real notification channels, recovery or
+  re-authorization after a conflict, state loss, or exhausted retries, real
+  devices, and a host watchdog remain unimplemented and unowned.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula
