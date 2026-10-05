@@ -152,11 +152,12 @@ jobs:
         run: >-
           uv run --no-sync python -B -m pytest -o addopts='' -q -rs
           -p no:cacheprovider tests/edge_task
-      - name: Test Site Agent service
+      - name: Test Site Agent service (continuous V4 covered by complete suite)
         working-directory: simulation
         run: >-
           uv run --no-sync python -B -m pytest -o addopts='' -q
           -p no:cacheprovider tests/site_agent
+          --ignore=tests/site_agent/test_continuous_collection_execution_service.py
       - name: Test architecture, imports, and safety
         working-directory: simulation
         run: |
