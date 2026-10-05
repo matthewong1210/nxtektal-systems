@@ -1252,7 +1252,7 @@ git add nxt_pilot_ops/staffing tests/pilot_ops/test_staffing_exceptions.py \
 git commit -m "feat(staffing): derive exceptions and advisory baselines"
 ```
 
-### Task 3: Implement exact patch decoding and deterministic candidate validation
+### Task 3: Implement decoded patch contracts and deterministic candidate validation
 
 **Files:**
 - Create: `simulation/nxt_pilot_ops/staffing/validator.py`
@@ -1263,20 +1263,31 @@ git commit -m "feat(staffing): derive exceptions and advisory baselines"
 - Produces: independent validation results, materialized complete schedules/digests, stable rejection codes, and deterministic coverage gaps.
 - Implements the frozen `assignment_from_candidate` recipe in `validator.py`; `contracts.py` remains unchanged.
 
+**Stability rulings (binding wherever later pseudocode is abbreviated):**
+
+- Task 4 exclusively decodes the untrusted provider wire value. It enforces closed JSON shapes, candidate count/index set, operation count, parseable offset-bearing RFC3339 values, canonical code regex, alias membership, and duplicate assignment alias/REMOVE rules within each candidate before constructing `CandidatePatch`. Different candidates may independently reference the same baseline alias. Unknown aliases, duplicate REMOVE within one candidate, lexically invalid codes/timestamps, invalid/unknown fields, a third candidate, non-contiguous indexes, or any other structural violation invalidate the whole provider result; they are not per-candidate rejections. Task 3 consumes already-decoded patches and performs deterministic schedule semantics, including interval direction/minute/zone/date checks. This preserves the design rule that one semantically invalid candidate does not hide a second valid candidate without relaxing provider protocol failures.
+- Task 3 defines frozen/slotted `CandidatePatch` and `CandidateValidation` locally in `validator.py`; `contracts.py` remains unchanged. Both validate exact types and coherence on direct construction. Candidate indexes are exact integers `1|2` (booleans rejected); operation tuples contain only exact `RemoveOperation`/`AddOperation` values with matching literals; ADD endpoints are exact aware datetimes; rationale is safe Unicode at most 280 scalars; warnings are an exact tuple of at most five safe strings of at most 200 scalars. Direct patch construction enforces only structural scalar/class/literal/canonical-code/aware-timestamp validity and must leave interval direction, minute precision, offset-zone, date, and other semantic failures for the stable Task 3 rejection codes. Validation codes are closed, sorted, and unique. Valid results have no codes/gaps and have a canonical tuple schedule plus matching lowercase 64-hex digest; invalid results have nonempty codes and `None` schedule/digest. `coverage_gaps` is nonempty if and only if rejection codes equal exactly `("COVERAGE_GAP",)`; each exact `CoverageGap` has canonical codes, an aware positive whole-minute interval, exact integer `required >= 1`, and exact integer `0 <= actual < required`.
+- The Task 3 rejection vocabulary contains only semantic results reachable from this signature: `UNKNOWN_ROLE_AREA`, `INELIGIBLE_ROLE_AREA`, `MISSING_REQUIRED_SKILL`, `INVALID_INTERVAL`, `INVALID_MINUTE_PRECISION`, `OFFSET_TIMEZONE_MISMATCH`, `OUTSIDE_SERVICE_DATE`, `OUTSIDE_AVAILABILITY`, `OVERLAPS_EXCEPTION`, `OVERLAPPING_ASSIGNMENTS`, `MAX_DAILY_MINUTES_EXCEEDED`, `COVERAGE_GAP`, and `PROMPT_TEMPLATE_VERSION_MISMATCH`. Provider structural errors above belong to Task 4. Roster/exception/effective-plan staleness belongs to Task 7's locked current-basis comparison and becomes `STALE_SUGGESTION`; Task 3 must not widen its signature merely to manufacture stale codes. Operation-count overflow is structural and is rejected by Task 4/provider parsing or Task 7/manager parsing before Task 3.
+- Before validating any candidate, verify each alias map is an exact tuple of exact two-string tuples, aliases and targets are individually unique, worker and assignment alias namespaces do not collide, and target sets exactly equal the basis worker/assignment ID sets (including a valid empty assignment map). Invalid local evidence raises `staffing_invalid_evidence`; converting with `dict(...)` before this validation is forbidden. Task 4 additionally reconstructs the complete `ProviderPayload` and canonical input digest from the frozen basis plus the maps and requires exact equality, so swapping two otherwise-valid alias targets cannot redirect a suggestion to another worker. A defensive candidate reference to an absent alias or duplicate REMOVE raises `invalid_candidate_set` and invalidates the whole result rather than becoming a `CandidateValidation`.
+- Provider candidate indexes must be exactly `()` / `(1,)` / `(1, 2)` in order. Task 4 enforces this before Task 3; `validate_candidates` repeats it defensively. Direct `validate_candidate` still accepts index 2 so a manager may modify the second stored candidate without renumbering it.
+- Validation precedence is deterministic. Validate local evidence maps and decoded-patch structure first; template mismatch is then the first semantic check and short-circuits. Apply all validated REMOVEs before ADDs; preserve ADD relative order. For each ADD, test exact aware datetimes, minute precision, `end > start`, explicit offset/IANA round-trip consistency, both endpoints on the frozen service date, known role/area, eligibility, required skills, UTC-materialized availability containment, active-exception overlap, working-schedule overlap, and cumulative daily minutes. Every duration is elapsed time after converting both endpoints to UTC; never use same-`ZoneInfo` wall-clock subtraction across DST. Codes across ADDs are sorted/unique. Only when operation codes are empty is coverage computed; any gaps produce the sole code `COVERAGE_GAP` plus every deterministic gap.
+- Resolve weekly availability rows for the basis service date with the same `resolve_local_minute`/IANA rules used by roster materialization, then compare aware instants. Do not compare `HH:MM` strings. Nonexistent local minutes fail closed; an ambiguous wall minute is accepted only when the candidate's explicit offset identifies the same valid instant/fold under the site zone.
+- `coverage_gaps(schedule, basis)` segments each coverage window at its own endpoints and every intersecting final-assignment, active-exception, and coverage-window endpoint, clipping all points to the window. For each nonempty half-open segment, count distinct staff IDs whose assignment has the same role/area and covers the whole segment. Do not merge adjacent gaps. Return canonical order `(role_code, area_code, start_at, end_at, required, actual)`.
+- Expose `canonical_schedule(assignments)` and `schedule_digest(assignments)`. Canonical schedules use `(start_at, end_at, staff_id, assignment_id)`, matching Task 2. Unmentioned baseline `Assignment` objects are reused unchanged. A valid schedule digest is exactly `stable_digest(to_primitive(canonical_schedule))`; empty `()` is valid and hashes to `stable_digest(())`. Task 7 ACCEPT rechecks the stored schedule/digest with these helpers and MODIFY uses this same validator/formula.
+- Task 3 returns validations only; Task 7 owns `StoredCandidate` construction and `NO_VALID_SUGGESTION` terminal evidence. Task 7's local MODIFY adapter preserves `request.candidate_index`, uses fixed rationale `"manager modification"`, keeps the up-to-500-scalar manager note only in audit evidence, and requires 1..32 edited operations plus exact nonnegative revision integers.
+
 - [ ] **Step 1: Freeze validator result types and rejection vocabulary in failing tests**
 
 Define and assert at least:
 
 ```python
 REJECTION_CODES = {
-    "UNKNOWN_ASSIGNMENT_ALIAS", "DUPLICATE_REMOVE", "UNKNOWN_WORKER_ALIAS",
     "UNKNOWN_ROLE_AREA", "INELIGIBLE_ROLE_AREA", "MISSING_REQUIRED_SKILL",
     "OUTSIDE_AVAILABILITY", "OVERLAPS_EXCEPTION", "OVERLAPPING_ASSIGNMENTS",
     "MAX_DAILY_MINUTES_EXCEEDED", "OUTSIDE_SERVICE_DATE",
-    "TOO_MANY_OPERATIONS",
-    "INVALID_MINUTE_PRECISION", "OFFSET_TIMEZONE_MISMATCH", "COVERAGE_GAP",
-    "STALE_ROSTER_REVISION", "STALE_EXCEPTION_SET_REVISION",
-    "STALE_EFFECTIVE_PLAN_REVISION", "PROMPT_TEMPLATE_VERSION_MISMATCH",
+    "INVALID_INTERVAL", "INVALID_MINUTE_PRECISION",
+    "OFFSET_TIMEZONE_MISMATCH", "COVERAGE_GAP",
+    "PROMPT_TEMPLATE_VERSION_MISMATCH",
 }
 
 @dataclass(frozen=True, slots=True)
@@ -1292,13 +1303,13 @@ class CandidateValidation:
 
 - [ ] **Step 2: Add one failing parametrized case per rejection code**
 
-Build from one valid candidate and mutate exactly one fact per case. Assert stable sorted codes, no materialized schedule for invalid candidates, exact gap segments for `COVERAGE_GAP`, and unchanged input basis bytes before/after validation.
+Build from one valid decoded candidate and mutate exactly one semantic fact per reachable code. Assert stable sorted codes, no materialized schedule for invalid candidates, exact gap segments for `COVERAGE_GAP`, and unchanged input basis bytes before/after validation. Test provider structural/alias/operation-count failures in Task 4 and stale revision behavior in Task 7, not as unreachable Task 3 codes.
 
 - [ ] **Step 3: Add boundary and operation-order tests**
 
-Prove all REMOVE operations apply before ordered ADD operations even if arrays interleave them; an unmentioned assignment is byte-identical; duplicate removes fail; one worker may receive multiple non-overlapping ADDs; overlap fails; coverage splits at assignment, exception, and requirement boundaries. Pin explicit-offset timestamps against the roster IANA zone.
+Prove all REMOVE operations apply before ordered ADD operations even if arrays interleave them; an unmentioned assignment is the same object and byte-identical; duplicate removes are a whole-result structural error; one worker may receive multiple non-overlapping ADDs; overlap fails; coverage splits at assignment, exception, and every coverage-window boundary. Pin explicit-offset timestamps against both folds of an ambiguous roster-zone minute and reject nonexistent minutes.
 
-Target the pure helpers `basis_knows_role_area`, `basis_is_eligible`, `basis_has_required_skills`, `basis_is_available`, `basis_overlaps_exception`, `basis_overlaps_existing`, and `basis_exceeds_daily_limit` with one test each, including DST-zone availability, exception overlap, two ADDs overlapping each other, and cumulative daily minutes over the worker limit.
+Target the pure helpers `basis_knows_role_area`, `basis_is_eligible`, `basis_has_required_skills`, `basis_is_available`, `basis_overlaps_exception`, `basis_overlaps_existing`, and `basis_exceeds_daily_limit` with one test each, including UTC-materialized DST-zone availability, exception adjacency/overlap, two ADDs overlapping each other, and cumulative elapsed minutes over the worker limit. Freeze spring-forward and fall-back cases that distinguish UTC elapsed duration from wall-clock subtraction. Add direct-construction invalid matrices for both local records and malformed/missing/duplicate alias-map evidence.
 
 - [ ] **Step 4: Run validator tests and verify RED**
 
@@ -1308,9 +1319,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/pilot_ops/test_staffing_validator.py
 ```
 
-- [ ] **Step 5: Implement closed patch types and application**
+- [ ] **Step 5: Implement closed decoded-patch types and application**
 
-Import the exact `RemoveOperation`, `AddOperation`, and `CoverageGap` dataclasses frozen by Task 1; Task 3 only implements decoding and application:
+Import the exact `RemoveOperation`, `AddOperation`, and `CoverageGap` dataclasses frozen by Task 1; Task 3 implements the already-decoded local patch/value contracts and deterministic application. Task 4 remains the only provider-wire decoder:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -1321,7 +1332,7 @@ class CandidatePatch:
     operational_warnings: tuple[str, ...]
 ```
 
-Reject unknown keys. Enforce maximum 32 operations before applying. Rehydrate aliases through the reservation maps, remove from the frozen baseline, then append validated ADD assignments with content-derived IDs.
+Validate the local record coherence described above. Provider unknown keys/count/alias failures have already failed in Task 4; repeat the local alias-evidence and patch invariants defensively before rehydrating IDs. Remove from the frozen baseline, then append validated ADD assignments with content-derived IDs.
 
 - [ ] **Step 6: Implement deterministic validation and segmented coverage**
 
@@ -1332,26 +1343,22 @@ def validate_candidate(basis: BasisSnapshot, candidate: CandidatePatch,
                        *, worker_alias_to_staff_id: tuple[tuple[str, str], ...],
                        assignment_alias_to_assignment_id: tuple[tuple[str, str], ...],
                        prompt_template_version: str) -> CandidateValidation:
+    worker_ids, assignment_ids = validate_alias_maps(
+        basis, worker_alias_to_staff_id, assignment_alias_to_assignment_id)
+    validate_candidate_patch(candidate)
     if prompt_template_version != basis.prompt_template_version:
         return CandidateValidation(candidate.candidate_index, False, ("PROMPT_TEMPLATE_VERSION_MISMATCH",), (), None, None)
-    if len(candidate.operations) > 32:
-        return CandidateValidation(candidate.candidate_index, False, ("TOO_MANY_OPERATIONS",), (), None, None)
-    assignment_ids = dict(assignment_alias_to_assignment_id)
-    worker_ids = dict(worker_alias_to_staff_id)
     baseline = {item.assignment_id: item for item in basis.assignments}
     removes = [op for op in candidate.operations if op.operation == "REMOVE"]
     adds = [op for op in candidate.operations if op.operation == "ADD"]
-    remove_codes = validate_removes(removes, assignment_ids, baseline)
-    if remove_codes:
-        return CandidateValidation(candidate.candidate_index, False, tuple(sorted(set(remove_codes))), (), None, None)
+    validate_removes(removes, assignment_ids, baseline)
     removed_ids = {assignment_ids[item.assignment_alias] for item in removes}
     remaining = {key: value for key, value in baseline.items() if key not in removed_ids}
     add_codes, accepted_adds = validate_adds(adds, worker_ids, remaining, basis)
-    codes = remove_codes + add_codes
-    if codes:
-        return CandidateValidation(candidate.candidate_index, False, tuple(sorted(set(codes))), (), None, None)
+    if add_codes:
+        return CandidateValidation(candidate.candidate_index, False, tuple(sorted(set(add_codes))), (), None, None)
     schedule = apply_patch_operations(remaining, accepted_adds)
-    gaps = coverage_gaps(schedule, basis.coverage)
+    gaps = coverage_gaps(schedule, basis)
     if gaps:
         return CandidateValidation(candidate.candidate_index, False, ("COVERAGE_GAP",), tuple(gaps), None, None)
     return CandidateValidation(candidate.candidate_index, True, (), (), tuple(schedule), stable_digest(to_primitive(tuple(schedule))))
@@ -1359,28 +1366,31 @@ def validate_candidates(basis: BasisSnapshot, candidates: Sequence[CandidatePatc
                         *, worker_alias_to_staff_id: tuple[tuple[str, str], ...],
                         assignment_alias_to_assignment_id: tuple[tuple[str, str], ...],
                         prompt_template_version: str) -> tuple[CandidateValidation, ...]:
-    if len(candidates) > 2 or tuple(c.candidate_index for c in candidates) != tuple(sorted({c.candidate_index for c in candidates})):
-        raise StaffingError("invalid_candidate_set", "indices must be unique and ordered")
+    candidates = require_candidate_tuple(candidates)
+    indexes = tuple(candidate.candidate_index for candidate in candidates)
+    if indexes not in {(), (1,), (1, 2)}:
+        raise StaffingError("invalid_candidate_set", "indices must be contiguous and ordered")
     return tuple(validate_candidate(basis, candidate,
         worker_alias_to_staff_id=worker_alias_to_staff_id,
         assignment_alias_to_assignment_id=assignment_alias_to_assignment_id,
         prompt_template_version=prompt_template_version) for candidate in candidates)
 
 def validate_removes(removes, assignment_ids, baseline):
-    aliases = set(); codes = []
+    aliases = set()
     for operation in removes:
-        if operation.assignment_alias in aliases: codes.append("DUPLICATE_REMOVE")
+        if operation.assignment_alias in aliases:
+            raise StaffingError("invalid_candidate_set", "duplicate REMOVE")
         aliases.add(operation.assignment_alias)
         if operation.assignment_alias not in assignment_ids or assignment_ids[operation.assignment_alias] not in baseline:
-            codes.append("UNKNOWN_ASSIGNMENT_ALIAS")
-    return codes
+            raise StaffingError("invalid_candidate_set", "unknown assignment alias")
 
 def in_site_zone(value: datetime, timezone_name: str) -> bool:
-    if value.tzinfo is None:
+    if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
         return False
     zone = ZoneInfo(timezone_name)
-    local = value.astimezone(zone)
-    return local.utcoffset() == value.utcoffset()
+    local = value.astimezone(timezone.utc).astimezone(zone)
+    return (local.utcoffset() == value.utcoffset()
+            and local.replace(tzinfo=None) == value.replace(tzinfo=None))
 
 def basis_knows_role_area(basis: BasisSnapshot, role_code: str, area_code: str) -> bool:
     return any(rule.role_code == role_code and rule.area_code == area_code
@@ -1398,12 +1408,13 @@ def basis_has_required_skills(basis: BasisSnapshot, staff_id: str,
     return set(required).issubset(worker.skill_codes)
 
 def basis_is_available(basis: BasisSnapshot, operation: AddOperation, staff_id: str) -> bool:
-    local_start = operation.start_at.astimezone(ZoneInfo(basis.site_timezone))
-    local_end = operation.end_at.astimezone(ZoneInfo(basis.site_timezone))
-    return any(row.staff_id == staff_id and row.weekday == local_start.weekday()
-               and row.start_local <= local_start.strftime("%H:%M")
-               and local_end.strftime("%H:%M") <= row.end_local
-               for row in basis.availability)
+    windows = tuple((
+        resolve_local_minute(basis.basis.service_date, row.start_local, basis.site_timezone),
+        resolve_local_minute(basis.basis.service_date, row.end_local, basis.site_timezone),
+    ) for row in basis.availability if row.staff_id == staff_id
+        and row.weekday == basis.basis.service_date.weekday())
+    return any(start <= operation.start_at and operation.end_at <= end
+               for start, end in windows)
 
 def basis_overlaps_exception(basis: BasisSnapshot, staff_id: str, operation: AddOperation) -> bool:
     return any(exc.staff_id == staff_id and operation.start_at < exc.unavailable_end
@@ -1417,9 +1428,12 @@ def basis_overlaps_existing(staff_id: str, operation: AddOperation,
 def basis_exceeds_daily_limit(basis: BasisSnapshot, staff_id: str,
                               operation: AddOperation, working: dict[str, Assignment]) -> bool:
     worker = next(item for item in basis.workers if item.staff_id == staff_id)
-    minutes = sum(int((item.end_at - item.start_at).total_seconds() // 60)
+    minutes = sum(int((item.end_at.astimezone(timezone.utc)
+                       - item.start_at.astimezone(timezone.utc)).total_seconds() // 60)
                   for item in working.values() if item.staff_id == staff_id)
-    return minutes + int((operation.end_at - operation.start_at).total_seconds() // 60) > worker.max_daily_minutes
+    added = int((operation.end_at.astimezone(timezone.utc)
+                 - operation.start_at.astimezone(timezone.utc)).total_seconds() // 60)
+    return minutes + added > worker.max_daily_minutes
 
 def validate_adds(adds, worker_ids, remaining, basis):
     codes = []
@@ -1427,21 +1441,27 @@ def validate_adds(adds, worker_ids, remaining, basis):
     working = dict(remaining)
     for operation in adds:
         if operation.worker_alias not in worker_ids:
-            codes.append("UNKNOWN_WORKER_ALIAS"); continue
+            raise StaffingError("invalid_candidate_set", "unknown worker alias")
+        if type(operation.start_at) is not datetime or type(operation.end_at) is not datetime:
+            raise StaffingError("invalid_candidate_set", "timestamp type")
+        if (operation.start_at.tzinfo is None or operation.end_at.tzinfo is None
+                or operation.start_at.utcoffset() is None or operation.end_at.utcoffset() is None):
+            codes.append("OFFSET_TIMEZONE_MISMATCH"); continue
+        if operation.start_at.second or operation.end_at.second or operation.start_at.microsecond or operation.end_at.microsecond:
+            codes.append("INVALID_MINUTE_PRECISION"); continue
+        if operation.end_at <= operation.start_at:
+            codes.append("INVALID_INTERVAL"); continue
+        if not in_site_zone(operation.start_at, basis.site_timezone) or not in_site_zone(operation.end_at, basis.site_timezone):
+            codes.append("OFFSET_TIMEZONE_MISMATCH"); continue
+        if (operation.start_at.astimezone(ZoneInfo(basis.site_timezone)).date() != basis.basis.service_date
+                or operation.end_at.astimezone(ZoneInfo(basis.site_timezone)).date() != basis.basis.service_date):
+            codes.append("OUTSIDE_SERVICE_DATE"); continue
         if not basis_knows_role_area(basis, operation.role_code, operation.area_code):
             codes.append("UNKNOWN_ROLE_AREA"); continue
         if not basis_is_eligible(basis, worker_ids[operation.worker_alias], operation.role_code, operation.area_code):
             codes.append("INELIGIBLE_ROLE_AREA"); continue
         if not basis_has_required_skills(basis, worker_ids[operation.worker_alias], operation.role_code, operation.area_code):
             codes.append("MISSING_REQUIRED_SKILL"); continue
-        if operation.start_at.second or operation.end_at.second or operation.start_at.microsecond or operation.end_at.microsecond:
-            codes.append("INVALID_MINUTE_PRECISION"); continue
-        if not in_site_zone(operation.start_at, basis.site_timezone) or not in_site_zone(operation.end_at, basis.site_timezone):
-            codes.append("OFFSET_TIMEZONE_MISMATCH"); continue
-        if (operation.end_at <= operation.start_at
-                or operation.start_at.astimezone(ZoneInfo(basis.site_timezone)).date() != basis.basis.service_date
-                or operation.end_at.astimezone(ZoneInfo(basis.site_timezone)).date() != basis.basis.service_date):
-            codes.append("OUTSIDE_SERVICE_DATE"); continue
         if not basis_is_available(basis, operation, worker_ids[operation.worker_alias]):
             codes.append("OUTSIDE_AVAILABILITY"); continue
         if basis_overlaps_exception(basis, worker_ids[operation.worker_alias], operation):
@@ -1460,28 +1480,39 @@ def apply_patch_operations(remaining, accepted_adds):
     result = dict(remaining)
     for item in accepted_adds:
         result[item.assignment_id] = item
-    return tuple(sorted(result.values(), key=lambda item: (item.start_at, item.end_at, item.assignment_id)))
+    return tuple(sorted(result.values(), key=lambda item: (
+        item.start_at, item.end_at, item.staff_id, item.assignment_id)))
 
-def coverage_gaps(schedule, requirements):
+def coverage_gaps(schedule, basis):
     gaps = []
-    for requirement in requirements:
-        boundaries = sorted({requirement.start_at, requirement.end_at} |
-                            {point for item in schedule for point in (item.start_at, item.end_at)
-                             if requirement.start_at <= point <= requirement.end_at})
+    all_boundary_sources = tuple(schedule) + tuple(basis.exceptions) + tuple(basis.coverage)
+    for requirement in basis.coverage:
+        boundaries = {requirement.start_at, requirement.end_at}
+        for item in all_boundary_sources:
+            item_start = getattr(item, "start_at", getattr(item, "unavailable_start", None))
+            item_end = getattr(item, "end_at", getattr(item, "unavailable_end", None))
+            if item_start is not None and item_start < requirement.end_at and requirement.start_at < item_end:
+                boundaries.add(max(requirement.start_at, item_start))
+                boundaries.add(min(requirement.end_at, item_end))
+        boundaries = sorted(boundaries)
         for start, end in zip(boundaries, boundaries[1:]):
-            actual = sum(item.role_code == requirement.role_code and item.area_code == requirement.area_code
-                         and item.start_at <= start and end <= item.end_at for item in schedule)
+            actual = len({item.staff_id for item in schedule
+                          if item.role_code == requirement.role_code
+                          and item.area_code == requirement.area_code
+                          and item.start_at <= start and end <= item.end_at})
             if actual < requirement.minimum_staff:
                 gaps.append(CoverageGap(requirement.role_code, requirement.area_code, start, end,
                                         requirement.minimum_staff, actual))
-    return tuple(gaps)
+    return tuple(sorted(gaps, key=lambda item: (
+        item.role_code, item.area_code, item.start_at, item.end_at,
+        item.required, item.actual)))
 ```
 
-For each coverage tuple, build sorted unique boundaries from its requirement windows plus all intersecting assignment and exception endpoints. For every consecutive `[a,b)`, count eligible active assignments and compare to the frozen minimum. Do not infer coverage from model warnings or repair gaps.
+For each coverage tuple, build sorted unique clipped boundaries from its requirement window plus all intersecting assignment, exception, and coverage-window endpoints. For every consecutive `[a,b)`, count distinct staff with a matching role/area assignment covering the complete segment and compare to the frozen minimum. Do not merge adjacent gaps, infer coverage from model warnings, or repair gaps.
 
-- [ ] **Step 7: Prove one-valid/one-invalid filtering and all-invalid terminal input**
+- [ ] **Step 7: Prove independent validations and all-invalid handoff data**
 
-Add a helper that returns valid results plus recorded rejection summaries. Assert one valid candidate remains acceptable and the invalid one remains auditable; two invalid candidates produce `NO_VALID_SUGGESTION` data containing validator-computed gaps, with `terminal_state == "NO_VALID_SUGGESTION"` and non-null `failure_code == "NO_VALID_SUGGESTION"`.
+Assert one semantically valid candidate remains valid and the second semantic rejection remains independently auditable. With two invalid candidates, Task 3 returns both complete validation records, including validator-computed gaps, but creates no terminal/event payload. Task 7 consumes those records to persist `NO_VALID_SUGGESTION` and its failure code.
 
 - [ ] **Step 8: Run GREEN and commit**
 
@@ -1504,7 +1535,7 @@ git commit -m "feat(staffing): validate candidate schedule patches"
 
 - [ ] **Step 1: Add failing privacy and nonce tests**
 
-Assert a fixed nonce yields frozen `worker_…` and `assignment_…` aliases, a second nonce yields entirely different aliases, empty/short nonces reject, and replay history refuses an alias nonce digest already used by another reservation. Include a worker with valid skills/eligibility/availability but no current assignment and assert that worker still appears in `ProviderPayload.workers` and can be referenced by an ADD candidate. Serialize the entire provider payload/messages and prove they contain none of the fixture’s real staff IDs, display names, notes, source refs, or strings `robot`, `edge`, `directive`, `api_key`.
+Assert a fixed nonce yields frozen `worker_…` and `assignment_…` aliases, a second nonce yields entirely different aliases, empty/short nonces reject, and replay history refuses an alias nonce digest already used by another reservation. Swap two alias targets while preserving both target sets and assert projection/replay validation rejects the mismatch against the frozen provider payload. Include a worker with valid skills/eligibility/availability but no current assignment and assert that worker still appears in `ProviderPayload.workers` and can be referenced by an ADD candidate. Serialize the entire provider payload/messages and prove they contain none of the fixture’s real staff IDs, display names, notes, source refs, or strings `robot`, `edge`, `directive`, `api_key`.
 
 - [ ] **Step 2: Freeze the exact provider output schema and text limits**
 
@@ -1512,7 +1543,7 @@ Define one `STAFFING_SUGGESTION_OUTPUT_SCHEMA` as the frozen stdlib description 
 
 - [ ] **Step 3: Add failing decoder tests for every shape violation**
 
-Reject a third candidate, 33rd operation, unknown field at any depth, bad enum, missing field, duplicate candidate index, duplicate assignment alias, unknown alias, oversized rationale/warning, HTML/Markdown treated only as text, and a provider mapping that tries to inject real `staff_id`. Also reject keys named `prompt`, `raw_response`, `reasoning`, `api_key`, `headers`, or `metadata` at every depth, and reject overlong text before normalization.
+Reject a third candidate, 33rd operation, unknown field at any depth, bad enum, missing field, non-contiguous/duplicate candidate index, duplicate assignment alias/REMOVE within one candidate, unknown worker or assignment alias, noncanonical role/area code, offset-less or unparsable timestamp, oversized rationale/warning, HTML/Markdown treated only as text, and a provider mapping that tries to inject real `staff_id`. These are whole-result failures even when another candidate is otherwise valid; the same baseline alias may appear once in each of two independent candidates. In a separate case, decode two structurally valid candidates and prove one Task 3 semantic rejection does not hide the other valid candidate. Also reject keys named `prompt`, `raw_response`, `reasoning`, `api_key`, `headers`, or `metadata` at every depth, and reject overlong text before normalization.
 
 - [ ] **Step 4: Run projection tests and verify RED**
 
@@ -1558,8 +1589,10 @@ STAFFING_SUGGESTION_OUTPUT_SCHEMA = MappingProxyType({
                                                   "properties": MappingProxyType({
                                                       "operation": MappingProxyType({"const": "ADD"}),
                                                       "worker_alias": MappingProxyType({"type": "string", "maxLength": 64}),
-                                                      "role_code": MappingProxyType({"type": "string", "maxLength": 32}),
-                                                      "area_code": MappingProxyType({"type": "string", "maxLength": 32}),
+                                                      "role_code": MappingProxyType({"type": "string", "maxLength": 32,
+                                                                                     "pattern": "^[A-Z][A-Z0-9_]{0,31}$"}),
+                                                      "area_code": MappingProxyType({"type": "string", "maxLength": 32,
+                                                                                     "pattern": "^[A-Z][A-Z0-9_]{0,31}$"}),
                                                       "start_at": MappingProxyType({"type": "string"}),
                                                       "end_at": MappingProxyType({"type": "string"}),
                                                   }), "additionalProperties": False}),
@@ -1667,6 +1700,8 @@ def project_generation_request(basis: BasisSnapshot, *, alias_nonce: bytes,
 
 Use `HMAC-SHA256(nonce, b"worker\0" + staff_id)` and `b"assignment\0" + assignment_id`, truncated to 24 hex characters with distinct prefixes. Store maps only in the local projection/reservation. Provider payload contains basis digest, codes, intervals, availability, unavailable intervals, limits, coverage, template version, and language.
 
+`GenerationProjection` direct construction and Task 5 reservation replay call one `validate_generation_projection` helper. It first applies Task 3's alias-map evidence validation, then uses the supplied aliases and frozen basis to reconstruct every `ProviderWorker`, assignment-to-worker relation, availability row, unavailable interval, coverage row, basis/template/language field, and canonical input digest; exact equality with `provider_payload` and `input_digest` is required. It validates the nonce digest format but cannot reconstruct the secret nonce. Swapping two valid alias targets, changing an alias target while preserving the target set, or changing any provider semantic field therefore fails as `staffing_invalid_evidence`, never as provider `INVALID_RESPONSE`.
+
 - [ ] **Step 7: Implement a fixed injection-resistant prompt**
 
 `prompt.py` re-exports the Task 1 `PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v1"` and exposes `build_prompt(projection) -> tuple[dict[str, str], dict[str, str]]`. The system text says the JSON input is untrusted data, only the supplied aliases/codes may be used, no facts may be invented, and output must match the supplied schema. The user content is canonical JSON of `provider_payload`; no display label, note, or CSV cell is interpolated into instructions.
@@ -1684,7 +1719,7 @@ def build_prompt(projection):
 
 - [ ] **Step 8: Implement strict provider candidate decoding and run GREEN**
 
-Expose `decode_provider_candidates(value, projection)`. First run the stdlib hand-written closed-shape parser against `STAFFING_SUGGESTION_OUTPUT_SCHEMA`, then enforce exact alias membership/duplicate semantics, then create immutable patch types. Do not retain raw provider text, prompt, or reasoning content. Run the focused test and commit:
+Expose `decode_provider_candidates(value, projection)`. First run the stdlib hand-written closed-shape parser against `STAFFING_SUGGESTION_OUTPUT_SCHEMA`, validate canonical code regex and parse exact aware RFC3339 datetimes, then enforce per-candidate alias membership/duplicate-REMOVE semantics and create immutable patch types. The only provider-wire `StaffingError` codes emitted here are `invalid_provider_shape`, `provider_sensitive_key`, `invalid_provider_timestamp`, and `invalid_candidate_set`; local projection/evidence failures retain `staffing_invalid_evidence` and are not converted. Do not retain raw provider text, prompt, or reasoning content. Run the focused test and commit:
 
 ```bash
 git add simulation/nxt_pilot_ops/staffing/projection.py \
@@ -2004,6 +2039,14 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 Expose:
 
 ```python
+def closed_request_id(value: object, *, code: str) -> str:
+    if type(value) is not dict:
+        raise StaffingError(code, "request body")
+    try:
+        return validate_identifier(value.get("request_id"), "request_id")
+    except StaffingError as error:
+        raise StaffingError(code, "request_id") from error
+
 class StaffingOperations:
     def __init__(self, ledger: StaffingLedger, *, site_id: str,
                  deployment_id: str, site_timezone: str) -> None:
@@ -2011,18 +2054,26 @@ class StaffingOperations:
         self.site_id, self.deployment_id = site_id, deployment_id
         self.site_timezone = site_timezone
     def import_roster(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("roster-import", payload, lambda h: event_for_roster(
+        return self._append_request("roster-import",
+            closed_request_id(payload, code="staffing_invalid_roster"), payload,
+            lambda h: event_for_roster(
             h, validate_roster_import(payload, site_id=self.site_id, deployment_id=self.deployment_id,
                                       site_timezone=self.site_timezone), payload, recorded_at))
     def record_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("exception-record", payload, lambda h: event_for_exception(
+        return self._append_request("exception-record",
+            closed_request_id(payload, code="staffing_invalid_roster"), payload,
+            lambda h: event_for_exception(
             h, normalize_exception(
                 payload, roster=self._roster_for_history(h, payload)),
             payload, recorded_at))
     def cancel_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("exception-cancel", payload, lambda h: event_for_cancel(h, payload, recorded_at))
+        return self._append_request("exception-cancel",
+            closed_request_id(payload, code="staffing_invalid_roster"), payload,
+            lambda h: event_for_cancel(h, payload, recorded_at))
     def correct_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("exception-correct", payload, lambda h: event_for_correction(h, payload, recorded_at))
+        return self._append_request("exception-correct",
+            closed_request_id(payload, code="staffing_invalid_roster"), payload,
+            lambda h: event_for_correction(h, payload, recorded_at))
     def reserve_generation(self, payload: object, *, alias_nonce: bytes,
                            route_evidence: GenerationRouteEvidence,
                            prompt_template_version: str, language: str,
@@ -2033,20 +2084,22 @@ class StaffingOperations:
                 basis, alias_nonce=alias_nonce,
                 prompt_template_version=prompt_template_version, language=language)
             return event_for_reservation(history, payload, projection, route_evidence, recorded_at)
-        return self._append_request("suggestion-generate", payload, build)
+        return self._append_request(
+            "suggestion-generate", closed_request_id(payload, code="INVALID_TRANSITION"),
+            payload, build)
 
-def _append_request(self, kind: str, payload: object,
+def _append_request(self, kind: str, request_id: str, payload: object,
                     build: Callable[[StaffingHistory], StaffingEvent],
                     *, digest_payload: object | None = None) -> ReceiptResult:
         canonical = payload if digest_payload is None else digest_payload
         digest = stable_digest(canonical) if isinstance(canonical, dict) else stable_digest(to_primitive(canonical))
         def locked_builder(state):
             try:
-                prior = state.request(kind, payload["request_id"], digest)
+                prior = state.request(kind, request_id, digest)
             except StaffingError as error:
                 if error.code != "IDEMPOTENCY_CONFLICT":
                     raise
-                return ConflictDecision(kind, payload["request_id"], "IDEMPOTENCY_CONFLICT")
+                return ConflictDecision(kind, request_id, "IDEMPOTENCY_CONFLICT")
             if prior is not None:
                 return ReturnReceiptDecision(prior)
             try:
@@ -2058,8 +2111,13 @@ def _append_request(self, kind: str, payload: object,
                     "INVALID_TRANSITION", "STALE_SUGGESTION",
                 }:
                     raise
-                code = "STALE_SUGGESTION" if error.code == "STALE_SUGGESTION" else "STALE_REQUEST"
-                return ConflictDecision(kind, payload["request_id"], code)
+                if error.code == "STALE_SUGGESTION":
+                    code = "STALE_SUGGESTION"
+                elif error.code == "INVALID_TRANSITION":
+                    code = "INVALID_TRANSITION"
+                else:
+                    code = "STALE_REQUEST"
+                return ConflictDecision(kind, request_id, code)
         return self.ledger.append_via(locked_builder)
 ```
 
@@ -2068,42 +2126,87 @@ Each method supplies a builder to `StaffingLedger.append_via`; the builder repla
 Use these closed manager helpers; local IDs never enter a provider patch:
 
 ```python
+def manager_identifier(value: object, field: str) -> str:
+    try:
+        return validate_identifier(value, field)
+    except StaffingError as error:
+        raise StaffingError("INVALID_TRANSITION", field) from error
+
+def manager_code(value: object, field: str) -> str:
+    try:
+        return validate_code(value, field)
+    except StaffingError as error:
+        raise StaffingError("INVALID_TRANSITION", field) from error
+
+def manager_human_text(value: object, field: str, *, minimum: int = 1,
+                       maximum: int, formula_safe: bool = False) -> str:
+    try:
+        return validate_human_text(value, field, minimum=minimum, maximum=maximum,
+                                   formula_safe=formula_safe)
+    except StaffingError as error:
+        raise StaffingError("INVALID_TRANSITION", field) from error
+
 def parse_manager_response(value: object, *, suggestion_id: str) -> ManagerResponseRequest:
     body = require_exact_object(value, {"schema", "request_id", "operator", "kind",
                                         "expected_revisions", "candidate_index",
-                                        "edited_operations", "reason_code", "note"})
-    revisions = require_exact_object(body["expected_revisions"], {"roster", "exception_set", "effective_plan"})
-    if any(not isinstance(item, int) for item in revisions.values()):
+                                        "edited_operations", "reason_code", "note"},
+                                code="INVALID_TRANSITION", detail="manager response fields")
+    if body["schema"] != "nxt-staffing-manager-response/v1":
+        raise StaffingError("INVALID_TRANSITION", "schema")
+    manager_identifier(body["request_id"], "request_id")
+    manager_identifier(suggestion_id, "suggestion_id")
+    manager_human_text(body["operator"], "operator", maximum=128, formula_safe=True)
+    if body["note"] is not None:
+        manager_human_text(body["note"], "note", minimum=0, maximum=500)
+    kind = body["kind"]
+    reason = body["reason_code"]
+    if type(kind) is not str or kind not in {"ACCEPT", "MODIFY", "REJECT"}:
+        raise StaffingError("INVALID_TRANSITION", "unknown kind")
+    if type(reason) is not str or reason not in MANAGER_REASON_CODES:
+        raise StaffingError("INVALID_TRANSITION", "unknown reason_code")
+    revisions = require_exact_object(
+        body["expected_revisions"], {"roster", "exception_set", "effective_plan"},
+        code="INVALID_TRANSITION", detail="expected_revisions")
+    if any(type(item) is not int or item < 0 for item in revisions.values()):
         raise StaffingError("INVALID_TRANSITION", "expected_revisions")
     expected = RevisionVector(revisions["roster"], revisions["exception_set"], revisions["effective_plan"])
     raw_operations = body["edited_operations"]
-    if body["kind"] in {"ACCEPT", "REJECT"}:
+    if kind in {"ACCEPT", "REJECT"}:
         if raw_operations is not None:
             raise StaffingError("INVALID_TRANSITION", "edited_operations must be null")
         raw_operations = ()
-    elif body["kind"] == "MODIFY":
-        if not isinstance(raw_operations, list):
-            raise StaffingError("INVALID_TRANSITION", "MODIFY requires edited_operations array")
-    else:
-        raise StaffingError("INVALID_TRANSITION", "unknown kind")
+    elif kind == "MODIFY":
+        if type(raw_operations) is not list or not 1 <= len(raw_operations) <= 32:
+            raise StaffingError("INVALID_TRANSITION", "MODIFY requires 1..32 edited operations")
     operations = []
     for item in raw_operations:
-        operation = require_exact_object(item, set(item))
+        if type(item) is not dict:
+            raise StaffingError("INVALID_TRANSITION", "edited operation object")
+        operation = dict(item)
         if operation.get("operation") == "REMOVE" and set(operation) == {"operation", "assignment_id"}:
-            operations.append(ManagerRemoveOperation("REMOVE", operation["assignment_id"]))
+            assignment_id = manager_identifier(operation["assignment_id"], "assignment_id")
+            operations.append(ManagerRemoveOperation("REMOVE", assignment_id))
         elif operation.get("operation") == "ADD" and set(operation) == {
                 "operation", "staff_id", "role_code", "area_code", "start_at", "end_at"}:
-            operations.append(ManagerAddOperation("ADD", operation["staff_id"], operation["role_code"],
-                                                  operation["area_code"], parse_manager_datetime(operation["start_at"]),
+            staff_id = manager_identifier(operation["staff_id"], "staff_id")
+            role_code = manager_code(operation["role_code"], "role_code")
+            area_code = manager_code(operation["area_code"], "area_code")
+            operations.append(ManagerAddOperation("ADD", staff_id, role_code,
+                                                  area_code, parse_manager_datetime(operation["start_at"]),
                                                   parse_manager_datetime(operation["end_at"])))
         else:
             raise StaffingError("INVALID_TRANSITION", "edited_operations")
-    kind = body["kind"]
+    remove_ids = tuple(item.assignment_id for item in operations
+                       if item.operation == "REMOVE")
+    if len(remove_ids) != len(set(remove_ids)):
+        raise StaffingError("INVALID_TRANSITION", "duplicate REMOVE")
     candidate_index = body["candidate_index"]
-    reason = body["reason_code"]
-    if kind == "ACCEPT" and (candidate_index not in (1, 2) or reason != "APPROVED"):
+    if kind == "ACCEPT" and (type(candidate_index) is not int
+                             or candidate_index not in (1, 2) or reason != "APPROVED"):
         raise StaffingError("INVALID_TRANSITION", "ACCEPT requires candidate and APPROVED")
-    if kind == "MODIFY" and reason != "APPROVED_WITH_CHANGES":
+    if kind == "MODIFY" and (type(candidate_index) is not int
+                             or candidate_index not in (1, 2)
+                             or reason != "APPROVED_WITH_CHANGES"):
         raise StaffingError("INVALID_TRANSITION", "MODIFY requires APPROVED_WITH_CHANGES")
     if kind == "REJECT" and (candidate_index is not None or reason not in {
             "MANUAL_HANDLING", "INSUFFICIENT_CONTEXT", "OTHER"}):
@@ -2112,7 +2215,8 @@ def parse_manager_response(value: object, *, suggestion_id: str) -> ManagerRespo
                                   candidate_index, tuple(operations), reason, body["note"])
 
 def parse_manager_datetime(value: object) -> datetime:
-    if not isinstance(value, str):
+    if (type(value) is not str
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:Z|[+-]\d{2}:\d{2})", value) is None):
         raise StaffingError("INVALID_TRANSITION", "manager timestamp must be RFC3339")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -2125,15 +2229,20 @@ def parse_manager_datetime(value: object) -> datetime:
 def stored_candidate(history: StaffingHistory, generation_id: str,
                      candidate_index: int) -> StoredCandidate | None:
     for event in reversed(history.events):
-        if event.event_type == "suggestion_issued" and event.payload.generation_id == generation_id:
+        if (event.event_type in {"suggestion_issued", "suggestion_unavailable"}
+                and event.payload.generation_id == generation_id):
             return next((item for item in event.payload.candidates
                          if item.candidate_index == candidate_index), None)
     return None
 
 def local_operations_to_candidate(request: ManagerResponseRequest,
                                   reservation: GenerationReservedPayload) -> CandidatePatch:
-    inverse_workers = {staff_id: alias for alias, staff_id in reservation.worker_alias_to_staff_id}
-    inverse_assignments = {assignment_id: alias for alias, assignment_id in reservation.assignment_alias_to_assignment_id}
+    worker_ids, assignment_ids = validate_alias_maps(
+        reservation.basis_snapshot,
+        reservation.worker_alias_to_staff_id,
+        reservation.assignment_alias_to_assignment_id)
+    inverse_workers = {staff_id: alias for alias, staff_id in worker_ids.items()}
+    inverse_assignments = {assignment_id: alias for alias, assignment_id in assignment_ids.items()}
     converted = []
     for item in request.edited_operations:
         if item.operation == "REMOVE":
@@ -2145,16 +2254,19 @@ def local_operations_to_candidate(request: ManagerResponseRequest,
                 raise StaffingError("INVALID_TRANSITION", "unknown staff_id")
             converted.append(AddOperation("ADD", inverse_workers[item.staff_id], item.role_code,
                                           item.area_code, item.start_at, item.end_at))
-    return CandidatePatch(1, tuple(converted), request.note or "manager modification", ())
+    return CandidatePatch(
+        request.candidate_index, tuple(converted), "manager modification", ())
 ```
 
-`decode_provider_candidates` whole-result shape/alias failures are caught inside the locked builder and become one `suggestion_unavailable` with `terminal_state="INVALID_RESPONSE"`, stable domain `failure_code`, the original gateway `ResultEvidence` and attempts, and no fabricated provider failure. A successful gateway result with zero valid candidates uses `terminal_state="NO_VALID_SUGGESTION"` and persists every `StoredCandidate` rejection/gap; non-success gateway results require `decoded_output is None`, persist empty candidates, and use the gateway status as terminal state. Per-candidate validation rejections remain candidates, not whole-result errors.
+Only the explicit provider-wire error allowlist from `decode_provider_candidates` is caught inside the locked builder and converted into one `suggestion_unavailable` with `terminal_state="INVALID_RESPONSE"`, stable domain `failure_code`, the original gateway `ResultEvidence` and attempts, and no fabricated provider failure. `staffing_invalid_evidence`, identity/integrity errors, and unexpected domain errors must propagate to the staffing fail-closed path; local reservation/alias corruption is never blamed on the provider. A successful gateway result with zero valid candidates uses `terminal_state="NO_VALID_SUGGESTION"` and persists every `StoredCandidate` rejection/gap; non-success gateway results require `decoded_output is None`, persist empty candidates, and use the gateway status as terminal state. Per-candidate validation rejections remain candidates, not whole-result errors.
 
-Manager tests cover ACCEPT selecting a stored valid candidate, MODIFY translating local `staff_id`/`assignment_id` through inverse maps and re-running the same validator, REJECT producing no plan, unknown IDs, unknown reason/decision, all three stale revisions, any later roster import, and two concurrent responses where exactly one composite event wins.
+Manager tests cover ACCEPT reconstructing the stored patch, re-running the same validator, and requiring exact equality with its stored schedule/digest; MODIFY (including candidate 2) requires that candidate index to exist in the persisted candidate set, translates local `staff_id`/`assignment_id` through validated inverse maps, and re-runs the same validator; REJECT produces no plan. Also cover unknown IDs, duplicate REMOVE, unknown reason/decision, all three stale revisions, any later roster import, and two concurrent responses where exactly one composite event wins. MODIFY allows an existing invalid stored candidate to be edited but never a nonexistent index, requires 1..32 edited operations, preserves the request candidate index, and never copies the audit note into `CandidatePatch.rationale`.
 
 Add a cross-plan field-set assertion before parsing: the routed request keys are exactly `{"schema", "request_id", "operator", "kind", "expected_revisions", "candidate_index", "edited_operations", "reason_code", "note"}`, and `expected_revisions` is exactly `{"roster", "exception_set", "effective_plan"}`; route context supplies `suggestion_id`, which is mapped internally to `generation_id`. No `decision`, `effective_schedule`, or client-supplied generation ID is accepted on this wire.
 
-Parametrize the parser with ACCEPT/REJECT carrying `edited_operations=None` and MODIFY carrying a nonempty array; assert null becomes the internal empty tuple only for ACCEPT/REJECT, while null/missing for MODIFY is rejected. Assert a manager basis/roster conflict returns `ConflictReceipt.code == "STALE_SUGGESTION"` and maps to HTTP `staffing_stale_suggestion` (409); ordinary stale revision conflicts remain `STALE_REQUEST`.
+Parametrize the parser with ACCEPT/REJECT carrying `edited_operations=None` and MODIFY carrying a nonempty array of at most 32 items; assert null becomes the internal empty tuple only for ACCEPT/REJECT, while null, empty, missing, or 33 items for MODIFY is rejected. Require every expected revision to have exact integer type and be nonnegative, rejecting booleans. Assert a manager basis/roster conflict returns `ConflictReceipt.code == "STALE_SUGGESTION"` and maps to HTTP `staffing_stale_suggestion` (409); ordinary stale revision conflicts remain `STALE_REQUEST`.
+
+Add a table-driven total-parser matrix that substitutes `list`, `dict`, `bool`, control-bearing strings, and overlong strings into `kind`, `reason_code`, `request_id`, `operator`, `assignment_id`, `staff_id`, `role_code`, and `area_code`. Direct parser calls must raise only `StaffingError("INVALID_TRANSITION", ...)`, never raw `TypeError`/`KeyError`; membership or duplicate-set checks run only after exact scalar validation. Repeat the matrix through the real `commit_manager_response` entry point: a non-object, missing, or malformed `request_id` raises that stable `StaffingError` before ledger access because no idempotency identity exists, while a valid request ID plus any other illegal field returns `ConflictReceipt.code == "INVALID_TRANSITION"`. It must never be rewritten to `STALE_REQUEST`; only the three stale revisions and template mismatch use that code, while `STALE_SUGGESTION` remains distinct. Reject space-separated datetimes, missing seconds, fractional seconds, naive values, lowercase `z`, and malformed/out-of-range offsets so manager ADD timestamps are the exact offset-bearing RFC3339 `YYYY-MM-DDTHH:MM:00Z|±HH:MM` profile before Task 3 applies timezone/service-date semantics.
 
 Under one ledger builder, mutate exception/plan revisions after reservation while retaining the old expected vector and assert the current-basis digest comparison still returns `STALE_SUGGESTION`. Submit identical manager bodies with the same request ID to two suggestion IDs and assert their canonical digests differ, so neither is treated as a duplicate of the other.
 
@@ -2219,6 +2331,11 @@ def commit_generation_result(self, generation_id: str,
                     assignment_alias_to_assignment_id=reservation.assignment_alias_to_assignment_id,
                     prompt_template_version=reservation.prompt_template_version)
             except StaffingError as error:
+                if error.code not in {
+                    "invalid_provider_shape", "provider_sensitive_key",
+                    "invalid_provider_timestamp", "invalid_candidate_set",
+                }:
+                    raise
                 return AppendEventDecision(suggestion_unavailable_event(
                     result, (), None, recorded_at,
                     terminal_state="INVALID_RESPONSE", failure_code=error.code))
@@ -2250,6 +2367,7 @@ def interrupt_generation(self, generation_id: str, *, recorded_at: datetime) -> 
 
 def commit_manager_response(self, payload: object, *, suggestion_id: str,
                             recorded_at: datetime) -> ReceiptResult:
+    request_id = closed_request_id(payload, code="INVALID_TRANSITION")
     def build(history: StaffingHistory) -> StaffingEvent:
         request = parse_manager_response(payload, suggestion_id=suggestion_id)
         reservation = history.reservation(suggestion_id)
@@ -2274,10 +2392,27 @@ def commit_manager_response(self, payload: object, *, suggestion_id: str,
             raise StaffingError("STALE_SUGGESTION", suggestion_id)
         if request.kind == "ACCEPT":
             candidate = stored_candidate(history, suggestion_id, request.candidate_index)
-            if candidate is None or candidate.materialized_schedule is None:
+            if candidate is None:
                 raise StaffingError("INVALID_TRANSITION", "ACCEPT requires a valid stored candidate")
-            effective = candidate.materialized_schedule
+            validation = validate_candidate(
+                reservation.basis_snapshot,
+                CandidatePatch(candidate.candidate_index, candidate.operations,
+                               candidate.rationale, candidate.operational_warnings),
+                worker_alias_to_staff_id=reservation.worker_alias_to_staff_id,
+                assignment_alias_to_assignment_id=reservation.assignment_alias_to_assignment_id,
+                prompt_template_version=reservation.prompt_template_version)
+            if (not validation.valid or validation.materialized_schedule is None
+                    or validation.materialized_schedule_digest is None
+                    or validation.materialized_schedule != candidate.materialized_schedule
+                    or validation.materialized_schedule_digest
+                       != candidate.materialized_schedule_digest
+                    or schedule_digest(validation.materialized_schedule)
+                       != validation.materialized_schedule_digest):
+                raise StaffingError("INVALID_TRANSITION", "stored candidate validation mismatch")
+            effective = validation.materialized_schedule
         elif request.kind == "MODIFY":
+            if stored_candidate(history, suggestion_id, request.candidate_index) is None:
+                raise StaffingError("INVALID_TRANSITION", "MODIFY requires a stored candidate")
             patch = local_operations_to_candidate(request, reservation)
             validation = validate_candidate(
                 reservation.basis_snapshot, patch,
@@ -2292,7 +2427,7 @@ def commit_manager_response(self, payload: object, *, suggestion_id: str,
         return manager_response_event(history, request, reservation.basis_snapshot,
                                       effective, recorded_at)
     return self._append_request(
-        "manager-response", payload, build,
+        "manager-response", request_id, payload, build,
         digest_payload={"suggestion_id": suggestion_id, "body": payload})
 def recover_interrupted_generations(self, *, recorded_at: datetime
                                     ) -> tuple[ReceiptResult, ...]:

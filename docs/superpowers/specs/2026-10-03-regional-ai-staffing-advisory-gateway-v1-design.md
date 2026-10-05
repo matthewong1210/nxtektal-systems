@@ -331,6 +331,13 @@ assignment。领域层先应用全部 REMOVE，再按数组顺序应用 ADD。�
 assignment alias、重复 REMOVE、未知 code、越界时间、未知字段或第三个候选使整个
 provider result 无效。同一 worker alias 可出现在多个不重叠 ADD 中。
 
+这里的 provider-result 结构失败边界是词法/协议边界：`code` 不匹配 canonical
+`[A-Z][A-Z0-9_]{0,31}`，时间不是可解析且带显式 offset 的 RFC3339 值，alias 不属于本次
+reservation，或同一候选内重复 REMOVE。不同候选可以各自引用同一基线 alias，因为候选
+彼此独立。词法合法但 basis 中不存在的 role-area tuple、`end <= start`、非整分钟、offset
+与站点 IANA 时区不一致、落在服务日或 availability 之外等属于下一节的逐候选确定性语义
+拒绝；因此一个此类无效候选不会吞掉另一个有效候选。
+
 模型不报告“仍未满足的最低覆盖”；最低覆盖由领域层确定性计算。warnings 只是显示文本，
 不能覆盖校验结果。只有完整 schema 校验通过后，组合根才使用本地映射还原 ID 并交给
 领域校验；映射不得暴露给 adapter 或供应商。模型返回顺序不是安全、政策或执行优先级。
