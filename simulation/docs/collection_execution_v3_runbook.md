@@ -203,7 +203,7 @@ replace that evidence.
 ## Expected fixed identity and result
 
 The deterministic fixture produces these values.  Paths, process IDs and
-wall-clock read time are excluded from the causal identities.
+wall-clock read time are excluded from the causal identities. The fixed witness was regenerated against the reconciled V3 source tree on 2026-10-05; source-derived IDs changed, while policy actions and the 600-ball result remained the same.
 
 | Field | Expected value |
 |---|---|
@@ -214,21 +214,21 @@ wall-clock read time are excluded from the causal identities.
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `6c5b3c8406304a48ef8910a368f7fb7d24c35d2bd00c89c4981b38a400c74131` |
+| `engine_digest` | `739a6dd6aa48a333ccf6ca0c0b6170d4c213d4042992e84fc9e97182a81fe700` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `45c1c687bd766535b64471aaaaa16c5bca3be4ec4810e22bee330b8af932b183` |
-| `execution_id` | `f6a8ed06ae68ffe36a941abc3b4763b17cd699e74069fac1e5e041366346d7d9` |
-| `attempt_id` | `attempt-f6a8ed06ae68ffe36a941abc3b4763b17cd699e74069fac1e5e041366346d7d9` |
-| `assignment_id` | `assignment-3bc3c03294671642f4825a8a5bfd619b8c85c16c338a5daf32d3764b6997665d` |
-| request digest | `dfa579f944f6db85512ae674976e6b5680e52b9281c5579cdbe61cee7d04e1c6` |
-| request high-water digest | `bb8d0ce02097474e90d70ab7431ca291feda44e61d1fc70c1e7d166735719318` |
+| `binding_id` | `97e983a299c3f39e3f74c681261b8eef0f243f0dfe6ca2609c5f36d3911d3eff` |
+| `execution_id` | `416d39d5efca501d69380f549bc65c54c90848939e0443f1fbd5b8745e8406ad` |
+| `attempt_id` | `attempt-416d39d5efca501d69380f549bc65c54c90848939e0443f1fbd5b8745e8406ad` |
+| `assignment_id` | `assignment-93ae0318a9b1bc810566e6fc4ac575c9aae182a36e08900cda134980d396fa92` |
+| request digest | `1bbc37722194bddee3f2d614cb5112d1006a6bf0381900d2060bec171be12dac` |
+| request high-water digest | `0aba61bef211a89345356bc2975682f237de8efd262a46641b0a3f8de2446199` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED` / `UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600` to runtime robot `R1` |
 | `unload_quantity.balls` | `600` to bound station `H1` |
-| final assignment `event_digest` | `cad049df3f1be7e1f51270bee6ccee298407ae5afc2064ca0722f279bd84e23d` |
-| final `replay_digest` | `4783b289d33daf2f3bc09563726d35edd07f82e48e417f2940ec4b32532bfc5d` |
+| final assignment `event_digest` | `f545ecea21c75058af83a64b1ca238ded4c0856d16adf40a21680248b27e5707` |
+| final `replay_digest` | `010da8807a4b3dc6ce03ae34d28d7d056ec613c2fe236899048990d2894065e8` |
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not
 invent aliases for them: the real session identity is the
@@ -256,7 +256,7 @@ The start event ID is
 The collection-exit event ID is
 `assignment-event-81515e140285cfe0cad8ec409d36c5dd5e19a7c6d3be199a6210a4cd110ad0cc`.
 The unload event ID is
-`assignment-event-fbc70ad71939471c37a630086834d324209242a2dadd9268ca2e038cbcff0f5d`;
+`assignment-event-774fd03406cc084bea35558b4554ce6dbb10a658f52251d1fe8301d59929ff54`;
 the terminal event ID is
 `assignment-event-085580c4f92d8f3eb906839ab5275e98475483c8b64153e30957d2cd8e269903`.
 The read projection retains all fifteen raw source event IDs and the six Edge
@@ -264,11 +264,11 @@ record IDs rather than collapsing the evidence to the 600-ball summary.
 Those Edge record IDs in the observed normal loop are:
 
 ```text
-rec_4893376da211d23ff1da2cca
-rec_7f7f498b52823deadbd22a11
-rec_92669c32c41f839f9171f8a9
-rec_c3a88a5882f1cfc5c8ef16db
-rec_d03d5e98428c32b97e3bfc9d
+rec_0da6df1fb52b9e645766dc0d
+rec_2b8f32105baab9c9959e44ce
+rec_3a0b46f842d5fff0e0fb5f56
+rec_410890c704e3376d074efc55
+rec_d4ee4a267e15b32790b3f076
 rec_fbf9d67c03833c163d455189
 ```
 
