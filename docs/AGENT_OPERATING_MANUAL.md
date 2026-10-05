@@ -77,6 +77,9 @@ Current claims must remain honest:
 - Facility and Shadow Ops recommendations are advisory; no production command
   bridge exists.
 - No LLM or generative agent has direct robot/actuator authority.
+- `nxt_model_gateway` provides provider-neutral HTTPS generation with untrusted
+  transient JSON proposals, never decisions, commands, physical telemetry or
+  an execution path. It does not establish real-site deployment readiness.
 - Digital-twin/USD output is projection only.
 - Site-level physical command admission, autonomous actuator execution, live
   Omniverse/Nucleus delivery, and production real-site deployment are not
@@ -226,6 +229,13 @@ e-stop handling, or safety loops. Site-level physical command admission,
 autonomous actuator execution, live Omniverse/Nucleus delivery, and production
 real-site deployment are explicitly outside the implemented system.
 
+No model call enters Agent Runtime, Site Agent, Edge Task or robot/control
+packages. Only `simulation/scripts/` may compose the gateway with a domain
+owner, and keys enter only through composition-root injection. Production
+endpoints are private constants; UI/API/CSV/environment cannot override them.
+CN uses Kimi only; GLOBAL uses OpenAI with at most one Anthropic fallback only
+for closed availability codes. Schema-valid output remains untrusted.
+
 ## Package responsibilities
 
 The normative responsibility/dependency table is
@@ -250,6 +260,9 @@ The normative responsibility/dependency table is
   lazily uses commissioning's existing projection.
 - `simulation/scripts/` are composition roots. The ROI engine independently
   owns its versioned formulas and traces.
+- `nxt_model_gateway` owns stateless provider-neutral HTTPS generation only:
+  no domain semantics, persistence or first-party imports. Its stable contract
+  is [Regional Model Gateway V1](../simulation/docs/model_gateway_v1.md).
 
 ## Source selection and documentation discipline
 
@@ -319,6 +332,13 @@ provenance, use only contract-defined backfill, and protect determinism,
 canonical bytes, safety admission, and old replay/model versions.
 
 ### Verification
+
+Gateway changes require offline `tests/model_gateway`, Pilot Ops and Site
+Agent focused regression, gateway/reverse architecture guards, locked dependency
+checks, distribution inspection and isolated-wheel imports. Keep model keys and
+raw bodies out of diagnostics. Check `AttemptStarted.timeout_s` as the approved
+upper bound: observer time consumes the total budget and actual send timeout
+may shrink. The complete Python suite remains the integration gate.
 
 Run focused tests first, then package and boundary suites, then the complete
 surface suite. Add parity tests for alternate paths, trajectory/RNG tests for

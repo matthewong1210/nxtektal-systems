@@ -96,6 +96,7 @@ BANNED_FIRST_PARTY_MENTIONS = (
     # only Range Operations projections and never touches the map layer.
     "nxt_course_world_model",
     "nxt_edge_task",
+    "nxt_model_gateway",
 )
 
 OTHER_PACKAGES = (
@@ -116,6 +117,7 @@ OTHER_PACKAGES = (
     "nxt_workflow_enablement",
     "nxt_course_world_model",
     "nxt_edge_task",
+    "nxt_model_gateway",
 )
 
 BANNED_CALL_NAMES = {

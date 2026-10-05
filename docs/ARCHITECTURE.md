@@ -105,6 +105,7 @@ physical observation source or production publisher/sink is implemented.
 | Versioned course spatial truth and map queries | Immutable `nxt_course_world_model.CourseWorldModel` revisions plus the read-only `MapQueryService` | Spatial information only; never commissioned truth, facility state, a live map, twin output, readiness, navigation, a landing model, or a command surface |
 | Simulated Edge<->robot task-exchange evidence | `nxt_edge_task` wire contracts and the append-only Edge journal; the protocol double's own journal for what it decided, started, and completed | SIMULATION rehearsal evidence only; never physical task admission, robot telemetry truth, facility state, advice, recommendation workflow, or proof a physical act occurred |
 | Shadow policy evaluation and workflow evidence | `nxt_pilot_ops` recommendation, trace, workflow, and ledger contracts | Advisory records; never actuator acknowledgement by themselves |
+| Model generation | `nxt_model_gateway` provider-neutral HTTPS boundary | Untrusted transient JSON proposals; never decisions, commands, telemetry, facility truth, or an execution path |
 | Viewer replay/output | Independent deterministic `RangeOpsEnv` replay through public APIs | Viewer artifacts; never FacilityState input or upstream truth |
 | Dynamic twin projection | Declared layout plus FacilityState stream | USD artifacts; never upstream truth |
 | Robot task execution | `HandoffController` through `RobotTaskInterface` | Adapter-specific action and telemetry |
@@ -184,6 +185,7 @@ orienting a reviewer:
 | `nxt_edge_task` | Edge Task Exchange V0 (PR A) plus Pilot Dispatch rehearsal | SIMULATION-only task-exchange rehearsal between an Edge gateway and two protocol doubles over local Mosquitto or the integrated in-memory runner; dated schedule intent and local inbox response evidence in the same journal: three versioned wire contracts, content-derived `task_id`, dedup on both ends, `(boot_sequence, event_sequence)` ordering with late evidence, absorbing terminals and the terminal-conflict authorization gate, session regression, liveness, persist-before-publish executor rules with restart branches; stdlib-only, no transport, clock, advice, or execution surface |
 | `nxt_site_agent` | Pilot Site Agent Service V0 | Local readiness-gated application shell around the Agent Runtime: loopback-only versioned Manager API, noncanonical projections and shift briefing, fixture source-cursor persistence; fixture-backed Shadow Mode only, no authentication, no physical device or command path |
 | `nxt_sim` | Robot execution lab | Handoff controller, task interface, mock and stub adapters |
+| `nxt_model_gateway` | Regional Model Gateway V1 | Stateless provider-neutral HTTPS generation; no domain semantics, persistence or first-party imports; composition only in `simulation/scripts/`; untrusted transient JSON proposals |
 | `nxt_range_agent` | Benchmark harness | Reproducible policy evaluation, not a production agent runtime |
 | `nxt_range_viewer` / `nxt_range_demo` | Demo and replay | Read-only presentation over exported artifacts |
 | `apps/operational-replay` | Operational Replay web app | Read-only browser storytelling over selected exported artifacts |
@@ -210,6 +212,12 @@ Root documentation and `.agent/` govern all surfaces without creating a
 runtime dependency between them.
 
 ## Stable technical references
+
+- [`simulation/docs/model_gateway_v1.md`](../simulation/docs/model_gateway_v1.md):
+  public contracts, fixed endpoints, envelopes, failures, regional routing,
+  deadlines, observer ordering, redaction and non-goals. Keys enter only by
+  composition-root injection; no model call enters Agent Runtime, Site Agent,
+  Edge Task or robot/control packages.
 
 - [`simulation/docs/range_ops.md`](../simulation/docs/range_ops.md): whole-site
   runtime and safety shield.

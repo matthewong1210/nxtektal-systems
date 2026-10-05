@@ -20,6 +20,7 @@ UPSTREAM_PACKAGES = (
     "nxt_workflow_enablement",
     "nxt_course_world_model",
     "nxt_edge_task",
+    "nxt_model_gateway",
 )
 CORE_BANNED_ROOTS = {
     *UPSTREAM_PACKAGES,
@@ -29,6 +30,7 @@ CORE_BANNED_ROOTS = {
     "pxr",
     "rclpy",
     "rospy",
+    "nxt_model_gateway",
 }
 
 

@@ -102,6 +102,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/course_world_model
 uv run --no-sync python -B -m pytest -o addopts='' -q -rs -p no:cacheprovider tests/edge_task
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/model_gateway
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \
@@ -124,6 +125,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_task/test_architecture.py \
   tests/edge_task/test_scripts_guard.py \
   tests/site_agent/test_architecture.py \
+  tests/model_gateway/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -148,7 +150,7 @@ uv run --no-sync python -m compileall -q -f \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
   nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
-  nxt_edge_task nxt_site_agent scripts ../.github/scripts
+  nxt_edge_task nxt_site_agent nxt_model_gateway scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
 mkdir -p "$python_dist_dir"
@@ -177,6 +179,7 @@ shipped = (
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
     "nxt_edge_observation", "nxt_workflow_enablement",
     "nxt_course_world_model", "nxt_edge_task", "nxt_site_agent",
+    "nxt_model_gateway",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:

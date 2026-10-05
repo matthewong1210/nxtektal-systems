@@ -85,6 +85,7 @@ BANNED_IMPORT_ROOTS = {
     "uuid",
     "random",
     "secrets",
+    "nxt_model_gateway",
 }
 
 EXECUTION_TOKENS = (
@@ -182,6 +183,7 @@ OTHER_PACKAGES = (
     # course spatial truth reaches consumers only through composition
     # roots, never through the service package.
     "nxt_site_agent",
+    "nxt_model_gateway",
 )
 
 # Package names this package's *source* may never mention, even in

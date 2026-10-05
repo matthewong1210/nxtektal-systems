@@ -84,6 +84,7 @@ BANNED_IMPORT_ROOTS = {
     "uuid",
     "random",
     "secrets",
+    "nxt_model_gateway",
 }
 
 EXECUTION_TOKENS = (
@@ -172,6 +173,7 @@ OTHER_PACKAGES = (
     "nxt_edge_observation",
     "nxt_course_world_model",
     "nxt_edge_task",
+    "nxt_model_gateway",
 )
 
 # The exact runtime-bearing package names this package's *source* may

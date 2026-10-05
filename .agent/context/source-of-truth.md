@@ -24,6 +24,7 @@ fact class and runtime boundary.
 | Dated rehearsal schedule intent and local operator inbox responses | `nxt_edge_task` records in the existing Edge journal; due-time task admission retains the existing task/device rules | A recurring calendar, advice-to-task conversion, remote notification, evidence that an uncertain task was completed, or authority to clear a device/task restriction |
 | Site Agent service shell | `nxt_site_agent` service lifecycle state, versioned loopback Manager API projections and optional composition-root `/api/v0/task-ops` route transport, fixture source-cursor persistence, and noncanonical service diagnostics | Facility truth, observation semantics, policy or workflow semantics, a second evidence store, wall-clock canonical times, an authentication story, or any physical command surface |
 | Facility advice | `nxt_facility.decisions.Recommendation` | Directive or execution acknowledgement |
+| Model generation | `nxt_model_gateway` owns provider-neutral HTTPS contracts only | Untrusted transient JSON proposals; no domain authority, decisions, commands, telemetry, persistence or execution path |
 | Shadow decision evaluation | `nxt_pilot_ops` snapshot, evaluation, trace, and recommendation | Command, actuator, safety shield, or live state |
 | Human/execution workflow evidence | Shadow Ops immutable workflow records and hash-chained ledger | Proof the physical act occurred beyond the recorded acknowledgement |
 | Operational history | `nxt_memory` append-only windows and queries | Live policy input or causal evidence |
@@ -112,6 +113,14 @@ regenerable outputs. When they disagree with their inputs, the output is wrong.
 Never patch a projection by hand to establish an operational fact.
 
 ### Advice versus execution
+
+The Regional Model Gateway imports no first-party package and can be composed
+with a domain owner only in `simulation/scripts/`. Keys enter only through
+composition-root injection. Fixed production endpoints are private constants;
+UI/API/CSV/environment cannot change them. CN uses Kimi only; GLOBAL uses OpenAI
+then at most one Anthropic attempt for closed availability codes. No model call
+enters Agent Runtime, Site Agent, Edge Task or robot/control packages. Valid
+JSON and a matching schema never establish truth or authorize an action.
 
 Facility and Shadow Ops recommendations are immutable advisory records. Human
 acceptance, modification, execution request, execution acknowledgement, and

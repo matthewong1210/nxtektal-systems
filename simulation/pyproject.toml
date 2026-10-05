@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
+    "jsonschema>=4.26,<5",
 ]
 
 [project.optional-dependencies]
@@ -81,7 +82,9 @@ build-backend = "hatchling.build"
 # contract: versioned wire messages, the Edge task/device journal derivation,
 # and the protocol double's executor rules. It is stdlib-only, imports no
 # other nxt_* package, and owns no transport, state, advice, or execution.
-packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement", "nxt_course_world_model", "nxt_edge_task", "nxt_site_agent"]
+# nxt_model_gateway is a stateless, provider-neutral network leaf; it owns
+# no domain or persistence semantics and imports no other first-party package.
+packages = ["nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory", "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops", "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime", "nxt_edge_observation", "nxt_workflow_enablement", "nxt_course_world_model", "nxt_edge_task", "nxt_site_agent", "nxt_model_gateway"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

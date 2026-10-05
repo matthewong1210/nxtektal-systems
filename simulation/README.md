@@ -51,6 +51,7 @@ vocabulary (`interfaces/types`, `config/models`) and changes nothing in
 | `nxt_edge_task` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation with dedup, ordering, terminal-conflict gate, and liveness, plus the protocol double's executor rules, dated UTC schedules, and local operator inbox; stdlib-only, no transport or physical execution surface |
 | `nxt_site_agent` | Local readiness-gated Site Agent service shell: loopback Manager API, noncanonical projections/briefing, fixture source-cursor persistence; fixture-backed Shadow Mode only |
 | `nxt_range_viewer`, `nxt_range_demo` | Deterministic replay export and read-only presentation |
+| `nxt_model_gateway` | Stateless provider-neutral HTTPS generation; no domain semantics, persistence or first-party imports; composition only in `simulation/scripts/`; untrusted transient JSON proposals, never decisions, commands, telemetry or an execution path |
 
 The robot handoff packages and Site OS packages remain separate layers. The
 full dependency and truth map is in
@@ -169,6 +170,15 @@ docs/               architecture, integration plans, assumptions, missing inputs
 ```
 
 ## Architecture rule
+
+The [Regional Model Gateway V1](docs/model_gateway_v1.md) is a separate network
+leaf. Keys enter only through composition-root injection; production endpoints
+are private constants that UI/API/CSV/environment cannot override. CN uses Kimi;
+GLOBAL uses OpenAI with at most one Anthropic fallback for closed availability
+codes. `tests/model_gateway/test_architecture.py` blocks all first-party imports
+and all other packages' gateway mentions. No model call enters Agent Runtime,
+Site Agent, Edge Task or robot/control packages. Offline tests and library
+availability are not proof of real-site deployment.
 
 `controllers/` (task logic) never imports `adapters/` (simulation). This is
 enforced by `tests/test_architecture.py`. The high-level interface —

@@ -21,7 +21,14 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
 `twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
 `edge_observation`, `workflow_enablement`, `course_world_model`,
-`edge_task`, and `site_agent`.
+`edge_task`, `site_agent`, and `model_gateway`.
+
+Run the gateway focused suite after Site Agent:
+
+```bash
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/model_gateway
+```
 
 `tests/edge_task/test_integration_mosquitto.py` needs a local `mosquitto`
 binary; it skips with an explicit reason otherwise, and a skip is not delivery
@@ -53,6 +60,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/edge_task/test_architecture.py \
   tests/edge_task/test_scripts_guard.py \
   tests/site_agent/test_architecture.py \
+  tests/model_gateway/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
   tests/test_unload_retry.py \
@@ -61,7 +69,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 
 For changes to merged Commissioning, Site Runtime, Agent Runtime, the Edge
 Observation adapter kit, Workflow Enablement, the Course World Model, Edge
-Task Exchange, or Site Agent, run the entire relevant package suites in addition to the
+Task Exchange, Site Agent, or Regional Model Gateway, run the entire relevant package suites in addition to the
 architecture/safety subset:
 
 ```bash
@@ -73,7 +81,8 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/workflow_enablement \
   tests/course_world_model \
   tests/edge_task \
-  tests/site_agent
+  tests/site_agent \
+  tests/model_gateway
 ```
 
 Run the full suite before handing off a Python production/contract change:
@@ -87,7 +96,53 @@ Build the package when packaging/export membership changes:
 
 ```bash
 build_dir="$(mktemp -d)"
+PYTHONPYCACHEPREFIX="$build_dir/python-bytecode" \
+uv run --no-sync python -m compileall -q -f \
+  nxt_sim nxt_range_ops nxt_range_agent nxt_facility nxt_memory \
+  nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
+  nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
+  nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
+  nxt_edge_task nxt_site_agent nxt_model_gateway scripts ../.github/scripts
 uv build --out-dir "$build_dir"
+uv run --no-sync python -B ../.github/scripts/verify_python_distribution.py "$build_dir"
+```
+
+Install the single wheel with locked core constraints and import it outside the
+checkout, matching the CI package order:
+
+```bash
+uv export --frozen --no-dev --no-emit-project --no-hashes \
+  --output-file "$build_dir/nxt-sim-constraints.txt"
+uv venv --python 3.13.14 "$build_dir/isolated"
+set -- "$build_dir"/*.whl
+test "$#" -eq 1
+wheel_path="$1"
+uv pip install --python "$build_dir/isolated/bin/python" \
+  --constraints "$build_dir/nxt-sim-constraints.txt" "$wheel_path"
+(
+  cd "$build_dir"
+  "$build_dir/isolated/bin/python" -I - <<'PY'
+from importlib import import_module
+from importlib.metadata import version
+from importlib.util import find_spec
+
+shipped = (
+    "nxt_sim", "nxt_range_ops", "nxt_facility", "nxt_memory",
+    "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
+    "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
+    "nxt_edge_observation", "nxt_workflow_enablement",
+    "nxt_course_world_model", "nxt_edge_task", "nxt_site_agent",
+    "nxt_model_gateway",
+)
+repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
+for name in shipped:
+    import_module(name)
+for name in repository_only:
+    assert find_spec(name) is None, f"repository-only package installed: {name}"
+print("isolated wheel imports passed:", version("nxt-sim"))
+PY
+)
+uv pip check --python "$build_dir/isolated/bin/python"
 ```
 
 Inspect the temporary output, then remove that exact temporary directory when
@@ -108,7 +163,7 @@ safe. Do not build into the repository.
 | Commissioning contract/projection | Strict schema/provenance/immutability, canonical conflict-safe storage, one-way detached projections, forbidden-import guards, downstream integration review |
 | Site Runtime orchestration | Input/freshness and quality rejection; exact FacilityState/AssemblyReport retention; deterministic envelope ID; strict sequence/replay; checkpoint recovery and idempotent publication; setup-only commissioning seam; no duplicate domain contracts, policy, or execution imports |
 | Agent Runtime composition | Rejected input never reaches policy; one evaluation outcome per admitted envelope; deterministic evaluation/trace/recommendation IDs; restart/replay idempotency and divergence fail-closed; workflow legality and recommendation immutability; byte-identical evidence; boundary guards including no execution/network/wall-clock surface |
-| AI/LLM integration | Proof outputs remain advisory; static/import tests prevent direct directive, robot-interface, adapter, ROS, actuator, or e-stop access |
+| AI/LLM integration | Proof outputs remain advisory; static/import tests prevent direct directive, robot-interface, adapter, ROS, actuator, or e-stop access. Gateway outputs remain untrusted transient JSON proposals; `tests/model_gateway` and its architecture guard prove fixed endpoints, bounded offline transport, closed failure/fallback codes, observer ordering/redaction, no first-party imports, and no core-package consumer. Keys enter only by composition-root injection; no model call enters Agent Runtime, Site Agent, Edge Task, or robot/control packages. |
 | Edge observation adapter | Calibration identity/unit/range/timestamp fail-closed behavior; explicit MISSING instead of an optimistic default; unmapped raw fields reported; deterministic observation identity; at-least-once feed semantics; boundary guards proving no transport, network, robot, actuator, or e-stop surface |
 | Course World Model contract/query | Immutable identity and content-digest verification; deterministic serialization across processes and hash seeds; coordinate/geometry/elevation fail-closed rules; pure read-only queries with explicit non-answer statuses and no fabricated intersection; site-binding cross-checks; Range Operations readiness byte-identical with and without Course Model evidence; boundary guards proving no runtime, transport, filesystem, or execution import |
 | Edge Task Exchange contract/journal/executor | Strict wire decoding (exact keys, single-member `SIMULATION` environment, content-derived `task_id`); Edge transition table enumerated cell by cell with duplicate/late/conflicting dispositions; terminal-conflict gate in both arrival orders with prior facts preserved; session regression; liveness and restart grace; crash injection on both sides with execution counts asserted from the double's own journal (exactly one `execution_started` for a completed task, zero for the carrier); no republish after a terminal; journal truncation/tamper fail loud; journal high-water anchor (rollback and rewritten-record refusal, torn-batch tolerance); robot identity continuity (explicit provisioning, state-loss and rolled-back-journal refusal, re-provisioning detected as a session regression on status and events); evidence-conflict authorization gate; read-time freshness of the CLI views; boundary guards proving stdlib-only, no other `nxt_*` import, no transport, clock, execution, or live-switch surface; plus a real local Mosquitto multi-process run attached to the delivery |

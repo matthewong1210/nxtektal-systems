@@ -124,6 +124,18 @@ unloading/charging, CE82A integration, and field operation remain absent.
 
 ## Static truth versus dynamic evidence
 
+The current checkout also implements `nxt_model_gateway`, a stateless,
+provider-neutral HTTPS generation library. It owns no domain semantics or
+persistence and imports no first-party package. Only a composition root in
+`simulation/scripts/` may combine it with a domain owner and inject keys.
+Model HTTPS is not physical telemetry/control; results are untrusted transient
+JSON proposals, not decisions, commands or an execution path. This library and
+its offline provider tests do not change the absent physical-deployment rows.
+Production endpoints are private constants, not UI/API/CSV/environment inputs.
+CN uses Kimi only; GLOBAL uses OpenAI with at most one Anthropic fallback only
+for the closed availability codes in
+[`model_gateway_v1.md`](../../simulation/docs/model_gateway_v1.md).
+
 For a physical facility, commissioning owns **what exists and how it is
 configured**. A validated, immutable `CommissionedSite` manifest is
 authoritative for:
@@ -245,6 +257,7 @@ give Site Runtime ownership of simulation truth.
 | Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules, dated schedules, and local inbox response evidence | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, and the test-entry CLI / integrated runner stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
 | Local service lifecycle, Manager API projection transport, fixture source-cursor persistence, service diagnostics | `nxt_site_agent` (noncanonical application shell; loopback-only; no state, policy, workflow, or execution semantics) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
+| Provider-neutral HTTPS generation | `nxt_model_gateway`; script-only composition and key injection; no model call enters Agent Runtime, Site Agent, Edge Task or robot/control packages |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
 | Broad state-derived manager advice | `nxt_facility.decisions` |

@@ -38,6 +38,11 @@ runtime dependency.
   in the merged `nxt_commissioning.CommissionedSite` contract. Commissioning
   answers what exists, not what is happening now.
 - **Canonical downstream state:** immutable `FacilityState` snapshots.
+- **Model generation:** `nxt_model_gateway` is a stateless provider-neutral HTTPS
+  leaf returning untrusted transient JSON proposals, not decisions, commands,
+  physical telemetry or an execution path. It owns no domain semantics or
+  persistence, imports no first-party package, and is composed only in
+  `simulation/scripts/`.
 - **Decision support:** deterministic `nxt_facility` recommendations and the
   manager briefing. These are broad FacilityState-derived, advisory outputs.
 - **Shadow Ops:** `nxt_pilot_ops` decision trust, trace, evaluation, human
@@ -69,6 +74,12 @@ runtime dependency.
   explicitly non-causal analysis.
 
 ## Honest-scope rules
+
+- Model keys enter only through composition-root injection. Production endpoints
+  are private constants, never UI/API/CSV/environment configuration. CN uses Kimi;
+  GLOBAL uses OpenAI with one possible Anthropic fallback only for availability
+  codes. No model call enters Agent Runtime, Site Agent, Edge Task or robot/control
+  packages. Gateway implementation and offline tests do not imply deployment readiness.
 
 - Physical values in the current simulator are placeholder-tagged. Outputs
   validate software pipelines, not robot or facility design.
@@ -106,6 +117,7 @@ runtime dependency.
 - `simulation/docs/workflow_enablement_v0.md`
 - `simulation/docs/course_world_model_v0.md`
 - `simulation/docs/site_agent_v0.md`
+- `simulation/docs/model_gateway_v1.md`
 - `nxtektal-roi-engine/README.md`
 - `nxtektal-roi-engine/docs/api-contract.md`
 

@@ -49,6 +49,7 @@ Classify the feature before choosing a directory:
 | Cross-package physical-site state orchestration | `nxt_site_runtime`: ordering/input validation, existing telemetry assembly invocation, publication-quality gate, exact state/report envelope, checkpoint/recovery, idempotent state publication |
 | Continuous evaluation lifecycle over Site Runtime and Shadow Ops | `nxt_agent_runtime` composition/lifecycle only |
 | ROI semantics | Versioned `@nxtektal/roi-engine` |
+| Provider-neutral HTTPS generation | `nxt_model_gateway`: stateless network leaf; no domain semantics, persistence or first-party imports; composition only in `simulation/scripts/` |
 
 If no row fits, stop and write the missing responsibility explicitly. Do not
 choose a new package name as a substitute for deciding who owns the fact.
@@ -115,6 +116,17 @@ Before editing, record:
 Use a diagram only when it makes the data/dependency flow materially clearer.
 
 ## 6. Apply deployment and execution gates
+
+For model generation, record a gateway boundary card: results are untrusted
+transient JSON proposals, not decisions, commands, telemetry or an execution
+path; a composition root in `simulation/scripts/` is the sole consumer and key
+injection owner. Production endpoints are private constants, never UI/API/CSV/env
+configuration. No model call enters Agent Runtime, Site Agent, Edge Task or
+robot/control packages. CN uses Kimi only; GLOBAL starts with OpenAI and permits
+one Anthropic fallback only for the contract's availability codes. Verify the
+gateway and reverse guards, offline provider suites, lock and isolated wheel;
+the [stable contract](../../simulation/docs/model_gateway_v1.md) owns exact
+envelopes, failures, deadline/observer ordering and redaction.
 
 For physical-site work, verify the
 [deployment contract](../context/deployment.md): commissioning owns static facts,

@@ -201,6 +201,15 @@ coupling in named seams:
   projections only; fixture composition and the optional task-operations
   callback are injected from scripts)
 - `simulation/scripts/` for cross-package orchestration
+- `nxt_model_gateway` as a stateless provider-neutral HTTPS leaf with no
+  first-party imports, domain semantics or persistence; only
+  `simulation/scripts/` composition roots may consume it
+
+Model results are untrusted transient JSON proposals, not decisions, commands,
+physical telemetry or an execution path. Keys enter only by composition-root
+injection. Fixed production endpoints are private constants, never UI/API/CSV/
+environment configuration. CN uses Kimi only; GLOBAL uses OpenAI then at most
+one Anthropic attempt only for the closed availability failure codes.
 
 Repository-local benchmark and viewer tools are separate consumers of public
 `nxt_range_ops` APIs; their permitted coupling is recorded in
@@ -258,6 +267,7 @@ type:
 | Site Agent service approved-surface imports, stdlib whitelist, execution/LLM/nondeterminism bans, script transport bans, and no reverse dependency | `simulation/tests/site_agent/test_architecture.py` |
 | Site Agent Console API-only presentation leaf: no Python/ROI imports, no robot-command vocabulary, no hidden browser persistence, `/api/v0/` only | `apps/site-agent-console/tests/boundaries.test.ts` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
+| Model Gateway import whitelist, neutral vocabulary, no reverse consumer, registration and negative controls | `simulation/tests/model_gateway/test_architecture.py` plus the existing package reverse guards |
 | Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |
 | Handoff timeout, state-machine, retry/recovery, unload, and e-stop behavior | `simulation/tests/test_state_machine.py`, `test_retry_recovery.py`, `test_unload_retry.py`, `test_emergency_stop.py` |
 
@@ -266,6 +276,10 @@ rules are documented but not exhaustively static-tested. Treat them as binding
 and add a guard when changing that boundary.
 
 ## Forbidden dependency outcomes
+
+- Any model call entering Agent Runtime, Site Agent, Edge Task or robot/control
+  packages; gateway composition with a domain owner belongs only in
+  `simulation/scripts/`.
 
 - Simulator or robot packages importing FacilityState, memory, telemetry, twin,
   demo, or Shadow Ops.

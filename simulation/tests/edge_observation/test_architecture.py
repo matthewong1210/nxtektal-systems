@@ -79,6 +79,7 @@ BANNED_IMPORT_ROOTS = {
     "random",
     "secrets",
     "os",
+    "nxt_model_gateway",
 }
 
 EXECUTION_TOKENS = (
@@ -159,6 +160,7 @@ OTHER_PACKAGES = (
     # The Site Agent service shell receives adapter diagnostics as plain
     # data from composition roots and must not import the adapter kit.
     "nxt_site_agent",
+    "nxt_model_gateway",
 )
 
 

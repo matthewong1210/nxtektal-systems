@@ -580,6 +580,7 @@ name = "nxt-sim"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "jsonschema" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
@@ -616,6 +617,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "gymnasium", marker = "extra == 'range-ops'", specifier = ">=1.0" },
+    { name = "jsonschema", specifier = ">=4.26,<5" },
     { name = "numpy", marker = "extra == 'course-camera'", specifier = ">=1.26" },
     { name = "numpy", marker = "extra == 'range-ops'", specifier = ">=1.26" },
     { name = "paho-mqtt", marker = "extra == 'edge-gateway'", specifier = ">=2.1,<3" },

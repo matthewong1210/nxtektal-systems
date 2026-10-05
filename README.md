@@ -15,6 +15,7 @@ Robots solve tasks. NXTektal coordinates the facility.
 |---|---|---|
 | **AI operations** | Maintains trusted facility state, orchestrates publication-quality state flow, evaluates operating conditions, produces auditable recommendations, and preserves decision evidence | `nxt_commissioning`, `nxt_telemetry`, `nxt_site_runtime`, `nxt_facility`, `nxt_pilot_ops`, `nxt_memory`, `nxt_workflow_enablement`, `nxt_course_world_model` |
 | **Digital twin** | Turns the same operational state into a time-indexed spatial representation | `nxt_range_twin` |
+| **Model generation** | Provider-neutral HTTPS returning untrusted transient JSON proposals; no decision or execution authority | `nxt_model_gateway`; script-only composition |
 | **Robots** | Execute bounded tasks behind deterministic safety and control interfaces | `nxt_sim`; mock execution is implemented, while the Isaac Sim and physical ROS 2 adapters are stubs |
 
 The simulator is the proving ground, not the product boundary. It creates
@@ -123,6 +124,7 @@ row; the "What is working now" section above describes `main` only.
 | `simulation/nxt_edge_task/` | SIMULATION-only Edge<->robot task-exchange rehearsal: versioned wire contracts, Edge task/device journal derivation, protocol-double executor rules, dated schedules, and local inbox | Implemented rehearsal contract; local Mosquitto or the integrated in-memory runner with two protocol doubles, no physical task admission or execution path |
 | `simulation/nxt_site_agent/` | Local readiness-gated service around the Agent Runtime, with a versioned loopback Manager API, projections, and shift briefing | Implemented application shell; fixture-backed Shadow Mode only, loopback-only, no authentication, no physical device or command path |
 | `simulation/nxt_sim/` | Micro handoff controller and robot task interface | Mock backend implemented; physical backends stubbed |
+| `simulation/nxt_model_gateway/` | Stateless provider-neutral HTTPS generation; no domain semantics, persistence or first-party imports; composition only in `simulation/scripts/` | Implemented in this checkout; untrusted transient JSON proposals, not decisions, commands, telemetry or an execution path; no deployment-readiness claim |
 | `simulation/nxt_range_viewer/`, `nxt_range_demo/` | Deterministic replay export and investor presentation | Implemented local demo tooling |
 | `apps/operational-replay/` | Browser storytelling over selected replay artifacts | Implemented read-only simulation/reference presentation |
 | `apps/site-agent-console/` | Manager Console for the local fixture-backed Site Agent service | Implemented static export; consumes only the local Manager API, clearly labeled simulated |
@@ -176,6 +178,10 @@ facility performance:
   inventing them;
 - the strongest demo policy is a deterministic rule-based baseline, not a
   trained model;
+- the [Regional Model Gateway](simulation/docs/model_gateway_v1.md) accepts keys
+  only by composition-root injection and uses fixed private endpoints, never
+  endpoint overrides from UI/API/CSV/environment; CN uses Kimi, GLOBAL uses
+  OpenAI with at most one Anthropic fallback for closed availability codes;
 - the twin is a read-only projection, not a source of operational truth; and
 - no LLM, recommendation engine, Site Runtime component, or generative agent
   participates in physical command admission, execution, e-stop, or safety

@@ -157,6 +157,11 @@ jobs:
         run: >-
           uv run --no-sync python -B -m pytest -o addopts='' -q
           -p no:cacheprovider tests/site_agent
+      - name: Test Regional Model Gateway
+        working-directory: simulation
+        run: >-
+          uv run --no-sync python -B -m pytest -o addopts='' -q
+          -p no:cacheprovider tests/model_gateway
       - name: Test architecture, imports, and safety
         working-directory: simulation
         run: |
@@ -182,6 +187,7 @@ jobs:
             tests/edge_task/test_architecture.py \
             tests/edge_task/test_scripts_guard.py \
             tests/site_agent/test_architecture.py \
+            tests/model_gateway/test_architecture.py \
             tests/test_state_machine.py \
             tests/test_retry_recovery.py \
             tests/test_unload_retry.py \
@@ -203,7 +209,7 @@ jobs:
             nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
             nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
             nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
-            nxt_edge_task nxt_site_agent scripts ../.github/scripts
+            nxt_edge_task nxt_site_agent nxt_model_gateway scripts ../.github/scripts
       - name: Build and inspect wheel and source distribution
         working-directory: simulation
         shell: bash
@@ -245,6 +251,7 @@ jobs:
               "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
               "nxt_edge_observation", "nxt_workflow_enablement",
               "nxt_course_world_model", "nxt_edge_task", "nxt_site_agent",
+              "nxt_model_gateway",
           )
           repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 

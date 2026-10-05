@@ -117,6 +117,10 @@ architectural responsibility, not an inferred person or team.
     live loop. Recommendation and workflow ledgers do not become state truth.
 15. Do not invent physical facts, demand, capabilities, ETAs, defaults, or
     provenance. Preserve missingness and fail closed where the repository does.
+16. `nxt_model_gateway` produces untrusted transient JSON proposals, never
+    decisions, commands, telemetry or an execution path. No model call enters
+    Agent Runtime, Site Agent, Edge Task or robot/control packages. Only
+    `simulation/scripts/` may compose it with a domain owner and inject keys.
 
 See [`.agent/context/source-of-truth.md`](.agent/context/source-of-truth.md) for
 the complete truth matrix and [`.agent/context/package-map.md`](.agent/context/package-map.md)
@@ -283,6 +287,14 @@ An untracked document is never repository authority by itself.
   import it; only composition-root scripts may.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
+- Keep `nxt_model_gateway` a stateless, provider-neutral HTTPS network leaf:
+  no first-party imports, domain semantics or persistence. Only the approved
+  stdlib roots plus `jsonschema` are allowed; no provider SDK, environment,
+  filesystem, process, random/UUID or wall-clock capability. Production
+  endpoints are private constants, never configurable through UI/API/CSV/env.
+  CN uses Kimi only; GLOBAL uses OpenAI with at most one Anthropic fallback
+  only for the closed availability codes. Site Agent's approved imports remain
+  unchanged. See [the gateway contract](simulation/docs/model_gateway_v1.md).
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula
   changes require a new `model_version` and recomputability of prior versions.
 
@@ -314,6 +326,12 @@ full suite, and config validation. ROI changes require typecheck, tests, and a
 build. The lock covers every declared extra (including `twin` and the
 script-confined `edge-gateway` client); provision with
 `uv sync --locked --all-extras` and never change the lock silently.
+
+For gateway changes, run `tests/model_gateway`, `tests/pilot_ops` and
+`tests/site_agent`, plus the gateway architecture guard and the existing
+reverse guards. Use offline provider fixtures, check `uv lock --check`, build
+and inspect the distribution, and import `nxt_model_gateway` from the isolated
+wheel. The full Python suite remains the integration gate.
 
 No Python formatter, linter, or type checker is currently configured. The
 repository CI workflow and exact local equivalents are documented in
