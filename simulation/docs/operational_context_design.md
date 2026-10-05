@@ -1401,9 +1401,13 @@ a per-row quarantine; a separate import process.
 
 **Revision 2.** A six-lens adversarial review (planned/recorded/derived
 confusion, ambiguity, scope creep, architecture gate, console trust semantics,
-corrections and idempotency) produced 79 findings; each was verified against
-the specification and the repository by two independent skeptics and then
-judged by the author. Changes made in response:
+corrections and idempotency) produced 79 findings. Fifty-five of them were
+verified against the specification and the repository by two independent
+skeptics. The review run was interrupted twice by container restarts, so the
+remaining 24 (16 under corrections and idempotency, 3 under the architecture
+gate, 2 under scope creep, and 1 each under ambiguity, console trust, and fact
+confusion) were adjudicated by the author alone against the same sources.
+Every finding was then judged by the author. Changes made in response:
 
 - freshness now ages the source's **coverage end** (declared export time or
   newest recorded event), not the import time, with explicit `ok`/`stale`
