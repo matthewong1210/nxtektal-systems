@@ -463,7 +463,7 @@ API data from the V4 owner path, not hand-edited projections:
 
 - `two-task-active.json` remains the uninterrupted Task 6 witness at
   `now_sim_t_s=31800.0` with replay digest
-  `c9d746864edf6765da7c2f94dc2f7fff4c6fc6850501f63fd4965419a64880f9`;
+  `cfecebbe163ae6eecdb93e5e8971d407f607419b121a13f32a3c434d729152d8`;
 - `two-task-pending.json` is the first GET after a real process recovery at
   `now_sim_t_s=31200.0`.  Recovery has durably admitted the second task, but no
   policy action or assignment exists, so its state is `PENDING` and both

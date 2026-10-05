@@ -8,9 +8,12 @@ finite V3 session and runs the resulting collection tasks sequentially. It does
 not replace the fixed single-task 3C service documented in
 [the V3 runbook](collection_execution_v3_runbook.md).
 
-The evidence recorded below was produced from repository head
-`27fcea2d4639dc695f57bd342998803967ecbd09` on 2026-10-01. The branch remains
-local and unmerged.
+The original live-service proof was recorded on 2026-10-01. The frozen
+witnesses and source-derived identities below were refreshed on 2026-10-05
+using the merged engine and real Manager API callbacks. Task states, action
+order, timestamps, and ledger-backed 600/600 and 296/296 quantities are unchanged.
+The original live-service purity hash in §11 remains a dated historical record.
+The branch remains local and unmerged.
 
 ## 1. Scope and ownership
 
@@ -359,7 +362,7 @@ wait "$SERVICE_PID"
 
 The expected exit code is 0.
 
-## 8. Uninterrupted proof observed on 2026-10-01
+## 8. Uninterrupted proof, refreshed on 2026-10-05
 
 The uninterrupted run used the API-equivalent command above with `--api-only`,
 port `8774`, and a fresh root. Both chains were sent through public Planning HTTP
@@ -380,8 +383,8 @@ ledger-backed quantity. The process was not restarted.
 | scheduler after first / second terminal | `RUNNING` / `RUNNING` |
 | Planning outcomes | `[]` |
 | config digest | `518deac1f992a453ea40a440b346ebfcf3fcf54f8b1cb9c32b6cb1ee694393b3` |
-| engine digest | `b3e31f4904a3e58713474a87c879be3480f5ece6bc6b5bd6302311baabba0d29` |
-| final replay digest | `ad3b5c32518050522c753e964ebb751407cd702f2ddb94e27ecbf49000e0d1cd` |
+| engine digest | `33f7e7f3b233bc15677484b124b75918f33e94895b825ced7a261f53ad6c1a6c` |
+| final replay digest | `7854b8c3b63c1edb051f9f741ad64545542061d361eabf5a93db125aa1272202` |
 
 ### 8.2 Complete causal identities
 
@@ -394,11 +397,11 @@ ledger-backed quantity. The process was not restarted.
 | confirmation | `confirmation_3a06c3c3f65c7aebee43a54f` | `confirmation_676eaa75723a52b123d8ac09` |
 | schedule | `schedule_b7cb7f2d896ab910ace1a1e1` | `schedule_826becf5e8d940da07d59423` |
 | task | `task_e67abab7fe5666824af72300` | `task_51b158a10d9deba0b1aae545` |
-| binding | `c729a7dfd1b2128a235ff03461fbc6571946ffb20dca0b47bcdcebaf4458af1c` | `0660a893d8304b121a556969ae2e0e66b0dbc2d7be435925fb84073382a2bc63` |
-| execution request | `exec_req_579b8bb9dac804ea425d948c` | `exec_req_9ec7f8a0eac9d63fe98f102e` |
-| execution | `75ac1b88002c03ecdec352ed27d9c306893ac4c29674c891eac1ddf96808f215` | `125688930584b23999ff42f630c60f77f7daef28019dfb65c033db17151a3a24` |
-| attempt | `attempt-75ac1b88002c03ecdec352ed27d9c306893ac4c29674c891eac1ddf96808f215` | `attempt-125688930584b23999ff42f630c60f77f7daef28019dfb65c033db17151a3a24` |
-| assignment | `assignment-cb92a8f8c137db1f65e5a92f672945956048d5f3f971329900e150cc7616461d` | `assignment-112f751b8329d287d128072099a217c0fb69db1ede97a7be951edd69992c8d73` |
+| binding | `c2bcda7c1aeee17a2bc7eb7e975cade829c4487fb7c6c86d52ac311c1e950497` | `f28213f450dab6887b20ce7eb9239d03d630648dbd58e14acfc86a4c83d864ed` |
+| execution request | `exec_req_7850d5410913611cfb8db699` | `exec_req_69f6ba76c06e875215b6fb3e` |
+| execution | `f1dd7ae28567763cf4036027741c620338e3497fbce4c8a955659f6645b3c301` | `0a54e06a6ceed7799b428ffabff95875ed03da1998804bb52aa2976a24b6d6b2` |
+| attempt | `attempt-f1dd7ae28567763cf4036027741c620338e3497fbce4c8a955659f6645b3c301` | `attempt-0a54e06a6ceed7799b428ffabff95875ed03da1998804bb52aa2976a24b6d6b2` |
+| assignment | `assignment-153cf4125a76c704820bd8cf6de329feaaa4c617e2b4aa5930b3dab497027558` | `assignment-1b055067bb05174d89341470b9a6e103b8950b90eea155e8a231b43cfc9b545e` |
 
 Both schedules finished as `DISPATCHED`, with no schedule reason or detail. Task
 1 was created at `2026-09-16T08:10:00.000000Z` and ended Edge-side as
@@ -420,7 +423,7 @@ These are separate owner vocabularies, not a contradiction.
 | quantity source | `RANGE_SIMULATION_BALL_LEDGER` | `RANGE_SIMULATION_BALL_LEDGER` |
 | collection exit | `ROBOT_PAYLOAD_FULL` | `ZONE_EMPTY` |
 | event sequence | 1–19, complete | 1–12, complete |
-| event digest | `8feada8515a152816dbeda7ef12b340344c89eeb6fa7a226462ce865c104cc37` | `69301d39fd20c395d223d142a6f33da261f1dc0b5c0fc1c968acd0642c6fc72a` |
+| event digest | `6031f3f9fef6e970279272314c59126d0d81b7e646c63679bde708695cc959af` | `2575ae5008072085ac4237717cf005e6055c9d0819cd47ea6d47128f281351cb` |
 | conservation | passed | passed |
 | payload parity | passed | passed |
 | device protection | none | none |
@@ -434,54 +437,54 @@ projection rule for a partial collection result.
 Chain 1 raw source events:
 
 ```text
-assignment-event-d4d1eee09c9cd3296e06471fb14d9d7b903c2d7a4a77b1945a51137400e32255
-assignment-event-8c86fbc8f6786000633395072fad6e5c604e4195d63a40431910d04f6f9eb662
-assignment-event-8db89e31e1197d83066e136d795298df1bbf6b5a64d0c8c72690850a6649e666
-assignment-event-915dd31b3025cf01249558703d00b3299a9ab6ccdf12c14d99796103217ec116
-assignment-event-729139f7d8520b29ad263f9817bbd3d5a2ba261a6dcbf163d281557a9d37384f
-assignment-event-c0800e631a421bb6703f6a82fff4d6f486a35dc2ca23ad929ebad765ee84772d
-assignment-event-e1422dcd2dbe5ab4ef2c6f0b68e6cdb4f26e23a70b35f5477bdc9b331dc18aaf
-assignment-event-7e43511ee1f5b79ba3584599609c08032a753bf9a82c819709c3434454821818
-assignment-event-21efdd4f2ad4c800f87c41c6cf1e2417ccd24a861f865d824c3e4cbdc67b15d6
-assignment-event-aca96a3f70013b053ddd319d748911a0edce49b588284e78d52cb30d4c299268
-assignment-event-2bf4c5d07ef3ec829ba0e1bc0bae6129ab2402bbf453a779131aa48e56ffcb05
-assignment-event-7f3eb588345aae9c67c19997e5b516c624ee636957d4ed027de4d0e5d8ba60a3
-assignment-event-2aa70b4a256857f06928bcd005a97f268a9e18c373f6fb612120e007d3cda4ad
-assignment-event-f43cd8ec2704c3ef5c8b5229780cba8a2bba3aa47aacf56849a6b2df90396fae
-assignment-event-df3afd07e65e2504be154d670f9d79a58b86fadd0ce1d83b4ddae3b606bc091a
+assignment-event-bb87ad62ab9271ef029400fbcf62a28fb99eef33428972845228a81d0d287cb8
+assignment-event-44d14002097a43bca1a45a28dca393dfe33f928105e9ee64749f3367f8214fc6
+assignment-event-5ce35e8d96ee9c2313377a992403217b7b0173505fc3e0e2c95d79bb9239948e
+assignment-event-eb01e1247283699ec640c6a140934ff4a4240568bf0b904bf38d8dca1546377a
+assignment-event-851b6fc59af601d59153d954a756d14c3f8eb9717e008f6f9037c15b316d3454
+assignment-event-74d897233f3b7120504e8f428d4353ef7571c4f7567ba5ecd4eda6f253cdfd92
+assignment-event-638e140100319e016d700f5388e76ba375e04f0b9fc28dc70c651d7750f33b52
+assignment-event-a89d3b0584cede86d122b2015664d7dccdafb9d54267c7467fba4bc40a3a7a56
+assignment-event-3c8d8268350b45a7d1b286be4c92e333ea3a6525543787d9acb89f5f017869a7
+assignment-event-89d7f7ea48343186cb0314f352e5d270af64e2d5377dd2574841dfef257f782c
+assignment-event-dd5b7c677c0c4b6074d66e9b050c4e022c643453e3b018ae5049965dafb1db4e
+assignment-event-a5fc9ff7115b982b9953b24326abaa09cb36b96adacedb5e411bf5eafa975168
+assignment-event-1e67e8233adb2c377464e1d062c88f40bbc95520eac93b694cf57639ad9435fc
+assignment-event-dd86c7b98f3874871b000d13b13f05c0931f0c027caf818498b736265e2771ad
+assignment-event-95a5ff77f6197526747939fb537a0bf39fdcf8f17b50fffd44499652fafe4466
 ```
 
 Chain 1 unload source event:
 
 ```text
-assignment-event-833a52cb4650e8eabe5179e0340589ca7a88406a674f295ea2badb6641b142ef
+assignment-event-a331b1017f03134ce5c196626197be1ff9c52342daf604806723826c0ade7f38
 ```
 
 Chain 2 raw source events:
 
 ```text
-assignment-event-40622fcd4d016147a33433a9aaf2229336d62bfb802714049b0b59d1b6a833e3
-assignment-event-e5412fc28d662271c02cde57387f9e0bb81a1a63bd77dde6f31f18fe703422b1
-assignment-event-b591a9c148aac0120bb692bafefeef84f10bbe3618c8311d754b9b31c0fb45c2
-assignment-event-598f7fd933b4b528297a0a5cd241f85266666bf696c0c44bb47d777d0806be4d
-assignment-event-0252850928ff986021e511c65bb4a950cd339ae10ff8f4b3b5d1ff537862dd00
-assignment-event-1eb4138667987c3c3ff6a2196f989265d2475bc79994f6ca18de68b3d2c4adee
-assignment-event-e6510e524a80d0ac5381f10bd055de23e93d001fb484eaeed9aab476f937fb9e
-assignment-event-311137d085b7065ffe3c1898760453f14ba7d6db7deeb22bba61e5885548a653
+assignment-event-7cf0388859ed3abdcbdba79a82cd3f6d5aca8f6c3d94a92c0cd744e6289fb1cb
+assignment-event-046ce61a3671d0a8deadf048b641f55a1ce834e254db5db2b93e482e7fd34c2e
+assignment-event-937ef0d72912b650acccd638d952c030e3e353cba77421620e1c2d331f6395f5
+assignment-event-b3af3995d81f21867e75073cf8066e24a2b71bea18f2ce9297590ea358272abb
+assignment-event-ec3993622d32ae568ca3f56665cb45e8c64539937e802988ee6d473d32696883
+assignment-event-2000fb1a93bb020d2711a1843b91625018a1e495f75bf53649cb4be033934ae3
+assignment-event-fe61a9c0f4092e6fd97318a2b45f5e044ee9a9860a30700f961f48a33b58ecf4
+assignment-event-a23e00f7721bc1587ac17a5b1b8a0dc7d77b23cf629fdc4511fdb4a76815ac68
 ```
 
 Chain 2 unload source event:
 
 ```text
-assignment-event-c6285de432be0e5b1766293015ebfebd8a2704923408f342d8d5a40c03e7c208
+assignment-event-27552606544aa5cdf69eb0a22fed2bdabb5ddca9c5caf848b58135968bc34a7c
 ```
 
 The verified Edge record IDs were:
 
 | Chain | Edge records |
 |---|---|
-| 1 | `rec_0fd359fcd477fb25089d1e5a`, `rec_28de8cedde616a4d037b4819`, `rec_76e4d3f09e74adb18a9e493c`, `rec_83ef63f96780f7a3e6f68469`, `rec_dd86bc055ae7fe70d4cfc048`, `rec_e9b24960a453e6946b2fe94c` |
-| 2 | `rec_13d16d433494e5abea504317`, `rec_77390fb18d4eae06ef5ab943`, `rec_8384229d71b6645a4e5a8862`, `rec_a4172d8a4844e419cb7a08e1`, `rec_de9a3e38f2dcba667c8fd3b1`, `rec_f6fc4d230e8567c2579acb22` |
+| 1 | `rec_7ec428d4f05ccb33a207729f`, `rec_83ef63f96780f7a3e6f68469`, `rec_8edce7985e38494ca554e618`, `rec_9d608ba4ea16fa2af9064585`, `rec_c8ec41a972dd6ca8b6c8778e`, `rec_ddbb23cbd9413c968b5602b5` |
+| 2 | `rec_194a83e296a26046396edbe6`, `rec_2a420f734bbb93fc85503cc9`, `rec_3b0f637f850ee67b3d23968d`, `rec_570d7451ad690975c69062fe`, `rec_c6adc5de158af68d53c710f3`, `rec_de9a3e38f2dcba667c8fd3b1` |
 
 ## 9. Resume the same durable root
 
@@ -504,7 +507,9 @@ incarnation mismatch.
 
 ## 10. Restart-before-second-due proof
 
-The restart proof used a second empty root and port `8775`:
+The original live restart proof used a second empty root and port `8775`.
+The replay digests below were refreshed through the owner runtime and Manager
+API callbacks on 2026-10-05:
 
 1. start with `--initialize --driver-interval 6 --api-only`;
 2. submit chain 1 at 08:10;
@@ -521,13 +526,13 @@ Observed timeline:
 
 | Process | Simulated time | Observation | Replay digest |
 |---|---:|---|---|
-| initial | 08:10 | chain 1 accepted | `0185e769a51b6e60bb43c8360b0a79f26482576c4c35082599e257540fb9a6f1` |
-| initial | 08:20 | chain 1 RUNNING, 600 raw / 0 unload; chain 2 then submitted | `58ba4167e8aa9f87ddcbbef20cfbeed8711b791c7d0320e5f2add0d7e2578ed9` |
-| initial | 08:30 | chain 1 SUCCEEDED 600/600; chain 2 not due | `aa3a38bbe90b4501ee74084c1232d1df30eb8a2b862a3a2a8b14eb04f3b3ba52` |
-| immediate restart | 08:30 | identical durable state before advancement | `aa3a38bbe90b4501ee74084c1232d1df30eb8a2b862a3a2a8b14eb04f3b3ba52` |
-| restart | 08:40 | chain 2 due; execution not yet started | `a7501d28b183e11a457d18b070d58360249d3d24a87159979e288aa8bad095bc` |
-| restart | 08:50 | chain 2 RUNNING, 296 raw / 0 unload | `22363af0ad815a17e58842fa1b8142d2c2a204db55236719f0f87c160cf3c953` |
-| restart | 09:00 | chain 2 PARTIAL, 296/296 | `9dad437eb7940ee2b0c9d6fc0d441bbb7596b99678f39a41cec1ddde50fb248e` |
+| initial | 08:10 | chain 1 accepted | `0c9090a0b20de6a51ab8b0680f07c24c944aa69b806de50b184541f6382652ef` |
+| initial | 08:20 | chain 1 RUNNING, 600 raw / 0 unload; chain 2 then submitted | `84680b3d3dd2e2c29e7f952296b09331c12956ff0f712fa19f76c624daaa55ac` |
+| initial | 08:30 | chain 1 SUCCEEDED 600/600; chain 2 not due | `04bc0da286caf67479517fd3d8f4b7e553bedde5e6ef2a216e0044277b3d9b9e` |
+| immediate restart | 08:30 | identical durable state before advancement | `04bc0da286caf67479517fd3d8f4b7e553bedde5e6ef2a216e0044277b3d9b9e` |
+| restart | 08:40 | chain 2 due; execution not yet started | `d99b14e6fb85f6376771dd5af9826659978608b9aeb131971936ef9f4f6ad113` |
+| restart | 08:50 | chain 2 RUNNING, 296 raw / 0 unload | `00bb71ea44864911443922b8071c370e1d82cfab8da48c659d4c055b0f7ca430` |
+| restart | 09:00 | chain 2 PARTIAL, 296/296 | `72f68cd3bd8be42b6d8f596b25c5730cc4f29fde515fb2c7f87a075741ffcddd` |
 
 All confirmation, schedule, task, binding, execution-request, execution,
 attempt, and assignment IDs match the uninterrupted proof. Each owner array has
@@ -619,8 +624,8 @@ these 11 GETs, and recompute after each round:
 7. `/api/v1/planning/requests/continuous-input-002`
 8. `/api/v1/planning/requests/continuous-plan-002`
 9. `/api/v1/planning/requests/continuous-confirmation-002`
-10. `/api/v1/collection-executions/requests/exec_req_9ec7f8a0eac9d63fe98f102e`
-11. `/api/v1/collection-executions/requests/exec_req_579b8bb9dac804ea425d948c`
+10. `/api/v1/collection-executions/requests/exec_req_69f6ba76c06e875215b6fb3e`
+11. `/api/v1/collection-executions/requests/exec_req_7850d5410913611cfb8db699`
 
 Every response must be HTTP 200, and request recovery must return the original
 request's durable receipt. On 2026-10-01, all three hash points were identical:
