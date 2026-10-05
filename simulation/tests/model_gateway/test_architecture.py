@@ -23,11 +23,44 @@ FORBIDDEN_DOMAIN_TOKENS = {
     "robot", "actuator", "directive", "dispatch", "safetyshield", "rclpy",
     "ros2", "ledger", "journal", "filesystem", "site_agent",
 }
-BANNED_CALLS = {
+BANNED_CAPABILITY_NAMES = {
     "open", "open_code", "FileIO", "__import__", "eval", "exec", "compile", "getenv", "environ",
     "now", "utcnow", "today", "time", "time_ns", "uuid1", "uuid4",
     "random", "randint", "system", "popen",
 }
+BANNED_BUILTIN_NAMES = {"open", "__import__", "eval", "exec", "compile"}
+# An allowed root does not authorize its implementation's re-exported modules.
+# Review this small surface when adding an import or a module-qualified member.
+# In particular, io grants exactly the two HTTP parser wrappers, not file I/O.
+ALLOWED_MODULE_MEMBERS = {
+    "__future__": {"annotations"},
+    "collections": {"abc"},
+    "collections.abc": {"Callable", "Mapping"},
+    "copy": {"copy", "deepcopy"},
+    "dataclasses": {"dataclass", "field"},
+    "enum": {"StrEnum"},
+    "hashlib": {"sha256"},
+    "http": {"client"},
+    "http.client": {
+        "HTTPException", "HTTPResponse", "HTTPSConnection", "IncompleteRead",
+        "_MAXHEADERS", "_MAXLINE",
+    },
+    "io": {"RawIOBase", "BufferedReader"},
+    "json": {"dumps", "loads"},
+    "math": {"isfinite"},
+    "re": {"compile", "error", "fullmatch", "match"},
+    "socket": {"SOCK_STREAM", "gaierror", "getaddrinfo", "socket"},
+    "ssl": {"SSLError", "create_default_context"},
+    "threading": {"Event", "Thread"},
+    "types": {"MappingProxyType"},
+    "typing": {"Any", "NoReturn", "Protocol"},
+    "jsonschema": {"Draft202012Validator", "exceptions"},
+    "jsonschema.exceptions": {"SchemaError", "ValidationError"},
+}
+ALLOWED_QUALIFIED_NAMES = set(ALLOWED_MODULE_MEMBERS) | {
+    f"{module}.{member}"
+    for module, members in ALLOWED_MODULE_MEMBERS.items() for member in members
+} | {"jsonschema.Draft202012Validator.check_schema"}
 REVERSE_GUARDS = {
     "pilot_ops/test_boundaries.py": ("UPSTREAM_PACKAGES", "CORE_BANNED_ROOTS"),
     "site_runtime/test_architecture.py": ("package_names",),
@@ -51,15 +84,16 @@ def forbidden_imports(source: str) -> set[str]:
             if node.level > 1:
                 rejected.add("." * node.level + (node.module or ""))
                 continue
-            if node.module == "io":
-                rejected.update(f"io.{alias.name}" for alias in node.names
-                                if alias.name not in {"RawIOBase", "BufferedReader"})
+            if node.module in ALLOWED_MODULE_MEMBERS:
+                rejected.update(f"{node.module}.{alias.name}" for alias in node.names
+                                if alias.name not in ALLOWED_MODULE_MEMBERS[node.module])
             modules = [node.module or ""]
         else:
             continue
         for module in modules:
             root = module.split(".")[0]
-            if root.startswith("nxt_") or root not in ALLOWED_STDLIB | ALLOWED_THIRD_PARTY:
+            if (root.startswith("nxt_") or root not in ALLOWED_STDLIB | ALLOWED_THIRD_PARTY
+                    or module not in ALLOWED_MODULE_MEMBERS):
                 rejected.add(module)
     return rejected
 
@@ -75,6 +109,130 @@ def forbidden_tokens(source: str) -> set[str]:
         token for token in FORBIDDEN_DOMAIN_TOKENS
         if re.search(r"(?<![a-z0-9])" + re.escape(token) + r"(?![a-z0-9])", lowered)
     }
+
+
+def forbidden_capabilities(source: str) -> set[str]:
+    """Inspect references, not just calls; never import inspected source.
+
+    Bind imports to qualified names and propagate direct aliases to a fixed
+    point. Bindings are conservative unions across scopes/reassignments: local
+    shadowing cannot erase a forbidden origin. Only approved paths propagate,
+    so this finite analysis cannot grow indefinitely on cyclic assignments.
+    Module objects may be qualified or directly aliased, not passed/hidden in
+    arbitrary expressions that would escape this syntactic provenance analysis.
+    """
+    rejected = forbidden_imports(source)
+    tree = ast.parse(source)
+    nodes = list(ast.walk(tree))
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    bindings: dict[str, set[str]] = {}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name.split(".")[0]
+                origin = alias.name if alias.asname else alias.name.split(".")[0]
+                bindings.setdefault(name, set()).add(origin)
+        elif isinstance(node, ast.ImportFrom) and not node.level:
+            for alias in node.names:
+                bindings.setdefault(alias.asname or alias.name, set()).add(
+                    f"{node.module}.{alias.name}"
+                )
+
+    def origins(node: ast.AST) -> set[str]:
+        if isinstance(node, ast.Name):
+            return bindings.get(node.id, set())
+        if isinstance(node, ast.Attribute):
+            return {f"{name}.{node.attr}" for name in origins(node.value)}
+        return set()
+
+    aliases = []
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, (ast.AnnAssign, ast.NamedExpr)):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if value is not None and all(isinstance(target, ast.Name) for target in targets):
+            aliases.append((targets, value))
+    while True:
+        changed = False
+        for targets, value in aliases:
+            paths = origins(value) & ALLOWED_QUALIFIED_NAMES
+            for target in targets:
+                existing = bindings.setdefault(target.id, set())
+                if paths - existing:
+                    existing.update(paths)
+                    changed = True
+        if not changed:
+            break
+
+    alias_values = {value for _, value in aliases}
+    for node in nodes:
+        if not isinstance(node, (ast.Name, ast.Attribute)) or not isinstance(node.ctx, ast.Load):
+            continue
+        paths = origins(node)
+        rejected.update(paths - ALLOWED_QUALIFIED_NAMES)
+        name = node.id if isinstance(node, ast.Name) else node.attr
+        parent = parents.get(node)
+        direct_call = isinstance(parent, ast.Call) and parent.func is node
+        forbidden_name = (
+            name in BANNED_BUILTIN_NAMES if isinstance(node, ast.Name)
+            else name in BANNED_CAPABILITY_NAMES
+        )
+        if (forbidden_name or direct_call and name in BANNED_CAPABILITY_NAMES) and paths != {"re.compile"}:
+            rejected.add(name)
+        if paths & ALLOWED_MODULE_MEMBERS.keys():
+            qualified = isinstance(parent, ast.Attribute) and parent.value is node
+            if not qualified and node not in alias_values:
+                rejected.update(f"module escape: {path}" for path in paths)
+    return rejected
+
+
+@pytest.mark.parametrize("source", [
+    "import io as streams; reader = streams.FileIO; reader('file')",
+    "reader = open; reader('file')",
+    "import io; writer = io.TextIOWrapper",
+    "import io as streams; second = streams; writer = second.TextIOWrapper",
+    "run = exec",
+    "evaluate = eval",
+    "load = __import__",
+    "compile_source = compile",
+    "from socket import os as settings; settings.environ['KEY']",
+    "from socket import os as child; child.posix_spawn('x', [], {})",
+    "from http.server import time as clock; clock.time()",
+    "from http.server import time as clock; timer = clock.time",
+    "from dataclasses import sys as runtime; runtime.modules",
+    "from threading import _os as process; process.environ",
+    "import socket as net; alias = net; settings = alias.os",
+    "import http.server as server; clock = server.time",
+    "from http import server; clock = server.time",
+    "from socket import *",
+    "import ssl as tls; raw = tls.os",
+    "import io; first = second; second = io; first.FileIO",
+    "import io; streams: object = io; streams.TextIOWrapper",
+    "import io; (streams,) = (io,); streams.FileIO",
+    "import socket; modules = [socket]; modules[0].os",
+    "import io; getattr(io, 'FileIO')",
+    "import io; reader = io; reader = reader.TextIOWrapper",
+])
+def test_production_capability_scan_rejects_references_and_reexports(source):
+    assert forbidden_capabilities(source), source
+
+
+@pytest.mark.parametrize("source", [
+    "import re; pattern = re.compile('x')",
+    "import io as streams; base = streams.RawIOBase; reader = streams.BufferedReader",
+    "from io import RawIOBase, BufferedReader",
+    "import re as patterns; factory = patterns.compile; factory('x')",
+    "from re import compile; factory = compile; factory('x')",
+    "from re import compile as factory; factory('x')",
+    "from http import client as transport; base = transport.HTTPSConnection",
+    "import io as streams; alias = streams; base = alias.RawIOBase",
+    "system = 'prompt'; content = system",
+])
+def test_production_capability_scan_accepts_approved_references(source):
+    assert forbidden_capabilities(source) == set()
 
 
 def test_import_guard_negative_control():
@@ -119,16 +277,8 @@ def test_gateway_sources_have_only_approved_imports_and_neutral_tokens():
     assert files
     for path in files:
         source = path.read_text(encoding="utf-8")
-        assert not forbidden_imports(source), (path.name, forbidden_imports(source))
+        assert not forbidden_capabilities(source), (path.name, forbidden_capabilities(source))
         assert not forbidden_tokens(source), (path.name, forbidden_tokens(source))
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Call):
-                name = (node.func.id if isinstance(node.func, ast.Name)
-                        else node.func.attr if isinstance(node.func, ast.Attribute) else None)
-                if name == "compile" and isinstance(node.func, ast.Attribute):
-                    assert isinstance(node.func.value, ast.Name) and node.func.value.id == "re"
-                else:
-                    assert name not in BANNED_CALLS, (path.name, name)
 
 
 def test_other_packages_cannot_import_or_mention_gateway():
