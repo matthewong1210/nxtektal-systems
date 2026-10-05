@@ -29,7 +29,7 @@
 
 ## Cross-task contract freeze (implemented by Task 1, then consumed by later tasks)
 
-Task 1 owns the first RED/GREEN implementation of `contracts.py`; later tasks import these names and do not redefine them. Every dataclass is frozen, slotted, and closed (no `dict` or arbitrary `Mapping[str, Any]` fields). Parsers reject unknown keys before constructing a value and enforce the stated bounds.
+Task 1 owns the first RED/GREEN implementation of `contracts.py`; later tasks import these names and do not redefine their field surfaces. Every dataclass is frozen, slotted, and closed (no `dict` or arbitrary `Mapping[str, Any]` fields). Task 1 implements the roster parsers plus the five provenance parsers named below. Task 5 owns payload/event wire parsers and recursive forbidden-key rejection for those wire shapes. Later tasks may add the explicitly assigned constructors below without changing the frozen fields.
 
 ```python
 from __future__ import annotations
@@ -368,7 +368,7 @@ class GenerationReservedPayload:
     assignment_alias_to_assignment_id: tuple[tuple[str, str], ...]
     input_digest: str
     prompt_template_version: str
-    language: str
+    language: Literal["zh-CN", "en"]
     route: GenerationRouteEvidence
     retry_of: str | None
     operator: str
@@ -517,7 +517,7 @@ class ProviderPayload:
     unavailable: tuple[ProviderUnavailable, ...]
     coverage: tuple[ProviderCoverage, ...]
     prompt_template_version: str
-    language: str
+    language: Literal["zh-CN", "en"]
 
 @dataclass(frozen=True, slots=True)
 class CoverageGap:
@@ -624,6 +624,28 @@ EVENT_TO_OPERATION = {
     "generation_reserved": "suggestion-generate", "manager_response_committed": "manager-response",
 }
 
+EVENT_TYPES = frozenset({
+    "roster_imported", "exception_recorded", "exception_cancelled",
+    "exception_corrected", "generation_reserved", "generation_interrupted",
+    "provider_attempt_started", "provider_attempt_finished",
+    "suggestion_issued", "suggestion_unavailable",
+    "manager_response_committed",
+})
+OPERATION_KINDS = frozenset({
+    "roster-import", "exception-record", "exception-cancel",
+    "exception-correct", "suggestion-generate", "manager-response",
+})
+GENERATION_TERMINALS = frozenset({
+    "SUCCEEDED", "NO_VALID_SUGGESTION", "UNAVAILABLE", "REFUSED",
+    "INVALID_RESPONSE", "PROVIDER_ERROR", "CONFIGURATION_ERROR",
+    "SECURITY_ERROR", "RESULT_UNKNOWN",
+})
+MANAGER_REASON_CODES = frozenset({
+    "APPROVED", "APPROVED_WITH_CHANGES", "MANUAL_HANDLING",
+    "INSUFFICIENT_CONTEXT", "OTHER",
+})
+PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v1"
+
 @dataclass(frozen=True, slots=True)
 class StaffingHistory:
     events: tuple[StaffingEvent, ...]
@@ -668,7 +690,19 @@ class VerifiedLedgerState:
 
 Operation builders return `ReceiptResult`: `CommittedReceipt` for a new append, `DuplicateReceipt` for an identical canonical payload found before stale checks, or `ConflictReceipt` for a changed payload, stale CAS, or illegal transition. A duplicate never appends a second event.
 
-`StaffingException` and `StaffingBasis` are implemented in Task 1's `contracts.py` before any Task 2 import; the forward references above are resolved in that same module. `GenerationRouteEvidence`, `AttemptRouteEvidence`, `AttemptStartedEvidence`, `AttemptFinishedEvidence`, and `ResultEvidence` are the only accepted provenance inputs. A parser must reject keys named `prompt`, `raw_response`, `reasoning`, `secret`, `api_key`, `headers`, or `metadata`, reject unknown keys recursively, and reject text over the declared bound (including nested text). Tests must cover each rejected key, prompt/raw-response/reasoning injection, and overlong text.
+The stored receipt and every `CommittedReceipt` have `duplicate=False`. A duplicate return reconstructs the immutable receipt with `duplicate=True` and wraps it in `DuplicateReceipt`; the stored original remains unchanged. `CommittedReceipt.__post_init__` rejects `duplicate=True`, and `DuplicateReceipt.__post_init__` rejects `duplicate=False`, so wrapper and inner flag always agree.
+
+`StaffingException` and `StaffingBasis` field surfaces are implemented in Task 1's `contracts.py` before any Task 2 import; the forward references above are resolved in that same module. Later tasks do not modify these frozen classes. Instead, Task 2 owns `build_staffing_exception` and `compose_staffing_basis`, Task 3 owns `assignment_from_candidate`, Task 5 owns `event_from_record`, and Task 7 owns `stored_candidate_from_validation`. Their exact canonical recipes are frozen below. `GenerationRouteEvidence`, `AttemptRouteEvidence`, `AttemptStartedEvidence`, `AttemptFinishedEvidence`, and `ResultEvidence` are the only accepted provenance inputs. Task 1 implements `parse_attempt_route_evidence`, `parse_generation_route_evidence`, `parse_attempt_started_evidence`, `parse_attempt_finished_evidence`, and `parse_result_evidence`; each rejects unknown keys, forbidden sensitive keys, bad nested provenance, and overlong text before constructing a value. Task 5 applies the same recursive policy to event and payload wire objects. Forbidden keys are `prompt`, `raw_response`, `reasoning`, `secret`, `api_key`, `headers`, and `metadata`.
+
+Task 1 validates direct construction for roster/time values and all five provenance records. Provenance bounds are fixed: attempt index is exact integer `0|1`; provider is `KIMI|OPENAI|ANTHROPIC`, region `CN|GLOBAL`, and role `PRIMARY|BACKUP`; route ID is ASCII 1..64, model ID ASCII 1..128, and optional provider request ID/finish reason ASCII 1..160; timeout is finite and positive; optional input/output token counts are exact integers in `0..1_000_000`; failure code matches `[A-Z][A-Z0-9_]{0,63}`; ordered attempts contain 0..2 items; and candidate count is an exact integer in 0..2. Persisted language is exactly `zh-CN|en`. General identifiers use `IDENTIFIER_PATTERN` with maximum length 128; audit operator is safe Unicode 1..128 and note is safe Unicode 0..500. Other payload coherence is tested and enforced by the first task that constructs or parses that payload, without changing fields.
+
+Deterministic constructor recipes (all objects are passed through `to_primitive` before `stable_digest`):
+
+- `build_staffing_exception(body, start, end)` derives `exception_id = "exception_" + stable_digest({"schema":"nxt-staffing-exception-id/v1", "request_id":body["request_id"]})[:24]`, then copies the already-validated service date, staff ID, kind, interval, and note. Changed payload under the same request ID is caught by request-digest idempotency; it does not create a second exception identity.
+- `compose_staffing_basis(service_date, roster, active, plan, exception_set_revision)` sorts `active` by `(staff_id, unavailable_start, unavailable_end, exception_id)`. `exception_set_digest` hashes `{"schema":"nxt-staffing-exception-set/v1", "service_date":service_date, "exceptions":active}`. `effective_plan_digest` hashes `{"schema":"nxt-staffing-effective-plan/v1", "service_date":service_date, "revision":plan.revision, "status":plan.status, "schedule_digest":plan.schedule_digest, "effective_schedule":plan.effective_schedule, "source_sequence":plan.source_sequence, "affected_exception_ids":plan.affected_exception_ids}`. `basis_digest` hashes `{"schema":"nxt-staffing-basis/v1", "service_date":service_date, "roster_revision":roster.revision, "exception_set_revision":exception_set_revision, "effective_plan_revision":plan.revision, "roster_digest":roster.roster_digest, "exception_set_digest":exception_set_digest, "effective_plan_digest":effective_plan_digest}`. These exact values populate `StaffingBasis`.
+- `assignment_from_candidate(operation, basis, staff_id)` derives `assignment_id = "assignment_" + stable_digest({"schema":"nxt-staffing-candidate-assignment-id/v1", "basis_digest":basis.basis.basis_digest, "service_date":basis.basis.service_date, "staff_id":staff_id, "role_code":operation.role_code, "area_code":operation.area_code, "start_at":utc_text(operation.start_at), "end_at":utc_text(operation.end_at)})[:24]` and copies those semantic fields into `Assignment`.
+- Task 5 exposes `staffing_event_id(event_type, sequence, site_id, deployment_id, occurred_at_utc, causation_id, payload)`. It returns `"staffing_event_" + stable_digest({"schema":"nxt-staffing-event-id/v1", "event_type":event_type, "sequence":sequence, "site_id":site_id, "deployment_id":deployment_id, "occurred_at_utc":utc_text(occurred_at_utc), "causation_id":causation_id, "payload":payload})[:24]`. `event_from_record(body, payload)` requires the stored event ID to equal that value before constructing `StaffingEvent`; operation event builders use the same helper.
+- `stored_candidate_from_validation(candidate, validation)` requires equal candidate indexes. It copies operations, rationale, and warnings from `candidate`, and rejection codes, gaps, schedule, and digest from `validation`. A valid result requires empty rejections/gaps plus non-`None` schedule/digest; an invalid result requires a nonempty rejection set and `None` schedule/digest. It returns a detached `StoredCandidate`.
 
 The gateway mapping is lossless and explicit: `AttemptRouteEvidence.provider`, `.region`, `.route_role`, and `.model_id` map to per-attempt provenance; `GenerationRouteEvidence` freezes readiness and primary/backup route selection; `AttemptFinishedEvidence` carries the gateway `AttemptRecord` fields; `ResultEvidence` carries the gateway `GenerationResult` fields and ordered attempts. Provider names, request IDs, finish reasons, token counts, and digests are bounded metadata only—provider text, prompt, raw response, reasoning, headers, and secrets never enter an event payload or ledger record.
 
@@ -699,11 +733,11 @@ The gateway mapping is lossless and explicit: `AttemptRouteEvidence.provider`, `
 - Consumes: the exact `RosterImportRequest` shape (`site_timezone`, top-level `workers`, `availability`, `assignment_rules`, `regular_assignments`, and `coverage`) plus injected site/deployment identity. The domain parser accepts no legacy `timezone`, nested worker availability, or `coverage_requirements` names.
 - Produces: immutable roster revisions, deterministic service-day assignments/availability/coverage, and stable errors with no I/O.
 
-Controller clarification frozen before implementation: extend the existing canonical serializer with `date -> YYYY-MM-DD` after its `datetime` branch; preserve the exact four-field `ServiceDayRoster` and keep service-day availability as weekday-filtered `RosterRevision.availability` rows resolved by later consumers; derive `revision` as `expected_roster_revision + 1`. The roster digest excludes request/audit/CAS fields and the derived revision. It hashes the explicit normalized roster core (`schema`, identity/timezone, effective bounds, workers, availability, regular assignments, assignment rules, coverage), with stored tuples and digest arrays sharing deterministic semantic sort order. Reordering equivalent import rows therefore does not change the digest.
+Controller clarification frozen before implementation: extend the existing canonical serializer with `date -> YYYY-MM-DD` after its `datetime` branch; preserve the exact four-field `ServiceDayRoster` and keep service-day availability as weekday-filtered `RosterRevision.availability` rows resolved by later consumers; derive `revision` as `expected_roster_revision + 1`. The roster digest excludes request/audit/CAS fields and the derived revision. It hashes the explicit normalized roster core (`schema`, identity/timezone, effective bounds, workers, availability, regular assignments, assignment rules, coverage), with stored tuples and digest arrays sharing deterministic semantic sort order. Reordering equivalent import rows therefore does not change the digest. `time.py` owns `utc_text(value)`: require an aware datetime, normalize to UTC, render fixed six-digit microseconds, and replace `+00:00` with `Z`. Every staffing content-ID recipe uses that exact representation.
 
 - [ ] **Step 1: Freeze the exact normalized roster request in fixtures and failing tests**
 
-Begin this RED cycle by asserting the exact field sets and closed parser behavior for every cross-task contract above (`StaffingEvent`, `StaffingReceipt`, `ReceiptResult`, `StaffingHistory`, and the three evidence dataclasses) in `test_staffing_roster.py`; Task 1 Step 4 turns those assertions GREEN in `contracts.py`.
+Begin this RED cycle by asserting the exact field sets, frozen/slotted behavior, and immutable tuple storage for every cross-task contract above (`StaffingEvent`, `StaffingReceipt`, `ReceiptResult`, `StaffingHistory`, and all five provenance inputs) in `test_staffing_roster.py`. Assert `CommittedReceipt` accepts only `duplicate=False` and `DuplicateReceipt` accepts only `duplicate=True`. Assert closed parser behavior now for the roster shapes and five provenance parsers; Task 5 owns event/payload wire parser behavior. Task 1 Step 4 turns these assertions GREEN in `contracts.py`.
 
 Use this closed shape in `staffing_fixtures.py`:
 
@@ -777,7 +811,7 @@ class PatchKind(StrEnum):
     ADD = "ADD"
 ```
 
-`StaffingBasis`, `StaffingException`, and `BasisSnapshot` are already frozen in the cross-task contracts above; Task 1 tests their exact field sets and constructs them only through the strict parser.
+`StaffingBasis`, `StaffingException`, and `BasisSnapshot` are already frozen in the cross-task contracts above; Task 1 tests their exact field sets. Task 2 implements the frozen `build_staffing_exception` and `compose_staffing_basis` recipes before using them.
 
 Add frozen `Worker`, `AvailabilityWindow`, `WeeklyAssignment`, `AssignmentRule`, `CoverageRequirement`, `RosterRevision`, `Assignment`, `ServiceDayRoster`, and exact parser helpers. Use `to_primitive`/`canonical_json`/`stable_digest` from the existing owner; do not import outside `nxt_pilot_ops`. Add backward-compatible `date` handling to `nxt_pilot_ops.serialization.to_primitive` after the existing `datetime` case and prove all pre-existing canonical bytes remain unchanged.
 
@@ -964,6 +998,7 @@ git commit -m "feat(staffing): validate weekly roster evidence"
 - Consumes: a materialized day, immutable replay history, exception requests, and accepted complete schedules.
 - Produces: normalized unavailable intervals, active exception set, current advisory baseline, three-revision `StaffingBasis`, and review state.
 - Imports the frozen `StaffingEvent`, `StaffingHistory`, and `StaffingReceipt` contracts from the cross-task section; Task 2 must not invent local event or history shapes.
+- Implements the frozen `build_staffing_exception` and `compose_staffing_basis` recipes in `exceptions.py`/`plans.py`; `contracts.py` remains unchanged.
 
 - [ ] **Step 1: Add failing tests for the exact minimal exception body**
 
@@ -1043,7 +1078,7 @@ def normalize_exception(payload: object, *, roster: ServiceDayRoster) -> Staffin
         start, end = (shift.start_at, point) if kind is ExceptionKind.LATE else (point, shift.end_at)
         if not shift.start_at < point < shift.end_at:
             raise StaffingError("invalid_exception_time", "outside shift")
-    return StaffingException.from_request(body, start=start, end=end)
+    return build_staffing_exception(body, start=start, end=end)
 def active_exceptions(events: Sequence[StaffingEvent],
                       service_date: date) -> tuple[StaffingException, ...]:
     visible = {}
@@ -1056,6 +1091,20 @@ def active_exceptions(events: Sequence[StaffingEvent],
         elif event.event_type == "exception_cancelled":
             visible.pop(payload.exception_id, None)
     return tuple(sorted(visible.values(), key=lambda item: (item.unavailable_start, item.exception_id)))
+
+def exception_set_revision(events: Sequence[StaffingEvent], service_date: date) -> int:
+    def affected_date(event):
+        if event.event_type == "exception_recorded":
+            return event.payload.exception.service_date
+        if event.event_type == "exception_cancelled":
+            return event.payload.cancelled_exception.service_date
+        if event.event_type == "exception_corrected":
+            if (event.payload.previous_exception.service_date
+                    != event.payload.replacement_exception.service_date):
+                raise StaffingError("staffing_invalid_event", "correction changes service date")
+            return event.payload.replacement_exception.service_date
+        return None
+    return sum(1 for event in events if affected_date(event) == service_date)
 def apply_exceptions(assignments: Sequence[Assignment],
                      exceptions: Sequence[StaffingException]) -> tuple[Assignment, ...]:
     result = []
@@ -1089,8 +1138,9 @@ def build_staffing_basis(history, service_date):
     assignments = apply_exceptions(
         baseline if baseline is not None else materialize_service_day(roster, service_date).assignments,
         active)
-    basis = StaffingBasis.from_parts(service_date, roster, active,
-                                     effective_plan_state(history, service_date))
+    basis = compose_staffing_basis(
+        service_date, roster, active, effective_plan_state(history, service_date),
+        exception_set_revision(history.events, service_date))
     coverage = tuple(
         CoverageWindow(row.role_code, row.area_code,
                        resolve_local_minute(service_date, row.start_local, roster.site_timezone),
@@ -1159,6 +1209,7 @@ git commit -m "feat(staffing): derive exceptions and advisory baselines"
 **Interfaces:**
 - Consumes: one frozen basis snapshot, local alias maps, and up to two exact candidate patches.
 - Produces: independent validation results, materialized complete schedules/digests, stable rejection codes, and deterministic coverage gaps.
+- Implements the frozen `assignment_from_candidate` recipe in `validator.py`; `contracts.py` remains unchanged.
 
 - [ ] **Step 1: Freeze validator result types and rejection vocabulary in failing tests**
 
@@ -1347,7 +1398,8 @@ def validate_adds(adds, worker_ids, remaining, basis):
             codes.append("OVERLAPPING_ASSIGNMENTS"); continue
         if basis_exceeds_daily_limit(basis, worker_ids[operation.worker_alias], operation, working):
             codes.append("MAX_DAILY_MINUTES_EXCEEDED"); continue
-        item = Assignment.from_candidate(operation, basis, staff_id=worker_ids[operation.worker_alias])
+        item = assignment_from_candidate(
+            operation, basis, staff_id=worker_ids[operation.worker_alias])
         accepted.append(item)
         working[item.assignment_id] = item
     return codes, tuple(accepted)
@@ -1404,7 +1456,7 @@ Assert a fixed nonce yields frozen `worker_…` and `assignment_…` aliases, a 
 
 - [ ] **Step 2: Freeze the exact provider output schema and text limits**
 
-Define `STAFFING_SUGGESTION_OUTPUT_SHAPE` as a frozen stdlib description consumed by a hand-written parser: every object has an exact allowed-key set (equivalent to `additionalProperties: false`), `candidates` has at most 2 items, each patch has at most 32 operations, rationale is at most 280 scalars, `operational_warnings` has at most 5 items of at most 200 scalars, and REMOVE/ADD use exact closed shapes. Do not add `jsonschema` or any other schema dependency.
+Define one `STAFFING_SUGGESTION_OUTPUT_SCHEMA` as the frozen stdlib description consumed by the hand-written parser and passed to the gateway: every object has an exact allowed-key set (equivalent to `additionalProperties: false`), `candidates` has at most 2 items, each patch has at most 32 operations, rationale is at most 280 scalars, `operational_warnings` has at most 5 items of at most 200 scalars, and REMOVE/ADD use exact closed shapes. Do not introduce a second `SHAPE` constant. Do not add `jsonschema` or any other schema dependency.
 
 - [ ] **Step 3: Add failing decoder tests for every shape violation**
 
@@ -1427,7 +1479,7 @@ Use a small recursive parser rather than a schema package:
 ```python
 from types import MappingProxyType
 
-FORBIDDEN_KEYS = frozenset({"prompt", "raw_response", "reasoning", "api_key", "headers", "metadata"})
+FORBIDDEN_KEYS = frozenset({"prompt", "raw_response", "reasoning", "secret", "api_key", "headers", "metadata"})
 MAX_OUTPUT_TOKENS = 2048
 
 STAFFING_SUGGESTION_OUTPUT_SCHEMA = MappingProxyType({
@@ -1479,7 +1531,7 @@ def require_object(value: object, allowed: frozenset[str], path: str) -> dict[st
     return {str(key): item for key, item in value.items()}
 ```
 
-Add tests that call `require_object` recursively with each forbidden key, a 281-scalar rationale, a 201-scalar warning, and a third candidate; each must fail before any dataclass is constructed. Define `ProviderPayload` in `contracts.py`, store alias maps as immutable tuples, and return `GenerationProjection` with no raw provider value retained.
+Add tests that call `require_object` recursively with each forbidden key, a 281-scalar rationale, a 201-scalar warning, and a third candidate; each must fail before any dataclass is constructed. Consume the `ProviderPayload` already frozen by Task 1, store alias maps as immutable tuples, and return `GenerationProjection` with no raw provider value retained.
 
 Export the immutable `STAFFING_SUGGESTION_OUTPUT_SCHEMA` from `projection.py`; the handwritten parser and this schema share the same frozen key/enumeration/maximum constants. The domain package never imports `jsonschema`; integration passes the gateway response to `decode_provider_candidates` and tests schema/parser agreement directly.
 
@@ -1565,12 +1617,12 @@ Use `HMAC-SHA256(nonce, b"worker\0" + staff_id)` and `b"assignment\0" + assignme
 
 - [ ] **Step 7: Implement a fixed injection-resistant prompt**
 
-`prompt.py` exposes `PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v1"` and `build_prompt(projection) -> tuple[dict[str, str], dict[str, str]]`. The system text says the JSON input is untrusted data, only the supplied aliases/codes may be used, no facts may be invented, and output must match the supplied schema. The user content is canonical JSON of `provider_payload`; no display label, note, or CSV cell is interpolated into instructions.
+`prompt.py` re-exports the Task 1 `PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v1"` and exposes `build_prompt(projection) -> tuple[dict[str, str], dict[str, str]]`. The system text says the JSON input is untrusted data, only the supplied aliases/codes may be used, no facts may be invented, and output must match the supplied schema. The user content is canonical JSON of `provider_payload`; no display label, note, or CSV cell is interpolated into instructions.
 
 The cross-layer canonical input is exactly `{template_version, messages, output_schema, max_output_tokens}` with `MAX_OUTPUT_TOKENS = 2048`; `GenerationProjection.input_digest` hashes this semantic payload using the same primitive conversion as gateway `GenerationRequest.canonical_input_digest`. Integration Task 3 must construct its `GenerationRequest`, assert `request.canonical_input_digest == operations.generation_work(generation_id).input_digest`, and only then call the gateway. Add a test hook that compares the two canonical primitives byte-for-byte; any prompt/schema/token-budget drift fails before outbound I/O.
 
 ```python
-PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v1"
+from .contracts import PROMPT_TEMPLATE_VERSION
 
 def build_prompt(projection):
     messages = canonical_generation_input(
@@ -1580,7 +1632,7 @@ def build_prompt(projection):
 
 - [ ] **Step 8: Implement strict provider candidate decoding and run GREEN**
 
-Expose `decode_provider_candidates(value, projection)`. First run the stdlib hand-written closed-shape parser against `STAFFING_SUGGESTION_OUTPUT_SHAPE`, then enforce exact alias membership/duplicate semantics, then create immutable patch types. Do not retain raw provider text, prompt, or reasoning content. Run the focused test and commit:
+Expose `decode_provider_candidates(value, projection)`. First run the stdlib hand-written closed-shape parser against `STAFFING_SUGGESTION_OUTPUT_SCHEMA`, then enforce exact alias membership/duplicate semantics, then create immutable patch types. Do not retain raw provider text, prompt, or reasoning content. Run the focused test and commit:
 
 ```bash
 git add simulation/nxt_pilot_ops/staffing/projection.py \
@@ -1605,7 +1657,7 @@ Import `EVENT_TYPES`, `OPERATION_KINDS`, `GENERATION_TERMINALS`, and `MANAGER_RE
 
 - [ ] **Step 2: Add bounded parser tests before implementation**
 
-For each payload parser supply one valid closed object and then mutate one key at a time. Reject `prompt`, `raw_response`, `reasoning`, `api_key`, `headers`, `metadata`, unknown nested keys, and text over the bounds in `GenerationRouteEvidence`, `AttemptRouteEvidence`, `AttemptStartedEvidence`, `AttemptFinishedEvidence`, and `ResultEvidence`. Assert parser output is a frozen dataclass and contains no original mutable mapping.
+For each payload parser supply one valid closed object and then mutate one key at a time. Reject `prompt`, `raw_response`, `reasoning`, `secret`, `api_key`, `headers`, `metadata`, unknown nested keys, and text over the bounds. Reuse Task 1's five provenance parsers for nested `GenerationRouteEvidence`, `AttemptRouteEvidence`, `AttemptStartedEvidence`, `AttemptFinishedEvidence`, and `ResultEvidence` rather than redefining them. Assert parser output is a frozen dataclass and contains no original mutable mapping.
 
 - [ ] **Step 3: Run pure workflow tests and verify RED**
 
@@ -1617,7 +1669,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 
 - [ ] **Step 4: Implement closed event parsing and state transitions**
 
-Implement `parse_event(value: object, *, site_id: str, deployment_id: str) -> StaffingEvent` with exact key sets and a dispatch table from `event_type` to payload parser. Implement `transition(history, event) -> StaffingHistory`; enforce one terminal per generation, `retry_of` only to an existing `RESULT_UNKNOWN`, manager decision/reason pairing, revision monotonicity, and immutable tuples. No `Mapping[str, Any]` crosses this boundary.
+Implement `parse_event(value: object, *, site_id: str, deployment_id: str) -> StaffingEvent` with exact key sets and a dispatch table from `event_type` to payload parser. Task 5 implements and tests the frozen `staffing_event_id`/`event_from_record` functions in `workflow.py`; `contracts.py` remains unchanged. Implement `transition(history, event) -> StaffingHistory`; enforce one terminal per generation, `retry_of` only to an existing `RESULT_UNKNOWN`, manager decision/reason pairing, revision monotonicity, and immutable tuples. No `Mapping[str, Any]` crosses this boundary.
 
 ```python
 from .contracts import EVENT_TO_OPERATION
@@ -1627,7 +1679,7 @@ def parse_event(value, *, site_id, deployment_id):
     if body["site_id"] != site_id or body["deployment_id"] != deployment_id:
         raise StaffingError("staffing_identity_mismatch", "event")
     payload = PAYLOAD_PARSERS[body["event_type"]](body["payload"])
-    return StaffingEvent.from_record(body, payload)
+    return event_from_record(body, payload)
 
 def transition(history, event):
     if event.sequence != history.record_count + 1:
@@ -1673,6 +1725,18 @@ Freeze record keys:
 {"schema_version", "sequence", "event_id", "event_type", "site_id",
  "deployment_id", "occurred_at_utc", "payload", "causation_id",
  "previous_hash", "record_hash"}
+```
+
+`ledger.py` owns this internal immutable parsed-record carrier (it is not a public cross-task contract):
+
+```python
+@dataclass(frozen=True, slots=True)
+class LedgerRecord:
+    event: StaffingEvent
+    sequence: int
+    previous_hash: str
+    record_hash: str
+    canonical_line: bytes
 ```
 
 Freeze anchor keys/schema:
@@ -1731,7 +1795,7 @@ class StaffingLedger:
             state = self._read_verified_unlocked()
             decision = builder(state)
             if isinstance(decision, ReturnReceiptDecision):
-                return DuplicateReceipt(decision.receipt)
+                return DuplicateReceipt(replace(decision.receipt, duplicate=True))
             if isinstance(decision, ConflictDecision):
                 return ConflictReceipt(decision.operation_kind, decision.request_id, decision.code)
             next_history = transition(state.history, decision.event)
@@ -1754,7 +1818,7 @@ class StaffingLedger:
                 if error.code != "IDEMPOTENCY_CONFLICT":
                     raise
                 return ConflictReceipt(operation_kind, request_id, error.code)
-            return DuplicateReceipt(prior) if prior is not None else None
+            return DuplicateReceipt(replace(prior, duplicate=True)) if prior is not None else None
     def verify(self) -> tuple[int, str]:
         with self._critical_section():
             state = self._read_verified_unlocked()
@@ -1786,7 +1850,11 @@ def _canonical_record(self, state, event):
             "occurred_at_utc": event.occurred_at_utc, "payload": event.payload,
             "causation_id": event.causation_id, "previous_hash": state.head_hash}
     body["record_hash"] = stable_digest(to_primitive(body))
-    return LedgerRecord(event=event, sequence=body["sequence"], record_hash=body["record_hash"], body=body)
+    canonical_line = canonical_json(body).encode("utf-8") + b"\n"
+    return LedgerRecord(event=event, sequence=body["sequence"],
+                        previous_hash=body["previous_hash"],
+                        record_hash=body["record_hash"],
+                        canonical_line=canonical_line)
 ```
 
 Inside the one critical section: verify ledger and anchor, semantically replay, call builder, reject more than one event, ensure an absent anchor is initialized and fsynced at genesis before the first record append, append one canonical line, flush/fsync the ledger, fsync directory, write a `0600` temp anchor, flush/fsync it, `os.replace`, and fsync directory again. Anchor may lag a valid suffix but never lead or disagree at its count; a nonempty ledger with no anchor fails closed because the legitimate first-append crash already has the genesis anchor.
@@ -1808,6 +1876,7 @@ git commit -m "feat(staffing): persist anchored advisory evidence"
 **Interfaces:**
 - Consumes: verified ledger history, strict requests, projections, frozen `GenerationRouteEvidence`/`AttemptStartedEvidence`/`AttemptFinishedEvidence`/`ResultEvidence`, and injected audit times.
 - Produces: durable receipts, date/request projections, exactly one terminal generation, complete effective plans, and explicit `RESULT_UNKNOWN` recovery.
+- Implements the frozen `stored_candidate_from_validation(candidate, validation)` recipe in `operations.py`; `contracts.py` remains unchanged.
 
 - [ ] **Step 1: Reuse frozen event and operation contracts in failing operation tests**
 
@@ -2100,7 +2169,9 @@ def commit_generation_result(self, generation_id: str,
                 return AppendEventDecision(suggestion_unavailable_event(
                     result, (), None, recorded_at,
                     terminal_state="INVALID_RESPONSE", failure_code=error.code))
-            stored_all = tuple(StoredCandidate.from_validation(item) for item in validations)
+            stored_all = tuple(
+                stored_candidate_from_validation(candidate, validation)
+                for candidate, validation in zip(candidates, validations, strict=True))
             stored_valid = tuple(item for item, validation in zip(stored_all, validations)
                                  if validation.valid)
             if stored_valid:
