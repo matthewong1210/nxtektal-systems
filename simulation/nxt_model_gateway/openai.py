@@ -22,6 +22,8 @@ class OpenAIAdapter(_BaseAdapter):
         return self._prepare(request, payload, self._bearer_headers())
 
     def _parse(self, envelope, schema):
+        if 'choices' in envelope:
+            raise _malformed()
         if envelope.get('status') != 'completed':
             raise _malformed()
         output = envelope['output']
@@ -31,6 +33,8 @@ class OpenAIAdapter(_BaseAdapter):
         for item in output:
             if item['type'] != 'message':
                 continue
+            if 'status' in item and item['status'] != 'completed':
+                raise _malformed()
             content = item['content']
             if not isinstance(content, tuple):
                 raise _malformed()

@@ -123,6 +123,54 @@ def test_responses_only_one_completed_answer(body, code):
     assert outcome.decoded_json is None
 
 
+@pytest.mark.parametrize('choices', [
+    [{'message': {'content': '{"result":["other"]}'}}], [], None,
+])
+def test_completed_responses_rejects_any_top_level_choices(choices):
+    envelope = json.loads(success_bytes(PROVIDER))
+    envelope['choices'] = choices
+    envelope['output'][0]['content'][0]['text'] = canonical_json({
+        'result': ['secret-key', 'sensitive-output'],
+    })
+    adapter, transport = make_adapter(body=canonical_json(envelope).encode())
+    outcome = adapter.send(adapter.prepare(request()), timeout_s=1.0)
+    assert outcome.failure_code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+    assert outcome.status is GenerationStatus.INVALID_RESPONSE
+    assert outcome.decoded_json is outcome.output_digest is None
+    assert outcome.retryable is outcome.security_failure is False
+    assert transport.calls == ['transport.post']
+    assert 'secret-key' not in repr(outcome)
+    assert 'sensitive-output' not in repr(outcome)
+
+
+@pytest.mark.parametrize('message_status', ['incomplete', 'in_progress', None, False, 'sensitive-output'])
+def test_completed_responses_rejects_explicit_unfinished_message(message_status):
+    envelope = json.loads(success_bytes(PROVIDER))
+    envelope['output'][0]['status'] = message_status
+    envelope['output'][0]['content'][0]['text'] = canonical_json({
+        'result': ['secret-key', 'sensitive-output'],
+    })
+    adapter, transport = make_adapter(body=canonical_json(envelope).encode())
+    outcome = adapter.send(adapter.prepare(request()), timeout_s=1.0)
+    assert outcome.failure_code is FailureCode.MALFORMED_PROVIDER_RESPONSE
+    assert outcome.status is GenerationStatus.INVALID_RESPONSE
+    assert outcome.decoded_json is outcome.output_digest is None
+    assert outcome.retryable is outcome.security_failure is False
+    assert transport.calls == ['transport.post']
+    assert 'secret-key' not in repr(outcome)
+    assert 'sensitive-output' not in repr(outcome)
+
+
+def test_explicit_completed_message_status_is_accepted():
+    envelope = json.loads(success_bytes(PROVIDER))
+    envelope['output'][0]['status'] = 'completed'
+    adapter, transport = make_adapter(body=canonical_json(envelope).encode())
+    outcome = adapter.send(adapter.prepare(request()), timeout_s=1.0)
+    assert outcome.status is GenerationStatus.SUCCEEDED
+    assert outcome.decoded_json['result'] == ()
+    assert transport.calls == ['transport.post']
+
+
 TRANSPORT_CASES = [
     ('INPUT_TOO_LARGE', 'CONFIGURATION_ERROR', False, False),
     ('RESPONSE_TOO_LARGE', 'SECURITY_ERROR', False, True),
