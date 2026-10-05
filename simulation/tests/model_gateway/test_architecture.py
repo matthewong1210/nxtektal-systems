@@ -28,7 +28,20 @@ BANNED_CAPABILITY_NAMES = {
     "now", "utcnow", "today", "time", "time_ns", "uuid1", "uuid4",
     "random", "randint", "system", "popen",
 }
-BANNED_BUILTIN_NAMES = {"open", "__import__", "eval", "exec", "compile"}
+BANNED_BUILTIN_NAMES = {
+    "open", "__import__", "eval", "exec", "compile", "getattr", "setattr",
+    "delattr", "vars", "globals", "locals", "__builtins__",
+}
+BANNED_CAPABILITY_NAMES |= BANNED_BUILTIN_NAMES
+SENSITIVE_REFLECTION_ATTRIBUTES = {
+    "__globals__", "__builtins__", "__dict__", "__code__", "__closure__",
+    "__subclasses__", "__mro__", "__class__", "__bases__", "__base__",
+    "__getattribute__", "__getattr__", "__func__", "__self__", "__wrapped__",
+    "__reduce__", "__reduce_ex__", "__traceback__", "__context__", "__cause__",
+    "tb_frame", "tb_next", "f_globals", "f_builtins", "f_locals", "f_back",
+    "gi_frame", "gi_code", "cr_frame", "cr_code", "ag_frame", "ag_code",
+    "mro", "cell_contents",
+}
 # An allowed root does not authorize its implementation's re-exported modules.
 # Review this small surface when adding an import or a module-qualified member.
 # In particular, io grants exactly the two HTTP parser wrappers, not file I/O.
@@ -119,12 +132,23 @@ def _relative_enum_attributes() -> set[str]:
     return attributes
 
 
+RELATIVE_ENUM_VALUES = _relative_enum_attributes()
+RELATIVE_ENUM_TYPES = {name.rsplit(".", 1)[0] for name in RELATIVE_ENUM_VALUES}
+RELATIVE_DATA_VALUES = RELATIVE_ENUM_VALUES | {
+    ".transport._KIMI_ENDPOINT", ".transport._OPENAI_ENDPOINT", ".transport._ANTHROPIC_ENDPOINT",
+}
+RELATIVE_CLASS_NAMES = {
+    f".{module}.{node.name}"
+    for module, members in ALLOWED_RELATIVE_MEMBERS.items()
+    for node in ast.parse((PACKAGE_ROOT / f"{module}.py").read_text()).body
+    if isinstance(node, ast.ClassDef) and node.name in members
+}
 ALLOWED_QUALIFIED_NAMES = set(ALLOWED_MODULE_MEMBERS) | {
     f"{module}.{member}"
     for module, members in ALLOWED_MODULE_MEMBERS.items() for member in members
 } | {"jsonschema.Draft202012Validator.check_schema"} | set(
     RELATIVE_IMPORT_ORIGINS.values()
-) | _relative_enum_attributes()
+) | RELATIVE_ENUM_VALUES
 REVERSE_GUARDS = {
     "pilot_ops/test_boundaries.py": ("UPSTREAM_PACKAGES", "CORE_BANNED_ROOTS"),
     "site_runtime/test_architecture.py": ("package_names",),
@@ -187,13 +211,21 @@ def forbidden_capabilities(source: str) -> set[str]:
     point. Bindings are conservative unions across scopes/reassignments: local
     shadowing cannot erase a forbidden origin. Only approved paths propagate,
     so this finite analysis cannot grow indefinitely on cyclic assignments.
-    Module objects may be qualified or directly aliased, not passed/hidden in
-    arbitrary expressions that would escape this syntactic provenance analysis.
+    Modules and internal capabilities may be qualified or directly aliased, not
+    hidden in expressions this analysis cannot follow. Internal functions may
+    be called directly; classes additionally have explicit declarative/type-test
+    contexts. Endpoint instances and enum values are data, not namespace access.
+    Reflection is banned independently of import/alias provenance.
     """
     rejected = forbidden_imports(source)
     tree = ast.parse(source)
     nodes = list(ast.walk(tree))
     parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    shadowed_names = {
+        node.id for node in nodes if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+    } | {
+        node.name for node in nodes if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    } | {node.arg for node in nodes if isinstance(node, ast.arg)}
     bindings: dict[str, set[str]] = {}
     for node in nodes:
         if isinstance(node, ast.Import):
@@ -215,6 +247,59 @@ def forbidden_capabilities(source: str) -> set[str]:
         if isinstance(node, ast.Attribute):
             return {f"{name}.{node.attr}" for name in origins(node.value)}
         return set()
+
+    def is_type_annotation(node: ast.AST) -> bool:
+        """Recognize declarative annotation syntax, not arbitrary expressions."""
+        child = node
+        while (parent := parents.get(child)) is not None:
+            if isinstance(parent, (ast.arg, ast.AnnAssign)) and parent.annotation is child:
+                return True
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)) and parent.returns is child:
+                return True
+            if isinstance(parent, ast.BinOp) and isinstance(parent.op, ast.BitOr):
+                child = parent
+            elif isinstance(parent, ast.Tuple) and isinstance(parents.get(parent), ast.Subscript):
+                child = parent
+            elif isinstance(parent, ast.Subscript) and parent.slice is child:
+                generic = parent.value
+                builtin_generic = (
+                    isinstance(generic, ast.Name) and generic.id in
+                    {"tuple", "list", "dict", "set", "frozenset", "type"}
+                    and generic.id not in shadowed_names and generic.id not in bindings
+                )
+                imported_generic = origins(generic)
+                safe_generic = imported_generic and all(
+                    name.startswith(("typing.", "collections.abc.")) for name in imported_generic
+                )
+                if not (builtin_generic or safe_generic):
+                    return False
+                child = parent
+            else:
+                return False
+        return False
+
+    def is_class_context(node: ast.AST) -> bool:
+        parent = parents.get(node)
+        if is_type_annotation(node):
+            return True
+        if isinstance(parent, ast.ClassDef) and node in parent.bases:
+            return True
+        if isinstance(parent, ast.ExceptHandler) and parent.type is node:
+            return True
+        if (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                and parent.func.id in {"isinstance", "issubclass"}
+                and parent.func.id not in shadowed_names and parent.func.id not in bindings
+                and len(parent.args) == 2 and parent.args[1] is node and not parent.keywords):
+            return True
+        # Existing disposition coverage enumerates enum values; this creates
+        # data rather than handing a class to a user-supplied callback.
+        if (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name)
+                and parent.func.id == "set" and parent.func.id not in shadowed_names
+                and parent.func.id not in bindings and len(parent.args) == 1
+                and parent.args[0] is node and not parent.keywords
+                and origins(node) <= RELATIVE_ENUM_TYPES):
+            return True
+        return False
 
     aliases = []
     for node in nodes:
@@ -238,8 +323,16 @@ def forbidden_capabilities(source: str) -> set[str]:
         if not changed:
             break
 
-    alias_values = {value for _, value in aliases}
+    # A walrus may itself be passed/returned/embedded; tracking its target does
+    # not authorize that expression's value to escape.
+    alias_values = {value for _, value in aliases if isinstance(parents[value], (ast.Assign, ast.AnnAssign))}
     for node in nodes:
+        if isinstance(node, ast.Attribute) and node.attr in SENSITIVE_REFLECTION_ATTRIBUTES:
+            rejected.add(f"reflection: {node.attr}")
+        if (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, str)
+                and node.slice.value in SENSITIVE_REFLECTION_ATTRIBUTES):
+            rejected.add(f"reflection: {node.slice.value}")
         if not isinstance(node, (ast.Name, ast.Attribute)) or not isinstance(node.ctx, ast.Load):
             continue
         paths = origins(node)
@@ -253,10 +346,14 @@ def forbidden_capabilities(source: str) -> set[str]:
         )
         if (forbidden_name or direct_call and name in BANNED_CAPABILITY_NAMES) and paths != {"re.compile"}:
             rejected.add(name)
+        qualified = isinstance(parent, ast.Attribute) and parent.value is node
         if paths & ALLOWED_MODULE_MEMBERS.keys():
-            qualified = isinstance(parent, ast.Attribute) and parent.value is node
             if not qualified and node not in alias_values:
                 rejected.update(f"module escape: {path}" for path in paths)
+        capabilities = {path for path in paths if path.startswith(".")} - RELATIVE_DATA_VALUES
+        if capabilities and not (qualified or direct_call or node in alias_values):
+            if not (capabilities <= RELATIVE_CLASS_NAMES and is_class_context(node)):
+                rejected.update(f"capability escape: {path}" for path in capabilities)
     return rejected
 
 
@@ -332,6 +429,57 @@ def test_relative_imports_cannot_launder_modules_or_escape_symbols(source):
     "from . import GenerationRequest as Request; contract = Request",
 ])
 def test_relative_imports_keep_approved_concrete_symbols(source):
+    assert forbidden_capabilities(source) == set()
+
+
+@pytest.mark.parametrize("expression", [
+    "alias, = (encode,); scope = alias.__globals__; reader = scope['__builtins__']['open']; reader('example', 'w')",
+    "scope = getattr(encode, '__globals__')",
+    "alias, = (encode,)",
+    "saved = [encode]",
+    "saved = {'encode': encode}",
+    "saved = {encode}",
+    "alias = [encode][0]",
+    "consume(encode)",
+    "consume(callback=encode)",
+    "consume(alias := encode)",
+    "def export():\n    return encode",
+    "export = lambda: encode",
+    "def capture(callback=encode):\n    return callback",
+    "alias = encode if enabled else None",
+    "alias = encode or fallback",
+    "holder.callback = encode",
+])
+def test_internal_capabilities_cannot_escape_untracked_expressions(expression):
+    source = "from .serialization import canonical_json as encode\n" + expression
+    assert forbidden_capabilities(source), source
+
+
+@pytest.mark.parametrize("attribute", [
+    "__globals__", "__builtins__", "__dict__", "__code__", "__closure__",
+    "__subclasses__", "__mro__", "__class__", "__bases__", "__base__",
+    "__getattribute__", "__func__", "__self__", "__wrapped__",
+    "mro", "cell_contents",
+])
+def test_reflective_attributes_are_banned_without_import_provenance(attribute):
+    assert forbidden_capabilities(f"scope = unknown.{attribute}")
+
+
+@pytest.mark.parametrize("builtin", ["getattr", "setattr", "delattr", "vars", "globals", "locals"])
+def test_reflection_builtin_references_are_banned(builtin):
+    assert forbidden_capabilities(f"reflect = {builtin}")
+
+
+@pytest.mark.parametrize("source", [
+    "from .serialization import canonical_json as encode; alias = encode; alias({'x': 1})",
+    "from .transport import _KIMI_ENDPOINT as endpoint; post(endpoint=endpoint)",
+    "from .contracts import Provider; consume(Provider.KIMI)",
+    "from .contracts import ProviderConfig; valid = isinstance(value, ProviderConfig)",
+    "from .contracts import ProviderConfig; holder: ProviderConfig | None = None",
+    "from .adapters import _BaseAdapter\nclass Adapter(_BaseAdapter): pass",
+    "from .contracts import FailureCode; codes = set(FailureCode)",
+])
+def test_internal_capability_allowed_contexts_remain_available(source):
     assert forbidden_capabilities(source) == set()
 
 
