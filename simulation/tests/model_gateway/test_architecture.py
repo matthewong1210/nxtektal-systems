@@ -57,10 +57,74 @@ ALLOWED_MODULE_MEMBERS = {
     "jsonschema": {"Draft202012Validator", "exceptions"},
     "jsonschema.exceptions": {"SchemaError", "ValidationError"},
 }
+# Internal imports expose specific owned symbols, never Python module objects.
+# Keep this separate from external namespaces: importing .transport does not
+# authorize access to transport's socket/io/ssl implementation imports.
+ALLOWED_RELATIVE_MEMBERS = {
+    "contracts": {
+        "AttemptObserver", "AttemptObserverError", "AttemptRecord", "AttemptStarted",
+        "DeploymentRegion", "FailureCode", "GatewayContractError", "GenerationMessage",
+        "GenerationRequest", "GenerationResult", "GenerationStatus", "MessageRole",
+        "Provider", "ProviderConfig", "TokenUsage", "_digest", "_invalid",
+        "_optional_metadata", "_outcome",
+    },
+    "serialization": {
+        "_canonical_tree", "_freeze_json", "_validate_local_object_schema",
+        "canonical_json", "decode_validated_json", "stable_digest",
+    },
+    "adapters": {
+        "AdapterOutcome", "PreparedRequest", "ProviderAdapter", "_BaseAdapter",
+        "_malformed", "_refused", "_usage",
+    },
+    "transport": {
+        "HttpTransport", "HttpResponse", "ProviderEndpoint", "TransportFailure",
+        "StdlibHttpsTransport", "_KIMI_ENDPOINT", "_OPENAI_ENDPOINT", "_ANTHROPIC_ENDPOINT",
+    },
+    "kimi": {"KimiAdapter"},
+    "openai": {"OpenAIAdapter"},
+    "anthropic": {"AnthropicAdapter"},
+    "routing": {"ModelGateway", "RoutePolicy", "RouteReadiness", "RouteReadinessStatus"},
+}
+RELATIVE_IMPORT_ORIGINS = {
+    f".{module}.{member}": f".{module}.{member}"
+    for module, members in ALLOWED_RELATIVE_MEMBERS.items() for member in members
+}
+# Root-level concrete exports keep the defining symbol's provenance. Read only
+# syntax, never execute/import gateway code or authorize a root module export.
+for _node in ast.parse((PACKAGE_ROOT / "__init__.py").read_text()).body:
+    if isinstance(_node, ast.ImportFrom) and _node.level == 1:
+        for _alias in _node.names:
+            _origin = f".{_node.module}.{_alias.name}"
+            if _origin in RELATIVE_IMPORT_ORIGINS:
+                RELATIVE_IMPORT_ORIGINS[f".{_alias.asname or _alias.name}"] = _origin
+
+
+def _relative_enum_attributes() -> set[str]:
+    """Permit declared enum values, not arbitrary internals of owned classes."""
+    attributes = set()
+    for module, members in ALLOWED_RELATIVE_MEMBERS.items():
+        tree = ast.parse((PACKAGE_ROOT / f"{module}.py").read_text())
+        for node in tree.body:
+            if (isinstance(node, ast.ClassDef) and node.name in members
+                    and any(isinstance(base, ast.Name) and base.id == "StrEnum"
+                            for base in node.bases)):
+                for statement in node.body:
+                    if (isinstance(statement, ast.Assign)
+                            and isinstance(statement.value, ast.Constant)
+                            and isinstance(statement.value.value, str)):
+                        attributes.update(
+                            f".{module}.{node.name}.{target.id}"
+                            for target in statement.targets if isinstance(target, ast.Name)
+                        )
+    return attributes
+
+
 ALLOWED_QUALIFIED_NAMES = set(ALLOWED_MODULE_MEMBERS) | {
     f"{module}.{member}"
     for module, members in ALLOWED_MODULE_MEMBERS.items() for member in members
-} | {"jsonschema.Draft202012Validator.check_schema"}
+} | {"jsonschema.Draft202012Validator.check_schema"} | set(
+    RELATIVE_IMPORT_ORIGINS.values()
+) | _relative_enum_attributes()
 REVERSE_GUARDS = {
     "pilot_ops/test_boundaries.py": ("UPSTREAM_PACKAGES", "CORE_BANNED_ROOTS"),
     "site_runtime/test_architecture.py": ("package_names",),
@@ -80,6 +144,11 @@ def forbidden_imports(source: str) -> set[str]:
             modules = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom):
             if node.level == 1:
+                module_prefix = f".{node.module}." if node.module else "."
+                rejected.update(
+                    module_prefix + alias.name for alias in node.names
+                    if module_prefix + alias.name not in RELATIVE_IMPORT_ORIGINS
+                )
                 continue
             if node.level > 1:
                 rejected.add("." * node.level + (node.module or ""))
@@ -132,10 +201,12 @@ def forbidden_capabilities(source: str) -> set[str]:
                 name = alias.asname or alias.name.split(".")[0]
                 origin = alias.name if alias.asname else alias.name.split(".")[0]
                 bindings.setdefault(name, set()).add(origin)
-        elif isinstance(node, ast.ImportFrom) and not node.level:
+        elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
+                prefix = "." * node.level + (f"{node.module}." if node.module else "")
+                origin = prefix + alias.name
                 bindings.setdefault(alias.asname or alias.name, set()).add(
-                    f"{node.module}.{alias.name}"
+                    RELATIVE_IMPORT_ORIGINS.get(origin, origin)
                 )
 
     def origins(node: ast.AST) -> set[str]:
@@ -232,6 +303,35 @@ def test_production_capability_scan_rejects_references_and_reexports(source):
     "system = 'prompt'; content = system",
 ])
 def test_production_capability_scan_accepts_approved_references(source):
+    assert forbidden_capabilities(source) == set()
+
+
+@pytest.mark.parametrize("source", [
+    "from .transport import socket as net; net.os.posix_spawn('example', ['example'], {})",
+    "from .transport import io as streams; wrapper = streams.TextIOWrapper",
+    "from . import transport as link; link.socket.os.posix_spawn('example', ['example'], {})",
+    "from .transport import ssl as tls; hidden = tls.os",
+    "from .serialization import json as data; module = data",
+    "from .contracts import re as expressions; hidden = expressions.sys",
+    "from . import serialization as codec; codec.json.loads('{}')",
+    "from .transport import io as streams; alias = streams; wrapper = alias.TextIOWrapper",
+    "from .transport import *",
+    "from . import contracts; alias = contracts; hidden = alias.math",
+    "from .serialization import canonical_json as encode; hidden = encode.__globals__",
+    "from .contracts import Provider as Kind; hidden = Kind.__dict__",
+])
+def test_relative_imports_cannot_launder_modules_or_escape_symbols(source):
+    assert forbidden_capabilities(source), source
+
+
+@pytest.mark.parametrize("source", [
+    "from .contracts import Provider as Kind; selected = Kind.KIMI",
+    "from .serialization import canonical_json as encode; encode({'result': []})",
+    "from .transport import _KIMI_ENDPOINT as endpoint; selected = endpoint",
+    "from .transport import HttpTransport as Base; class_alias = Base",
+    "from . import GenerationRequest as Request; contract = Request",
+])
+def test_relative_imports_keep_approved_concrete_symbols(source):
     assert forbidden_capabilities(source) == set()
 
 
