@@ -513,10 +513,41 @@ def test_cleanup_failure_cannot_leak_or_override_security_failure():
     (b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n', 0, None),
     (b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}', 0.25, FailureCode.READ_TIMEOUT),
     (b'HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n{}', 0, FailureCode.CONNECTION_INTERRUPTED),
+    *[(b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n' + body, 0, code)
+      for body, code in (
+          (b'2\r\n{}\r\n0', FailureCode.CONNECTION_INTERRUPTED),
+          (b'2\r\n{}\r\n0\r\n', FailureCode.CONNECTION_INTERRUPTED),
+          (b'2\r\n{}XX0\r\n\r\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2\r\n{}\r', FailureCode.CONNECTION_INTERRUPTED),
+          (b'2\r\n{}\r\n', FailureCode.CONNECTION_INTERRUPTED),
+          (b'2\r\n{}\r\n0\r\nX-Checksum: abc\r\n', FailureCode.CONNECTION_INTERRUPTED),
+          (b'2\r\n{}\r\n0\r\nX-Checksum: abc', FailureCode.CONNECTION_INTERRUPTED),
+          (b'2\r\n{}\r\n0\r\nnot-a-header\r\n\r\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2\r\n{}\r\n0\r\nContent-Length: 2\r\n\r\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2\r\n{}\r\n0\r\nX-Checksum: abc\r\n folded\r\n\r\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2\r\n{}\r\n0\r\n' + b'X-Checksum: abc\r\n' * 101 + b'\r\n',
+           FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2\r\n{}\r\n0\n\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'+2\r\n{}\r\n0\r\n\r\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2;bad="unterminated\r\n{}\r\n0\r\n\r\n', FailureCode.MALFORMED_PROVIDER_RESPONSE),
+          (b'2\r\n{}\r\n0\r\nX-Checksum: abc\r\n\r\n', None),
+          (b'2\r\n{}\r\n0\r\n' + b'X-Checksum: abc\r\n' * 100 + b'\r\n', None),
+          (b'1;name=value\r\n{\r\n1;flag\r\n}\r\n000;done="yes"\r\n\r\n', None),
+      )],
+    pytest.param(
+        b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n80001\r\n'
+        + b'x' * 524289 + b'\r\n0\r\n\r\n', 0, FailureCode.RESPONSE_TOO_LARGE,
+        id='chunked-body-one-sentinel-over-limit',
+    ),
+    pytest.param(
+        b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nX-Checksum: '
+        + b'x' * 300 + b'\r\n\r\n', 0.01, FailureCode.READ_TIMEOUT,
+        id='deadline-during-trailer-read',
+    ),
 ])
 def test_real_http_parser_over_fake_tls_socket(monkeypatch, wire, advance, want_code):
     clock = Clock()
-    socket_calls, sends, timeouts, identities = [], [], [], []
+    socket_calls, sends, timeouts, identities, closes = [], [], [], [], []
 
     class RawStream(io.RawIOBase):
         def __init__(self):
@@ -545,7 +576,7 @@ def test_real_http_parser_over_fake_tls_socket(monkeypatch, wire, advance, want_
             sends.append(data)
 
         def close(self):
-            pass
+            closes.append('socket')
 
     class Context:
         def wrap_socket(self, raw, *, server_hostname):
@@ -559,10 +590,19 @@ def test_real_http_parser_over_fake_tls_socket(monkeypatch, wire, advance, want_
         with pytest.raises(TransportFailure) as raised:
             post(instance)
         assert raised.value.code is want_code
+        assert raised.value.retryable is (want_code in {
+            FailureCode.READ_TIMEOUT, FailureCode.CONNECTION_INTERRUPTED,
+        })
+        assert raised.value.security_failure is (want_code is FailureCode.RESPONSE_TOO_LARGE)
+        diagnostic = str(raised.value) + repr(raised.value)
+        assert 'fixture-key' not in diagnostic
+        assert 'private-request-body' not in diagnostic
+        assert wire.decode() not in diagnostic
     else:
         assert post(instance).body == b'{}'
     assert socket_calls == [('203.0.113.10', 443)]
     assert identities == ['api.openai.com']
+    assert closes == ['socket']
     wire_request = b''.join(sends)
     assert wire_request.startswith(b'POST /v1/responses HTTP/1.1\r\n')
     assert wire_request.count(b'Host: api.openai.com\r\n') == 1

@@ -163,7 +163,67 @@ class _DeadlineSocket:
         self._sock.close()
 
 
+_HTTP_TOKEN = rb"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
+_QUOTED_VALUE = rb'"(?:[\t\x20\x21\x23-\x5b\x5d-\x7e\x80-\xff]|\\[\t\x20-\x7e\x80-\xff])*"'
+_CHUNK_LINE = re.compile(
+    rb'([0-9A-Fa-f]+)(?:[ \t]*;[ \t]*' + _HTTP_TOKEN
+    + rb'(?:[ \t]*=[ \t]*(?:' + _HTTP_TOKEN + rb'|' + _QUOTED_VALUE + rb'))?)*'
+)
+_TRAILER_LINE = re.compile(rb'(' + _HTTP_TOKEN + rb'):[\t\x20-\x7e\x80-\xff]*')
+_FORBIDDEN_TRAILERS = frozenset((
+    b'content-length', b'transfer-encoding', b'host', b'connection', b'trailer',
+    b'content-encoding', b'content-type', b'content-range', b'authorization',
+    b'proxy-authorization', b'www-authenticate', b'proxy-authenticate',
+))
+
+
+class _StrictHttpResponse(http.client.HTTPResponse):
+    """Retain stdlib body reads but reject its permissive chunk termination."""
+
+    def _framing_line(self):
+        line = self.fp.readline(http.client._MAXLINE + 1)
+        if len(line) > http.client._MAXLINE:
+            raise http.client.HTTPException('chunk framing line exceeds limit')
+        if not line.endswith(b'\n'):
+            raise http.client.IncompleteRead(b'')
+        if not line.endswith(b'\r\n'):
+            raise http.client.HTTPException('invalid chunk framing line ending')
+        return line[:-2]
+
+    def _read_next_chunk_size(self):
+        match = _CHUNK_LINE.fullmatch(self._framing_line())
+        if match is None:
+            raise http.client.HTTPException('invalid chunk size or extension')
+        return int(match.group(1), 16)
+
+    def _read_and_discard_trailer(self):
+        # Require the final blank line, even when there are no trailer fields.
+        for count in range(http.client._MAXHEADERS + 1):
+            line = self._framing_line()
+            if line == b'':
+                return
+            match = _TRAILER_LINE.fullmatch(line)
+            if (count == http.client._MAXHEADERS or match is None
+                    or match.group(1).lower() in _FORBIDDEN_TRAILERS):
+                raise http.client.HTTPException('invalid or prohibited trailer')
+
+    def _get_chunk_left(self):
+        chunk_left = self.chunk_left
+        if not chunk_left:
+            if chunk_left is not None and self._safe_read(2) != b'\r\n':
+                raise http.client.HTTPException('invalid chunk delimiter')
+            chunk_left = self._read_next_chunk_size()
+            if chunk_left == 0:
+                self._read_and_discard_trailer()
+                self._close_conn()
+                chunk_left = None
+            self.chunk_left = chunk_left
+        return chunk_left
+
+
 class _ResolvedHttpsConnection(http.client.HTTPSConnection):
+    response_class = _StrictHttpResponse
+
     def __init__(self, *, host, port, address, context, timeout, monotonic, deadline):
         super().__init__(host, port, timeout=timeout, context=context)
         self._address = address
