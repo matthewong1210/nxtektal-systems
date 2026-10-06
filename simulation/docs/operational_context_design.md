@@ -139,7 +139,10 @@ slice, but the slice is built over it.
   `package.json` changed. The ROI engine pins 1.2.1 as a dev-only dependency,
   so its production audit is unaffected. `main` needs the same replay-app fix
   before its own CI is green again. Integration branch head after this commit:
-  `717ca22d191f42b6fb64b5888071ee08a21d6d48`.
+  `717ca22d191f42b6fb64b5888071ee08a21d6d48`. The branch was pushed with a
+  normal push on 2026-10-06 and then received the three behavior-parity
+  commits of §1.7 (`340b2fe`, `b5f9639`, `26ffdb4`); its head is
+  `26ffdb4f434c1eab10c6d10cb46fe13f6806f627`.
 
 Ancestry (every listed commit except `0d742cab` exists):
 
@@ -208,6 +211,37 @@ Everything in §§2–11 was written against `4b86d9f`. Re-checked against
   changes nothing.
 - Baselines cited in §8.5 and §11 move from 39 Vitest cases and 98
   `tests/site_agent` cases to 658 and 258.
+
+### 1.7 Behavior-parity gate (2026-10-06)
+
+The reports from the unreachable `feat/supervisor-console-v1` ended with 706
+Supervisor Console tests; the reachable base runs 658. The difference cannot be
+explained by consolidation: no console test file was ever deleted or renamed in
+any reachable history (`git log --all --diff-filter=DR -- apps/site-agent-console/tests`
+is empty), and the static count of `it`/`test` call sites and `.each` tables is
+monotonic along each line of Codex development, reaching 343 call sites plus 41
+`.each` tables, which Vitest expands to 658 cases. The 48 missing cases exist
+only in the unreachable store and were not recreated. Instead the eleven
+behaviors were verified against the current code and executable tests; where a
+behavior was absent, the smallest correction and regression test were added on
+the integration branch.
+
+| Behavior | Implementation on `26ffdb4` | Regression test | Status before gate |
+|---|---|---|---|
+| Inventory unknown-first; a current value needs a non-null value, an `ok` source and a current view; a legitimate zero stays zero | `StatePanel.tsx` (`formatBalls` null → "—", 0 → "0"; `readingVerdict`; no-data branch); `ui.tsx` `StaleViewContext` downgrades the reading badge when the view is stale | `state-provenance.test.tsx` ("keeps a legitimate zero as zero", "renders an unknown value as a dash"); `view-trust.test.tsx`; `component.test.tsx` (no-data, missing/stale) | value and source parts present; current-view part added |
+| Missing, absent or unrecognized provenance reads "Published but unverified", even in a stale view | `StatePanel.tsx::provenanceLabel` (known grades `high`/`medium`/`low` from `nxt_telemetry/assemble.py`) | `state-provenance.test.tsx` ("provenance grade"); `view-trust.test.tsx` (stale view keeps the label) | absent (raw grade or "unknown" was shown) |
+| A stale or read-expired view propagates to every section with no green badge | Manager API view: `ui.tsx` `Badge` + `ConsoleScreen.tsx` provider ("· stale view"); execution panel: `CollectionExecutionPanel.tsx` `stale`/`expired`; planning and task panels: `scheduler-health.ts` expiry shared by both | `view-trust.test.tsx` ("downgrades every green badge"); `execution-interaction.test.tsx` 323/346; `planning-interaction.test.tsx` 324 | present for execution/planning/task panels; absent for the five Manager API panels, added. The Manager API read has no wall-clock expiry on this base; freshness for the new sections comes from the snapshot's own coverage end (§7) |
+| Reads show pending until complete, including the prerendered state | `lib/actions.ts` `initialConsoleView` (`loading: true`), `ConsoleScreen.tsx` loading branch, `INITIAL_EXECUTION_VIEW` | `view-trust.test.tsx` ("pending state, including the prerendered page"); `tests/http-smoke.mjs` now asserts the static export carries the loading text and no `badge-ok` or inventory; `actions.test.ts` 45 | present; prerender assertion added |
+| `collection_execution_unavailable` is UNAVAILABLE only for HTTP 503; other statuses are read failures; a 404 alone means the route is not connected | `CollectionExecutionPanel.tsx` (`unavailable: status === 404`, `serviceUnavailable: status === 503 && code === …`); `simulationClockFor` falls back to the wall clock only on 404 | `execution-interaction.test.tsx` (503 and 500 cases, 216, 228, 472); `execution-last-known.test.tsx`; `execution-panel.test.tsx` 79, 328 | 404 part present; 503 distinction added |
+| Retained, binding-only and empty snapshots remain visible as last-known information | `CollectionExecutionPanel.tsx` keeps `data` through a failed read; `BindingOnlyCard`; empty note labelled last-known under a stale read | `execution-panel.test.tsx` 56, 88; `execution-interaction.test.tsx` 179, 228, 606; `execution-last-known.test.tsx` (empty snapshot) | present; empty-snapshot test added |
+| Retained records, sessions, edge state and device protection use historical wording and last-known markers | `ExecutionRecordCard.tsx` ("Ended at", "Did not start (contract evidence)", DEVICE PROTECTED, Edge verification line); `ExecutionSessionStrip.tsx` (ENDED/PAUSED notes, "last successful read") | `execution-panel.test.tsx` 191, 203, 264, 56 | present |
+| Row-level simulated provenance is honored independently of the global fixture-mode flag | `StatePanel.tsx::sourceTypeBadge` from each `SourceReference.source_type` (`sensor`/`simulation`/`external_system`); task-ops, execution and course-ops payloads already carry `environment: SIMULATION` row-level | `state-provenance.test.tsx` ("row-level source kind"); `task-ops.test.ts` 45; `collection-executions-contract.test.ts` | present for pilot panels; absent for dispenser channels, added |
+| The supply banner uses the console's provenance verdict, not the service aggregate alone | `StatePanel.tsx::readingVerdict` (worst of aggregate, channel statuses, report lists; aggregate shown when it differs) | `state-provenance.test.tsx` ("reading verdict") | absent (badge repeated `reading_status`) |
+| `view.busy` participates in the mutation lock; hash changes during a locked write are reverted, not auto-switched after release | `lib/actions.ts::canMutateConsole` (`!view.busy`); no hash or history navigation exists in the console, so there is nothing to revert | `actions.test.ts` 57, 83; `console-consistency.test.tsx` 231; `boundaries.test.ts` ("has no hash- or history-driven navigation") pins the absence | lock present; hash behavior not applicable, pinned |
+| Bindings without results say no execution result has been recorded and report the admitted and bound task count | `ExecutionRecordCard.tsx::BindingOnlyCard` sentence; `CollectionExecutionPanel.tsx` counts line | `execution-last-known.test.tsx` ("reports the admitted and bound task count"); `execution-panel.test.tsx` 88 | wording and counts added |
+
+After the three commits the console suite is 29 files and 679 cases; typecheck,
+lint, build, HTTP smoke and the production audit pass.
 
 ---
 
