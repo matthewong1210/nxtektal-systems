@@ -2165,6 +2165,7 @@ git commit -m "feat(staffing): persist anchored advisory evidence"
 - Consumes: verified ledger history, strict requests, projections, frozen `GenerationRouteEvidence`/`AttemptStartedEvidence`/`AttemptFinishedEvidence`/`ResultEvidence`, and injected audit times.
 - Produces: durable receipts, date/request projections, exactly one terminal generation, complete effective plans, and explicit `RESULT_UNKNOWN` recovery.
 - Imports Task 5's frozen `stored_candidate_from_validation(candidate, validation)` and `candidate_patch_for_revalidation(candidate)` recipes from `workflow.py`; it does not reimplement them, and Task 7 leaves `contracts.py` unchanged.
+- Freezes the sole module export as `operations.__all__ = ("StaffingOperations",)`. Task 7 intentionally leaves `staffing/__init__.py` unchanged; integration uses the explicit deep import `nxt_pilot_ops.staffing.operations.StaffingOperations`, so the package root does not silently acquire a second public surface. Task 8 must preserve this narrow root rather than add a re-export.
 
 - [ ] **Step 1: Reuse frozen event and operation contracts in failing operation tests**
 
@@ -2193,11 +2194,11 @@ assert MANAGER_REASON_CODES == frozenset({
 })
 ```
 
-Exercise Task 5's authoritative transition/replay rules through the operation layer: reject illegal transitions, duplicate suggestion terminal (including a second interrupt after `generation_interrupted`), early/duplicate manager response, attempt finish without start, provider/order mismatch, reused alias nonce digest, unknown or branched `retry_of`, cross-identity data, unknown manager reason code, response note over 500 Unicode scalars/with controls, and derived revision/digest mismatch. ACCEPT fixes `APPROVED`, MODIFY fixes `APPROVED_WITH_CHANGES`; REJECT accepts only the three rejection reason codes. Task 7 must not reimplement the Task 5 state machine or evidence matrices.
+Exercise Task 5's authoritative transition/replay rules through the operation layer: reject illegal transitions, duplicate suggestion terminal (including a second interrupt after `generation_interrupted`), early/duplicate manager response, attempt finish without start, provider/order mismatch, reused alias nonce digest, unknown or branched `retry_of`, cross-identity data, unknown manager reason code, response note over 500 Unicode scalars/with controls, and derived revision/digest mismatch. Construct the owner with a site or deployment different from its ledger and require immediate `staffing_identity_mismatch`, including on an empty ledger before any cold-start projection can expose the caller-supplied identity. Pass generation A with started/finished evidence whose `request_id` is generation B and require locked `staffing_invalid_evidence` with no append to either generation. ACCEPT fixes `APPROVED`, MODIFY fixes `APPROVED_WITH_CHANGES`; REJECT accepts only the three rejection reason codes. Task 7 must not reimplement the Task 5 state machine or evidence matrices.
 
 - [ ] **Step 2: Add failing idempotency and CAS tests**
 
-For every operation kind, assert the idempotency key is `(site_id, deployment_id, operation_kind, request_id)`. Each mutation first produces one detached canonical request body. `_request_digest` returns `stable_digest(detached_body)` for roster, exception, reservation, cancellation, and correction; manager response alone returns `stable_digest({"suggestion_id": suggestion_id, "body": detached_body})` because its route context is semantic. The exact resulting lowercase 64-hex value is passed through the locked builder and copied unchanged into the event payload; normalized DTOs never recompute it. Same key plus same digest returns the original receipt before new stale checks; same key plus changed digest returns `IDEMPOTENCY_CONFLICT`; same request ID under `roster-import` and `exception-record` creates two independent receipts and never conflicts. Test roster, exception, cancellation, correction, reservation, and manager response revisions under concurrent builders. Reserve a suggestion, import a future-effective roster revision, and prove the earlier suggestion is stale even though its service date still selects the older roster.
+For every operation kind, assert the idempotency key is `(site_id, deployment_id, operation_kind, request_id)`. Each mutation first produces one detached canonical request body. `_request_digest` returns `stable_digest(detached_body)` for roster, exception, reservation, cancellation, and correction; manager response alone returns `stable_digest({"suggestion_id": suggestion_id, "body": detached_body})` because its route context is semantic. The exact resulting lowercase 64-hex value is passed through the locked builder and copied unchanged into the event payload; normalized DTOs never recompute it. Same key plus same digest returns the original receipt before new stale checks; same key plus changed digest returns `IDEMPOTENCY_CONFLICT`; same request ID under `roster-import` and `exception-record` creates two independent receipts and never conflicts. Test roster import, exception record/cancel/correct, reservation, and manager-response revisions under concurrent builders. Roster import compares the validated new revision to the locked latest revision plus one; record/cancel/correct compare the body exception-set revision to the locked date-scoped revision. Every mismatch returns `STALE_REQUEST` before transition, never a late `staffing_invalid_evidence`. Reserve a suggestion, import a future-effective roster revision, and prove the earlier suggestion is stale even though its service date still selects the older roster.
 
 The detached request body is a strict wire snapshot, not a generic serialization. Before any request parser or digest, recursively accept only exact `dict` containers with exact-string keys, exact `list` containers, and exact `None|bool|int|float|str` scalars; integers are limited to the portable signed 64-bit range, floats must be finite, and strings valid UTF-8. Return fresh exact built-ins, reject ancestor cycles, container depth greater than 32, and occurrence 524,290 after a maximum of 524,289 visited occurrences. A shared non-cyclic subtree is allowed and copied independently. Reject without invoking hooks every tuple, mapping/list subclass or proxy, dataclass, date/datetime, enum, set, bytes, non-string key, unsupported or out-of-range scalar, non-finite float, invalid-Unicode string, and cyclic/over-limit tree. The entire traversal/root/fresh-copy boundary catches every ordinary `Exception` and replaces it with the caller-supplied input code before ledger access; it never catches `BaseException`. Regression-test each rejected family and a greater-than-64-bit exact integer through generation, manager, and one roster/exception entry point; assert zero ledger writes and prove none is treated as a duplicate of the corresponding legal JSON request. Add a coordinated exact-dict size-mutation race while the detacher traverses a large child and assert any resulting traversal failure is the same fixed input error with no probe/append call, never raw `RuntimeError`.
 
@@ -2387,49 +2388,98 @@ def _request_digest(kind: str, detached_body: dict[str, object], *,
 class StaffingOperations:
     def __init__(self, ledger: StaffingLedger, *, site_id: str,
                  deployment_id: str, site_timezone: str) -> None:
+        if ledger.site_id != site_id or ledger.deployment_id != deployment_id:
+            raise StaffingError("staffing_identity_mismatch", "site/deployment")
         self.ledger = ledger
         self.site_id, self.deployment_id = site_id, deployment_id
         self.site_timezone = site_timezone
     def import_roster(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
         body = _detach_request_body(payload, code="staffing_invalid_roster")
         digest = _request_digest("roster-import", body)
+        def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
+            roster = validate_roster_import(
+                body, site_id=self.site_id, deployment_id=self.deployment_id,
+                site_timezone=self.site_timezone,
+            )
+            committed = roster_revisions(history)
+            current_revision = committed[-1].revision if committed else 0
+            if roster.revision != current_revision + 1:
+                raise StaffingError("STALE_ROSTER_REVISION", "expected_roster_revision")
+            return event_for_roster(
+                history, roster, body, recorded_at,
+                request_digest=authoritative_digest,
+            )
         return self._append_request(
             "roster-import", closed_request_id(body, code="staffing_invalid_roster"), digest,
-            lambda h, d: event_for_roster(
-                h, validate_roster_import(
-                    body, site_id=self.site_id, deployment_id=self.deployment_id,
-                    site_timezone=self.site_timezone,
-                ), body, recorded_at, request_digest=d,
-            ),
+            build,
         )
     def record_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
         body = _detach_request_body(payload, code="staffing_invalid_roster")
         digest = _request_digest("exception-record", body)
+        def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
+            exception = normalize_exception(
+                body, roster=self._roster_for_history(history, body),
+            )
+            current_revision = exception_set_revision(
+                history.events, exception.service_date,
+            )
+            if body["expected_exception_set_revision"] != current_revision:
+                raise StaffingError(
+                    "STALE_EXCEPTION_SET_REVISION", "expected_exception_set_revision",
+                )
+            return event_for_exception(
+                history, exception, body, recorded_at,
+                request_digest=authoritative_digest,
+            )
         return self._append_request(
             "exception-record", closed_request_id(body, code="staffing_invalid_roster"), digest,
-            lambda h, d: event_for_exception(
-                h, normalize_exception(
-                    body, roster=self._roster_for_history(h, body),
-                ), body, recorded_at, request_digest=d,
-            ),
+            build,
         )
     def cancel_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
         body = parse_exception_cancel_request(
             _detach_request_body(payload, code="staffing_invalid_roster")
         )
         digest = _request_digest("exception-cancel", body)
+        def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
+            previous = active_exception_by_id(history, body["exception_id"])
+            if previous is None:
+                raise StaffingError("INVALID_TRANSITION", "unknown exception_id")
+            current_revision = exception_set_revision(
+                history.events, previous.service_date,
+            )
+            if body["expected_exception_set_revision"] != current_revision:
+                raise StaffingError(
+                    "STALE_EXCEPTION_SET_REVISION", "expected_exception_set_revision",
+                )
+            return event_for_cancel(
+                history, body, recorded_at, request_digest=authoritative_digest,
+            )
         return self._append_request(
             "exception-cancel", body["request_id"], digest,
-            lambda h, d: event_for_cancel(h, body, recorded_at, request_digest=d),
+            build,
         )
     def correct_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
         body = parse_exception_correction_request(
             _detach_request_body(payload, code="staffing_invalid_roster")
         )
         digest = _request_digest("exception-correct", body)
+        def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
+            previous = active_exception_by_id(history, body["exception_id"])
+            if previous is None:
+                raise StaffingError("INVALID_TRANSITION", "unknown exception_id")
+            current_revision = exception_set_revision(
+                history.events, previous.service_date,
+            )
+            if body["expected_exception_set_revision"] != current_revision:
+                raise StaffingError(
+                    "STALE_EXCEPTION_SET_REVISION", "expected_exception_set_revision",
+                )
+            return event_for_correction(
+                history, body, recorded_at, request_digest=authoritative_digest,
+            )
         return self._append_request(
             "exception-correct", body["request_id"], digest,
-            lambda h, d: event_for_correction(h, body, recorded_at, request_digest=d),
+            build,
         )
     def reserve_generation(self, payload: object, *, alias_nonce: bytes,
                            route_evidence: GenerationRouteEvidence,
@@ -2655,7 +2705,7 @@ Parametrize the parser with ACCEPT/REJECT carrying `edited_operations=None` and 
 
 Add a table-driven total-parser matrix that substitutes `list`, `dict`, `bool`, control-bearing strings, and overlong strings into `kind`, `reason_code`, `request_id`, `operator`, `assignment_id`, `staff_id`, `role_code`, and `area_code`. Direct parser calls and the real `commit_manager_response` entry point must raise only `StaffingError("staffing_invalid_request", ...)` before ledger access for every closed-wire syntax failure: non-object input, missing/unknown fields (including hidden `suggestion_id`/`generation_id`), schema mismatch, malformed request ID, wrong scalar/container types, invalid branch coherence, and lexical timestamp failure. Integration maps that code to HTTP 400. Membership or duplicate-set checks run only after exact scalar validation. Valid syntax whose referenced suggestion/candidate/alias is absent, whose generation is not exactly one prior `suggestion_issued`, or whose generation already has a manager response is a locked lifecycle conflict and returns `ConflictReceipt.code == "INVALID_TRANSITION"` (HTTP 409). It must never be rewritten to `STALE_REQUEST`; only the three stale revisions and template mismatch use that code, while `STALE_SUGGESTION` remains distinct. Reject space-separated datetimes, missing seconds, fractional seconds, naive values, lowercase `z`, signed zero (`+00:00`/`-00:00`), and malformed/out-of-range offsets. The exact manager ADD timestamp profile is `YYYY-MM-DDTHH:MM:00Z` for zero offset or the same form with a signed nonzero `±HH:MM` suffix before Task 3 applies timezone/service-date semantics.
 
-Under one ledger builder, mutate exception/plan revisions after reservation while retaining the old expected vector and assert the current-basis digest comparison still returns `STALE_SUGGESTION`. Submit identical manager bodies with the same request ID to two suggestion IDs and assert their canonical digests differ, so neither is treated as a duplicate of the other. Freeze separate valid MODIFY bodies using `Z`, `+08:00`, `-04:00`, and `-05:00`; the request digest binds each original validated wire spelling from the detached body while the event builder receives that authoritative digest directly, so DTO datetime normalization can never change idempotency identity.
+Under one ledger builder, mutate exception/plan revisions after reservation while retaining the old expected vector and assert the reservation/current-basis comparison runs first and returns `STALE_SUGGESTION`. In a separate unchanged-basis fixture, send a well-formed manager request whose expected vector differs from that same current basis and assert `STALE_REQUEST`. Submit identical manager bodies with the same request ID to two suggestion IDs and assert their canonical digests differ, so neither is treated as a duplicate of the other. Freeze separate valid MODIFY bodies using `Z`, `+08:00`, `-04:00`, and `-05:00`; the request digest binds each original validated wire spelling from the detached body while the event builder receives that authoritative digest directly, so DTO datetime normalization can never change idempotency identity.
 
 `parse_manager_response` maps `kind` to the internal `decision` field only when constructing `ManagerResponseCommittedPayload`; it maps the injected `suggestion_id` to `generation_id`, and `edited_operations` stays a closed local-operation union until each ID is inverse-mapped and validated.
 
@@ -2667,20 +2717,35 @@ Add the locked generation seam and recovery operations:
 
 ```python
 def _append_generation_event(self, generation_id: str,
-                             make_event: Callable[[StaffingHistory], StaffingEvent]
+                             make_event: Callable[[StaffingHistory,
+                                                   GenerationReservedPayload], StaffingEvent]
                              ) -> EventCommit:
     def build(state: VerifiedLedgerState) -> AppendEventDecision:
-        return AppendEventDecision(make_event(state.history))
+        reservation = state.history.reservation(generation_id)
+        event = make_event(state.history, reservation)
+        if getattr(event.payload, "generation_id", None) != generation_id:
+            raise StaffingError("staffing_invalid_evidence", "generation_id")
+        return AppendEventDecision(event)
     return self.ledger.append_event_via(build)
 
 def record_attempt_started(self, generation_id: str, evidence: AttemptStartedEvidence,
                            *, recorded_at: datetime) -> EventCommit:
+    def make(history: StaffingHistory,
+             reservation: GenerationReservedPayload) -> StaffingEvent:
+        if type(evidence) is not AttemptStartedEvidence or evidence.request_id != generation_id:
+            raise StaffingError("staffing_invalid_evidence", "attempt generation")
+        return started_event(history, reservation, evidence, recorded_at)
     return self._append_generation_event(
-        generation_id, lambda history: started_event(history, evidence, recorded_at))
+        generation_id, make)
 def record_attempt_finished(self, generation_id: str, evidence: AttemptFinishedEvidence,
                             *, recorded_at: datetime) -> EventCommit:
+    def make(history: StaffingHistory,
+             reservation: GenerationReservedPayload) -> StaffingEvent:
+        if type(evidence) is not AttemptFinishedEvidence or evidence.request_id != generation_id:
+            raise StaffingError("staffing_invalid_evidence", "attempt generation")
+        return finished_event(history, reservation, evidence, recorded_at)
     return self._append_generation_event(
-        generation_id, lambda history: finished_event(history, evidence, recorded_at))
+        generation_id, make)
 
 def generation_work(self, generation_id: str) -> GenerationProjection:
     history = self.ledger.read()
@@ -2745,7 +2810,7 @@ def commit_generation_result(self, generation_id: str,
                 }:
                     raise
                 return AppendEventDecision(suggestion_unavailable_event(
-                    result, (), None, recorded_at,
+                    state.history, reservation, result, (), None, recorded_at,
                     terminal_state="INVALID_RESPONSE", failure_code=error.code))
             stored_all = tuple(
                 stored_candidate_from_validation(candidate, validation)
@@ -2754,15 +2819,26 @@ def commit_generation_result(self, generation_id: str,
                                  if validation.valid)
             if stored_valid:
                 digest = stable_digest(to_primitive(stored_all))
-                return AppendEventDecision(terminal_event(result, stored_all, digest, recorded_at))
+                return AppendEventDecision(terminal_event(
+                    state.history, reservation, result, stored_all, digest, recorded_at))
             digest = stable_digest(to_primitive(stored_all)) if stored_all else None
             return AppendEventDecision(suggestion_unavailable_event(
-                result, stored_all, digest, recorded_at,
+                state.history, reservation, result, stored_all, digest, recorded_at,
                 terminal_state="NO_VALID_SUGGESTION", failure_code="NO_VALID_SUGGESTION"))
         if detached_output is not None:
             raise StaffingError("staffing_invalid_evidence", "decoded_output")
-        return AppendEventDecision(suggestion_unavailable_event(result, (), None, recorded_at))
+        return AppendEventDecision(suggestion_unavailable_event(
+            state.history, reservation, result, (), None, recorded_at))
     return self.ledger.append_event_via(build)
+
+# Private Task 7 builders; none is supplied by workflow.py.
+# started_event/finished_event and both terminal builders receive the locked
+# history plus the exact reservation. They copy reservation.request_digest,
+# bind evidence.request_id/generation_id, use history.record_count + 1, normalize
+# recorded_at to canonical UTC, set causation_id to reservation.generation_id,
+# and derive the event ID only through Task 5's staffing_event_id.
+# terminal_event builds suggestion_issued; suggestion_unavailable_event builds
+# suggestion_unavailable. No helper reads the ledger outside this builder.
 
 def interrupt_generation(self, generation_id: str, *, recorded_at: datetime
                          ) -> EventCommit | ConflictReceipt:
@@ -2811,11 +2887,14 @@ def commit_manager_response(self, payload: object, *, suggestion_id: str,
                 or current_basis.effective_plan_revision != expected_basis.effective_plan_revision
                 or current_basis.roster_digest != expected_basis.roster_digest
                 or current_basis.exception_set_digest != expected_basis.exception_set_digest
-                or current_basis.effective_plan_digest != expected_basis.effective_plan_digest
-                or request.expected_revisions.roster != current_basis.roster_revision
-                or request.expected_revisions.exception_set != current_basis.exception_set_revision
-                or request.expected_revisions.effective_plan != current_basis.effective_plan_revision):
+                or current_basis.effective_plan_digest != expected_basis.effective_plan_digest):
             raise StaffingError("STALE_SUGGESTION", suggestion_id)
+        if request.expected_revisions.roster != current_basis.roster_revision:
+            raise StaffingError("STALE_ROSTER_REVISION", "expected_revisions")
+        if request.expected_revisions.exception_set != current_basis.exception_set_revision:
+            raise StaffingError("STALE_EXCEPTION_SET_REVISION", "expected_revisions")
+        if request.expected_revisions.effective_plan != current_basis.effective_plan_revision:
+            raise StaffingError("STALE_EFFECTIVE_PLAN_REVISION", "expected_revisions")
         if request.kind == "ACCEPT":
             candidate = stored_candidate(history, suggestion_id, request.candidate_index)
             if candidate is None:
