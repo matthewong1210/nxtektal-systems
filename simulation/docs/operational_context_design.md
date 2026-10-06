@@ -1,12 +1,16 @@
 # Operational Context Ingestion V0 — design specification
 
-**Date:** 2026-10-05 · **Status:** Proposed design, awaiting approval. Nothing in
-this document is implemented. No code, package, endpoint, console section, or
-test described here exists on any branch. Revision 2 after an adversarial
-self-review (§15 records what changed).
-**Builds on:** the merged Site OS layers on `main` and the *unmerged* Pilot Site
-Agent service and Manager Console on `feature/pilot-site-agent-service-v0`
-(see §1, a blocking finding).
+**Date:** 2026-10-05, revised 2026-10-06 · **Status:** Proposed design with the
+owner's product decisions recorded (§0.1) and the implementation base fixed
+(§1). Nothing in this document is implemented. No code, package, endpoint,
+console section, or test described here exists on any branch. Revision 3 after
+the branch-reconciliation gate (§15 records what changed).
+**Builds on:** the merged Site OS layers on `main` (`e3f63ca`) and the Pilot
+Site Agent service and Manager Console as they stand on the open Codex branch
+`codex/continuous-collection-v4-reviewed` at `2c421f4`, which already contains
+`main`. The local integration branch
+`integration/supervisor-console-ops-context-base` (§1.4) is the implementation
+base.
 **Architecture ladder:** business-system records → source adapters → normalized
 operational events → operational-context projection → one Supervisor Snapshot →
 existing Supervisor Console. Physical inventory, washing, dispensing, and
@@ -30,92 +34,180 @@ the task's term.
 | How are they persisted? | The composition root wires `nxt_edge_task.journal.JsonlJournal` under a new schema label, exactly as `nxt_edge_interventions` does; the leaf writes no files (§6). | Proceed (precedent-backed) |
 | Where is the Supervisor Snapshot composed? | In the existing application boundary `nxt_site_agent`, as one additive `/api/v0` endpoint that embeds the five existing projections verbatim plus the new context sections, under one lock acquisition (§8). | Proceed, **conditional on §1** |
 | Where does the agent's demand-versus-coverage advice live? | `nxt_pilot_ops`, as a second named policy with its own stdlib-only contracts and a sibling ledger; never a third decision engine. Every element is a versioned contract addition, so it is a separately gated second PR (§9). | **Reshape** (own gate) |
-| On which branch is this built? | The Supervisor Console exists only on an unmerged branch that conflicts with `main` in 16 files. | **Pause** until the base-branch decision in §1.4 is made |
+| On which branch is this built? | The local integration branch `integration/supervisor-console-ops-context-base`, created from `codex/continuous-collection-v4-reviewed` at `2c421f4` (PR 20, stacked on PR 19), which already contains `main`; merging `main` into it was a no-op (§1). | **Proceed** (base fixed on 2026-10-06; the slice PR stacks on PR 20 until it merges) |
+
+### 0.1 Approved product decisions (recorded 2026-10-06)
+
+The owner approved the following for this slice. Each closes an item in §14
+and binds §§3–8:
+
+1. The additive endpoint stays at `GET /api/v0/supervisor-snapshot` (§8.1).
+2. Timestamps are stored in UTC; operating dates derive from the commissioned
+   site timezone. The China fixture uses `Asia/Shanghai` (§2.5, §8.4).
+3. V0 rejects the whole import batch when schema validation or any row
+   validation fails, returns actionable row numbers and reasons, and never
+   publishes a partial snapshot (§3.4, §6.2). There is no quarantine in V0.
+4. No raw import file and no unrestricted free text is retained; only
+   allow-listed normalized fields, the file hash, import metadata, and safe
+   diagnostics are kept (§3.3, §4).
+5. Demand-versus-coverage recommendations (§9) and any Kimi or other LLM
+   integration stay out of this implementation slice.
+6. Planned, source-recorded, derived, and unknown values stay separate (§5).
+7. Corrections stay append-only and replay is deterministic (§6).
 
 ---
 
-## 1. Implementation status and the base-branch finding (blocking)
+## 1. Implementation status and the base-branch reconciliation
 
-### 1.1 What was inspected
+### 1.1 What was inspected (reconciliation gate, 2026-10-06)
 
 - Working branch `claude/admiring-euler-vvhgx6` is `origin/main` at `e3f63ca`
   plus this document; the worktree is otherwise clean.
-- `main` contains no Supervisor Console, Manager API, snapshot, or
-  trust-semantics component. A repository-wide search for `supervisor`,
-  `Manager API`, `/api/v`, and `SupervisorSnapshot` returns nothing on `main`.
-  `agent_runtime_v1.md` states there is no HTTP server on `main`.
-- Remote branch `feature/pilot-site-agent-service-v0` (head `4b86d9f`, 10
-  commits ahead of `main`, 15 behind, merge-base `22af25a`) adds the Pilot Site
-  Agent service `simulation/nxt_site_agent`, the loopback Manager API
-  `nxt-site-agent/api/v0`, the static console `apps/site-agent-console`, their
-  tests, two composition-root scripts, and governance edits registering them.
-  This is the Supervisor Console the task refers to.
-- Remote branch `feature/edge-gateway-live-input-v0` (head `c358ecf`, 5 ahead,
-  15 behind) carries a script-local `SiteClock` that maps UTC wire times into
-  the commissioned timezone's operating day. It is cited below only as
-  *unmerged precedent*; nothing here depends on it.
+- `main` (`e3f63ca`, the PR 18 merge of 2026-09-24) contains no Supervisor
+  Console, Manager API, snapshot, or trust-semantics component.
+- The commit reported to the owner as the latest console work,
+  `0d742cab69e2ca7174e73ea5c01369e5baf923c3` on `feat/supervisor-console-v1`,
+  does not exist in `matthewong1210/nxtektal-systems`. It is reachable from no
+  branch, tag, or pull-request ref (`git ls-remote origin` lists every ref;
+  `git fetch origin <sha>` answers "not our ref"; the GitHub commits API
+  answers "No commit found"); no pull request ever had that head branch; it is
+  absent from the sibling repository `matthewong1210/nxtektal-website` and from
+  the local object store. One Codex merge commit (`b9a6604`) records a merge
+  from a local Codex workspace clone, so the reported SHA most likely names a
+  local, never-pushed branch or was transcribed incorrectly. It has no
+  descendants anywhere reachable and cannot be compared with or used as a base.
+- `feature/pilot-site-agent-service-v0` (head `4b86d9f`, PR 12, open) is the
+  original Site Agent service and console branch: 10 commits over its
+  merge-base `22af25a`, 15 behind `main`.
+- `codex/v3-main-reconciliation` (head `12a3023`, PR 19, open against `main`)
+  descends from `4b86d9f` (93 commits over `main`) and already contains `main`:
+  `aa528af` merged `main` on 2026-10-05.
+  `codex/continuous-collection-v4-reviewed` (head `2c421f4`, PR 20, open
+  against the PR 19 branch) descends from `12a3023` (116 commits over `main`)
+  and also contains `main` (`fccbdc4`, `d97f48f`). All six hosted CI jobs
+  passed on both heads on 2026-10-05.
+- `feature/edge-gateway-live-input-v0` (head `c358ecf`) still carries the
+  script-local `SiteClock` cited below only as unmerged precedent.
 
 ### 1.2 Status labels used in this document
 
 | Component | Status |
 |---|---|
-| `nxt_sim`, `nxt_range_ops`, `nxt_facility`, `nxt_memory`, `nxt_telemetry`, `nxt_range_twin`, `nxt_pilot_ops`, `nxt_commissioning`, `nxt_site_runtime`, `nxt_agent_runtime`, `nxt_edge_observation`, `nxt_workflow_enablement`, `nxt_course_world_model`, `nxt_edge_task`, `nxt_edge_interventions` (the `simulation/pyproject.toml` wheel list) and the repository-local `nxt_range_agent`, `nxt_range_viewer`, `nxt_range_demo` | merged / current checkout |
-| `nxt_site_agent`, `apps/site-agent-console`, `simulation/docs/site_agent_v0.md`, `scripts/site_agent_fixture.py`, `scripts/site_agent_demo.py` | implemented on unmerged branch `feature/pilot-site-agent-service-v0` |
+| `nxt_sim`, `nxt_range_ops`, `nxt_facility`, `nxt_memory`, `nxt_telemetry`, `nxt_range_twin`, `nxt_pilot_ops`, `nxt_commissioning`, `nxt_site_runtime`, `nxt_agent_runtime`, `nxt_edge_observation`, `nxt_workflow_enablement`, `nxt_course_world_model`, `nxt_edge_task`, `nxt_edge_interventions` (the `simulation/pyproject.toml` wheel list) and the repository-local `nxt_range_agent`, `nxt_range_viewer`, `nxt_range_demo` | merged / on `main` |
+| `nxt_site_agent`, `apps/site-agent-console`, `simulation/docs/site_agent_v0.md`, `scripts/site_agent_fixture.py`, `scripts/site_agent_demo.py`, plus the planning v1, course-ops v1, collection-execution v1/v3/v4, and task-ops services, contracts, scripts, and console panels | implemented on the integration base (open PRs 19 and 20; not on `main`) |
 | `SiteClock` in `scripts/edge_gateway_live_input_v0.py` | implemented on unmerged branch `feature/edge-gateway-live-input-v0` (precedent only) |
 | `nxt_operational_context`, every contract, endpoint, console panel, test, and guard edit named in §§3–11 | proposed |
 
-### 1.3 Observed baseline (this environment: Python 3.13.14, uv 0.8.17, Node 22.22.0)
+### 1.3 Which branch carries the latest console work
 
-Run against a detached worktree of `feature/pilot-site-agent-service-v0` at
-`4b86d9f` after `uv venv --python 3.13.14` and `uv sync --frozen --all-extras`:
+The Codex branches do. The console fixes the owner described are commits on
+`codex/v3-main-reconciliation`, all absent from `4b86d9f`:
 
-| Command (from `simulation/` or `apps/site-agent-console/`) | Observed |
+| Concern | Commits on the integration base |
 |---|---|
-| `pytest -o addopts='' -q -p no:cacheprovider tests/site_agent` | 98 passed |
-| `pytest ... tests/edge_observation tests/workflow_enablement` | 437 passed |
-| `npm run typecheck` | clean |
-| `npm run lint` | clean |
-| `npm test` | 39 passed (5 files: 18 component, 11 api, 5 boundaries, 3 actions, 2 smoke) |
-| `npm run build` | static export produced |
+| Retained state | `e0a3512` preserve committed manager response receipts (`commit_receipt`, `manager_response_result_unknown`); `21bb263` keep original times, freeze correction targets, hold UNKNOWN writes |
+| Stale state | `fa0af1e` keep the advice panels consistent across overlapping refreshes; `de15392` expire the shared scheduler reading for both panels at once; `c8b5eae` expire the execution read health on its own 15-second wall clock; `b5db33d` keep the simulation clock stale when the execution route disappears after a read |
+| Execution lock and write gating | `1ca4243` gate every write by the validated service capability declaration; `061949c` gate planning recovery replay; the shared console mutation lock `canMutateConsole` in `lib/actions.ts` (busy during a change, stale after a failed refresh) |
+| Trust semantics (V4 only) | `a897467` close continuous session review gaps; `34d2b43` derive execution IDs from the regenerated witness |
 
-Facts that constrain later verification:
+Missing work in either direction: `4b86d9f` is an ancestor of both Codex heads
+(`git rev-list 2c421f4..4b86d9f` is empty), so nothing on it or on `main` is
+missing from `2c421f4`. `2c421f4` carries 257 files (+82,038 / −168) that
+`main` lacks: planning v1, course-ops v1, collection-execution v1/v3/v4
+contracts, services, and witnesses, task-ops capabilities, the console panels
+and tests for them, and their documentation. None of that is part of this
+slice, but the slice is built over it.
 
-- On Python 3.11 the same branch fails 42 tests and errors 18: `slots=True`
-  dataclasses in `nxt_edge_observation/contracts.py` call zero-argument
-  `super()`, which Python 3.11 rejects; readiness then reports `NOT_READY` and
-  every launch is refused. CI pins 3.13.14, so this is an interpreter artifact,
-  but every verification of this slice must use 3.13.14.
-- `uv lock --check` passes on `main` and **fails** on the branch: `main`
-  reconciled `uv.lock` with the `edge-gateway` extra in `890e0bf` after the
-  branch's merge-base. `--locked` installs on the branch as-is fail.
-- `git merge-tree --write-tree main origin/feature/pilot-site-agent-service-v0`
-  reports content conflicts in 16 files: every governance file under
-  `.agent/`, `AGENTS.md`, `README.md`, `docs/ARCHITECTURE.md`, `docs/CI.md`,
-  `simulation/README.md`, `simulation/pyproject.toml`,
-  `.github/workflows/verification.yml`, and three sibling architecture tests.
-- Both unmerged branches carry a stale `tests/pilot_ops/test_boundaries.py`
-  whose `UPSTREAM_PACKAGES` lacks `nxt_edge_task` and `nxt_edge_interventions`,
-  and the site-agent branch's `OTHER_PACKAGES` and `BANNED_FIRST_PARTY_MENTIONS`
-  omit them too. A merge must keep `main`'s lists and cross-register
-  `nxt_site_agent` in `tests/edge_task/test_architecture.py` (the
-  `nxt_edge_interventions` guard discovers packages dynamically).
+### 1.4 Integration base and what was changed there
 
-### 1.4 The base-branch decision the owner must make
+- Branch `integration/supervisor-console-ops-context-base`, created in an
+  isolated worktree from `2c421f4`. `git merge origin/main` reported
+  "Already up to date": there were no conflicts to resolve because the Codex
+  reconciliation had already merged `main`. The branch is local only; it has
+  not been pushed, merged, or deployed.
+- `uv lock --check` passes on it under uv 0.11.29 (the CI pin), so no lockfile
+  repair was needed; the revision-2 finding about a stale `uv.lock` applied to
+  `4b86d9f` only.
+- One behavior change was made, through npm's own workflow and nothing else:
+  advisory GHSA-68fv-2mgg-jv7q on `source-map-js` (published after the
+  2026-10-05 CI runs) now fails `npm audit --omit=dev` for
+  `apps/site-agent-console` and `apps/operational-replay` on the Codex heads
+  and, for the replay app, on `main` as well. `npm audit fix` under npm 11.21.0
+  (the major that wrote both lockfiles; npm 10 would have rewritten about 250
+  unrelated lines) bumped `source-map-js` 1.2.1→1.2.2 and `brace-expansion`
+  5.0.9→5.0.12 and 1.1.18→1.1.21 in the two `package-lock.json` files; no
+  `package.json` changed. The ROI engine pins 1.2.1 as a dev-only dependency,
+  so its production audit is unaffected. `main` needs the same replay-app fix
+  before its own CI is green again. Integration branch head after this commit:
+  `717ca22d191f42b6fb64b5888071ee08a21d6d48`.
 
-The task requires reusing the existing Supervisor Console and keeping its trust
-semantics intact. That console is absent from `main`. Routing code through a
-component absent from the target branch is forbidden by the architecture gate
-(§1.4 of `.agent/workflows/architecture-review.md`). Options:
+Ancestry (every listed commit except `0d742cab` exists):
 
-| Option | Consequence |
+```text
+22af25a  merge-base of 4b86d9f and main
+├── … ─ e3f63ca  origin/main (PR 18 merge)
+└── … ─ 4b86d9f  feature/pilot-site-agent-service-v0 (PR 12)
+         └── … ─ aa528af (merges e3f63ca) ─ 12a3023  codex/v3-main-reconciliation (PR 19)
+                  └── … ─ 2c421f4  codex/continuous-collection-v4-reviewed (PR 20)
+                           └── 717ca22  integration/supervisor-console-ops-context-base (local)
+0d742cab  feat/supervisor-console-v1 — not found in any reachable store
+```
+
+### 1.5 Observed baseline on the integration branch
+
+Environment: Python 3.13.14, uv 0.11.29 (run through `uvx`), Node 22.22.0 with
+npm 10.9.4 for installs and checks (CI pins Node 22.23.2). Commands were run on
+`717ca22` from `simulation/`, `apps/site-agent-console/`, or
+`apps/operational-replay/`, exactly as `.github/workflows/verification.yml`
+runs them.
+
+| Command | Observed |
 |---|---|
-| **A (recommended).** Merge `feature/pilot-site-agent-service-v0` into `main` first (resolving the 16-file conflict, the lock check, and the guard-list drift), then build this slice on `main`. | Clean base; this slice becomes an additive change over merged contracts. The merge is outside this slice's scope and needs its own review. |
-| **B.** Stack this slice on `feature/pilot-site-agent-service-v0` after bringing `main` into it. | Faster start; a stacked PR that cannot merge before its base, with two concurrent governance edits to reconcile. |
-| **C.** Build the ingestion package and snapshot on `main` without the console and service. | Satisfies neither "reuse the existing Supervisor Console" nor "extend the current fragmented reads"; the snapshot would have no server or client. Not recommended. |
+| `uv lock --check`; `uv sync --locked --all-extras`; optional `usd-core` 26.8 and Streamlit probe; `uv pip check` | all passed |
+| `pytest … tests/site_runtime`, `tests/pilot_ops`, `tests/commissioning`, `tests/edge_observation`, `tests/workflow_enablement`, `tests/course_world_model` | 60, 648, 132, 240, 197, 198 passed respectively |
+| `pytest … -rs tests/edge_task` | 283 passed, 11 skipped (the Mosquitto module skips without a broker) |
+| `pytest … tests/site_agent --ignore=…/test_continuous_collection_execution_service.py` | 258 passed |
+| architecture, imports, and safety list (25 test files) | 211 passed |
+| complete Python suite | 3277 passed, 16 skipped in 26 min 38 s |
+| `scripts/validate_configs.py` | 0 errors, 0 warnings |
+| `compileall` of every package, `scripts`, and `.github/scripts` | passed |
+| `.github/scripts/verify_repository.py` | passed (753 tracked paths, 90 Markdown files) |
+| console `npm ci`, `typecheck`, `lint`, `test`, `build`, `smoke`, `audit --omit=dev` | all passed: 26 files, 658 tests; HTTP smoke passed; production audit 0 vulnerabilities after the lockfile patch (1 high before it) |
+| replay app `npm ci`, `typecheck`, `lint`, `test`, `build`, `smoke`, `audit --omit=dev` | all passed: 7 files, 81 tests; HTTP smoke passed; production audit 0 vulnerabilities after the lockfile patch (1 high before it) |
 
-This document is written against the contracts on
-`feature/pilot-site-agent-service-v0` at `4b86d9f` so it is correct under A or
-B. It does not assume the merge has happened.
+### 1.6 What the integration base changes for this design
+
+Everything in §§2–11 was written against `4b86d9f`. Re-checked against
+`2c421f4`:
+
+- `nxt_site_agent/contracts.py` is identical on the two heads, so
+  `CompositionSeam`, `ComposedRuntime`, `API_SCHEMA_VERSION`, and
+  `SERVICE_MODE_LABEL` as cited in §8 are unchanged. `service.py` changed only
+  in the manager-response path (`commit_receipt`,
+  `manager_response_result_unknown`, `_committed_response_projection`);
+  `briefing_snapshot()` and the lock discipline §8.2 relies on are unchanged.
+  `api.py` added the `/api/v1` course-ops, planning, and collection-execution
+  routes and `/api/v0/task-ops`; `_STATUS_BY_CODE` grew but still lacks
+  `ledger_unreadable`, `queue_unreadable`, and `journal_unreadable`, so §10
+  stands.
+- The console page is now `app/page.tsx` → `components/ConsoleScreen.tsx`, with
+  `lib/console.ts::readConsole` performing the five-endpoint `Promise.all`
+  read and `lib/actions.ts` tagging every read with a generation. §8.5 is
+  restated against those files. The planning, course-ops, task-ops, and
+  collection-execution panels have their own reads and freshness rules and are
+  untouched by this slice.
+- `tests/boundaries.test.ts` now admits the exact `/api/v1` planning,
+  course-ops, and collection-execution read paths;
+  `/api/v0/supervisor-snapshot` satisfies its existing `startsWith("/api/v0/")`
+  rule, so the test needs no edit.
+- `tests/site_agent/test_architecture.py` now lists `nxt_edge_task` in
+  `BANNED_FIRST_PARTY_MENTIONS` and `OTHER_PACKAGES`, and `SERVICE_SCRIPTS`
+  grew from two to five; two collection-execution scripts already import
+  `nxt_edge_task` while the package never mentions it. That is exactly the
+  split §6 and §10 propose for the journal, so the proposal gains precedent and
+  changes nothing.
+- Baselines cited in §8.5 and §11 move from 39 Vitest cases and 98
+  `tests/site_agent` cases to 658 and 258.
 
 ---
 
@@ -1001,22 +1093,20 @@ The shell copies these strings; it never composes them (§2.6).
 
 ### 8.1 Endpoint and versioning decision
 
-The task suggests `GET /api/v1/supervisor-snapshot`. The existing transport is
-`nxt-site-agent/api/v0`; the console's boundary test allows only `/api/v0`
-paths, `decode()` rejects any other envelope schema, and the branch docs state
-no API surface exists outside `/api/v0/`. Two consistent options:
-
-| Option | Trade-off |
-|---|---|
-| **A (proposed).** Additive `GET /api/v0/supervisor-snapshot` whose `data` carries `snapshot_schema = "nxt-site-agent/supervisor-snapshot/v1"`. | Existing endpoints, envelope, error codes, tests, docs, and the console boundary test stay intact; the snapshot versions itself. |
-| B. New transport version `/api/v1/…`. | Coordinated edits to `lib/api.ts`, `boundaries.test.ts`, `contracts.py`, `test_api.py`, the README, `site_agent_v0.md`, `AGENTS.md`, and the package map, plus two coexisting envelope schemas. |
-
-A is proposed. If the owner prefers the literal `/api/v1` path, B is a
-mechanical change but should be its own commit.
+The task suggested `GET /api/v1/supervisor-snapshot`. The owner approved the
+additive `GET /api/v0/supervisor-snapshot` on 2026-10-06 (§0.1). Rationale
+retained: the existing Manager API transport is `nxt-site-agent/api/v0`;
+`decode()` rejects any other envelope schema; the console boundary test admits
+any `/api/v0/` path; and the snapshot versions itself through
+`snapshot_schema = "nxt-site-agent/supervisor-snapshot/v1"` inside `data`, so
+existing endpoints, envelope, error codes, tests, and docs stay intact. The
+`/api/v1` read contracts on the integration base (planning, course-ops,
+collection-executions) are separate frozen resources, not a transport version
+of the Manager API, and this slice does not touch them.
 
 ### 8.2 One generation, one identity, and the seam
 
-The only coherent multi-source read on the branch today is
+The only coherent multi-source read on the integration base today is
 `briefing_snapshot()`: one `with self._lock:` acquisition that excludes
 `advance` and `respond`. Every other endpoint reads live evidence
 independently, and the console's `Promise.all` over five endpoints can render
@@ -1115,25 +1205,33 @@ explicit and never subtracts across them:
 - every `import_batch_*` record carries `clock_basis`; a mismatch with the
   projection's basis is a data-quality issue (§7.1), never a number.
 
-Pre-existing risk recorded for the owner: the `main` pilot fixture anchors
-scenario midnight at `2026-08-08T00:00:00+00:00` while the same manifest
-declares `"timezone": "Asia/Shanghai"`, and nothing cross-checks them. The
-fixture clock value must be pinned so that its Asia/Shanghai date is
-2026-08-08 (for example `2026-08-08T04:00:00Z`, 12:00 local), or the manifest
-timezone changed; §14 asks which.
+Decided (§0.1): timestamps are stored in UTC and operating dates derive from
+the commissioned timezone, `Asia/Shanghai` for the China fixture. The pilot
+fixture's scenario origin `SIMULATION_MIDNIGHT_ISO = "2026-08-08T00:00:00+00:00"`
+is therefore 08:00 on operating date 2026-08-08 in `Asia/Shanghai`; it is a
+scenario-time origin, not a local midnight, and the fixture is not re-pinned
+(its own `captured_at` values already carry `+08:00`). The operating day for
+that date is `[2026-08-07T16:00:00Z, 2026-08-08T16:00:00Z)`. A test must assert
+this derivation, and the declared fixture `ClockSource` must carry the same
+zone so that `operating_day_boundary_ambiguous` (§2.5) can never fire on the
+fixture.
 
 ### 8.5 Console changes (two compact sections only)
 
-- `app/page.tsx` fetches `client.supervisorSnapshot()` once for everything it
-  renders. A pure `lib/snapshot.ts::splitSnapshot(snapshot): ConsoleData`
-  hands the embedded `health`, `state`, `recommendations`, `briefing`, and
+- `lib/console.ts::readConsole` becomes one `client.supervisorSnapshot()` call
+  followed by a pure `lib/snapshot.ts::splitSnapshot(snapshot): ConsoleData`
+  that hands the embedded `health`, `state`, `recommendations`, `briefing`, and
   `fixture` to the existing panels with **unchanged prop shapes**, proven by a
-  test that deep-equals its outputs to the existing fixture builders. No vitest
-  test imports `page.tsx` today, so the 39 existing cases are unaffected by the
-  acquisition change; `tsc`, the boundary test, and the HTTP smoke (banner,
-  "Site Agent", "Manager Console" text in the initial render) still gate it.
-  The last-good-view rule now applies to the whole snapshot: one generation or
-  the previous one, never a mix.
+  test that deep-equals its outputs to the existing fixture builders.
+  `ConsoleData` gains `staffing`, `demand`, `play`, `physical_stores`,
+  `machines`, `exceptions`, `data_quality`, and `generation`. `app/page.tsx`,
+  `ConsoleScreen`, and the generation-tagged controller in `lib/actions.ts` are
+  untouched: the controller already lets only the current read commit and keeps
+  the last good view, marked stale, after a failed read, so one snapshot per
+  read yields "one generation or the previous one, never a mix" without new
+  client logic. `tsc`, the boundary test, the 658 existing Vitest cases, and
+  the HTTP smoke still gate it; the planning, course-ops, task-ops, and
+  collection-execution panels keep their own reads.
 - New `StaffingTodayPanel`: `scheduled_today` (labelled as a plan),
   `scheduled_now`, `confirmed_present_now`, `presence_unknown_now` (never shown
   as absent), `present_unscheduled_now` when non-zero, role coverage table
@@ -1170,7 +1268,13 @@ beside the existing three evidence streams.
 
 ---
 
-## 9. Agent behavior (advisory; a separately gated second PR)
+## 9. Agent behavior (advisory; deferred to a separately gated second PR)
+
+Owner decision of 2026-10-06 (§0.1): demand-versus-coverage recommendations and
+any Kimi or other LLM integration are out of this implementation slice. This
+section records the design for that later PR. It binds nothing in §§3–8 except
+the reserved `coverage_recommendations: []` field and the `evidence_status`
+presentation flag.
 
 ### 9.1 Semantic owner and divergence contract
 
@@ -1282,10 +1386,10 @@ is `[]`.
 | `simulation/pyproject.toml` | add the package to the single-line `packages` list (wheel membership) |
 | `.github/workflows/verification.yml` | add a focused `Test Operational Context` step, the architecture-list entry, the `compileall` entry, and the `shipped` tuple entry, as every package since Site Runtime has |
 | Sibling reverse guards on `main` | append `nxt_operational_context` to `tests/site_runtime/test_architecture.py`, `tests/agent_runtime/test_architecture.py`, `tests/edge_observation/test_architecture.py`, `tests/workflow_enablement/test_architecture.py` (three lists), `tests/course_world_model/test_architecture.py` (four lists), `tests/pilot_ops/test_boundaries.py`, exactly the six files the `nxt_edge_interventions` commit touched |
-| `simulation/nxt_site_agent/` (branch) | `contracts.py`: `ClockSource`, `ContextReader` protocol, `CompositionSeam.clock` and `CompositionSeam.context_for` (both default `None`); `service.py`: `supervisor_snapshot()` and reader lifecycle in `_launch_fresh`/`_resume`/`reset`/`restart_runtime`; `api.py`: one GET route and `_STATUS_BY_CODE` entries for `ledger_unreadable`, `queue_unreadable`, `journal_unreadable`; `projections.py`: snapshot assembly; `tests/site_agent/test_architecture.py`: `nxt_operational_context` into `BANNED_FIRST_PARTY_MENTIONS` and `OTHER_PACKAGES`, plus a positive assertion that the two scripts import `nxt_edge_task.journal` only; `test_api.py` endpoint lists; new `test_snapshot.py`. No stdlib whitelist change. |
-| `simulation/scripts/site_agent_fixture.py`, `site_agent_demo.py` (branch) | compose the journal (`nxt_edge_task.journal.JsonlJournal`), profiles, replay fixture, admission facts, `ContextConfig`, the declared fixture `ClockSource`, and the per-run `context_for` factory; flags `--context-dir`, `--import <source_system> <file>`, `--exported-at <ISO-8601>`; `SCRIPT_BANNED_IMPORT_ROOTS` is a ban list that does not name `nxt_edge_task`, so no widening is required; `--no-serve` output remains `health_snapshot()` only |
-| `apps/site-agent-console/` (branch) | `lib/api.ts` snapshot types and method; `lib/snapshot.ts`; `app/page.tsx` single fetch; two panels; `lib/format.ts::formatCount`; tests and fixtures |
-| `simulation/docs/site_agent_v0.md` (branch) | add the `GET /api/v0/supervisor-snapshot` row to the Manager API table; replace "Wall clock is never read: reading age, `responded_at`, and every briefing time use observation/scenario time, so identical action sequences produce byte-identical canonical evidence across runs" with "No canonical evidence reads a wall clock: reading age, `responded_at`, and every briefing time use observation/scenario time, so identical action sequences produce byte-identical canonical evidence across runs; only `GET /api/v0/supervisor-snapshot` carries a `generation.generated_at` from the composition root's declared `ClockSource`, which never enters canonical evidence, `responded_at`, or any other endpoint" |
+| `simulation/nxt_site_agent/` (integration base) | `contracts.py`: `ClockSource`, `ContextReader` protocol, `CompositionSeam.clock` and `CompositionSeam.context_for` (both default `None`); `service.py`: `supervisor_snapshot()` and reader lifecycle in `_launch_fresh`/`_resume`/`reset`/`restart_runtime`; `api.py`: one GET route and `_STATUS_BY_CODE` entries for `ledger_unreadable`, `queue_unreadable`, `journal_unreadable`; `projections.py`: snapshot assembly; `tests/site_agent/test_architecture.py`: `nxt_operational_context` into `BANNED_FIRST_PARTY_MENTIONS` and `OTHER_PACKAGES`, plus a positive assertion that the two scripts import `nxt_edge_task.journal` only; `test_api.py` endpoint lists; new `test_snapshot.py`. No stdlib whitelist change. |
+| `simulation/scripts/site_agent_fixture.py`, `site_agent_demo.py` (integration base) | compose the journal (`nxt_edge_task.journal.JsonlJournal`), profiles, replay fixture, admission facts, `ContextConfig`, the declared fixture `ClockSource`, and the per-run `context_for` factory; flags `--context-dir`, `--import <source_system> <file>`, `--exported-at <ISO-8601>`; `SCRIPT_BANNED_IMPORT_ROOTS` is a ban list that does not name `nxt_edge_task`, so no widening is required; `--no-serve` output remains `health_snapshot()` only |
+| `apps/site-agent-console/` (integration base) | `lib/api.ts` snapshot types and method; `lib/snapshot.ts`; `lib/console.ts::readConsole` single fetch and the extended `ConsoleData`; two panels mounted from `components/ConsoleScreen.tsx`; `lib/format.ts::formatCount`; tests and fixtures |
+| `simulation/docs/site_agent_v0.md` (integration base) | add the `GET /api/v0/supervisor-snapshot` row to the Manager API table; replace "Wall clock is never read: reading age, `responded_at`, and every briefing time use observation/scenario time, so identical action sequences produce byte-identical canonical evidence across runs" with "No canonical evidence reads a wall clock: reading age, `responded_at`, and every briefing time use observation/scenario time, so identical action sequences produce byte-identical canonical evidence across runs; only `GET /api/v0/supervisor-snapshot` carries a `generation.generated_at` from the composition root's declared `ClockSource`, which never enters canonical evidence, `responded_at`, or any other endpoint" |
 | Governance | `.agent/context/package-map.md`, `source-of-truth.md` (the §2.1 row), `architecture.md` (seam bullet, guarded-boundary row), `deployment.md` ("Also added after that baseline" paragraph, placement row, statement that the "Not implemented" rows are unchanged), `.agent/workflows/architecture-review.md` (placement row), `testing.md` (suite lists), `AGENTS.md` (dependency bullet, source-precedence doc list), `docs/ARCHITECTURE.md`, `docs/CI.md`, `README.md`, `simulation/README.md`, `.agent/context/product.md`, `simulation/docs/operational_context_v0.md` (stable doc written at implementation) |
 
 Nothing changes in `nxt_facility`, `nxt_telemetry`, `nxt_site_runtime`,
@@ -1315,7 +1419,7 @@ Pre-existing drift noted, not fixed here: `testing.md` lists
 | 10 | Stale ⇒ no green status | `test_freshness.py::test_stale_source_forces_unknown_labels`; `test_quiet_source_without_declared_export_time_goes_stale`; console `component.test.tsx` shows `stale` in text for both panels |
 | 11 | Partial invalid import ⇒ no inconsistent snapshot | `test_import.py::test_one_bad_row_rejects_whole_batch`; `tests/site_agent/test_snapshot.py::test_rejected_batch_leaves_snapshot_unchanged_and_reports_it`; `test_import.py::test_uncommitted_tail_recommits_with_one_record`; `test_byte_torn_journal_fails_closed_and_marks_context_unavailable` |
 | 12 | Every value traceable | `test_traceability.py::test_each_projected_value_recomputes_from_cited_events_and_mapping` |
-| 13 | Existing console trust tests pass | the existing 39 Vitest cases untouched; the 98 `tests/site_agent` cases keep their assertions and stay green, with list literals extended as recorded in §8.5/§10 (the two endpoint tuples in `test_api.py`, `BANNED_FIRST_PARTY_MENTIONS`, `OTHER_PACKAGES`); baseline observed in §1.3 |
+| 13 | Existing console trust tests pass | the existing 658 Vitest cases untouched; the 258 `tests/site_agent` cases of the CI-focused step keep their assertions and stay green, with list literals extended as recorded in §8.5/§10 (the two endpoint tuples in `test_api.py`, `BANNED_FIRST_PARTY_MENTIONS`, `OTHER_PACKAGES`); baseline observed in §1.5 |
 | 14 | Physical inventory and machine fields remain unknown | `tests/site_agent/test_snapshot.py::test_physical_stores_and_machines_derive_unknown_from_source_references` (fixture mode: `physical == false` for every field, `available == false`) |
 
 Plus: determinism (same effective view, `as_of`, and profiles ⇒ byte-identical
@@ -1344,7 +1448,9 @@ labor-savings claims; physical sensor ingestion; robot or washer commands;
 generic dashboards; visual redesign beyond the two sections; vendor APIs;
 browser automation or scraping; authentication (and therefore any drill-down
 endpoint); forecasting; raw source-file retention; an availability projection;
-a per-row quarantine; a separate import process.
+a per-row quarantine; a separate import process; any Kimi or other LLM
+integration; the demand-versus-coverage advisory of §9, deferred by owner
+decision to its own gated PR.
 
 ## 13. Follow-on seams preserved
 
@@ -1376,21 +1482,22 @@ a per-row quarantine; a separate import process.
    them, play duration and `confirmed_active_players` stay `UNKNOWN`.
 6. **Export cadence and timezones:** how often are files exported, do they
    carry offsets, and is the commissioned timezone correct for the pilot site?
-7. **Operating day:** local midnight (V0) or facility close?
+7. **Operating day:** decided — local midnight in the commissioned timezone
+   (§0.1); a facility-close day boundary is a later profile option.
 8. **Admission window, thresholds, tolerances:** who declares
    `clock_in_admission_before_s`, each source's `stale_after_s` and
    `clock_skew_tolerance_s`, and the demand windows?
-9. **Fixture clock:** pin a fixture clock value whose Asia/Shanghai date is
-   2026-08-08, or change the pilot manifest timezone; the UTC-midnight anchor
-   and the manifest zone currently disagree.
-10. **Base branch:** Option A, B, or C in §1.4.
-11. **Endpoint path:** `/api/v0/supervisor-snapshot` (proposed) or a `/api/v1`
-    transport version.
-12. **Quarantine:** accept V0 strict rejection (a permanently invalid historical
-    row blocks a source until re-export), or approve a journaled per-row
-    quarantine as the next slice.
-13. **Audit retention:** whether any raw source file may ever be retained
-    (this design says no and records only digests).
+9. **Fixture clock:** decided — `Asia/Shanghai` stays; the UTC scenario origin
+   is 08:00 local on operating date 2026-08-08 and is not re-pinned (§8.4).
+10. **Base branch:** decided — the integration branch of §1.4, stacked on
+    PR 20 until PR 19 and PR 20 merge.
+11. **Endpoint path:** decided — `/api/v0/supervisor-snapshot` (§8.1).
+12. **Quarantine:** decided — V0 rejects the whole batch with actionable row
+    numbers and reasons and publishes no partial snapshot; a journaled per-row
+    quarantine remains a candidate for a later slice.
+13. **Audit retention:** decided — no raw import file and no unrestricted free
+    text is retained; only allow-listed normalized fields, the file hash,
+    import metadata, and safe diagnostics.
 14. **Availability:** whether a later slice projects `AVAILABILITY_DECLARED`
     (with a declared validity window) or the field stays out.
 15. **Advisory contract (second PR):** the §9.3 route versus generalizing the
@@ -1459,6 +1566,22 @@ time and UTC are never subtracted from each other; the console and service are
 labelled as an unmerged branch throughout; `SiteClock` is precedent only; the
 observed baseline is reported as observed.
 
-**Gate outcome: Pause.** Ownership and placement are resolved (Proceed), the
-advisory piece needs its own gate (Reshape), and implementation cannot start
-until the base-branch decision (§1.4) is made.
+**Revision 3 (2026-10-06, branch-reconciliation gate).** No design content in
+§§2–11 changed. §1 was rewritten from the reconciliation evidence: the reported
+commit `0d742cab…` does not exist in any reachable store; the Codex branches,
+not `4b86d9f`, carry the latest console trust, retained-state, stale-state, and
+write-gating fixes; the integration branch was created from `2c421f4` and a
+merge of `main` was a no-op; one lockfile-only dependency patch was made
+through `npm audit fix`; the baseline table was re-observed on that branch.
+§0.1 records the owner's seven product decisions and §14 marks the items they
+close. §8.1, §8.4, §8.5, §9, §10, §11, and §12 were restated against the
+integration base and those decisions. The revision-2 claim that the UTC
+scenario origin and the `Asia/Shanghai` manifest disagree on the date was wrong
+(00:00 UTC is 08:00 local on the same date) and is withdrawn.
+
+**Gate outcome: Proceed to the implementation plan.** Ownership and placement
+are resolved (Proceed), the advisory piece stays out of the slice and keeps its
+own later gate (Reshape), and the implementation base is fixed (§1.4). The
+slice PR stacks on PR 20 until PR 19 and PR 20 merge; the first implementation
+commit must re-run the §1.5 table against the then-current base. No package
+code has been written.
