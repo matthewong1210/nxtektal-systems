@@ -1,0 +1,12 @@
+{
+  "schema": "nxt-staffing-errors/v1",
+  "exchanges": [
+    {"name":"invalid-request","route_template":"/api/v1/staffing/exceptions","method":"POST","http_status":400,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_invalid_request","detail":"request body is invalid"}}},
+    {"name":"request-not-found","route_template":"/api/v1/staffing/requests/{operation_kind}/{request_id}","method":"GET","http_status":404,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_request_not_found","detail":"no committed request in verified evidence"}}},
+    {"name":"resource-not-found","route_template":"/api/v1/staffing/dates/{service_date}","method":"GET","http_status":404,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_not_found","detail":"staffing resource was not found"}}},
+    {"name":"idempotency-conflict","route_template":"/api/v1/staffing/roster-imports","method":"POST","http_status":409,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_conflict","detail":"request_id is already bound to different content"}}},
+    {"name":"stale-suggestion","route_template":"/api/v1/staffing/suggestions/{suggestion_id}/accept","method":"POST","http_status":409,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_stale_suggestion","detail":"staffing basis has changed"}}},
+    {"name":"generation-busy","route_template":"/api/v1/staffing/suggestions","method":"POST","http_status":429,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_busy","detail":"generation capacity is full"}}},
+    {"name":"staffing-unavailable","route_template":"/api/v1/staffing","method":"GET","http_status":503,"body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","error":{"code":"staffing_unavailable","detail":"staffing evidence is unavailable"}}}
+  ]
+}

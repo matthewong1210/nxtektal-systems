@@ -1,0 +1,51 @@
+{
+  "schema":"nxt-staffing-exchanges/v1",
+  "exchanges":[
+    {
+      "name":"manager-accepted","method":"POST","route_template":"/api/v1/staffing/suggestions/{suggestion_id}/accept",
+      "request":{"schema":"nxt-staffing-manager-response/v1","request_id":"request-accept-1","operator":"manager-1","kind":"ACCEPT","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"candidate_index":1,"edited_operations":null,"reason_code":"APPROVED","note":"采用一号方案"},
+      "http_status":200,
+      "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
+        "schema":"nxt-staffing/v1","disposition":"created","operation_kind":"manager-response","request_id":"request-accept-1","operation_id":"staffing-event-accept-1","state":"COMMITTED",
+        "record":{"record_kind":"MANAGER_RESPONSE_COMMITTED","suggestion_id":"generation-success-1","response_kind":"ACCEPT","reason_code":"APPROVED","operator":"manager-1","note":"采用一号方案","effective_plan":{"revision":1,"status":"CURRENT","schedule_digest":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","assignments":[{"assignment_id":"assignment-002","staff_id":"staff-002","display_name":"Operator Two","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T10:30:00+08:00","end_at":"2026-10-06T17:00:00+08:00"}]},"committed_at_utc":"2026-10-06T01:30:00.000000Z"}
+      }}
+    },
+    {
+      "name":"manager-modified","method":"POST","route_template":"/api/v1/staffing/suggestions/{suggestion_id}/modify",
+      "request":{"schema":"nxt-staffing-manager-response/v1","request_id":"request-modify-1","operator":"manager-1","kind":"MODIFY","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"candidate_index":1,"edited_operations":[{"operation":"ADD","staff_id":"staff-002","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T03:00:00Z","end_at":"2026-10-06T09:00:00Z"}],"reason_code":"APPROVED_WITH_CHANGES","note":"调整开始时间"},
+      "http_status":200,
+      "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
+        "schema":"nxt-staffing/v1","disposition":"created","operation_kind":"manager-response","request_id":"request-modify-1","operation_id":"staffing-event-modify-1","state":"COMMITTED",
+        "record":{"record_kind":"MANAGER_RESPONSE_COMMITTED","suggestion_id":"generation-success-2","response_kind":"MODIFY","reason_code":"APPROVED_WITH_CHANGES","operator":"manager-1","note":"调整开始时间","effective_plan":{"revision":1,"status":"CURRENT","schedule_digest":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","assignments":[{"assignment_id":"assignment-003","staff_id":"staff-002","display_name":"Operator Two","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T11:00:00+08:00","end_at":"2026-10-06T17:00:00+08:00"}]},"committed_at_utc":"2026-10-06T01:31:00.000000Z"}
+      }}
+    },
+    {
+      "name":"manager-rejected","method":"POST","route_template":"/api/v1/staffing/suggestions/{suggestion_id}/reject",
+      "request":{"schema":"nxt-staffing-manager-response/v1","request_id":"request-reject-1","operator":"manager-1","kind":"REJECT","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"candidate_index":null,"edited_operations":null,"reason_code":"MANUAL_HANDLING","note":"现场人工处理"},
+      "http_status":200,
+      "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
+        "schema":"nxt-staffing/v1","disposition":"created","operation_kind":"manager-response","request_id":"request-reject-1","operation_id":"staffing-event-reject-1","state":"COMMITTED",
+        "record":{"record_kind":"MANAGER_RESPONSE_COMMITTED","suggestion_id":"generation-success-3","response_kind":"REJECT","reason_code":"MANUAL_HANDLING","operator":"manager-1","note":"现场人工处理","effective_plan":null,"committed_at_utc":"2026-10-06T01:32:00.000000Z"}
+      }}
+    },
+    {
+      "name":"date-after-manager-response","method":"GET","route_template":"/api/v1/staffing/dates/{service_date}","http_status":200,
+      "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
+        "schema":"nxt-staffing/v1","environment":"SIMULATION","mode":"STAFFING_ADVISORY_ONLY","server_time_utc":"2026-10-06T01:35:00.000000Z","service_date":"2026-10-06",
+        "context":{"site_id":"site-cn-1","deployment_id":"deployment-1","site_timezone":"Asia/Shanghai"},
+        "generation_capability":{"status":"READY","region":"CN","primary_provider":"KIMI","backup_provider":null,"failure_code":null},
+        "revisions":{"roster":1,"exception_set":3,"effective_plan":1},
+        "roster":{"revision":1,"effective_from_local_date":"2026-10-06","effective_until_local_date":null,"worker_count":2,"assignment_count":1,"coverage_rule_count":1},
+        "assignments":[{"assignment_id":"assignment-001","staff_id":"staff-001","display_name":"Operator One","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T09:00:00+08:00","end_at":"2026-10-06T17:00:00+08:00"}],
+        "active_exceptions":[{"exception_id":"exception-001","staff_id":"staff-001","display_name":"Operator One","kind":"EARLY_DEPARTURE","unavailable_start_at":"2026-10-06T15:30:00+08:00","unavailable_end_at":"2026-10-06T17:00:00+08:00","note":"修正为提前离岗","active":true}],
+        "effective_plan":{"revision":1,"status":"CURRENT","schedule_digest":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","assignments":[{"assignment_id":"assignment-002","staff_id":"staff-002","display_name":"Operator Two","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T10:30:00+08:00","end_at":"2026-10-06T17:00:00+08:00"}]},
+        "generations":[{
+          "suggestion_id":"generation-success-1","request_id":"request-generate-success","operation_id":"staffing-event-generation-success","state":"SUCCEEDED","basis":{"roster":1,"exception_set":3,"effective_plan":0,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"retry_of":null,
+          "candidates":[{"candidate_index":1,"status":"VALID","operations":[{"operation":"ADD","staff_id":"staff-002","display_name":"Operator Two","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T10:30:00+08:00","end_at":"2026-10-06T17:00:00+08:00"}],"rationale":"coverage restored","operational_warnings":[],"coverage_gaps":[],"schedule_digest":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","rejection_codes":[]}],
+          "coverage_gaps":[],"provenance":[{"attempt_index":0,"provider":"KIMI","region":"CN","route_role":"PRIMARY","route_id":"cn-kimi-v1","model_id":"moonshot-v1-128k","failure_code":null,"retryable":false,"security_failure":false,"provider_request_id":"provider-request-1","finish_reason":"stop","input_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","output_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","input_tokens":620,"output_tokens":210}],"failure_code":null,
+          "manager_response":{"response_kind":"ACCEPT","reason_code":"APPROVED","operator":"manager-1","note":"采用一号方案","effective_plan":{"revision":1,"status":"CURRENT","schedule_digest":"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","assignments":[{"assignment_id":"assignment-002","staff_id":"staff-002","display_name":"Operator Two","role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_at":"2026-10-06T10:30:00+08:00","end_at":"2026-10-06T17:00:00+08:00"}]}}
+        }]
+      }}
+    }
+  ]
+}

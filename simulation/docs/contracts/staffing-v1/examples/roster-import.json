@@ -1,0 +1,57 @@
+{
+  "schema": "nxt-staffing-exchanges/v1",
+  "exchanges": [
+    {
+      "name": "roster-committed",
+      "method": "POST",
+      "route_template": "/api/v1/staffing/roster-imports",
+      "request": {
+        "schema": "nxt-staffing-roster-import/v1",
+        "request_id": "request-roster-1",
+        "operator": "manager-1",
+        "expected_roster_revision": 0,
+        "site_id": "site-cn-1",
+        "deployment_id": "deployment-1",
+        "site_timezone": "Asia/Shanghai",
+        "effective_from_local_date": "2026-10-06",
+        "effective_until_local_date": null,
+        "source_ref": "manager-upload-2026-10-06.csv",
+        "workers": [
+          {
+            "staff_id": "staff-001",
+            "display_name": "Operator One",
+            "skill_codes": ["BALL_PICKING"],
+            "eligibility": [{"role_code":"RANGE_ATTENDANT","area_code":"RANGE_A"}],
+            "max_daily_minutes": 480
+          }
+        ],
+        "availability": [{"staff_id":"staff-001","weekday":1,"start_local":"08:00","end_local":"17:00"}],
+        "assignment_rules": [{"role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","required_skill_codes":["BALL_PICKING"]}],
+        "regular_assignments": [{"staff_id":"staff-001","weekday":1,"role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_local":"09:00","end_local":"17:00"}],
+        "coverage": [{"weekday":1,"role_code":"RANGE_ATTENDANT","area_code":"RANGE_A","start_local":"09:00","end_local":"17:00","minimum_staff":1}]
+      },
+      "http_status": 200,
+      "body": {
+        "schema": "nxt-site-agent/api/v0",
+        "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+        "data": {
+          "schema": "nxt-staffing/v1",
+          "disposition": "created",
+          "operation_kind": "roster-import",
+          "request_id": "request-roster-1",
+          "operation_id": "staffing-event-roster-1",
+          "state": "COMMITTED",
+          "record": {
+            "record_kind": "ROSTER_IMPORTED",
+            "roster_revision": 1,
+            "roster_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "imported_at_utc": "2026-10-06T01:00:00.000000Z",
+            "worker_count": 1,
+            "assignment_count": 1,
+            "coverage_rule_count": 1
+          }
+        }
+      }
+    }
+  ]
+}

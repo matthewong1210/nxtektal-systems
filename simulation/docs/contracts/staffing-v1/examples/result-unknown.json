@@ -1,0 +1,15 @@
+{
+  "schema":"nxt-staffing-exchanges/v1",
+  "exchanges":[
+    {
+      "name":"generation-interrupted",
+      "method":"GET",
+      "route_template":"/api/v1/staffing/requests/{operation_kind}/{request_id}",
+      "http_status":200,
+      "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
+        "schema":"nxt-staffing/v1","disposition":"duplicate","operation_kind":"suggestion-generate","request_id":"request-result-unknown","operation_id":"staffing-event-result-unknown","state":"RESULT_UNKNOWN",
+        "record":{"record_kind":"GENERATION_INTERRUPTED","suggestion_id":"generation-result-unknown","service_date":"2026-10-06","basis":{"roster":1,"exception_set":3,"effective_plan":0,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"retry_of":null,"provenance":[],"failure_code":"RESULT_UNKNOWN"}
+      }}
+    }
+  ]
+}

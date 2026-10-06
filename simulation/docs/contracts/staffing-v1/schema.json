@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nxt.local/contracts/staffing-v1/schema.json",
+  "title": "NXT staffing advisory Manager API v1",
+  "oneOf": [
+    {"$ref":"#/$defs/StaffingRequestBody"},
+    {"$ref":"#/$defs/SuccessEnvelope"},
+    {"$ref":"#/$defs/ErrorEnvelope"},
+    {"$ref":"#/$defs/SuccessExampleDocument"},
+    {"$ref":"#/$defs/ErrorExampleDocument"}
+  ],
+  "$defs": {
+    "Identifier": {"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"},
+    "Code": {"type":"string","minLength":1,"maxLength":32,"pattern":"^[A-Z][A-Z0-9_]{0,31}$"},
+    "FailureCode": {"type":"string","minLength":1,"maxLength":64,"pattern":"^[A-Z][A-Z0-9_]{0,63}$"},
+    "GenerationFailureCode": {"enum":["NO_VALID_SUGGESTION","DNS_FAILURE","CONNECT_TIMEOUT","CONNECT_FAILED","READ_TIMEOUT","CONNECTION_INTERRUPTED","HTTP_TIMEOUT","RATE_LIMITED","PROVIDER_UNAVAILABLE","DEADLINE_EXHAUSTED","BACKUP_UNCONFIGURED","PROVIDER_REFUSED","MALFORMED_PROVIDER_RESPONSE","SCHEMA_MISMATCH","invalid_provider_shape","provider_sensitive_key","invalid_provider_timestamp","invalid_candidate_set","PROVIDER_CLIENT_ERROR","INPUT_TOO_LARGE","AUTHENTICATION_FAILED","PERMISSION_DENIED","MODEL_NOT_FOUND","INVALID_PROVIDER_REQUEST","PROVIDER_UNCONFIGURED","RESPONSE_TOO_LARGE","UNSUPPORTED_CONTENT_ENCODING","REDIRECT_REFUSED","ENDPOINT_NOT_ALLOWED","TLS_VERIFICATION_FAILED"]},
+    "Digest": {"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]{64}$"},
+    "SafeText500": {"type":"string","maxLength":500,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"},
+    "Operator": {"type":"string","minLength":1,"maxLength":128,"pattern":"^(?![ \\t]*[=+@-])(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]+$"},
+    "SourceRef": {"type":"string","minLength":1,"maxLength":256,"pattern":"^(?![ \\t]*[=+@-])(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]+$"},
+    "DisplayName": {"type":"string","minLength":1,"maxLength":100,"pattern":"^(?![ \\t]*[=+@-])(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]+$"},
+    "Ascii64": {"type":"string","minLength":1,"maxLength":64,"pattern":"^(?=.*[^ ])[ -~]+$"},
+    "Ascii128": {"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*[^ ])[ -~]+$"},
+    "Ascii160": {"type":"string","minLength":1,"maxLength":160,"pattern":"^(?=.*[^ ])[ -~]+$"},
+    "LocalDate": {"type":"string","format":"date","minLength":10,"maxLength":10,"pattern":"^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])$"},
+    "LocalMinute": {"type":"string","minLength":5,"maxLength":5,"pattern":"^(?:[01]\\d|2[0-3]):[0-5]\\d$"},
+    "AuditUtcTimestamp": {"type":"string","format":"date-time","minLength":27,"maxLength":27,"pattern":"^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{6}Z$"},
+    "OffsetTimestamp": {"type":"string","format":"date-time","minLength":20,"maxLength":25,"pattern":"^\\d{4}-\\d{2}-\\d{2}T(?:[01]\\d|2[0-3]):[0-5]\\d:00(?:Z|[+-](?!00:00)(?:[01]\\d|2[0-3]):[0-5]\\d)$"},
+    "NullableIdentifier": {"oneOf":[{"$ref":"#/$defs/Identifier"},{"type":"null"}]},
+    "NullableDigest": {"oneOf":[{"$ref":"#/$defs/Digest"},{"type":"null"}]},
+    "NullableNote": {"oneOf":[{"$ref":"#/$defs/SafeText500"},{"type":"null"}]},
+    "RevisionVector": {
+      "type":"object","additionalProperties":false,
+      "properties":{"roster":{"type":"integer","minimum":0},"exception_set":{"type":"integer","minimum":0},"effective_plan":{"type":"integer","minimum":0}},
+      "required":["roster","exception_set","effective_plan"]
+    },
+    "Basis": {
+      "type":"object","additionalProperties":false,
+      "properties":{"roster":{"type":"integer","minimum":0},"exception_set":{"type":"integer","minimum":0},"effective_plan":{"type":"integer","minimum":0},"digest":{"$ref":"#/$defs/Digest"}},
+      "required":["roster","exception_set","effective_plan","digest"]
+    },
+    "GenerationCapability": {
+      "oneOf":[
+        {"type":"object","additionalProperties":false,"properties":{"status":{"const":"UNAVAILABLE"},"region":{"type":"null"},"primary_provider":{"type":"null"},"backup_provider":{"type":"null"},"failure_code":{"const":"PROVIDER_UNCONFIGURED"}},"required":["status","region","primary_provider","backup_provider","failure_code"]},
+        {"type":"object","additionalProperties":false,"properties":{"status":{"const":"READY"},"region":{"const":"CN"},"primary_provider":{"const":"KIMI"},"backup_provider":{"type":"null"},"failure_code":{"type":"null"}},"required":["status","region","primary_provider","backup_provider","failure_code"]},
+        {"type":"object","additionalProperties":false,"properties":{"status":{"const":"UNAVAILABLE"},"region":{"const":"CN"},"primary_provider":{"const":"KIMI"},"backup_provider":{"type":"null"},"failure_code":{"const":"PROVIDER_UNCONFIGURED"}},"required":["status","region","primary_provider","backup_provider","failure_code"]},
+        {"type":"object","additionalProperties":false,"properties":{"status":{"const":"READY"},"region":{"const":"GLOBAL"},"primary_provider":{"const":"OPENAI"},"backup_provider":{"const":"ANTHROPIC"},"failure_code":{"type":"null"}},"required":["status","region","primary_provider","backup_provider","failure_code"]},
+        {"type":"object","additionalProperties":false,"properties":{"status":{"const":"DEGRADED_BACKUP_UNCONFIGURED"},"region":{"const":"GLOBAL"},"primary_provider":{"const":"OPENAI"},"backup_provider":{"type":"null"},"failure_code":{"const":"BACKUP_UNCONFIGURED"}},"required":["status","region","primary_provider","backup_provider","failure_code"]},
+        {"type":"object","additionalProperties":false,"properties":{"status":{"const":"UNAVAILABLE"},"region":{"const":"GLOBAL"},"primary_provider":{"const":"OPENAI"},"backup_provider":{"oneOf":[{"const":"ANTHROPIC"},{"type":"null"}]},"failure_code":{"const":"PROVIDER_UNCONFIGURED"}},"required":["status","region","primary_provider","backup_provider","failure_code"]}
+      ]
+    },
+    "AssignmentProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "assignment_id":{"$ref":"#/$defs/Identifier"},"staff_id":{"$ref":"#/$defs/Identifier"},"display_name":{"$ref":"#/$defs/DisplayName"},
+        "role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_at":{"$ref":"#/$defs/OffsetTimestamp"},"end_at":{"$ref":"#/$defs/OffsetTimestamp"}
+      },
+      "required":["assignment_id","staff_id","display_name","role_code","area_code","start_at","end_at"]
+    },
+    "ExceptionProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "exception_id":{"$ref":"#/$defs/Identifier"},"staff_id":{"$ref":"#/$defs/Identifier"},"display_name":{"$ref":"#/$defs/DisplayName"},
+        "kind":{"enum":["LEAVE","LATE","EARLY_DEPARTURE","UNAVAILABLE"]},"unavailable_start_at":{"$ref":"#/$defs/OffsetTimestamp"},"unavailable_end_at":{"$ref":"#/$defs/OffsetTimestamp"},
+        "note":{"$ref":"#/$defs/NullableNote"},"active":{"type":"boolean"}
+      },
+      "required":["exception_id","staff_id","display_name","kind","unavailable_start_at","unavailable_end_at","note","active"]
+    },
+    "CoverageGap": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_at":{"$ref":"#/$defs/OffsetTimestamp"},"end_at":{"$ref":"#/$defs/OffsetTimestamp"},
+        "required_count":{"type":"integer","minimum":1,"maximum":10000},"assigned_count":{"type":"integer","minimum":0,"maximum":9999},"rejection_code":{"const":"COVERAGE_GAP"}
+      },
+      "required":["role_code","area_code","start_at","end_at","required_count","assigned_count","rejection_code"]
+    },
+    "CandidateRemoveProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"operation":{"const":"REMOVE"},"assignment_id":{"$ref":"#/$defs/Identifier"},"staff_id":{"$ref":"#/$defs/Identifier"},"display_name":{"$ref":"#/$defs/DisplayName"},"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_at":{"$ref":"#/$defs/OffsetTimestamp"},"end_at":{"$ref":"#/$defs/OffsetTimestamp"}},
+      "required":["operation","assignment_id","staff_id","display_name","role_code","area_code","start_at","end_at"]
+    },
+    "CandidateAddProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"operation":{"const":"ADD"},"staff_id":{"$ref":"#/$defs/Identifier"},"display_name":{"$ref":"#/$defs/DisplayName"},"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_at":{"$ref":"#/$defs/OffsetTimestamp"},"end_at":{"$ref":"#/$defs/OffsetTimestamp"}},
+      "required":["operation","staff_id","display_name","role_code","area_code","start_at","end_at"]
+    },
+    "CandidateOperationProjection": {"oneOf":[{"$ref":"#/$defs/CandidateRemoveProjection"},{"$ref":"#/$defs/CandidateAddProjection"}]},
+    "ManagerPatchRemove": {
+      "type":"object","additionalProperties":false,
+      "properties":{"operation":{"const":"REMOVE"},"assignment_id":{"$ref":"#/$defs/Identifier"}},"required":["operation","assignment_id"]
+    },
+    "ManagerPatchAdd": {
+      "type":"object","additionalProperties":false,
+      "properties":{"operation":{"const":"ADD"},"staff_id":{"$ref":"#/$defs/Identifier"},"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_at":{"$ref":"#/$defs/OffsetTimestamp"},"end_at":{"$ref":"#/$defs/OffsetTimestamp"}},
+      "required":["operation","staff_id","role_code","area_code","start_at","end_at"]
+    },
+    "ManagerPatchOperation": {"oneOf":[{"$ref":"#/$defs/ManagerPatchRemove"},{"$ref":"#/$defs/ManagerPatchAdd"}]},
+    "ProviderProvenance": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "attempt_index":{"enum":[0,1]},"provider":{"enum":["KIMI","OPENAI","ANTHROPIC"]},"region":{"enum":["CN","GLOBAL"]},"route_role":{"enum":["PRIMARY","BACKUP"]},
+        "route_id":{"enum":["cn-kimi-v1","global-openai-v1","global-anthropic-v1"]},"model_id":{"$ref":"#/$defs/Ascii128"},"failure_code":{"oneOf":[{"$ref":"#/$defs/FailureCode"},{"type":"null"}]},
+        "retryable":{"type":"boolean"},"security_failure":{"type":"boolean"},"provider_request_id":{"oneOf":[{"$ref":"#/$defs/Ascii160"},{"type":"null"}]},
+        "finish_reason":{"oneOf":[{"$ref":"#/$defs/Ascii160"},{"type":"null"}]},"input_digest":{"$ref":"#/$defs/Digest"},"output_digest":{"$ref":"#/$defs/NullableDigest"},
+        "input_tokens":{"oneOf":[{"type":"integer","minimum":0,"maximum":1000000},{"type":"null"}]},"output_tokens":{"oneOf":[{"type":"integer","minimum":0,"maximum":1000000},{"type":"null"}]}
+      },
+      "required":["attempt_index","provider","region","route_role","route_id","model_id","failure_code","retryable","security_failure","provider_request_id","finish_reason","input_digest","output_digest","input_tokens","output_tokens"],
+      "allOf":[
+        {"oneOf":[
+          {"properties":{"attempt_index":{"const":0},"provider":{"const":"KIMI"},"region":{"const":"CN"},"route_role":{"const":"PRIMARY"},"route_id":{"const":"cn-kimi-v1"}}},
+          {"properties":{"attempt_index":{"const":0},"provider":{"const":"OPENAI"},"region":{"const":"GLOBAL"},"route_role":{"const":"PRIMARY"},"route_id":{"const":"global-openai-v1"}}},
+          {"properties":{"attempt_index":{"const":1},"provider":{"const":"ANTHROPIC"},"region":{"const":"GLOBAL"},"route_role":{"const":"BACKUP"},"route_id":{"const":"global-anthropic-v1"}}}
+        ]},
+        {"oneOf":[
+          {
+            "properties":{"failure_code":{"type":"null"},"retryable":{"const":false},"security_failure":{"const":false},"output_digest":{"$ref":"#/$defs/Digest"}},
+            "allOf":[
+              {"oneOf":[
+                {"properties":{"provider":{"const":"KIMI"},"finish_reason":{"const":"stop"}}},
+                {"properties":{"provider":{"const":"OPENAI"},"finish_reason":{"const":"completed"}}},
+                {"properties":{"provider":{"const":"ANTHROPIC"},"finish_reason":{"const":"tool_use"}}}
+              ]},
+              {"oneOf":[
+                {"properties":{"input_tokens":{"type":"null"},"output_tokens":{"type":"null"}}},
+                {"properties":{"input_tokens":{"type":"integer","minimum":0,"maximum":1000000},"output_tokens":{"type":"integer","minimum":0,"maximum":1000000}}}
+              ]}
+            ]
+          },
+          {"properties":{"failure_code":{"enum":["DNS_FAILURE","CONNECT_TIMEOUT","CONNECT_FAILED","READ_TIMEOUT","CONNECTION_INTERRUPTED","HTTP_TIMEOUT","RATE_LIMITED","PROVIDER_UNAVAILABLE"]},"retryable":{"const":true},"security_failure":{"const":false},"provider_request_id":{"type":"null"},"finish_reason":{"type":"null"},"output_digest":{"type":"null"},"input_tokens":{"type":"null"},"output_tokens":{"type":"null"}}},
+          {"properties":{"failure_code":{"enum":["DEADLINE_EXHAUSTED","PROVIDER_REFUSED","MALFORMED_PROVIDER_RESPONSE","SCHEMA_MISMATCH","AUTHENTICATION_FAILED","PERMISSION_DENIED","MODEL_NOT_FOUND","INVALID_PROVIDER_REQUEST","PROVIDER_CLIENT_ERROR"]},"retryable":{"const":false},"security_failure":{"const":false},"provider_request_id":{"type":"null"},"finish_reason":{"type":"null"},"output_digest":{"type":"null"},"input_tokens":{"type":"null"},"output_tokens":{"type":"null"}}},
+          {"properties":{"failure_code":{"enum":["RESPONSE_TOO_LARGE","UNSUPPORTED_CONTENT_ENCODING","REDIRECT_REFUSED","ENDPOINT_NOT_ALLOWED","TLS_VERIFICATION_FAILED"]},"retryable":{"const":false},"security_failure":{"const":true},"provider_request_id":{"type":"null"},"finish_reason":{"type":"null"},"output_digest":{"type":"null"},"input_tokens":{"type":"null"},"output_tokens":{"type":"null"}}}
+        ]}
+      ]
+    },
+    "FallbackEligibleFailureCode": {"enum":["DNS_FAILURE","CONNECT_TIMEOUT","CONNECT_FAILED","READ_TIMEOUT","CONNECTION_INTERRUPTED","HTTP_TIMEOUT","RATE_LIMITED","PROVIDER_UNAVAILABLE"]},
+    "NonFallbackGatewayFailureCode": {"enum":["DEADLINE_EXHAUSTED","PROVIDER_REFUSED","MALFORMED_PROVIDER_RESPONSE","SCHEMA_MISMATCH","AUTHENTICATION_FAILED","PERMISSION_DENIED","MODEL_NOT_FOUND","INVALID_PROVIDER_REQUEST","PROVIDER_CLIENT_ERROR","RESPONSE_TOO_LARGE","UNSUPPORTED_CONTENT_ENCODING","REDIRECT_REFUSED","ENDPOINT_NOT_ALLOWED","TLS_VERIFICATION_FAILED"]},
+    "GatewayFailureCode": {"enum":["DNS_FAILURE","CONNECT_TIMEOUT","CONNECT_FAILED","READ_TIMEOUT","CONNECTION_INTERRUPTED","HTTP_TIMEOUT","RATE_LIMITED","PROVIDER_UNAVAILABLE","DEADLINE_EXHAUSTED","PROVIDER_REFUSED","MALFORMED_PROVIDER_RESPONSE","SCHEMA_MISMATCH","AUTHENTICATION_FAILED","PERMISSION_DENIED","MODEL_NOT_FOUND","INVALID_PROVIDER_REQUEST","PROVIDER_CLIENT_ERROR","RESPONSE_TOO_LARGE","UNSUPPORTED_CONTENT_ENCODING","REDIRECT_REFUSED","ENDPOINT_NOT_ALLOWED","TLS_VERIFICATION_FAILED"]},
+    "OpenAIFallbackFailureProvenance": {"allOf":[{"$ref":"#/$defs/ProviderProvenance"},{"properties":{"attempt_index":{"const":0},"provider":{"const":"OPENAI"},"failure_code":{"$ref":"#/$defs/FallbackEligibleFailureCode"}}}]},
+    "PrimarySuccessfulProvenance": {"allOf":[{"$ref":"#/$defs/ProviderProvenance"},{"properties":{"attempt_index":{"const":0},"failure_code":{"type":"null"}}}]},
+    "AnthropicFinishedProvenance": {"allOf":[{"$ref":"#/$defs/ProviderProvenance"},{"properties":{"attempt_index":{"const":1},"provider":{"const":"ANTHROPIC"}}}]},
+    "AnthropicSuccessfulProvenance": {"allOf":[{"$ref":"#/$defs/AnthropicFinishedProvenance"},{"properties":{"failure_code":{"type":"null"}}}]},
+    "PrimaryTerminalFailureProvenance": {"oneOf":[
+      {"allOf":[{"$ref":"#/$defs/ProviderProvenance"},{"properties":{"attempt_index":{"const":0},"provider":{"const":"KIMI"},"failure_code":{"$ref":"#/$defs/GatewayFailureCode"}}}]},
+      {"allOf":[{"$ref":"#/$defs/ProviderProvenance"},{"properties":{"attempt_index":{"const":0},"provider":{"const":"OPENAI"},"failure_code":{"$ref":"#/$defs/NonFallbackGatewayFailureCode"}}}]}
+    ]},
+    "AnthropicTerminalFailureProvenance": {"allOf":[{"$ref":"#/$defs/AnthropicFinishedProvenance"},{"properties":{"failure_code":{"$ref":"#/$defs/GatewayFailureCode"}}}]},
+    "EmptyProvenanceSequence": {"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/ProviderProvenance"}},
+    "ProviderProvenanceSequence": {"oneOf":[
+      {"$ref":"#/$defs/EmptyProvenanceSequence"},
+      {"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"allOf":[{"$ref":"#/$defs/ProviderProvenance"},{"properties":{"attempt_index":{"const":0}}}]}],"items":false},
+      {"type":"array","minItems":2,"maxItems":2,"prefixItems":[{"$ref":"#/$defs/OpenAIFallbackFailureProvenance"},{"$ref":"#/$defs/AnthropicFinishedProvenance"}],"items":false}
+    ]},
+    "SuccessfulTerminalProvenanceSequence": {"oneOf":[
+      {"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"$ref":"#/$defs/PrimarySuccessfulProvenance"}],"items":false},
+      {"type":"array","minItems":2,"maxItems":2,"prefixItems":[{"$ref":"#/$defs/OpenAIFallbackFailureProvenance"},{"$ref":"#/$defs/AnthropicSuccessfulProvenance"}],"items":false}
+    ]},
+    "GatewayFailureTerminalProvenanceSequence": {"oneOf":[
+      {"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"$ref":"#/$defs/PrimaryTerminalFailureProvenance"}],"items":false},
+      {"type":"array","minItems":2,"maxItems":2,"prefixItems":[{"$ref":"#/$defs/OpenAIFallbackFailureProvenance"},{"$ref":"#/$defs/AnthropicTerminalFailureProvenance"}],"items":false}
+    ]},
+    "LocalFailureAfterPrimaryProvenanceSequence": {"oneOf":[
+      {"$ref":"#/$defs/EmptyProvenanceSequence"},
+      {"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"$ref":"#/$defs/OpenAIFallbackFailureProvenance"}],"items":false}
+    ]},
+    "BackupUnconfiguredProvenanceSequence": {"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"$ref":"#/$defs/OpenAIFallbackFailureProvenance"}],"items":false},
+    "GatewayTerminalFailureCoherence": {"oneOf":[
+      {"properties":{"failure_code":{"const":"DNS_FAILURE"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"DNS_FAILURE"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"DNS_FAILURE"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"CONNECT_TIMEOUT"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"CONNECT_TIMEOUT"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"CONNECT_TIMEOUT"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"CONNECT_FAILED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"CONNECT_FAILED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"CONNECT_FAILED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"READ_TIMEOUT"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"READ_TIMEOUT"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"READ_TIMEOUT"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"CONNECTION_INTERRUPTED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"CONNECTION_INTERRUPTED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"CONNECTION_INTERRUPTED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"HTTP_TIMEOUT"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"HTTP_TIMEOUT"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"HTTP_TIMEOUT"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"RATE_LIMITED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"RATE_LIMITED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"RATE_LIMITED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"PROVIDER_UNAVAILABLE"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"PROVIDER_UNAVAILABLE"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"PROVIDER_UNAVAILABLE"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"DEADLINE_EXHAUSTED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"DEADLINE_EXHAUSTED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"DEADLINE_EXHAUSTED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"PROVIDER_REFUSED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"PROVIDER_REFUSED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"PROVIDER_REFUSED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"MALFORMED_PROVIDER_RESPONSE"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"MALFORMED_PROVIDER_RESPONSE"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"MALFORMED_PROVIDER_RESPONSE"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"SCHEMA_MISMATCH"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"SCHEMA_MISMATCH"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"SCHEMA_MISMATCH"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"AUTHENTICATION_FAILED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"AUTHENTICATION_FAILED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"AUTHENTICATION_FAILED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"PERMISSION_DENIED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"PERMISSION_DENIED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"PERMISSION_DENIED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"MODEL_NOT_FOUND"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"MODEL_NOT_FOUND"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"MODEL_NOT_FOUND"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"INVALID_PROVIDER_REQUEST"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"INVALID_PROVIDER_REQUEST"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"INVALID_PROVIDER_REQUEST"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"PROVIDER_CLIENT_ERROR"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"PROVIDER_CLIENT_ERROR"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"PROVIDER_CLIENT_ERROR"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"RESPONSE_TOO_LARGE"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"RESPONSE_TOO_LARGE"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"RESPONSE_TOO_LARGE"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"UNSUPPORTED_CONTENT_ENCODING"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"UNSUPPORTED_CONTENT_ENCODING"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"UNSUPPORTED_CONTENT_ENCODING"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"REDIRECT_REFUSED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"REDIRECT_REFUSED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"REDIRECT_REFUSED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"ENDPOINT_NOT_ALLOWED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"ENDPOINT_NOT_ALLOWED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"ENDPOINT_NOT_ALLOWED"}}}]}]}]}}},
+      {"properties":{"failure_code":{"const":"TLS_VERIFICATION_FAILED"},"provenance":{"allOf":[{"$ref":"#/$defs/GatewayFailureTerminalProvenanceSequence"},{"oneOf":[{"type":"array","minItems":1,"maxItems":1,"prefixItems":[{"properties":{"failure_code":{"const":"TLS_VERIFICATION_FAILED"}}}]},{"type":"array","minItems":2,"maxItems":2,"prefixItems":[{}, {"properties":{"failure_code":{"const":"TLS_VERIFICATION_FAILED"}}}]}]}]}}}
+    ]},
+    "TerminalProvenanceCoherence": {"oneOf":[
+      {"$ref":"#/$defs/GatewayTerminalFailureCoherence"},
+      {"properties":{"failure_code":{"const":"NO_VALID_SUGGESTION"},"provenance":{"$ref":"#/$defs/SuccessfulTerminalProvenanceSequence"}}},
+      {"properties":{"failure_code":{"enum":["invalid_provider_shape","provider_sensitive_key","invalid_provider_timestamp","invalid_candidate_set"]},"provenance":{"$ref":"#/$defs/SuccessfulTerminalProvenanceSequence"}}},
+      {"properties":{"failure_code":{"const":"PROVIDER_UNCONFIGURED"},"provenance":{"$ref":"#/$defs/EmptyProvenanceSequence"}}},
+      {"properties":{"failure_code":{"const":"INPUT_TOO_LARGE"},"provenance":{"$ref":"#/$defs/LocalFailureAfterPrimaryProvenanceSequence"}}},
+      {"properties":{"failure_code":{"const":"BACKUP_UNCONFIGURED"},"provenance":{"$ref":"#/$defs/BackupUnconfiguredProvenanceSequence"}}},
+      {"properties":{"failure_code":{"const":"DEADLINE_EXHAUSTED"},"provenance":{"$ref":"#/$defs/LocalFailureAfterPrimaryProvenanceSequence"}}}
+    ]},
+    "RejectionCode": {"enum":["UNKNOWN_ROLE_AREA","INELIGIBLE_ROLE_AREA","MISSING_REQUIRED_SKILL","INVALID_INTERVAL","INVALID_MINUTE_PRECISION","OFFSET_TIMEZONE_MISMATCH","OUTSIDE_SERVICE_DATE","OUTSIDE_AVAILABILITY","OVERLAPS_EXCEPTION","OVERLAPPING_ASSIGNMENTS","MAX_DAILY_MINUTES_EXCEEDED","COVERAGE_GAP","PROMPT_TEMPLATE_VERSION_MISMATCH"]},
+    "CandidateValidProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"candidate_index":{"enum":[1,2]},"status":{"const":"VALID"},"operations":{"type":"array","minItems":0,"maxItems":32,"items":{"$ref":"#/$defs/CandidateOperationProjection"}},"rationale":{"type":"string","maxLength":280,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"},"operational_warnings":{"type":"array","minItems":0,"maxItems":5,"items":{"type":"string","maxLength":200,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"}},"coverage_gaps":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CoverageGap"}},"schedule_digest":{"$ref":"#/$defs/Digest"},"rejection_codes":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/RejectionCode"}}},
+      "required":["candidate_index","status","operations","rationale","operational_warnings","coverage_gaps","schedule_digest","rejection_codes"]
+    },
+    "CandidateRejectedCoverageProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"candidate_index":{"enum":[1,2]},"status":{"const":"REJECTED"},"operations":{"type":"array","minItems":0,"maxItems":32,"items":{"$ref":"#/$defs/CandidateOperationProjection"}},"rationale":{"type":"string","maxLength":280,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"},"operational_warnings":{"type":"array","minItems":0,"maxItems":5,"items":{"type":"string","maxLength":200,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"}},"coverage_gaps":{"type":"array","minItems":1,"maxItems":4096,"items":{"$ref":"#/$defs/CoverageGap"}},"schedule_digest":{"type":"null"},"rejection_codes":{"const":["COVERAGE_GAP"]}},
+      "required":["candidate_index","status","operations","rationale","operational_warnings","coverage_gaps","schedule_digest","rejection_codes"]
+    },
+    "CandidateRejectedOtherProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"candidate_index":{"enum":[1,2]},"status":{"const":"REJECTED"},"operations":{"type":"array","minItems":0,"maxItems":32,"items":{"$ref":"#/$defs/CandidateOperationProjection"}},"rationale":{"type":"string","maxLength":280,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"},"operational_warnings":{"type":"array","minItems":0,"maxItems":5,"items":{"type":"string","maxLength":200,"pattern":"^[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]*$"}},"coverage_gaps":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CoverageGap"}},"schedule_digest":{"type":"null"},"rejection_codes":{"type":"array","minItems":1,"maxItems":13,"uniqueItems":true,"items":{"$ref":"#/$defs/RejectionCode"},"not":{"contains":{"const":"COVERAGE_GAP"}}}},
+      "required":["candidate_index","status","operations","rationale","operational_warnings","coverage_gaps","schedule_digest","rejection_codes"]
+    },
+    "CandidateRejectedProjection": {"oneOf":[{"$ref":"#/$defs/CandidateRejectedCoverageProjection"},{"$ref":"#/$defs/CandidateRejectedOtherProjection"}]},
+    "CandidateProjection": {"oneOf":[{"$ref":"#/$defs/CandidateValidProjection"},{"$ref":"#/$defs/CandidateRejectedProjection"}]},
+    "CandidateSequence": {"type":"array","minItems":0,"maxItems":2,"prefixItems":[{"allOf":[{"$ref":"#/$defs/CandidateProjection"},{"properties":{"candidate_index":{"const":1}}}]},{"allOf":[{"$ref":"#/$defs/CandidateProjection"},{"properties":{"candidate_index":{"const":2}}}]}],"items":false},
+    "CandidateNonemptySequence": {"type":"array","minItems":1,"maxItems":2,"prefixItems":[{"allOf":[{"$ref":"#/$defs/CandidateProjection"},{"properties":{"candidate_index":{"const":1}}}]},{"allOf":[{"$ref":"#/$defs/CandidateProjection"},{"properties":{"candidate_index":{"const":2}}}]}],"items":false,"contains":{"$ref":"#/$defs/CandidateValidProjection"},"minContains":1},
+    "RejectedCandidateSequence": {"type":"array","minItems":0,"maxItems":2,"prefixItems":[{"allOf":[{"$ref":"#/$defs/CandidateRejectedProjection"},{"properties":{"candidate_index":{"const":1}}}]},{"allOf":[{"$ref":"#/$defs/CandidateRejectedProjection"},{"properties":{"candidate_index":{"const":2}}}]}],"items":false},
+    "EffectivePlanProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"revision":{"type":"integer","minimum":1},"status":{"enum":["CURRENT","REVIEW_REQUIRED"]},"schedule_digest":{"$ref":"#/$defs/Digest"},"assignments":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/AssignmentProjection"}}},
+      "required":["revision","status","schedule_digest","assignments"]
+    },
+    "CommittedEffectivePlanProjection": {"allOf":[{"$ref":"#/$defs/EffectivePlanProjection"},{"properties":{"status":{"const":"CURRENT"}}}]},
+    "ManagerResponseSummary": {
+      "oneOf":[
+        {"type":"object","additionalProperties":false,"properties":{"response_kind":{"const":"ACCEPT"},"reason_code":{"const":"APPROVED"},"operator":{"$ref":"#/$defs/Operator"},"note":{"$ref":"#/$defs/NullableNote"},"effective_plan":{"$ref":"#/$defs/CommittedEffectivePlanProjection"}},"required":["response_kind","reason_code","operator","note","effective_plan"]},
+        {"type":"object","additionalProperties":false,"properties":{"response_kind":{"const":"MODIFY"},"reason_code":{"const":"APPROVED_WITH_CHANGES"},"operator":{"$ref":"#/$defs/Operator"},"note":{"$ref":"#/$defs/NullableNote"},"effective_plan":{"$ref":"#/$defs/CommittedEffectivePlanProjection"}},"required":["response_kind","reason_code","operator","note","effective_plan"]},
+        {"type":"object","additionalProperties":false,"properties":{"response_kind":{"const":"REJECT"},"reason_code":{"enum":["MANUAL_HANDLING","INSUFFICIENT_CONTEXT","OTHER"]},"operator":{"$ref":"#/$defs/Operator"},"note":{"$ref":"#/$defs/NullableNote"},"effective_plan":{"type":"null"}},"required":["response_kind","reason_code","operator","note","effective_plan"]}
+      ]
+    },
+    "GenerationReservedProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"suggestion_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"RESERVED"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"candidates":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CandidateProjection"}},"coverage_gaps":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CoverageGap"}},"provenance":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/ProviderProvenance"}},"failure_code":{"type":"null"},"manager_response":{"type":"null"}},
+      "required":["suggestion_id","request_id","operation_id","state","basis","retry_of","candidates","coverage_gaps","provenance","failure_code","manager_response"]
+    },
+    "GenerationInProgressProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"suggestion_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"IN_PROGRESS"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"candidates":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CandidateProjection"}},"coverage_gaps":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CoverageGap"}},"provenance":{"$ref":"#/$defs/ProviderProvenanceSequence"},"failure_code":{"type":"null"},"manager_response":{"type":"null"}},
+      "required":["suggestion_id","request_id","operation_id","state","basis","retry_of","candidates","coverage_gaps","provenance","failure_code","manager_response"]
+    },
+    "GenerationUnknownProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"suggestion_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"RESULT_UNKNOWN"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"candidates":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CandidateProjection"}},"coverage_gaps":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CoverageGap"}},"provenance":{"$ref":"#/$defs/ProviderProvenanceSequence"},"failure_code":{"const":"RESULT_UNKNOWN"},"manager_response":{"type":"null"}},
+      "required":["suggestion_id","request_id","operation_id","state","basis","retry_of","candidates","coverage_gaps","provenance","failure_code","manager_response"]
+    },
+    "GenerationSucceededProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"suggestion_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"SUCCEEDED"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"candidates":{"$ref":"#/$defs/CandidateNonemptySequence"},"coverage_gaps":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/CoverageGap"}},"provenance":{"$ref":"#/$defs/SuccessfulTerminalProvenanceSequence"},"failure_code":{"type":"null"},"manager_response":{"oneOf":[{"$ref":"#/$defs/ManagerResponseSummary"},{"type":"null"}]}},
+      "required":["suggestion_id","request_id","operation_id","state","basis","retry_of","candidates","coverage_gaps","provenance","failure_code","manager_response"]
+    },
+    "GenerationNoValidProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"suggestion_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"NO_VALID_SUGGESTION"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"candidates":{"$ref":"#/$defs/RejectedCandidateSequence"},"coverage_gaps":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/CoverageGap"}},"provenance":{"$ref":"#/$defs/SuccessfulTerminalProvenanceSequence"},"failure_code":{"const":"NO_VALID_SUGGESTION"},"manager_response":{"type":"null"}},
+      "required":["suggestion_id","request_id","operation_id","state","basis","retry_of","candidates","coverage_gaps","provenance","failure_code","manager_response"]
+    },
+    "GenerationUnavailableProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"suggestion_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"enum":["UNAVAILABLE","REFUSED","INVALID_RESPONSE","PROVIDER_ERROR","CONFIGURATION_ERROR","SECURITY_ERROR"]},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"candidates":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CandidateProjection"}},"coverage_gaps":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/CoverageGap"}},"provenance":{"$ref":"#/$defs/ProviderProvenanceSequence"},"failure_code":{"$ref":"#/$defs/GenerationFailureCode"},"manager_response":{"type":"null"}},
+      "required":["suggestion_id","request_id","operation_id","state","basis","retry_of","candidates","coverage_gaps","provenance","failure_code","manager_response"],
+      "allOf":[{"$ref":"#/$defs/TerminalProvenanceCoherence"},{"oneOf":[
+        {"properties":{"state":{"const":"UNAVAILABLE"},"failure_code":{"enum":["DNS_FAILURE","CONNECT_TIMEOUT","CONNECT_FAILED","READ_TIMEOUT","CONNECTION_INTERRUPTED","HTTP_TIMEOUT","RATE_LIMITED","PROVIDER_UNAVAILABLE","DEADLINE_EXHAUSTED","BACKUP_UNCONFIGURED"]}}},
+        {"properties":{"state":{"const":"REFUSED"},"failure_code":{"const":"PROVIDER_REFUSED"},"provenance":{"minItems":1}}},
+        {"properties":{"state":{"const":"INVALID_RESPONSE"},"failure_code":{"enum":["MALFORMED_PROVIDER_RESPONSE","SCHEMA_MISMATCH","invalid_provider_shape","provider_sensitive_key","invalid_provider_timestamp","invalid_candidate_set"]},"provenance":{"minItems":1}}},
+        {"properties":{"state":{"const":"PROVIDER_ERROR"},"failure_code":{"const":"PROVIDER_CLIENT_ERROR"},"provenance":{"minItems":1}}},
+        {"properties":{"state":{"const":"CONFIGURATION_ERROR"},"failure_code":{"enum":["INPUT_TOO_LARGE","AUTHENTICATION_FAILED","PERMISSION_DENIED","MODEL_NOT_FOUND","INVALID_PROVIDER_REQUEST","PROVIDER_UNCONFIGURED"]}}},
+        {"properties":{"state":{"const":"SECURITY_ERROR"},"failure_code":{"enum":["RESPONSE_TOO_LARGE","UNSUPPORTED_CONTENT_ENCODING","REDIRECT_REFUSED","ENDPOINT_NOT_ALLOWED","TLS_VERIFICATION_FAILED"]},"provenance":{"minItems":1}}}
+      ]}]
+    },
+    "GenerationProjection": {"oneOf":[{"$ref":"#/$defs/GenerationReservedProjection"},{"$ref":"#/$defs/GenerationInProgressProjection"},{"$ref":"#/$defs/GenerationUnknownProjection"},{"$ref":"#/$defs/GenerationSucceededProjection"},{"$ref":"#/$defs/GenerationNoValidProjection"},{"$ref":"#/$defs/GenerationUnavailableProjection"}]},
+    "RosterProjection": {
+      "type":"object","additionalProperties":false,
+      "properties":{"revision":{"type":"integer","minimum":1},"effective_from_local_date":{"$ref":"#/$defs/LocalDate"},"effective_until_local_date":{"oneOf":[{"$ref":"#/$defs/LocalDate"},{"type":"null"}]},"worker_count":{"type":"integer","minimum":0},"assignment_count":{"type":"integer","minimum":0},"coverage_rule_count":{"type":"integer","minimum":0}},
+      "required":["revision","effective_from_local_date","effective_until_local_date","worker_count","assignment_count","coverage_rule_count"]
+    },
+    "StaffingContext": {
+      "type":"object","additionalProperties":false,
+      "properties":{"site_id":{"$ref":"#/$defs/Identifier"},"deployment_id":{"$ref":"#/$defs/Identifier"},"site_timezone":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]+$"}},
+      "required":["site_id","deployment_id","site_timezone"]
+    },
+    "StaffingDateSnapshot": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "schema":{"const":"nxt-staffing/v1"},"environment":{"const":"SIMULATION"},"mode":{"const":"STAFFING_ADVISORY_ONLY"},"server_time_utc":{"$ref":"#/$defs/AuditUtcTimestamp"},"service_date":{"$ref":"#/$defs/LocalDate"},
+        "context":{"$ref":"#/$defs/StaffingContext"},"generation_capability":{"$ref":"#/$defs/GenerationCapability"},"revisions":{"$ref":"#/$defs/RevisionVector"},
+        "roster":{"oneOf":[{"$ref":"#/$defs/RosterProjection"},{"type":"null"}]},
+        "assignments":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/AssignmentProjection"}},
+        "active_exceptions":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/ExceptionProjection"}},
+        "effective_plan":{"oneOf":[{"$ref":"#/$defs/EffectivePlanProjection"},{"type":"null"}]},
+        "generations":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/GenerationProjection"}}
+      },
+      "required":["schema","environment","mode","server_time_utc","service_date","context","generation_capability","revisions","roster","assignments","active_exceptions","effective_plan","generations"]
+    },
+
+    "EligibilityInput": {
+      "type":"object","additionalProperties":false,"properties":{"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"}},"required":["role_code","area_code"]
+    },
+    "WorkerInput": {
+      "type":"object","additionalProperties":false,
+      "properties":{"staff_id":{"$ref":"#/$defs/Identifier"},"display_name":{"$ref":"#/$defs/DisplayName"},"skill_codes":{"type":"array","minItems":0,"maxItems":4096,"uniqueItems":true,"items":{"$ref":"#/$defs/Code"}},"eligibility":{"type":"array","minItems":0,"maxItems":4096,"uniqueItems":true,"items":{"$ref":"#/$defs/EligibilityInput"}},"max_daily_minutes":{"type":"integer","minimum":1,"maximum":1440}},
+      "required":["staff_id","display_name","skill_codes","eligibility","max_daily_minutes"]
+    },
+    "AvailabilityInput": {
+      "type":"object","additionalProperties":false,"properties":{"staff_id":{"$ref":"#/$defs/Identifier"},"weekday":{"type":"integer","minimum":0,"maximum":6},"start_local":{"$ref":"#/$defs/LocalMinute"},"end_local":{"$ref":"#/$defs/LocalMinute"}},"required":["staff_id","weekday","start_local","end_local"]
+    },
+    "AssignmentRuleInput": {
+      "type":"object","additionalProperties":false,"properties":{"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"required_skill_codes":{"type":"array","minItems":0,"maxItems":4096,"uniqueItems":true,"items":{"$ref":"#/$defs/Code"}}},"required":["role_code","area_code","required_skill_codes"]
+    },
+    "RegularAssignmentInput": {
+      "type":"object","additionalProperties":false,"properties":{"staff_id":{"$ref":"#/$defs/Identifier"},"weekday":{"type":"integer","minimum":0,"maximum":6},"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_local":{"$ref":"#/$defs/LocalMinute"},"end_local":{"$ref":"#/$defs/LocalMinute"}},"required":["staff_id","weekday","role_code","area_code","start_local","end_local"]
+    },
+    "CoverageInput": {
+      "type":"object","additionalProperties":false,"properties":{"weekday":{"type":"integer","minimum":0,"maximum":6},"role_code":{"$ref":"#/$defs/Code"},"area_code":{"$ref":"#/$defs/Code"},"start_local":{"$ref":"#/$defs/LocalMinute"},"end_local":{"$ref":"#/$defs/LocalMinute"},"minimum_staff":{"type":"integer","minimum":1,"maximum":10000}},"required":["weekday","role_code","area_code","start_local","end_local","minimum_staff"]
+    },
+    "RosterImportRequest": {
+      "type":"object","additionalProperties":false,
+      "properties":{
+        "schema":{"const":"nxt-staffing-roster-import/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"expected_roster_revision":{"type":"integer","minimum":0},
+        "site_id":{"$ref":"#/$defs/Identifier"},"deployment_id":{"$ref":"#/$defs/Identifier"},"site_timezone":{"type":"string","minLength":1,"maxLength":128,"pattern":"^(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]+$"},
+        "effective_from_local_date":{"$ref":"#/$defs/LocalDate"},"effective_until_local_date":{"oneOf":[{"$ref":"#/$defs/LocalDate"},{"type":"null"}]},"source_ref":{"$ref":"#/$defs/SourceRef"},
+        "workers":{"type":"array","minItems":1,"maxItems":4096,"items":{"$ref":"#/$defs/WorkerInput"}},"availability":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/AvailabilityInput"}},
+        "assignment_rules":{"type":"array","minItems":1,"maxItems":4096,"items":{"$ref":"#/$defs/AssignmentRuleInput"}},"regular_assignments":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/RegularAssignmentInput"}},
+        "coverage":{"type":"array","minItems":1,"maxItems":4096,"items":{"$ref":"#/$defs/CoverageInput"}}
+      },
+      "required":["schema","request_id","operator","expected_roster_revision","site_id","deployment_id","site_timezone","effective_from_local_date","effective_until_local_date","source_ref","workers","availability","assignment_rules","regular_assignments","coverage"]
+    },
+    "ExceptionRecordWholeShift": {
+      "type":"object","additionalProperties":false,
+      "properties":{"schema":{"const":"nxt-staffing-exception/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"service_date":{"$ref":"#/$defs/LocalDate"},"expected_roster_revision":{"type":"integer","minimum":0},"expected_exception_set_revision":{"type":"integer","minimum":0},"staff_id":{"$ref":"#/$defs/Identifier"},"kind":{"enum":["LEAVE","UNAVAILABLE"]},"time_local":{"type":"null"},"note":{"$ref":"#/$defs/NullableNote"}},
+      "required":["schema","request_id","operator","service_date","expected_roster_revision","expected_exception_set_revision","staff_id","kind","time_local","note"]
+    },
+    "ExceptionRecordPoint": {
+      "type":"object","additionalProperties":false,
+      "properties":{"schema":{"const":"nxt-staffing-exception/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"service_date":{"$ref":"#/$defs/LocalDate"},"expected_roster_revision":{"type":"integer","minimum":0},"expected_exception_set_revision":{"type":"integer","minimum":0},"staff_id":{"$ref":"#/$defs/Identifier"},"kind":{"enum":["LATE","EARLY_DEPARTURE"]},"time_local":{"$ref":"#/$defs/LocalMinute"},"note":{"$ref":"#/$defs/NullableNote"}},
+      "required":["schema","request_id","operator","service_date","expected_roster_revision","expected_exception_set_revision","staff_id","kind","time_local","note"]
+    },
+    "ExceptionRecordRequest": {"oneOf":[{"$ref":"#/$defs/ExceptionRecordWholeShift"},{"$ref":"#/$defs/ExceptionRecordPoint"}]},
+    "ExceptionReplacementWholeShift": {
+      "type":"object","additionalProperties":false,"properties":{"kind":{"enum":["LEAVE","UNAVAILABLE"]},"time_local":{"type":"null"},"note":{"$ref":"#/$defs/NullableNote"}},"required":["kind","time_local","note"]
+    },
+    "ExceptionReplacementPoint": {
+      "type":"object","additionalProperties":false,"properties":{"kind":{"enum":["LATE","EARLY_DEPARTURE"]},"time_local":{"$ref":"#/$defs/LocalMinute"},"note":{"$ref":"#/$defs/NullableNote"}},"required":["kind","time_local","note"]
+    },
+    "ExceptionReplacementInput": {"oneOf":[{"$ref":"#/$defs/ExceptionReplacementWholeShift"},{"$ref":"#/$defs/ExceptionReplacementPoint"}]},
+    "ExceptionCancelRequest": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-exception-cancel/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"expected_exception_set_revision":{"type":"integer","minimum":0},"note":{"$ref":"#/$defs/NullableNote"}},"required":["schema","request_id","operator","expected_exception_set_revision","note"]
+    },
+    "ExceptionCorrectRequest": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-exception-correct/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"expected_exception_set_revision":{"type":"integer","minimum":0},"replacement":{"$ref":"#/$defs/ExceptionReplacementInput"}},"required":["schema","request_id","operator","expected_exception_set_revision","replacement"]
+    },
+    "SuggestionGenerateRequest": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-suggestion-generate/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"service_date":{"$ref":"#/$defs/LocalDate"},"expected_revisions":{"$ref":"#/$defs/RevisionVector"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"}},"required":["schema","request_id","operator","service_date","expected_revisions","retry_of"]
+    },
+    "ManagerAcceptRequest": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-manager-response/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"kind":{"const":"ACCEPT"},"expected_revisions":{"$ref":"#/$defs/RevisionVector"},"candidate_index":{"enum":[1,2]},"edited_operations":{"type":"null"},"reason_code":{"const":"APPROVED"},"note":{"$ref":"#/$defs/NullableNote"}},"required":["schema","request_id","operator","kind","expected_revisions","candidate_index","edited_operations","reason_code","note"]
+    },
+    "ManagerModifyRequest": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-manager-response/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"kind":{"const":"MODIFY"},"expected_revisions":{"$ref":"#/$defs/RevisionVector"},"candidate_index":{"enum":[1,2]},"edited_operations":{"type":"array","minItems":1,"maxItems":32,"items":{"$ref":"#/$defs/ManagerPatchOperation"}},"reason_code":{"const":"APPROVED_WITH_CHANGES"},"note":{"$ref":"#/$defs/NullableNote"}},"required":["schema","request_id","operator","kind","expected_revisions","candidate_index","edited_operations","reason_code","note"]
+    },
+    "ManagerRejectRequest": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-manager-response/v1"},"request_id":{"$ref":"#/$defs/Identifier"},"operator":{"$ref":"#/$defs/Operator"},"kind":{"const":"REJECT"},"expected_revisions":{"$ref":"#/$defs/RevisionVector"},"candidate_index":{"type":"null"},"edited_operations":{"type":"null"},"reason_code":{"enum":["MANUAL_HANDLING","INSUFFICIENT_CONTEXT","OTHER"]},"note":{"$ref":"#/$defs/NullableNote"}},"required":["schema","request_id","operator","kind","expected_revisions","candidate_index","edited_operations","reason_code","note"]
+    },
+    "ManagerResponseRequest": {"oneOf":[{"$ref":"#/$defs/ManagerAcceptRequest"},{"$ref":"#/$defs/ManagerModifyRequest"},{"$ref":"#/$defs/ManagerRejectRequest"}]},
+    "StaffingRequestBody": {"oneOf":[{"$ref":"#/$defs/RosterImportRequest"},{"$ref":"#/$defs/ExceptionRecordRequest"},{"$ref":"#/$defs/ExceptionCancelRequest"},{"$ref":"#/$defs/ExceptionCorrectRequest"},{"$ref":"#/$defs/SuggestionGenerateRequest"},{"$ref":"#/$defs/ManagerResponseRequest"}]},
+
+    "RosterImportedRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"ROSTER_IMPORTED"},"roster_revision":{"type":"integer","minimum":1},"roster_digest":{"$ref":"#/$defs/Digest"},"imported_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"},"worker_count":{"type":"integer","minimum":1},"assignment_count":{"type":"integer","minimum":0},"coverage_rule_count":{"type":"integer","minimum":1}},"required":["record_kind","roster_revision","roster_digest","imported_at_utc","worker_count","assignment_count","coverage_rule_count"]
+    },
+    "ExceptionRecordedRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"EXCEPTION_RECORDED"},"exception":{"$ref":"#/$defs/ExceptionProjection"},"exception_set_revision":{"type":"integer","minimum":1},"recorded_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"}},"required":["record_kind","exception","exception_set_revision","recorded_at_utc"]
+    },
+    "ExceptionCancelledRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"EXCEPTION_CANCELLED"},"exception_id":{"$ref":"#/$defs/Identifier"},"exception_set_revision":{"type":"integer","minimum":1},"cancelled_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"}},"required":["record_kind","exception_id","exception_set_revision","cancelled_at_utc"]
+    },
+    "ExceptionCorrectedRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"EXCEPTION_CORRECTED"},"replaced_exception_id":{"$ref":"#/$defs/Identifier"},"replacement":{"$ref":"#/$defs/ExceptionProjection"},"exception_set_revision":{"type":"integer","minimum":1},"corrected_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"}},"required":["record_kind","replaced_exception_id","replacement","exception_set_revision","corrected_at_utc"]
+    },
+    "GenerationReservedRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"GENERATION_RESERVED"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"service_date":{"$ref":"#/$defs/LocalDate"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"provenance":{"type":"array","minItems":0,"maxItems":0,"items":{"$ref":"#/$defs/ProviderProvenance"}}},"required":["record_kind","suggestion_id","service_date","basis","retry_of","provenance"]
+    },
+    "GenerationInProgressRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"GENERATION_IN_PROGRESS"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"service_date":{"$ref":"#/$defs/LocalDate"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"provenance":{"$ref":"#/$defs/ProviderProvenanceSequence"}},"required":["record_kind","suggestion_id","service_date","basis","retry_of","provenance"]
+    },
+    "GenerationInterruptedRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"GENERATION_INTERRUPTED"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"service_date":{"$ref":"#/$defs/LocalDate"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"provenance":{"$ref":"#/$defs/ProviderProvenanceSequence"},"failure_code":{"const":"RESULT_UNKNOWN"}},"required":["record_kind","suggestion_id","service_date","basis","retry_of","provenance","failure_code"]
+    },
+    "SuggestionIssuedRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"SUGGESTION_ISSUED"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"service_date":{"$ref":"#/$defs/LocalDate"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"provenance":{"$ref":"#/$defs/SuccessfulTerminalProvenanceSequence"},"candidates":{"$ref":"#/$defs/CandidateNonemptySequence"},"coverage_gaps":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/CoverageGap"}},"failure_code":{"type":"null"}},"required":["record_kind","suggestion_id","service_date","basis","retry_of","provenance","candidates","coverage_gaps","failure_code"]
+    },
+    "SuggestionUnavailableRecord": {
+      "type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"SUGGESTION_UNAVAILABLE"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"service_date":{"$ref":"#/$defs/LocalDate"},"basis":{"$ref":"#/$defs/Basis"},"retry_of":{"$ref":"#/$defs/NullableIdentifier"},"provenance":{"$ref":"#/$defs/ProviderProvenanceSequence"},"candidates":{"$ref":"#/$defs/CandidateSequence"},"coverage_gaps":{"type":"array","minItems":0,"maxItems":4096,"items":{"$ref":"#/$defs/CoverageGap"}},"failure_code":{"$ref":"#/$defs/GenerationFailureCode"}},"required":["record_kind","suggestion_id","service_date","basis","retry_of","provenance","candidates","coverage_gaps","failure_code"],"allOf":[{"$ref":"#/$defs/TerminalProvenanceCoherence"}]
+    },
+    "ManagerResponseCommittedRecord": {
+      "oneOf":[
+        {"type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"MANAGER_RESPONSE_COMMITTED"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"response_kind":{"const":"ACCEPT"},"reason_code":{"const":"APPROVED"},"operator":{"$ref":"#/$defs/Operator"},"note":{"$ref":"#/$defs/NullableNote"},"effective_plan":{"$ref":"#/$defs/CommittedEffectivePlanProjection"},"committed_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"}},"required":["record_kind","suggestion_id","response_kind","reason_code","operator","note","effective_plan","committed_at_utc"]},
+        {"type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"MANAGER_RESPONSE_COMMITTED"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"response_kind":{"const":"MODIFY"},"reason_code":{"const":"APPROVED_WITH_CHANGES"},"operator":{"$ref":"#/$defs/Operator"},"note":{"$ref":"#/$defs/NullableNote"},"effective_plan":{"$ref":"#/$defs/CommittedEffectivePlanProjection"},"committed_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"}},"required":["record_kind","suggestion_id","response_kind","reason_code","operator","note","effective_plan","committed_at_utc"]},
+        {"type":"object","additionalProperties":false,"properties":{"record_kind":{"const":"MANAGER_RESPONSE_COMMITTED"},"suggestion_id":{"$ref":"#/$defs/Identifier"},"response_kind":{"const":"REJECT"},"reason_code":{"enum":["MANUAL_HANDLING","INSUFFICIENT_CONTEXT","OTHER"]},"operator":{"$ref":"#/$defs/Operator"},"note":{"$ref":"#/$defs/NullableNote"},"effective_plan":{"type":"null"},"committed_at_utc":{"$ref":"#/$defs/AuditUtcTimestamp"}},"required":["record_kind","suggestion_id","response_kind","reason_code","operator","note","effective_plan","committed_at_utc"]}
+      ]
+    },
+    "ReceiptRoster": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"roster-import"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"COMMITTED"},"record":{"$ref":"#/$defs/RosterImportedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptExceptionRecord": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"exception-record"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"COMMITTED"},"record":{"$ref":"#/$defs/ExceptionRecordedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptExceptionCancel": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"exception-cancel"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"COMMITTED"},"record":{"$ref":"#/$defs/ExceptionCancelledRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptExceptionCorrect": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"exception-correct"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"COMMITTED"},"record":{"$ref":"#/$defs/ExceptionCorrectedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptGenerationReserved": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"suggestion-generate"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"RESERVED"},"record":{"$ref":"#/$defs/GenerationReservedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptGenerationInProgress": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"suggestion-generate"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"IN_PROGRESS"},"record":{"$ref":"#/$defs/GenerationInProgressRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptGenerationInterrupted": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"suggestion-generate"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"RESULT_UNKNOWN"},"record":{"$ref":"#/$defs/GenerationInterruptedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptSuggestionIssued": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"suggestion-generate"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"SUCCEEDED"},"record":{"$ref":"#/$defs/SuggestionIssuedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "ReceiptSuggestionUnavailable": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"suggestion-generate"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"enum":["NO_VALID_SUGGESTION","UNAVAILABLE","REFUSED","INVALID_RESPONSE","PROVIDER_ERROR","CONFIGURATION_ERROR","SECURITY_ERROR"]},"record":{"$ref":"#/$defs/SuggestionUnavailableRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"],
+      "allOf":[{"oneOf":[
+        {"properties":{"state":{"const":"NO_VALID_SUGGESTION"},"record":{"properties":{"candidates":{"$ref":"#/$defs/RejectedCandidateSequence"},"provenance":{"minItems":1},"failure_code":{"const":"NO_VALID_SUGGESTION"}}}}},
+        {"properties":{"state":{"const":"UNAVAILABLE"},"record":{"properties":{"candidates":{"maxItems":0},"coverage_gaps":{"maxItems":0},"failure_code":{"enum":["DNS_FAILURE","CONNECT_TIMEOUT","CONNECT_FAILED","READ_TIMEOUT","CONNECTION_INTERRUPTED","HTTP_TIMEOUT","RATE_LIMITED","PROVIDER_UNAVAILABLE","DEADLINE_EXHAUSTED","BACKUP_UNCONFIGURED"]}}}}},
+        {"properties":{"state":{"const":"REFUSED"},"record":{"properties":{"candidates":{"maxItems":0},"coverage_gaps":{"maxItems":0},"provenance":{"minItems":1},"failure_code":{"const":"PROVIDER_REFUSED"}}}}},
+        {"properties":{"state":{"const":"INVALID_RESPONSE"},"record":{"properties":{"candidates":{"maxItems":0},"coverage_gaps":{"maxItems":0},"provenance":{"minItems":1},"failure_code":{"enum":["MALFORMED_PROVIDER_RESPONSE","SCHEMA_MISMATCH","invalid_provider_shape","provider_sensitive_key","invalid_provider_timestamp","invalid_candidate_set"]}}}}},
+        {"properties":{"state":{"const":"PROVIDER_ERROR"},"record":{"properties":{"candidates":{"maxItems":0},"coverage_gaps":{"maxItems":0},"provenance":{"minItems":1},"failure_code":{"const":"PROVIDER_CLIENT_ERROR"}}}}},
+        {"properties":{"state":{"const":"CONFIGURATION_ERROR"},"record":{"properties":{"candidates":{"maxItems":0},"coverage_gaps":{"maxItems":0},"failure_code":{"enum":["INPUT_TOO_LARGE","AUTHENTICATION_FAILED","PERMISSION_DENIED","MODEL_NOT_FOUND","INVALID_PROVIDER_REQUEST","PROVIDER_UNCONFIGURED"]}}}}},
+        {"properties":{"state":{"const":"SECURITY_ERROR"},"record":{"properties":{"candidates":{"maxItems":0},"coverage_gaps":{"maxItems":0},"provenance":{"minItems":1},"failure_code":{"enum":["RESPONSE_TOO_LARGE","UNSUPPORTED_CONTENT_ENCODING","REDIRECT_REFUSED","ENDPOINT_NOT_ALLOWED","TLS_VERIFICATION_FAILED"]}}}}}
+      ]}]
+    },
+    "ReceiptManagerResponse": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing/v1"},"disposition":{"enum":["created","duplicate"]},"operation_kind":{"const":"manager-response"},"request_id":{"$ref":"#/$defs/Identifier"},"operation_id":{"$ref":"#/$defs/Identifier"},"state":{"const":"COMMITTED"},"record":{"$ref":"#/$defs/ManagerResponseCommittedRecord"}},"required":["schema","disposition","operation_kind","request_id","operation_id","state","record"]},
+    "StaffingReceipt": {"oneOf":[{"$ref":"#/$defs/ReceiptRoster"},{"$ref":"#/$defs/ReceiptExceptionRecord"},{"$ref":"#/$defs/ReceiptExceptionCancel"},{"$ref":"#/$defs/ReceiptExceptionCorrect"},{"$ref":"#/$defs/ReceiptGenerationReserved"},{"$ref":"#/$defs/ReceiptGenerationInProgress"},{"$ref":"#/$defs/ReceiptGenerationInterrupted"},{"$ref":"#/$defs/ReceiptSuggestionIssued"},{"$ref":"#/$defs/ReceiptSuggestionUnavailable"},{"$ref":"#/$defs/ReceiptManagerResponse"}]},
+    "SuccessEnvelope": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"oneOf":[{"$ref":"#/$defs/StaffingReceipt"},{"$ref":"#/$defs/StaffingDateSnapshot"}]}},"required":["schema","disclaimer","data"]
+    },
+    "ErrorBody": {
+      "type":"object","additionalProperties":false,"properties":{"code":{"enum":["staffing_invalid_request","staffing_not_found","staffing_request_not_found","staffing_conflict","staffing_stale_suggestion","staffing_busy","staffing_unavailable"]},"detail":{"type":"string","minLength":1,"maxLength":500,"pattern":"^(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F\\uD800-\\uDFFF]+$"}},"required":["code","detail"]
+    },
+    "ErrorEnvelope": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"error":{"$ref":"#/$defs/ErrorBody"}},"required":["schema","disclaimer","error"]
+    },
+    "GenerationReceipt": {"oneOf":[{"$ref":"#/$defs/ReceiptGenerationReserved"},{"$ref":"#/$defs/ReceiptGenerationInProgress"},{"$ref":"#/$defs/ReceiptGenerationInterrupted"},{"$ref":"#/$defs/ReceiptSuggestionIssued"},{"$ref":"#/$defs/ReceiptSuggestionUnavailable"}]},
+    "SnapshotSuccessEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/StaffingDateSnapshot"}},"required":["schema","disclaimer","data"]},
+    "RosterReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/ReceiptRoster"}},"required":["schema","disclaimer","data"]},
+    "ExceptionRecordReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/ReceiptExceptionRecord"}},"required":["schema","disclaimer","data"]},
+    "ExceptionCancelReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/ReceiptExceptionCancel"}},"required":["schema","disclaimer","data"]},
+    "ExceptionCorrectReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/ReceiptExceptionCorrect"}},"required":["schema","disclaimer","data"]},
+    "GenerationReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/GenerationReceipt"}},"required":["schema","disclaimer","data"]},
+    "ManagerReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"$ref":"#/$defs/ReceiptManagerResponse"}},"required":["schema","disclaimer","data"]},
+    "RecoveryReceiptEnvelope": {"type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-site-agent/api/v0"},"disclaimer":{"const":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"},"data":{"allOf":[{"$ref":"#/$defs/StaffingReceipt"},{"properties":{"disposition":{"const":"duplicate"}}}]}},"required":["schema","disclaimer","data"]},
+    "SuccessExchange": {
+      "oneOf":[
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"GET"},"route_template":{"const":"/api/v1/staffing"},"http_status":{"const":200},"body":{"$ref":"#/$defs/SnapshotSuccessEnvelope"}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"GET"},"route_template":{"const":"/api/v1/staffing/dates/{service_date}"},"http_status":{"const":200},"body":{"$ref":"#/$defs/SnapshotSuccessEnvelope"}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"GET"},"route_template":{"const":"/api/v1/staffing/requests/{operation_kind}/{request_id}"},"http_status":{"const":200},"body":{"$ref":"#/$defs/RecoveryReceiptEnvelope"}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/roster-imports"},"request":{"$ref":"#/$defs/RosterImportRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/RosterReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/exceptions"},"request":{"$ref":"#/$defs/ExceptionRecordRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/ExceptionRecordReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/exceptions/{exception_id}/cancel"},"request":{"$ref":"#/$defs/ExceptionCancelRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/ExceptionCancelReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/exceptions/{exception_id}/correct"},"request":{"$ref":"#/$defs/ExceptionCorrectRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/ExceptionCorrectReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/suggestions"},"request":{"$ref":"#/$defs/SuggestionGenerateRequest"},"http_status":{"const":202},"body":{"$ref":"#/$defs/GenerationReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/suggestions/{suggestion_id}/accept"},"request":{"$ref":"#/$defs/ManagerAcceptRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/ManagerReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/suggestions/{suggestion_id}/modify"},"request":{"$ref":"#/$defs/ManagerModifyRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/ManagerReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/suggestions/{suggestion_id}/reject"},"request":{"$ref":"#/$defs/ManagerRejectRequest"},"http_status":{"const":200},"body":{"$ref":"#/$defs/ManagerReceiptEnvelope"}},"required":["name","method","route_template","request","http_status","body"]}
+      ]
+    },
+    "ErrorExchange": {
+      "oneOf":[
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/exceptions"},"http_status":{"const":400},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_invalid_request"}}}}}]}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"GET"},"route_template":{"const":"/api/v1/staffing/requests/{operation_kind}/{request_id}"},"http_status":{"const":404},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_request_not_found"}}}}}]}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"GET"},"route_template":{"const":"/api/v1/staffing/dates/{service_date}"},"http_status":{"const":404},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_not_found"}}}}}]}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/roster-imports"},"http_status":{"const":409},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_conflict"}}}}}]}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/suggestions/{suggestion_id}/accept"},"http_status":{"const":409},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_stale_suggestion"}}}}}]}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"POST"},"route_template":{"const":"/api/v1/staffing/suggestions"},"http_status":{"const":429},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_busy"}}}}}]}},"required":["name","method","route_template","http_status","body"]},
+        {"type":"object","additionalProperties":false,"properties":{"name":{"$ref":"#/$defs/Identifier"},"method":{"const":"GET"},"route_template":{"const":"/api/v1/staffing"},"http_status":{"const":503},"body":{"allOf":[{"$ref":"#/$defs/ErrorEnvelope"},{"properties":{"error":{"properties":{"code":{"const":"staffing_unavailable"}}}}}]}},"required":["name","method","route_template","http_status","body"]}
+      ]
+    },
+    "SuccessExampleDocument": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-exchanges/v1"},"exchanges":{"type":"array","minItems":1,"maxItems":32,"uniqueItems":true,"items":{"$ref":"#/$defs/SuccessExchange"}}},"required":["schema","exchanges"]
+    },
+    "ErrorExampleDocument": {
+      "type":"object","additionalProperties":false,"properties":{"schema":{"const":"nxt-staffing-errors/v1"},"exchanges":{"type":"array","minItems":7,"maxItems":7,"uniqueItems":true,"items":{"$ref":"#/$defs/ErrorExchange"}}},"required":["schema","exchanges"]
+    }
+  }
+}

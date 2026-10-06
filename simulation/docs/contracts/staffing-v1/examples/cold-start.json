@@ -1,0 +1,55 @@
+{
+  "schema": "nxt-staffing-exchanges/v1",
+  "exchanges": [
+    {
+      "name": "current-empty",
+      "method": "GET",
+      "route_template": "/api/v1/staffing",
+      "http_status": 200,
+      "body": {
+        "schema": "nxt-site-agent/api/v0",
+        "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+        "data": {
+          "schema": "nxt-staffing/v1",
+          "environment": "SIMULATION",
+          "mode": "STAFFING_ADVISORY_ONLY",
+          "server_time_utc": "2026-10-06T01:00:00.000000Z",
+          "service_date": "2026-10-06",
+          "context": {"site_id":"site-cn-1","deployment_id":"deployment-1","site_timezone":"Asia/Shanghai"},
+          "generation_capability": {"status":"UNAVAILABLE","region":null,"primary_provider":null,"backup_provider":null,"failure_code":"PROVIDER_UNCONFIGURED"},
+          "revisions": {"roster":0,"exception_set":0,"effective_plan":0},
+          "roster": null,
+          "assignments": [],
+          "active_exceptions": [],
+          "effective_plan": null,
+          "generations": []
+        }
+      }
+    },
+    {
+      "name": "date-empty",
+      "method": "GET",
+      "route_template": "/api/v1/staffing/dates/{service_date}",
+      "http_status": 200,
+      "body": {
+        "schema": "nxt-site-agent/api/v0",
+        "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+        "data": {
+          "schema": "nxt-staffing/v1",
+          "environment": "SIMULATION",
+          "mode": "STAFFING_ADVISORY_ONLY",
+          "server_time_utc": "2026-10-06T01:00:00.000000Z",
+          "service_date": "2026-10-07",
+          "context": {"site_id":"site-cn-1","deployment_id":"deployment-1","site_timezone":"Asia/Shanghai"},
+          "generation_capability": {"status":"READY","region":"CN","primary_provider":"KIMI","backup_provider":null,"failure_code":null},
+          "revisions": {"roster":0,"exception_set":0,"effective_plan":0},
+          "roster": null,
+          "assignments": [],
+          "active_exceptions": [],
+          "effective_plan": null,
+          "generations": []
+        }
+      }
+    }
+  ]
+}

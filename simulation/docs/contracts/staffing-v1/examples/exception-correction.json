@@ -1,0 +1,56 @@
+{
+  "schema": "nxt-staffing-exchanges/v1",
+  "exchanges": [
+    {
+      "name": "exception-recorded",
+      "method": "POST",
+      "route_template": "/api/v1/staffing/exceptions",
+      "request": {
+        "schema":"nxt-staffing-exception/v1","request_id":"request-exception-1","operator":"manager-1","service_date":"2026-10-06",
+        "expected_roster_revision":1,"expected_exception_set_revision":0,"staff_id":"staff-001","kind":"LATE","time_local":"10:30","note":"临时晚到"
+      },
+      "http_status": 200,
+      "body": {
+        "schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+        "data": {
+          "schema":"nxt-staffing/v1","disposition":"created","operation_kind":"exception-record","request_id":"request-exception-1","operation_id":"staffing-event-exception-1","state":"COMMITTED",
+          "record": {
+            "record_kind":"EXCEPTION_RECORDED","exception_set_revision":1,"recorded_at_utc":"2026-10-06T01:05:00.000000Z",
+            "exception":{"exception_id":"exception-001","staff_id":"staff-001","display_name":"Operator One","kind":"LATE","unavailable_start_at":"2026-10-06T09:00:00+08:00","unavailable_end_at":"2026-10-06T10:30:00+08:00","note":"临时晚到","active":true}
+          }
+        }
+      }
+    },
+    {
+      "name": "exception-cancelled",
+      "method": "POST",
+      "route_template": "/api/v1/staffing/exceptions/{exception_id}/cancel",
+      "request": {"schema":"nxt-staffing-exception-cancel/v1","request_id":"request-cancel-1","operator":"manager-1","expected_exception_set_revision":1,"note":"员工已按时到岗"},
+      "http_status": 200,
+      "body": {
+        "schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+        "data": {
+          "schema":"nxt-staffing/v1","disposition":"created","operation_kind":"exception-cancel","request_id":"request-cancel-1","operation_id":"staffing-event-cancel-1","state":"COMMITTED",
+          "record":{"record_kind":"EXCEPTION_CANCELLED","exception_id":"exception-001","exception_set_revision":2,"cancelled_at_utc":"2026-10-06T01:10:00.000000Z"}
+        }
+      }
+    },
+    {
+      "name": "exception-corrected",
+      "method": "POST",
+      "route_template": "/api/v1/staffing/exceptions/{exception_id}/correct",
+      "request": {"schema":"nxt-staffing-exception-correct/v1","request_id":"request-correct-1","operator":"manager-1","expected_exception_set_revision":2,"replacement":{"kind":"EARLY_DEPARTURE","time_local":"15:30","note":"修正为提前离岗"}},
+      "http_status": 200,
+      "body": {
+        "schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+        "data": {
+          "schema":"nxt-staffing/v1","disposition":"created","operation_kind":"exception-correct","request_id":"request-correct-1","operation_id":"staffing-event-correct-1","state":"COMMITTED",
+          "record": {
+            "record_kind":"EXCEPTION_CORRECTED","replaced_exception_id":"exception-001","exception_set_revision":3,"corrected_at_utc":"2026-10-06T01:15:00.000000Z",
+            "replacement":{"exception_id":"exception-001","staff_id":"staff-001","display_name":"Operator One","kind":"EARLY_DEPARTURE","unavailable_start_at":"2026-10-06T15:30:00+08:00","unavailable_end_at":"2026-10-06T17:00:00+08:00","note":"修正为提前离岗","active":true}
+          }
+        }
+      }
+    }
+  ]
+}
