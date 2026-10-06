@@ -10,6 +10,7 @@ import {
   type StaffingReceipt,
 } from "./staffing";
 import type { RosterImportDraft } from "./staffing-csv";
+import { requireStaffingManagerLabel } from "./staffing-guards";
 import type { ExceptionDraft, StaffingController } from "./staffing-state";
 
 type ManagerResponseDraft<T extends ManagerResponseRequest = ManagerResponseRequest> =
@@ -55,14 +56,18 @@ export function createStaffingActions(
   getManagerLabel: () => string,
   requestIdFactory: (kind: OperationKind) => string = newStaffingRequestId,
 ): StaffingActions {
-  const context = (): { snapshot: StaffingDateSnapshot; manager: string } => {
+  const context = (
+    requiresRoster: boolean,
+  ): { snapshot: StaffingDateSnapshot; manager: string } => {
     const view = controller.view();
     if (view.snapshot === null) throw new Error("The staffing snapshot has not loaded yet.");
     if (view.read.status !== "ready" || view.read.stale) {
       throw new Error("Refresh the stale staffing snapshot before making a change.");
     }
-    const manager = getManagerLabel();
-    if (manager.trim() === "") throw new Error("A nonblank manager label is required.");
+    if (requiresRoster && view.snapshot.roster === null) {
+      throw new Error("Import a staffing roster before making this change.");
+    }
+    const manager = requireStaffingManagerLabel(getManagerLabel());
     return { snapshot: view.snapshot, manager };
   };
 
@@ -70,7 +75,7 @@ export function createStaffingActions(
     suggestionId: string,
     body: ManagerResponseDraft,
   ): Promise<StaffingReceipt> => {
-    const { snapshot, manager } = context();
+    const { snapshot, manager } = context(true);
     const requestId = requestIdFactory("manager-response");
     const common = {
       schema: "nxt-staffing-manager-response/v1" as const,
@@ -100,7 +105,7 @@ export function createStaffingActions(
   return {
     refresh: () => controller.refresh(),
     async importRoster(draft) {
-      const { snapshot, manager } = context();
+      const { snapshot, manager } = context(false);
       const requestId = requestIdFactory("roster-import");
       return controller.submit({
         operationKind: "roster-import",
@@ -124,7 +129,7 @@ export function createStaffingActions(
       });
     },
     async recordException(draft) {
-      const { snapshot, manager } = context();
+      const { snapshot, manager } = context(true);
       const common = {
         schema: "nxt-staffing-exception/v1" as const,
         operator: manager,
@@ -159,7 +164,7 @@ export function createStaffingActions(
       return controller.submit({ operationKind: "exception-record", body });
     },
     async cancelException(exceptionId, note) {
-      const { snapshot, manager } = context();
+      const { snapshot, manager } = context(true);
       const requestId = requestIdFactory("exception-cancel");
       return controller.submit({
         operationKind: "exception-cancel",
@@ -174,7 +179,7 @@ export function createStaffingActions(
       });
     },
     async correctException(exceptionId, replacement) {
-      const { snapshot, manager } = context();
+      const { snapshot, manager } = context(true);
       const requestId = requestIdFactory("exception-correct");
       const body: ExceptionCorrectRequest = {
         schema: "nxt-staffing-exception-correct/v1",
@@ -190,7 +195,10 @@ export function createStaffingActions(
       });
     },
     async generateSuggestion() {
-      const { snapshot, manager } = context();
+      const { snapshot, manager } = context(true);
+      if (snapshot.generation_capability.status === "UNAVAILABLE") {
+        throw new Error("Staffing suggestion generation is currently unavailable.");
+      }
       const requestId = requestIdFactory("suggestion-generate");
       return controller.submit({
         operationKind: "suggestion-generate",

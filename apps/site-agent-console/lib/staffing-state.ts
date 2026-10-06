@@ -9,6 +9,7 @@ import {
   type StaffingReceipt,
   type SuggestionGenerateRequest,
 } from "./staffing";
+import { requireStaffingManagerLabel } from "./staffing-guards";
 
 export const STAFFING_SNAPSHOT_POLL_MS = 5_000;
 export const STAFFING_REQUEST_POLL_MS = 1_000;
@@ -664,8 +665,13 @@ export function createStaffingController(
       if (currentSnapshot === null || readState.status !== "ready" || readState.stale) {
         throw new Error("Refresh the staffing snapshot before retrying the generation.");
       }
-      const manager = getManagerLabel();
-      if (manager.trim() === "") throw new Error("A nonblank manager label is required.");
+      if (currentSnapshot.roster === null) {
+        throw new Error("Import a staffing roster before retrying the generation.");
+      }
+      if (currentSnapshot.generation_capability.status === "UNAVAILABLE") {
+        throw new Error("Staffing suggestion generation is currently unavailable.");
+      }
+      const manager = requireStaffingManagerLabel(getManagerLabel());
       const body: SuggestionGenerateRequest = {
         schema: "nxt-staffing-suggestion-generate/v1",
         request_id: requestIdFactory("suggestion-generate"),

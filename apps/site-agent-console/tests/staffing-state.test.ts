@@ -114,6 +114,12 @@ function projectionFrom(value: StaffingReceipt): GenerationProjection {
   return common as GenerationProjection;
 }
 
+function retryableSnapshot(name = "date-after-manager-response"): StaffingDateSnapshot {
+  const value = snapshot(name);
+  value.generations = [projectionFrom(receipt("generation-interrupted"))];
+  return value;
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (cause: unknown) => void;
@@ -925,10 +931,8 @@ describe("staffing state controller", () => {
   });
 
   it("retries a durable RESULT_UNKNOWN generation with a fresh ID and retry_of after reload", async () => {
-    const interrupted = receipt("generation-interrupted");
-    if (interrupted.operation_kind !== "suggestion-generate") throw new Error("fixture");
-    const initial = snapshot();
-    initial.generations = [projectionFrom(interrupted)];
+    const initial = retryableSnapshot();
+    const interrupted = initial.generations[0];
     const idFactory = vi.fn((kind: OperationKind) => `fresh-${kind}-request`);
     const h = harness({ getManagerLabel: () => "经理乙", requestIdFactory: idFactory });
     await h.ready(initial);
@@ -944,16 +948,56 @@ describe("staffing state controller", () => {
         operator: "经理乙",
         service_date: initial.service_date,
         expected_revisions: initial.revisions,
-        retry_of: interrupted.record.suggestion_id,
+        retry_of: interrupted.suggestion_id,
       },
     });
     const reserved = receipt("generation-reserved");
     if (reserved.operation_kind !== "suggestion-generate") throw new Error("fixture");
     reserved.request_id = "fresh-suggestion-generate-request";
-    reserved.record.retry_of = interrupted.record.suggestion_id;
+    reserved.record.retry_of = interrupted.suggestion_id;
     h.submits[0].resolve(reserved);
     await expect(retry).resolves.toEqual(reserved);
     expect(h.last().activeGenerationRequestId).toBe("fresh-suggestion-generate-request");
+    h.controller.stop();
+  });
+
+  it.each([
+    ["without a roster", retryableSnapshot("date-empty"), /roster/i],
+    [
+      "when generation capability is unavailable",
+      (() => {
+        const value = retryableSnapshot();
+        value.generation_capability = structuredClone(snapshot().generation_capability);
+        return value;
+      })(),
+      /capability|unavailable/i,
+    ],
+  ] as const)(
+    "refuses to retry a RESULT_UNKNOWN generation %s before generating an ID or submitting",
+    async (_label, initial, message) => {
+      const idFactory = vi.fn((kind: OperationKind) => `fresh-${kind}-request`);
+      const h = harness({ getManagerLabel: () => "经理乙", requestIdFactory: idFactory });
+      await h.ready(structuredClone(initial));
+
+      const retry = h.controller.retryUnknownGeneration();
+      await flush();
+      if (h.submits[0]) h.submits[0].reject(new Error("unexpected submit"));
+
+      await expect(retry).rejects.toThrow(message);
+      expect(idFactory).not.toHaveBeenCalled();
+      expect(h.client.submit).not.toHaveBeenCalled();
+      h.controller.stop();
+    },
+  );
+
+  it("refuses an unsafe manager label on RESULT_UNKNOWN retry before allocating an ID", async () => {
+    const idFactory = vi.fn((kind: OperationKind) => `fresh-${kind}-request`);
+    const h = harness({ getManagerLabel: () => " =1+1", requestIdFactory: idFactory });
+    await h.ready(retryableSnapshot());
+
+    await expect(h.controller.retryUnknownGeneration()).rejects.toThrow(/manager/i);
+    expect(idFactory).not.toHaveBeenCalled();
+    expect(h.client.submit).not.toHaveBeenCalled();
     h.controller.stop();
   });
 });
@@ -961,7 +1005,7 @@ describe("staffing state controller", () => {
 describe("staffing closed actions", () => {
   function actionHarness(patch: Partial<StaffingView> = {}) {
     let current: StaffingView = {
-      snapshot: snapshot(),
+      snapshot: snapshot("date-after-manager-response"),
       read: { status: "ready", stale: false, detail: null },
       write: null,
       activeGenerationRequestId: null,
@@ -1170,6 +1214,95 @@ describe("staffing closed actions", () => {
     });
   });
 
+  it("allows a roster import without an existing roster", async () => {
+    const noRoster = snapshot("date-empty");
+    const h = actionHarness({ snapshot: noRoster });
+    const base = mutation("roster-committed");
+    if (base.operationKind !== "roster-import") throw new Error("fixture");
+    const draftRecord = structuredClone(base.body) as unknown as Record<string, unknown>;
+    for (const protectedField of [
+      "request_id",
+      "operator",
+      "expected_roster_revision",
+      "site_id",
+      "deployment_id",
+    ]) delete draftRecord[protectedField];
+
+    await expect(
+      h.actions.importRoster(draftRecord as unknown as RosterImportDraft),
+    ).resolves.toEqual(receipt("exception-recorded"));
+    expect(h.requestIdFactory).toHaveBeenCalledWith("roster-import");
+    expect(h.submit).toHaveBeenCalledOnce();
+  });
+
+  it("refuses ordinary generation without a roster before generating an ID", async () => {
+    const noRoster = structuredClone(snapshot("date-empty"));
+    const h = actionHarness({ snapshot: noRoster });
+
+    await expect(h.actions.generateSuggestion()).rejects.toThrow(/roster/i);
+    expect(h.requestIdFactory).not.toHaveBeenCalled();
+    expect(h.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "recording an exception",
+      (actions: ReturnType<typeof createStaffingActions>) => actions.recordException({
+        staff_id: "staff-1",
+        kind: "LATE",
+        time_local: "09:15",
+        note: null,
+      }),
+    ],
+    [
+      "cancelling an exception",
+      (actions: ReturnType<typeof createStaffingActions>) =>
+        actions.cancelException("exception-1", null),
+    ],
+    [
+      "correcting an exception",
+      (actions: ReturnType<typeof createStaffingActions>) => actions.correctException(
+        "exception-1",
+        { kind: "EARLY_DEPARTURE", time_local: "16:30", note: null },
+      ),
+    ],
+    [
+      "accepting a suggestion",
+      (actions: ReturnType<typeof createStaffingActions>) =>
+        actions.acceptSuggestion("generation-1", 1, null),
+    ],
+    [
+      "modifying a suggestion",
+      (actions: ReturnType<typeof createStaffingActions>) => actions.modifySuggestion(
+        "generation-1",
+        1,
+        [{ operation: "REMOVE", assignment_id: "assignment-1" }],
+        null,
+      ),
+    ],
+    [
+      "rejecting a suggestion",
+      (actions: ReturnType<typeof createStaffingActions>) =>
+        actions.rejectSuggestion("generation-1", "MANUAL_HANDLING", null),
+    ],
+  ] as const)("refuses %s without a roster before generating an ID", async (_label, invoke) => {
+    const h = actionHarness({ snapshot: snapshot("date-empty") });
+
+    await expect(invoke(h.actions)).rejects.toThrow(/roster/i);
+    expect(h.requestIdFactory).not.toHaveBeenCalled();
+    expect(h.submit).not.toHaveBeenCalled();
+  });
+
+  it("refuses ordinary generation when generation capability is unavailable before generating an ID", async () => {
+    const unavailable = structuredClone(snapshot("date-after-manager-response"));
+    unavailable.generation_capability = structuredClone(snapshot().generation_capability);
+    const h = actionHarness({ snapshot: unavailable });
+
+    await expect(h.actions.generateSuggestion()).rejects.toThrow(/capability|unavailable/i);
+    expect(h.requestIdFactory).not.toHaveBeenCalled();
+    expect(h.submit).not.toHaveBeenCalled();
+  });
+
   it.each([
     [{ snapshot: null }, /snapshot/i],
     [{ read: { status: "error", stale: true, detail: "offline" } }, /stale|refresh/i],
@@ -1183,6 +1316,26 @@ describe("staffing closed actions", () => {
   it("refuses a blank manager label before generating an ID", async () => {
     const h = actionHarness();
     h.getManagerLabel.mockReturnValue("   ");
+    await expect(h.actions.generateSuggestion()).rejects.toThrow(/manager/i);
+    expect(h.requestIdFactory).not.toHaveBeenCalled();
+    expect(h.submit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["an equals formula prefix", "=1+1"],
+    ["a plus formula prefix", "+1"],
+    ["a minus formula prefix", "-1"],
+    ["an at-sign formula prefix", "@SUM(A1:A2)"],
+    ["a Unicode-whitespace formula prefix", "\u00a0=1+1"],
+    ["a control character", "经理\u0000甲"],
+    ["a Unicode format character", "经理\u200b甲"],
+    ["an unpaired high surrogate", "经理\uD800"],
+    ["an unpaired low surrogate", "经理\uDC00"],
+    ["more than 128 Unicode scalars", "😀".repeat(129)],
+  ])("refuses a manager label with %s before generating an ID", async (_label, manager) => {
+    const h = actionHarness();
+    h.getManagerLabel.mockReturnValue(manager);
+
     await expect(h.actions.generateSuggestion()).rejects.toThrow(/manager/i);
     expect(h.requestIdFactory).not.toHaveBeenCalled();
     expect(h.submit).not.toHaveBeenCalled();
