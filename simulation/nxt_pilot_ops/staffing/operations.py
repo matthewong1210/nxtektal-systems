@@ -87,7 +87,11 @@ from .projection import (
     project_generation_request,
     validate_generation_projection,
 )
-from .roster import select_effective_roster, validate_roster_import
+from .roster import (
+    materialize_service_day,
+    select_effective_roster,
+    validate_roster_import,
+)
 from .validator import (
     CandidatePatch,
     canonical_schedule,
@@ -1786,6 +1790,7 @@ def build_date_projection(
             manager_responses=(),
         )
     roster = select_effective_roster(roster_revisions(history), service_date)
+    roster_day = materialize_service_day(roster, service_date)
     basis = build_staffing_basis(history, service_date)
     generations = tuple(
         _generation_view(history, event.payload.generation_id)
@@ -1828,7 +1833,12 @@ def build_date_projection(
         assignment_count=len(roster.regular_assignments),
         coverage_count=len(roster.coverage),
         availability=tuple(basis.availability),
-        assignments=_assignment_views(basis.assignments, basis.workers),
+        # The date projection keeps roster shifts available for local exception
+        # entry.  The accepted advisory schedule is projected independently as
+        # effective_plan_schedule; using it here would hide a removed roster
+        # worker and expose an added substitute that exception validation does
+        # not treat as having a regular shift.
+        assignments=_assignment_views(roster_day.assignments, roster.workers),
         exceptions=_exception_views(basis.exceptions, basis.workers),
         effective_plan=plan,
         effective_plan_schedule=None

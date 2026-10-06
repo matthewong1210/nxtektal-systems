@@ -456,6 +456,11 @@ export function createStaffingController(
     }
 
     requiredRefreshReceipt = receipt;
+    readState = {
+      status: "loading",
+      stale: snapshotValue !== null,
+      detail: null,
+    };
     publish();
     await refreshAfterReceipt(receipt, epoch);
     return receipt;

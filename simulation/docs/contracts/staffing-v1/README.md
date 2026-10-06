@@ -44,6 +44,13 @@ retain a non-null `CURRENT` effective advisory plan after refresh; REJECT retain
 a null plan. None of these responses represents a formal schedule or execution
 truth.
 
+Snapshot `assignments` are the regular roster shifts materialized for the
+snapshot service date. They are not replaced by an accepted advisory plan and
+are not reduced by active exceptions; local exception entry uses this list to
+offer only employees with a regular shift. The current accepted advisory
+schedule, when one exists, is projected separately as
+`effective_plan.assignments`.
+
 ## Time, bounds, and privacy
 
 Dates are `YYYY-MM-DD`; local roster minutes are strict `HH:MM`. Server and ledger

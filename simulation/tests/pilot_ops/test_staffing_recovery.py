@@ -1934,6 +1934,59 @@ def test_manager_modify_and_reject_persist_closed_composite_events(
         assert request.committed_record.schedule_digest is None
 
 
+def test_date_projection_keeps_roster_assignments_separate_from_effective_plan(
+    tmp_path,
+) -> None:
+    _, operations = _open_operations(tmp_path / "ledger")
+    roster = roster_import_request()
+    replacement = deepcopy(roster["workers"][0])
+    replacement.update(staff_id="staff-002", display_name="本地员工乙")
+    roster["workers"].append(replacement)
+    availability = deepcopy(roster["availability"][0])
+    availability["staff_id"] = "staff-002"
+    roster["availability"].append(availability)
+    operations.import_roster(roster, recorded_at=NOW)
+    generation_id = _reserve(operations)
+    _issue_valid_suggestion(operations, generation_id)
+    response = _modify_body(operations)
+    response["edited_operations"][1]["staff_id"] = "staff-002"
+
+    committed = operations.commit_manager_response(
+        response, suggestion_id=generation_id, recorded_at=NOW
+    )
+    projection = operations.date_projection(date(2026, 10, 5))
+
+    assert type(committed) is CommittedReceipt
+    assert [row.staff_id for row in projection.assignments] == ["staff-001"]
+    assert projection.effective_plan_schedule is not None
+    assert [row.staff_id for row in projection.effective_plan_schedule] == [
+        "staff-002"
+    ]
+
+    substitute_exception = _exception_request(
+        request_id="exception-for-plan-only-worker"
+    )
+    substitute_exception["staff_id"] = "staff-002"
+    with pytest.raises(StaffingError) as raised:
+        operations.record_exception(substitute_exception, recorded_at=NOW)
+    assert raised.value.code == "unknown_staff_or_shift"
+
+    regular_exception = operations.record_exception(
+        _exception_request(request_id="exception-for-roster-worker"),
+        recorded_at=NOW,
+    )
+    after_exception = operations.date_projection(date(2026, 10, 5))
+    assert type(regular_exception) is CommittedReceipt
+    assert [row.staff_id for row in after_exception.assignments] == ["staff-001"]
+    assert [row.staff_id for row in after_exception.exceptions] == ["staff-001"]
+    assert after_exception.assignments[0].start_at.isoformat() == (
+        "2026-10-05T01:00:00+00:00"
+    )
+    assert after_exception.assignments[0].end_at.isoformat() == (
+        "2026-10-05T09:00:00+00:00"
+    )
+
+
 def test_manager_early_missing_candidate_and_unknown_alias_are_lifecycle_conflicts(
     tmp_path,
 ) -> None:

@@ -440,6 +440,11 @@ describe("staffing state controller", () => {
     h.submits[0].resolve(committed);
     await flush();
     expect(h.last().write).toMatchObject({ status: "committed", savedButStale: false });
+    expect(h.last().read).toMatchObject({ status: "loading", stale: true });
+    await expect(h.controller.submit(mutation("exception-recorded"))).rejects.toThrow(
+      /flight|refresh|stale/i,
+    );
+    expect(h.client.submit).toHaveBeenCalledTimes(1);
     expect(h.client.current).toHaveBeenCalledTimes(2);
     h.reads[1].reject(new TypeError("refresh failed"));
     await expect(pending).resolves.toEqual(committed);

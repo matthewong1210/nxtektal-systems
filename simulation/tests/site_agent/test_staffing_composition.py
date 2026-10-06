@@ -397,6 +397,40 @@ def rostered_date_projection(**changes) -> DateProjection:
     )
 
 
+def test_date_wire_keeps_regular_roster_and_effective_plan_assignments_separate() -> None:
+    regular = bounded_assignment_projection()
+    planned = replace(
+        regular,
+        assignment_id="assignment-2",
+        staff_id="staff-2",
+        display_name="Operator Two",
+    )
+    projection = rostered_date_projection(
+        assignment_count=1,
+        assignments=(regular,),
+        effective_plan=EffectivePlanState(
+            1, "CURRENT", "c" * 64, (planned,), 1, ()
+        ),
+        effective_plan_schedule=(planned,),
+    )
+
+    wire = with_runtime_context(
+        projection,
+        configured_for(cn_settings()),
+        now=NOW,
+        site_id="site-1",
+        deployment_id="deployment-1",
+        site_timezone="Asia/Shanghai",
+    )
+
+    validator("#/$defs/StaffingDateSnapshot").validate(wire)
+    assert [row["staff_id"] for row in wire["assignments"]] == ["staff-1"]
+    assert [
+        row["staff_id"] for row in wire["effective_plan"]["assignments"]
+    ] == ["staff-2"]
+    assert wire["assignments"][0]["start_at"] == "2026-10-06T09:00:00Z"
+
+
 def test_resolve_staffing_root_is_exact_stable_and_symlink_safe(tmp_path: Path) -> None:
     state = tmp_path / "stable"
     volatile = tmp_path / "volatile"
