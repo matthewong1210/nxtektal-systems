@@ -32,7 +32,10 @@ employee or day.
 `record.record_kind`. A recovery GET always returns `disposition: "duplicate"`.
 The public `suggestion_id` is the domain generation ID unchanged, while
 `operation_id` is the receipt event ID. `retry_of` names the earlier suggestion,
-never an event ID.
+never an event ID. Snapshot `generations` are ordered by reservation time, oldest
+first and newest last. Their request, suggestion, and operation IDs are each
+unique. A non-null `retry_of` must name exactly one earlier `RESULT_UNKNOWN`
+generation, and a `RESULT_UNKNOWN` generation can have at most one retry.
 
 Candidate projections restore local staff IDs and display names for manager
 review. A manager modification sends the smaller `ManagerPatchOperation` union;

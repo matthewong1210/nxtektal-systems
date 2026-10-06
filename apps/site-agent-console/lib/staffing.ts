@@ -724,6 +724,7 @@ export interface StaffingClient {
   date(serviceDate: string): Promise<StaffingDateSnapshot>;
   submit(mutation: StaffingMutation): Promise<StaffingReceipt>;
   lookup(operationKind: OperationKind, requestId: string): Promise<StaffingReceipt>;
+  lookupMutation(mutation: StaffingMutation): Promise<StaffingReceipt>;
 }
 
 class ValidationFailure extends Error {}
@@ -1414,6 +1415,34 @@ function generation(value: unknown): GenerationProjection {
   return value as GenerationProjection;
 }
 
+function generationSequence(value: unknown): GenerationProjection[] {
+  const items = array(value, 0, 4096).map(generation);
+  const requestIds = new Set<string>();
+  const suggestionIds = new Set<string>();
+  const operationIds = new Set<string>();
+  const earlierBySuggestion = new Map<string, GenerationProjection>();
+  const retriedParents = new Set<string>();
+
+  for (const item of items) {
+    ok(!requestIds.has(item.request_id));
+    ok(!suggestionIds.has(item.suggestion_id));
+    ok(!operationIds.has(item.operation_id));
+    requestIds.add(item.request_id);
+    suggestionIds.add(item.suggestion_id);
+    operationIds.add(item.operation_id);
+
+    if (item.retry_of !== null) {
+      const parent = earlierBySuggestion.get(item.retry_of);
+      ok(parent !== undefined && parent.state === "RESULT_UNKNOWN");
+      ok(!retriedParents.has(item.retry_of));
+      retriedParents.add(item.retry_of);
+    }
+    earlierBySuggestion.set(item.suggestion_id, item);
+  }
+
+  return items;
+}
+
 function generationCapability(value: unknown): GenerationCapability {
   const item = record(value, ["status", "region", "primary_provider", "backup_provider", "failure_code"]);
   const status = oneOf(item.status, ["READY", "UNAVAILABLE", "DEGRADED_BACKUP_UNCONFIGURED"] as const);
@@ -1465,7 +1494,7 @@ function validateSnapshot(value: unknown): StaffingDateSnapshot {
   array(item.assignments, 0, 4096).forEach(assignment);
   array(item.active_exceptions, 0, 4096).forEach(exception);
   nullable(item.effective_plan, effectivePlan);
-  array(item.generations, 0, 4096).forEach(generation);
+  generationSequence(item.generations);
   return value as StaffingDateSnapshot;
 }
 
@@ -1955,6 +1984,25 @@ export function createStaffingClient(fetchImpl: FetchLike = fetch): StaffingClie
   const get = async <T>(path: string, validator: (value: unknown) => T): Promise<T> =>
     (await requestBounded(fetchImpl, path, {}, 200, validator)).data;
 
+  const lookup = async (operationKind: OperationKind, requestId: string): Promise<StaffingReceipt> => {
+    try {
+      oneOf(operationKind, [
+        "roster-import", "exception-record", "exception-cancel", "exception-correct", "suggestion-generate", "manager-response",
+      ] as const);
+      identifier(requestId);
+    } catch {
+      throw new ManagerApiError(400, { code: "staffing_invalid_request", detail: "staffing request is invalid" });
+    }
+    const receipt = await get(
+      `/api/v1/staffing/requests/${encodeURIComponent(operationKind)}/${encodeURIComponent(requestId)}`,
+      validateReceipt,
+    );
+    if (receipt.disposition !== "duplicate" || receipt.operation_kind !== operationKind || receipt.request_id !== requestId) {
+      throw invalidResponse(200);
+    }
+    return receipt;
+  };
+
   return {
     current: () => get("/api/v1/staffing", validateSnapshot),
     date: async (serviceDate) => {
@@ -1982,22 +2030,14 @@ export function createStaffingClient(fetchImpl: FetchLike = fetch): StaffingClie
       catch { throw invalidResponse(responseValue.status); }
       return receipt;
     },
-    lookup: async (operationKind, requestId) => {
-      try {
-        oneOf(operationKind, [
-          "roster-import", "exception-record", "exception-cancel", "exception-correct", "suggestion-generate", "manager-response",
-        ] as const);
-        identifier(requestId);
-      } catch {
-        throw new ManagerApiError(400, { code: "staffing_invalid_request", detail: "staffing request is invalid" });
-      }
-      const receipt = await get(
-        `/api/v1/staffing/requests/${encodeURIComponent(operationKind)}/${encodeURIComponent(requestId)}`,
-        validateReceipt,
-      );
-      if (receipt.disposition !== "duplicate" || receipt.operation_kind !== operationKind || receipt.request_id !== requestId) {
-        throw invalidResponse(200);
-      }
+    lookup,
+    lookupMutation: async (mutationValue) => {
+      let mutation: StaffingMutation;
+      try { mutation = validateMutation(clone(mutationValue)); }
+      catch { throw new ManagerApiError(400, { code: "staffing_invalid_request", detail: "staffing request is invalid" }); }
+      const receipt = await lookup(mutation.operationKind, mutation.body.request_id);
+      try { correlate(mutation, receipt); }
+      catch { throw invalidResponse(200); }
       return receipt;
     },
   };

@@ -171,6 +171,36 @@ function largeRoster(workerCount: number, sourceRefLength: number): RosterImport
   return body;
 }
 
+function retryChainSnapshot(): StaffingDateSnapshot {
+  const snapshot = structuredClone(
+    exchange("date-after-manager-response").body.data,
+  ) as StaffingDateSnapshot;
+  const source = snapshot.generations[0];
+  const parent = {
+    ...structuredClone(source),
+    suggestion_id: "generation-result-unknown-parent",
+    request_id: "request-result-unknown-parent",
+    operation_id: "staffing-event-result-unknown-parent",
+    state: "RESULT_UNKNOWN",
+    retry_of: null,
+    candidates: [],
+    coverage_gaps: [],
+    provenance: [],
+    failure_code: "RESULT_UNKNOWN",
+    manager_response: null,
+  } as GenerationProjection;
+  const child = {
+    ...structuredClone(source),
+    suggestion_id: "generation-retry-child",
+    request_id: "request-retry-child",
+    operation_id: "staffing-event-retry-child",
+    retry_of: parent.suggestion_id,
+    manager_response: null,
+  } as GenerationProjection;
+  snapshot.generations = [parent, child];
+  return snapshot;
+}
+
 // Compile-time surface lock: removing or changing any named exported type must fail typecheck.
 type FrozenTypeSurface = [
   StaffingClient,
@@ -310,6 +340,66 @@ describe("staffing v1 frozen wire contract", () => {
       mutate(value);
       expect(() => parseStaffingSnapshot(value)).toThrow(ManagerApiError);
     }
+  });
+
+  it.each(["request_id", "suggestion_id", "operation_id"] as const)(
+    "rejects duplicate generation %s values",
+    (identityKey) => {
+      const snapshot = structuredClone(
+        exchange("date-after-manager-response").body.data,
+      ) as StaffingDateSnapshot;
+      const first = snapshot.generations[0];
+      const second = {
+        ...structuredClone(first),
+        request_id: "request-generation-second",
+        suggestion_id: "generation-second",
+        operation_id: "staffing-event-generation-second",
+        manager_response: null,
+      } as GenerationProjection;
+      second[identityKey] = first[identityKey];
+      snapshot.generations.push(second);
+
+      expect(() => parseStaffingSnapshot(snapshot)).toThrow(ManagerApiError);
+    },
+  );
+
+  it("accepts a retry that names one earlier RESULT_UNKNOWN generation", () => {
+    const snapshot = retryChainSnapshot();
+    expect(parseStaffingSnapshot(snapshot)).toEqual(snapshot);
+  });
+
+  it("rejects a retry whose parent is missing, later, or not RESULT_UNKNOWN", () => {
+    const missing = retryChainSnapshot();
+    missing.generations[1].retry_of = "generation-missing-parent";
+
+    const later = retryChainSnapshot();
+    later.generations.reverse();
+
+    const nonUnknown = retryChainSnapshot();
+    nonUnknown.generations[0] = {
+      ...structuredClone(nonUnknown.generations[1]),
+      suggestion_id: "generation-result-unknown-parent",
+      request_id: "request-non-unknown-parent",
+      operation_id: "staffing-event-non-unknown-parent",
+      retry_of: null,
+    } as GenerationProjection;
+
+    for (const snapshot of [missing, later, nonUnknown]) {
+      expect(() => parseStaffingSnapshot(snapshot)).toThrow(ManagerApiError);
+    }
+  });
+
+  it("rejects two retries that name the same RESULT_UNKNOWN parent", () => {
+    const snapshot = retryChainSnapshot();
+    const secondRetry = {
+      ...structuredClone(snapshot.generations[1]),
+      suggestion_id: "generation-retry-child-2",
+      request_id: "request-retry-child-2",
+      operation_id: "staffing-event-retry-child-2",
+    } as GenerationProjection;
+    snapshot.generations.push(secondRetry);
+
+    expect(() => parseStaffingSnapshot(snapshot)).toThrow(ManagerApiError);
   });
 
   it("rejects malformed candidate, coverage and provenance semantics", () => {
@@ -499,6 +589,55 @@ describe("staffing same-origin client", () => {
         code: "invalid_staffing_response",
       });
     }
+  });
+
+  it("recovers a mutation through the lookup route and fully correlates its receipt", async () => {
+    const interrupted = exchange("generation-interrupted");
+    const body = {
+      ...(structuredClone(exchange("generation-reserved").request) as SuggestionGenerateRequest),
+      request_id: "request-result-unknown",
+    };
+    const mutation: StaffingMutation = { operationKind: "suggestion-generate", body };
+    const valid = scripted(200, interrupted.body);
+
+    await expect(valid.client.lookupMutation(mutation)).resolves.toEqual(interrupted.body.data);
+    expect(valid.calls[0].url).toBe(
+      "/api/v1/staffing/requests/suggestion-generate/request-result-unknown",
+    );
+
+    const mismatched = structuredClone(interrupted.body);
+    (mismatched.data as StaffingReceipt & { record: GenerationInterruptedRecord })
+      .record.service_date = "2026-10-07";
+    await expect(scripted(200, mismatched).client.lookupMutation(mutation)).rejects.toMatchObject({
+      status: 200,
+      code: "invalid_staffing_response",
+    });
+  });
+
+  it("validates and detaches a mutation before lookup recovery", async () => {
+    const interrupted = exchange("generation-interrupted");
+    const body = {
+      ...(structuredClone(exchange("generation-reserved").request) as SuggestionGenerateRequest),
+      request_id: "request-result-unknown",
+    };
+    const mutation: StaffingMutation = { operationKind: "suggestion-generate", body };
+    let release: ((value: Response) => void) | undefined;
+    const fetchImpl: FetchLike = () => new Promise((resolve) => { release = resolve; });
+    const client = createStaffingClient(fetchImpl);
+    const pending = client.lookupMutation(mutation);
+    mutation.body.service_date = "2026-10-07";
+    release?.(response(200, interrupted.body));
+
+    await expect(pending).resolves.toEqual(interrupted.body.data);
+
+    const invalid = structuredClone(mutation) as StaffingMutation & Record<string, unknown>;
+    invalid.extra = "private";
+    const noFetch = vi.fn<FetchLike>();
+    await expect(createStaffingClient(noFetch).lookupMutation(invalid)).rejects.toMatchObject({
+      status: 400,
+      code: "staffing_invalid_request",
+    });
+    expect(noFetch).not.toHaveBeenCalled();
   });
 
   it("correlates mutation operation, request and route-specific record fields", async () => {
