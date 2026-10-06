@@ -29,6 +29,7 @@ import argparse
 import json
 import signal
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 SIM_ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +37,8 @@ if str(SIM_ROOT) not in sys.path:
     sys.path.insert(0, str(SIM_ROOT))
 
 from nxt_site_agent import (  # noqa: E402
+    ClockBasis,
+    ClockSource,
     LaunchRefusedError,
     SiteAgentApiServer,
     SiteAgentError,
@@ -54,10 +57,16 @@ from scripts.site_agent_fixture import (  # noqa: E402
     SITE_ID,
     broken_service_manifest_payload,
     evaluate_service_enablement,
+    fixture_clock,
     service_composition_seam,
     service_enablement_context,
     service_range_ops_evidence,
 )
+
+
+def utcnow() -> datetime:
+    """The host's UTC clock, used only when ``--context-clock system`` is chosen."""
+    return datetime.now(timezone.utc)
 
 _SECURITY_NOTE = (
     "local fixture use only — loopback binding, no authentication; not "
@@ -152,6 +161,24 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="launch, run --advance cycles, print health JSON, and exit",
     )
+    parser.add_argument(
+        "--context-clock",
+        choices=("fixture", "system"),
+        default="fixture",
+        help=(
+            "clock for the Supervisor Snapshot's business context: the declared "
+            "fixture instant (default) or the host UTC clock; scenario time is "
+            "unaffected"
+        ),
+    )
+    parser.add_argument(
+        "--context-as-of",
+        default=None,
+        help=(
+            "override the declared fixture instant (ISO-8601 with offset, e.g. "
+            "2026-08-08T10:30:00+00:00); only with --context-clock fixture"
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.broken:
@@ -159,7 +186,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.advance < 0:
         parser.error("--advance must be non-negative")
 
-    seam = service_composition_seam()
+    if args.context_clock == "system":
+        if args.context_as_of is not None:
+            parser.error("--context-as-of applies only to --context-clock fixture")
+        clock = ClockSource(read=utcnow, basis=ClockBasis.SYSTEM_UTC)
+    elif args.context_as_of is not None:
+        try:
+            declared = datetime.fromisoformat(args.context_as_of)
+        except ValueError:
+            parser.error("--context-as-of must be ISO-8601")
+        if declared.tzinfo is None:
+            parser.error("--context-as-of must carry a UTC offset")
+        clock = fixture_clock(declared.astimezone(timezone.utc))
+    else:
+        clock = fixture_clock()
+    seam = service_composition_seam(clock=clock)
     try:
         service = SiteAgentService.launch(
             runs_root=args.out,
@@ -227,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  workflow:   {RANGE_OPS_WORKFLOW_ID}")
     print(f"  evidence:   {service.storage.run_root}")
     print(f"  manager api: {server.url}/api/v0/health")
+    print(f"  snapshot:    {server.url}/api/v0/supervisor-snapshot ({clock.basis.value})")
     if args.console is not None:
         print(f"  console:     {server.url}/")
     else:

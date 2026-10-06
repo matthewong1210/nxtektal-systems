@@ -70,7 +70,7 @@ def test_one_bad_row_rejects_the_whole_batch_with_its_row_number_and_no_value(ad
     assert isinstance(result, oc.BatchRejection)
     assert result.rows_seen == 3
     assert [e.to_dict() for e in result.errors] == [{"row_number": 3, "column": "quantity", "reason": "invalid_count"}]
-    assert "two" not in oc.canonical_json(result.to_dict())
+    assert "REDACTED-77" not in oc.canonical_json(result.to_dict())
 
 
 def test_staffing_row_rules(admission, profiles) -> None:

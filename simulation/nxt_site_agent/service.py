@@ -46,7 +46,7 @@ from nxt_pilot_ops.ledger import (
     LedgerRecord,
     LedgerTransitionError,
 )
-from nxt_pilot_ops.serialization import to_primitive
+from nxt_pilot_ops.serialization import stable_digest, to_primitive
 from nxt_workflow_enablement import (
     RANGE_OPS_WORKFLOW_ID,
     RangeOpsLaunchPlan,
@@ -61,10 +61,12 @@ from .briefing import briefing_projection
 from .contracts import (
     ComposedRuntime,
     CompositionSeam,
+    ContextReader,
     DISCLAIMER,
     LaunchMaterials,
     LaunchRefusedError,
     SERVICE_MODE_LABEL,
+    SUPERVISOR_SNAPSHOT_SCHEMA,
     ServiceState,
     SiteAgentError,
     SourceCursor,
@@ -194,6 +196,12 @@ class SiteAgentService:
             plan.simulation_midnight_iso
         )
         self._recover_or_fail(resumed=resumed)
+        # Business operational context is read, never owned, through the
+        # seam's per-run reader.  Its failures become data quality, never
+        # a FAILED service.
+        self._context_reader, self._context_failure = (
+            self._compose_context_reader()
+        )
 
     # -- launch ----------------------------------------------------------
 
@@ -552,6 +560,23 @@ class SiteAgentService:
     def _fail(self, code: str, detail: str) -> None:
         self._state = ServiceState.FAILED
         self._failure = (code, detail)
+
+    def _compose_context_reader(
+        self,
+    ) -> tuple[ContextReader | None, tuple[str, str] | None]:
+        factory = self._seam.context_for
+        if factory is None:
+            return None, (
+                "context_reader_undeclared",
+                "the composition root declared no operational-context reader",
+            )
+        try:
+            return factory(self._storage.run_root), None
+        except Exception as exc:  # noqa: BLE001 - context never fails the service
+            return None, (
+                "context_reader_failed",
+                f"{type(exc).__name__}: {exc}",
+            )
 
     def _append_event(self, event: Mapping[str, Any]) -> None:
         if not self._storage.append_event(event):
@@ -1060,6 +1085,9 @@ class SiteAgentService:
             self._state = ServiceState.SERVING
             self._failure = None
             self._event_append_failures = 0
+            self._context_reader, self._context_failure = (
+                self._compose_context_reader()
+            )
             self._append_event(
                 {
                     "event": "restarted",
@@ -1120,7 +1148,264 @@ class SiteAgentService:
                 replacement._last_delivered_observation_ts
             )
             self._simulation_midnight = replacement._simulation_midnight
+            self._context_reader = replacement._context_reader
+            self._context_failure = replacement._context_failure
             return self.health_snapshot()
+
+    # -- supervisor snapshot ---------------------------------------------
+
+    def _read_context(
+        self,
+    ) -> tuple[dict[str, Any], str | None, str | None]:
+        """The business-context envelope plus the clock reading behind it.
+
+        Never raises.  Returns ``(envelope, generated_at, clock_basis)``
+        where an unavailable envelope carries ``status``, ``code`` and
+        ``detail`` and ``context`` is ``None``.
+        """
+
+        def unavailable(code: str, detail: str) -> dict[str, Any]:
+            return {
+                "status": "unavailable",
+                "code": code,
+                "detail": detail,
+                "context": None,
+            }
+
+        clock = self._seam.clock
+        if clock is None:
+            return (
+                unavailable(
+                    "clock_undeclared",
+                    "the composition root declared no clock for the "
+                    "Supervisor Snapshot; business context cannot be aged",
+                ),
+                None,
+                None,
+            )
+        basis = clock.basis.value
+        try:
+            as_of = clock.read()
+        except Exception as exc:  # noqa: BLE001 - clock failure is data
+            return (
+                unavailable("clock_failed", f"{type(exc).__name__}: {exc}"),
+                None,
+                basis,
+            )
+        if (
+            not isinstance(as_of, datetime)
+            or as_of.tzinfo is None
+            or as_of.utcoffset() is None
+        ):
+            return (
+                unavailable(
+                    "clock_invalid",
+                    "the declared clock must return a timezone-aware instant",
+                ),
+                None,
+                basis,
+            )
+        generated_at = to_primitive(as_of)
+        if self._context_reader is None:
+            code, detail = self._context_failure or (
+                "context_unavailable",
+                "no operational-context reader",
+            )
+            return unavailable(code, detail), generated_at, basis
+        try:
+            envelope = dict(self._context_reader.snapshot(as_of, basis))
+        except Exception as exc:  # noqa: BLE001 - reader failure is data
+            return (
+                unavailable(
+                    "context_reader_failed", f"{type(exc).__name__}: {exc}"
+                ),
+                generated_at,
+                basis,
+            )
+        if envelope.get("status") != "available" or not isinstance(
+            envelope.get("context"), Mapping
+        ):
+            return (
+                unavailable(
+                    str(envelope.get("code") or "context_unavailable"),
+                    str(
+                        envelope.get("detail")
+                        or "the operational-context reader returned no context"
+                    ),
+                ),
+                generated_at,
+                basis,
+            )
+        return envelope, generated_at, basis
+
+    @staticmethod
+    def _unknown_field(reason: str) -> dict[str, Any]:
+        return {"value": None, "label": "UNKNOWN", "reason": reason}
+
+    @classmethod
+    def _physical_stores(
+        cls, state: Mapping[str, Any], health: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Physical ball stores: the dispenser count the facility state
+        already publishes, labelled by its own source kind, and the stores
+        this slice has no evidence for, explicitly unknown.
+
+        A channel may say ``sensor`` because the commissioned binding is a
+        sensor, yet the service's observation source can still be a fixture
+        replaying synthetic samples through the real adapter path.  A value
+        is physical only when the channel says sensor *and* the service is
+        not running on a fixture source; both facts are shown."""
+        dispenser = state.get("dispenser") or {}
+        source = dispenser.get("count_source") or {}
+        source_type = source.get("source_type")
+        service_source = str(health.get("source_type") or "unknown")
+        fixture_source = service_source == "fixture" or bool(
+            health.get("fixture_mode")
+        )
+        value = dispenser.get("clean_available_balls")
+        if not state.get("available") or value is None:
+            count: dict[str, Any] = cls._unknown_field(
+                str(state.get("reason") or "no published facility state")
+            )
+        else:
+            count = {
+                "value": value,
+                "label": (
+                    "FIXTURE_FACILITY_STATE"
+                    if fixture_source
+                    else "FACILITY_STATE"
+                ),
+                "physical": source_type == "sensor" and not fixture_source,
+                "source_type": source_type or "unknown",
+                "service_source": service_source,
+                "source_status": dispenser.get("reading_status")
+                or source.get("status"),
+                "reason": None,
+            }
+        return {
+            "clean_balls_in_dispenser": count,
+            "clean_ball_weight_kg": cls._unknown_field(
+                "no weight sensor is connected in this slice"
+            ),
+            "awaiting_wash_balls": cls._unknown_field(
+                "no evidence source for awaiting-wash balls in this slice"
+            ),
+            "note": (
+                "Sold ball units never appear here; business records say "
+                "nothing about physical ball stores."
+            ),
+        }
+
+    @classmethod
+    def _machines(cls) -> dict[str, Any]:
+        reason = "no machine evidence source is connected in this slice"
+        return {
+            "washer_running": cls._unknown_field(reason),
+            "washer_fault": cls._unknown_field(reason),
+            "dispenser_running": cls._unknown_field(reason),
+        }
+
+    def supervisor_snapshot(self) -> dict[str, Any]:
+        """One coherent Supervisor Snapshot under one lock acquisition.
+
+        The five existing projections are embedded verbatim, so every
+        section comes from the same service generation.  Facility-evidence
+        read failures keep their endpoint semantics (``SiteAgentError``
+        propagates and the transport answers 503); business-context
+        failures never raise and appear only in ``data_quality``.
+        """
+        with self._lock:
+            health = self.health_snapshot()
+            state = self.state_snapshot()
+            recommendations = self.recommendations_snapshot()
+            briefing = self.briefing_snapshot()
+            fixture = self.fixture_snapshot()
+            scenario_now = self.scenario_now_iso()
+            envelope, generated_at, basis = self._read_context()
+            context = envelope.get("context")
+            if isinstance(context, Mapping):
+                staffing = dict(context.get("staffing") or {})
+                operations = dict(context.get("operations") or {})
+                sources = dict(context.get("sources") or {})
+                operating_day = context.get("operating_day")
+                exceptions = list(context.get("exceptions") or [])
+                context_status = str(context.get("status") or "unknown")
+            else:
+                reason = {
+                    "status": "unavailable",
+                    "code": envelope["code"],
+                    "detail": envelope["detail"],
+                }
+                staffing = dict(reason)
+                operations = dict(reason)
+                sources = {}
+                operating_day = None
+                exceptions = [
+                    {
+                        "code": envelope["code"],
+                        "source_system": None,
+                        "detail": envelope["detail"],
+                    }
+                ]
+                context_status = "unavailable"
+            report = (state.get("quality") or {}).get("assembly_report") or {}
+            body = {
+                "snapshot_schema": SUPERVISOR_SNAPSHOT_SCHEMA,
+                "identity": {
+                    "site_id": self._plan.site_id,
+                    "deployment_id": self._plan.deployment_id,
+                    "workflow_id": self._plan.workflow_id,
+                    "mode_label": SERVICE_MODE_LABEL,
+                    "fixture_mode": True,
+                    "disclaimer": DISCLAIMER,
+                    "run_directory": self._storage.run_root.name,
+                },
+                "health": health,
+                "state": state,
+                "recommendations": recommendations,
+                "briefing": briefing,
+                "fixture": fixture,
+                "staffing": staffing,
+                "operations": operations,
+                "operating_day": operating_day,
+                "context_sources": sources,
+                "physical_stores": self._physical_stores(state, health),
+                "machines": self._machines(),
+                # Reserved for a separately gated advisory slice; always
+                # empty here so no client can mistake it for guidance.
+                "coverage_recommendations": [],
+                "exceptions": exceptions,
+                "data_quality": {
+                    "context": {
+                        "status": context_status,
+                        "code": envelope.get("code"),
+                        "detail": envelope.get("detail"),
+                        "as_of": generated_at,
+                        "as_of_basis": basis,
+                        "clock_declared": self._seam.clock is not None,
+                        "reader_declared": self._seam.context_for is not None,
+                    },
+                    "facility": {
+                        "state_available": bool(state.get("available")),
+                        "missing_channels": list(
+                            report.get("missing_channels") or []
+                        ),
+                        "stale_channels": list(
+                            report.get("stale_channels") or []
+                        ),
+                        "service_state": health.get("service_state"),
+                        "degraded": bool(health.get("degraded")),
+                    },
+                },
+            }
+            body["generation"] = {
+                "snapshot_id": "svs_" + stable_digest(body)[:24],
+                "generated_at": generated_at,
+                "clock_basis": basis,
+                "scenario_now": scenario_now,
+                "run_directory": self._storage.run_root.name,
+            }
+            return body
 
     # -- manager workflow transport --------------------------------------
 
