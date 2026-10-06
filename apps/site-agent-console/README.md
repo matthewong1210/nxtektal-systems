@@ -118,14 +118,79 @@ otherwise it stays UNKNOWN with the blocker explained. A recovered receipt is
 never treated as evidence that the scheduler is running. Nothing in the console
 restarts the runner.
 
+## Staffing advisory pilot
+
+The staffing panel is a local, advisory-only evidence surface. It imports a
+reviewed roster, records same-day staff exceptions, shows model-generated
+coverage candidates, and records the manager's accept, modify or reject
+response. A proposal and its manager response are not an HR schedule, labor
+compliance proof, employee notification, robot task or execution command. Every
+separate operational action remains the manager's responsibility. The manager
+label is self-declared attribution, not authenticated identity.
+
+Staffing is enabled only when the integrated continuous-collection service is
+started with `--staffing-state-root`. The service stores its durable ledger at
+exactly
+`<state-root>/<site_id>/<deployment_id>/staffing-v1/`. Choose an absolute,
+access-controlled location on durable local storage, separate from `--out`.
+Changing or initializing `--out`, restarting the Site Agent, and fixture reset
+must not be used to remove or replace this stable staffing evidence. Omitting
+`--staffing-state-root` disables staffing while leaving the existing service
+available. The full launch, shutdown and backup procedure is in the
+[Staffing Advisory Pilot Runbook](../../simulation/docs/staffing_advisory_pilot_runbook.md).
+
+Provider routing is deployment configuration, never a browser setting:
+
+- `--staffing-region CN` uses Kimi only, configured with `--kimi-model` and the
+  `MOONSHOT_API_KEY` process environment variable. It has no cross-region
+  fallback.
+- `--staffing-region GLOBAL` uses OpenAI as primary, configured with
+  `--openai-model` and `OPENAI_API_KEY`. An approved Anthropic backup can be
+  configured with `--anthropic-model` and `ANTHROPIC_API_KEY`; it is considered
+  only for the gateway's bounded fallback cases.
+- `--staffing-language {zh-CN,en}` selects the fixed prompt language and
+  defaults to `zh-CN`. The console cannot change provider, model, endpoint,
+  prompt, timeout, token cap or fallback policy.
+
+Provider configuration is optional for local work: roster import, exception
+recording and correction, reads, and manager evidence remain usable without a
+working model route. Advisory generation is bounded to one active request plus
+four waiting requests per site; it does not block those local operations.
+
+Use the checked-in [CSV template](public/staffing-roster-template.csv). The
+browser accepts at most 512 KiB of strict UTF-8 RFC 4180 CSV, validates the
+closed row grammar, shows a preview, and sends nothing until the operator
+confirms it. The normalized JSON request is capped at 1 MiB before fetch, and
+the service revalidates the complete request; browser checks are convenience,
+not authority.
+
+Every write receives a new request ID immediately before submission. If a
+response is lost, the console first recovers the same operation by
+`GET /api/v1/staffing/requests/{operation-kind}/{request-id}`; a busy response
+may retry the identical body under that same ID. `RESULT_UNKNOWN` is different:
+after explicit manager approval, generation retry uses a fresh request ID and
+sets `retry_of` to the earlier `suggestion_id`, never to its request ID. The old
+and new receipts remain separate evidence.
+
+The integrated service binds to loopback and has no authentication. Run it only
+on a controlled operator computer; do not proxy, tunnel or publish it to a LAN
+or the internet. The local ledger, API, console and backups contain real
+identity and free text even though provider-bound data is minimized and
+pseudonymized, so the stable root and backups require access control and
+encryption.
+
 `happy-dom` is a development-only dependency used by
 `tests/planning-interaction.test.tsx` to mount the real panels and drive the
 real pollers under fake timers; it ships nothing to the static export.
 
 A minimal, decision-first Manager Console for the local fixture-backed
 Pilot Site Agent service. The console is a static Next.js export served
-same-origin by the Python service; it consumes only the versioned local
-Manager API (`/api/v0/`, `/api/v1/planning` and `/api/v1/course-ops`),
+same-origin by the Python service. Successful static responses enforce
+`Content-Security-Policy: connect-src 'self'`; source boundary tests remain
+defense in depth rather than the runtime network boundary. The console
+consumes only the versioned local
+Manager API (`/api/v0/`, `/api/v1/planning`, `/api/v1/course-ops`, the
+read-only `/api/v1/collection-executions`, and `/api/v1/staffing`),
 imports no Python Site OS package, and holds
 no authoritative state — after any refresh or restart it reconstructs
 its entire view from the API and the service's persisted evidence.
@@ -199,4 +264,8 @@ npm audit --omit=dev
 imports, robot-command vocabulary, hidden browser persistence, hardcoded
 network URLs, and any API path outside `/api/v0/` and the frozen
 `/api/v1/planning`, read-only `/api/v1/course-ops` and read-only
-`/api/v1/collection-executions` contracts.
+`/api/v1/collection-executions`, and advisory-only `/api/v1/staffing`
+contracts. It also freezes the three exact production dependencies and applies
+the stricter persistence, external-URL and command-vocabulary checks directly
+to the staffing panel, staffing inputs, CSV parser, action builder, manager
+label guard and same-origin staffing client.

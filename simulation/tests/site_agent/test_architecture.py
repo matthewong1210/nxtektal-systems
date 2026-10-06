@@ -69,8 +69,11 @@ FOREIGN_SURFACE_TOKENS = (
 )
 
 LLM_PATTERNS = (
-    r"\bopenai\b",
-    r"\banthropic\b",
+    r"\bopenai",
+    r"\banthropic",
+    r"\bkimi",
+    r"\bmoonshot",
+    r"\bprovider",
     r"\bllm\b",
     r"\blangchain\b",
     r"\bprompt\b",
@@ -148,6 +151,9 @@ COLLECTION_EXECUTION_SERVICE = (
 )
 CONTINUOUS_COLLECTION_EXECUTION_SERVICE = (
     SIMULATION_ROOT / "scripts" / "course_collection_execution_v4_service.py"
+)
+CONTINUOUS_COLLECTION_EXECUTION_SERVICE_RELATIVE = (
+    "scripts/course_collection_execution_v4_service.py"
 )
 STAFFING_COMPOSITION = SIMULATION_ROOT / "scripts" / "staffing_operations.py"
 STAFFING_COMPOSITION_RELATIVE = "scripts/staffing_operations.py"
@@ -304,6 +310,29 @@ ENDPOINT_OVERRIDE_NAMES = {
     "host",
 }
 
+DIRECT_NETWORK_CALL_PREFIXES = (
+    "aiohttp.",
+    "http.",
+    "httpx.",
+    "requests.",
+    "socket.",
+    "ssl.",
+    "urllib.request.",
+)
+
+DIRECT_PROVIDER_CALL_PREFIXES = (
+    "anthropic.",
+    "google.generativeai.",
+    "moonshot.",
+    "openai.",
+)
+
+DIRECT_EXECUTION_CALL_PREFIXES = (
+    "edge.",
+    "robot.",
+    "simulator.",
+)
+
 NON_PRODUCTION_TOOL_SCRIPTS = {
     "scripts/inspect_environment.py",
 }
@@ -317,6 +346,15 @@ def _package_files() -> list[Path]:
     ]
     assert files, "nxt_site_agent sources not found"
     return files
+
+
+def _llm_provider_surface_violations(source: str) -> list[str]:
+    lowered = source.lower()
+    return [
+        pattern
+        for pattern in LLM_PATTERNS
+        if re.search(pattern, lowered) is not None
+    ]
 
 
 def _imports_of(path: Path) -> set[str]:
@@ -372,18 +410,31 @@ def _dynamic_import(
     return True, target
 
 
-def _import_targets(source: str) -> set[str]:
+def _import_targets(source: str, *, relative: str | None = None) -> set[str]:
     tree = ast.parse(source)
     dynamic_aliases = _dynamic_import_aliases(tree)
+    package_parts: tuple[str, ...] = ()
+    if relative is not None:
+        module_parts = tuple(Path(relative).with_suffix("").parts)
+        package_parts = module_parts[:-1]
     modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0:
-            if node.module is None:
-                continue
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                if node.module is None:
+                    continue
+                base = node.module
+            else:
+                if relative is None or node.level > len(package_parts):
+                    continue
+                retained = package_parts[: len(package_parts) - node.level + 1]
+                suffix = () if node.module is None else tuple(node.module.split("."))
+                base = ".".join((*retained, *suffix))
             modules.update(
-                f"{node.module}.{alias.name}" for alias in node.names
+                f"{base}.{alias.name}" if base else alias.name
+                for alias in node.names
             )
         elif isinstance(node, ast.Call):
             is_dynamic, target = _dynamic_import(node, dynamic_aliases)
@@ -420,7 +471,44 @@ def _dynamic_import_violations(source: str) -> list[str]:
             and node.attr in {"__import__", "import_module"}
         ):
             violations.append(f"dynamic import attribute {node.attr}")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"eval", "exec"}
+        ):
+            violations.append(f"dynamic source call {node.func.id}")
     return violations
+
+
+def _dotted_expression(node: ast.AST) -> str | None:
+    parts: list[str] = []
+    current = node
+    while isinstance(current, ast.Attribute):
+        parts.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name):
+        return None
+    parts.append(current.id)
+    return ".".join(reversed(parts))
+
+
+def _assignment_target_names(target: ast.AST) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, ast.Attribute):
+        return [target.attr]
+    if isinstance(target, ast.Subscript):
+        key = target.slice
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            return [key.value]
+        return []
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return [
+            name
+            for item in target.elts
+            for name in _assignment_target_names(item)
+        ]
+    return []
 
 
 def _repo_source_python_files() -> list[Path]:
@@ -447,16 +535,100 @@ def _production_python_files() -> list[Path]:
     ]
 
 
-def _owner_importers(prefix: str) -> set[str]:
+def _production_source_texts() -> dict[str, str]:
+    return {
+        path.relative_to(SIMULATION_ROOT).as_posix(): path.read_text(
+            encoding="utf-8"
+        )
+        for path in _production_python_files()
+    }
+
+
+def _owner_importers_in_sources(
+    prefix: str, sources: dict[str, str]
+) -> set[str]:
     importers = set()
-    for path in _repo_source_python_files():
-        targets = _import_targets(path.read_text(encoding="utf-8"))
+    owner_path = prefix.replace(".", "/")
+    for relative, source in sources.items():
+        if relative == f"{owner_path}.py" or relative.startswith(
+            f"{owner_path}/"
+        ):
+            continue
+        targets = _import_targets(source, relative=relative)
         if any(
             target == prefix or target.startswith(f"{prefix}.")
             for target in targets
         ):
-            importers.add(path.relative_to(SIMULATION_ROOT).as_posix())
+            importers.add(relative)
     return importers
+
+
+def _staffing_owner_boundary_violations(
+    sources: dict[str, str],
+) -> list[str]:
+    gateway_importers = _owner_importers_in_sources(
+        "nxt_model_gateway", sources
+    )
+    staffing_domain_importers = _owner_importers_in_sources(
+        "nxt_pilot_ops.staffing", sources
+    )
+    composition_importers = _owner_importers_in_sources(
+        "scripts.staffing_operations", sources
+    )
+    expected_owner = {STAFFING_COMPOSITION_RELATIVE}
+    expected_composition_importer = {
+        CONTINUOUS_COLLECTION_EXECUTION_SERVICE_RELATIVE
+    }
+    violations: list[str] = []
+
+    if gateway_importers != expected_owner:
+        violations.append(f"gateway importers: {sorted(gateway_importers)!r}")
+    if staffing_domain_importers != expected_owner:
+        violations.append(
+            "staffing-domain importers: "
+            f"{sorted(staffing_domain_importers)!r}"
+        )
+    dual_owner_importers = gateway_importers & staffing_domain_importers
+    if dual_owner_importers != expected_owner:
+        violations.append(
+            "dual-owner importers: "
+            f"{sorted(dual_owner_importers)!r}"
+        )
+    package_gateway_importers = {
+        relative
+        for relative in gateway_importers
+        if relative.split("/", 1)[0].startswith("nxt_")
+    }
+    if package_gateway_importers:
+        violations.append(
+            "package gateway importers: "
+            f"{sorted(package_gateway_importers)!r}"
+        )
+    if composition_importers != expected_composition_importer:
+        violations.append(
+            "composition importers: "
+            f"{sorted(composition_importers)!r}"
+        )
+
+    v4_source = sources.get(CONTINUOUS_COLLECTION_EXECUTION_SERVICE_RELATIVE)
+    if v4_source is None:
+        violations.append("V4 composition source missing")
+    else:
+        v4_targets = _import_targets(
+            v4_source,
+            relative=CONTINUOUS_COLLECTION_EXECUTION_SERVICE_RELATIVE,
+        )
+        if "scripts.staffing_operations" not in v4_targets:
+            violations.append("V4 composition import missing")
+        if any(
+            target == "nxt_model_gateway"
+            or target.startswith("nxt_model_gateway.")
+            or target == "nxt_pilot_ops.staffing"
+            or target.startswith("nxt_pilot_ops.staffing.")
+            for target in v4_targets
+        ):
+            violations.append("V4 imports owner")
+    return violations
 
 
 def _staffing_composition_violations(source: str) -> list[str]:
@@ -493,19 +665,38 @@ def _staffing_composition_violations(source: str) -> list[str]:
         if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for target in targets:
-                name = None
-                if isinstance(target, ast.Name):
-                    name = target.id
-                elif isinstance(target, ast.Attribute):
-                    name = target.attr
+                for name in _assignment_target_names(target):
+                    if name.lower() in ENDPOINT_OVERRIDE_NAMES:
+                        violations.append(
+                            f"endpoint override assignment {name}"
+                        )
+        if isinstance(node, ast.Dict):
+            for key in node.keys:
                 if (
-                    name is not None
-                    and name.lower() in ENDPOINT_OVERRIDE_NAMES
+                    isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value.lower() in ENDPOINT_OVERRIDE_NAMES
                 ):
-                    violations.append(f"endpoint override assignment {name}")
+                    violations.append(f"endpoint override key {key.value}")
         if isinstance(node, ast.Call):
+            callee = _dotted_expression(node.func)
+            if callee is not None and callee.startswith(
+                DIRECT_NETWORK_CALL_PREFIXES
+            ):
+                violations.append(f"direct network call {callee}")
+            if callee is not None and callee.startswith(
+                DIRECT_PROVIDER_CALL_PREFIXES
+            ):
+                violations.append(f"direct provider SDK call {callee}")
+            if callee is not None and callee.startswith(
+                DIRECT_EXECUTION_CALL_PREFIXES
+            ):
+                violations.append(f"direct execution call {callee}")
             for keyword in node.keywords:
-                if keyword.arg in ENDPOINT_OVERRIDE_NAMES:
+                if (
+                    keyword.arg is not None
+                    and keyword.arg.lower() in ENDPOINT_OVERRIDE_NAMES
+                ):
                     violations.append(f"endpoint override {keyword.arg}")
     for token in EXECUTION_TOKENS:
         if token in source:
@@ -653,13 +844,27 @@ def test_service_has_no_execution_or_foreign_surface_tokens():
             assert token not in text, f"{path.name} mentions {token!r}"
 
 
-def test_service_has_no_llm_or_generative_agent_surface():
+def test_service_has_no_llm_provider_or_generative_agent_surface():
     for path in _package_files():
-        lowered = path.read_text(encoding="utf-8").lower()
-        for pattern in LLM_PATTERNS:
-            assert re.search(pattern, lowered) is None, (
-                f"{path.name} matches banned pattern {pattern!r}"
-            )
+        violations = _llm_provider_surface_violations(
+            path.read_text(encoding="utf-8")
+        )
+        assert violations == [], (
+            f"{path.name} matches banned patterns {violations!r}"
+        )
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "provider = object()",
+        "client = KimiClient()",
+        "prompt = build_prompt()",
+        "generative = True",
+    ),
+)
+def test_site_agent_llm_guard_rejects_synthetic_provider_semantics(source):
+    assert _llm_provider_surface_violations(source)
 
 
 def test_service_never_mentions_other_first_party_packages():
@@ -720,24 +925,9 @@ def test_service_scripts_import_no_transport_or_robot_stack():
 
 
 def test_staffing_has_one_unique_gateway_domain_composition_point():
-    gateway_importers = _owner_importers("nxt_model_gateway")
-    staffing_domain_importers = _owner_importers("nxt_pilot_ops.staffing")
-    expected = {STAFFING_COMPOSITION_RELATIVE}
-    assert gateway_importers == expected
-    assert staffing_domain_importers == expected
-    assert gateway_importers & staffing_domain_importers == expected
-
-    v4_targets = _import_targets(
-        CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
-    )
-    assert "scripts.staffing_operations" in v4_targets
-    assert not any(
-        target == "nxt_model_gateway"
-        or target.startswith("nxt_model_gateway.")
-        or target == "nxt_pilot_ops.staffing"
-        or target.startswith("nxt_pilot_ops.staffing.")
-        for target in v4_targets
-    )
+    assert _staffing_owner_boundary_violations(
+        _production_source_texts()
+    ) == []
 
 
 def test_owner_import_inventory_detects_alternate_import_syntax():
@@ -759,6 +949,65 @@ def test_owner_import_inventory_detects_alternate_import_syntax():
     assert "nxt_model_gateway.transport" in _import_targets(
         "from importlib import import_module as load\n"
         'provider = load("nxt_model_gateway.transport")'
+    )
+
+
+@pytest.mark.parametrize(
+    ("relative", "source", "expected_violation"),
+    (
+        (
+            "nxt_site_agent/gateway_leak.py",
+            "from nxt_model_gateway import Provider\n",
+            "package gateway importers",
+        ),
+        (
+            "nxt_site_agent/staffing_leak.py",
+            "from nxt_pilot_ops.staffing import StaffingError\n",
+            "staffing-domain importers",
+        ),
+        (
+            "scripts/alternate_staffing.py",
+            "import nxt_model_gateway.openai\n"
+            "from nxt_pilot_ops import staffing\n",
+            "dual-owner importers",
+        ),
+        (
+            "scripts/alternate_consumer.py",
+            "from scripts import staffing_operations\n",
+            "composition importers",
+        ),
+        (
+            "scripts/alternate_consumer.py",
+            "from . import staffing_operations\n",
+            "composition importers",
+        ),
+        (
+            "scripts/course_collection_execution_v4_service.py",
+            "from scripts import staffing_operations\n"
+            "from nxt_model_gateway import Provider\n",
+            "V4 imports owner",
+        ),
+    ),
+)
+def test_staffing_owner_guard_rejects_synthetic_boundary_bypasses(
+    relative, source, expected_violation
+):
+    sources = {
+        "scripts/staffing_operations.py": (
+            "from nxt_model_gateway import Provider\n"
+            "from nxt_pilot_ops.staffing.operations import "
+            "StaffingOperations\n"
+        ),
+        "scripts/course_collection_execution_v4_service.py": (
+            "from scripts import staffing_operations\n"
+        ),
+        "nxt_site_agent/__init__.py": "from .api import SiteAgentService\n",
+    }
+    sources[relative] = source
+
+    assert any(
+        expected_violation in violation
+        for violation in _staffing_owner_boundary_violations(sources)
     )
 
 
@@ -826,6 +1075,12 @@ def test_staffing_composition_retains_injected_io_time_and_execution_boundary():
         'BASE_URL = "https://api.openai.com/v1"',
         'PROVIDER_URL = "https://provider.invalid/v1"',
         "BASE_URL = provider_host",
+        'exec("import socket")',
+        'settings = {"base_url": provider_host}',
+        'settings["endpoint"] = provider_host',
+        "socket.create_connection(address)",
+        "openai.OpenAI(api_key=api_key)",
+        "simulator.step()",
         'build_gateway(endpoint="https://provider.invalid")',
         "send_robot_command(payload)",
     ),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import http.client
 import json
 import os
@@ -2542,13 +2543,14 @@ def test_worker_has_one_active_four_waiting_duplicate_first_and_no_network_lock(
     first = api.route("POST", "/api/v1/staffing/suggestions", generation_payload("request-1"))
     assert first["state"] == "RESERVED"
     assert entered.wait(5)
-    waiting_generation_ids = []
+    waiting: list[tuple[str, str]] = []
     for index in range(2, 6):
+        request_id = f"request-{index}"
         receipt = api.route(
-            "POST", "/api/v1/staffing/suggestions", generation_payload(f"request-{index}")
+            "POST", "/api/v1/staffing/suggestions", generation_payload(request_id)
         )
         assert receipt["state"] == "RESERVED"
-        waiting_generation_ids.append(receipt["record"]["suggestion_id"])
+        waiting.append((request_id, receipt["record"]["suggestion_id"]))
     before = owner.ledger.verify()
     with pytest.raises(SiteAgentError) as busy:
         api.route("POST", "/api/v1/staffing/suggestions", generation_payload("request-6"))
@@ -2605,7 +2607,90 @@ def test_worker_has_one_active_four_waiting_duplicate_first_and_no_network_lock(
     assert not closer.is_alive()
     assert closed == []
     assert transport.calls == 1
-    assert interrupted == waiting_generation_ids
+    assert interrupted == [generation_id for _request_id, generation_id in waiting]
+
+    reopened_ledger = StaffingLedger(
+        tmp_path / "real-blocking",
+        site_id="site-cn-1",
+        deployment_id="deployment-1",
+    )
+    reopened = StaffingOperations(
+        reopened_ledger,
+        site_id="site-cn-1",
+        deployment_id="deployment-1",
+        site_timezone="Asia/Shanghai",
+    )
+    try:
+        assert transport.calls == 1
+        for request_id, generation_id in waiting:
+            projection = reopened.request_projection(
+                "suggestion-generate", request_id
+            )
+            assert projection.generation_id == generation_id
+            assert projection.lifecycle_state == "RESULT_UNKNOWN"
+            interruptions = [
+                event
+                for event in reopened.ledger.read().events
+                if event.event_type == "generation_interrupted"
+                and event.payload.generation_id == generation_id
+            ]
+            assert len(interruptions) == 1
+            assert interruptions[0].payload.reason == "RESULT_UNKNOWN"
+    finally:
+        reopened_ledger.close()
+
+
+def test_identical_suggestion_posts_share_one_reservation_and_provider_call(
+    tmp_path: Path,
+) -> None:
+    api, owner, transport, entered, release = real_blocking_api(tmp_path)
+    request = generation_payload("request-concurrent-duplicate")
+    barrier = threading.Barrier(3)
+
+    def submit() -> dict[str, object]:
+        barrier.wait()
+        return api.route(
+            "POST",
+            "/api/v1/staffing/suggestions",
+            copy.deepcopy(request),
+        )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (executor.submit(submit), executor.submit(submit))
+            barrier.wait()
+            receipts = tuple(future.result(timeout=5) for future in futures)
+
+        assert sorted(receipt["disposition"] for receipt in receipts) == [
+            "created",
+            "duplicate",
+        ]
+        assert len(
+            [
+                event
+                for event in owner.ledger.read().events
+                if event.event_type == "generation_reserved"
+            ]
+        ) == 1
+        assert entered.wait(5)
+        assert transport.calls == 1
+
+        release.set()
+        terminal = wait_for_state(
+            api,
+            request["request_id"],
+            {"NO_VALID_SUGGESTION"},
+        )
+        duplicate = api.route(
+            "POST", "/api/v1/staffing/suggestions", copy.deepcopy(request)
+        )
+        assert terminal["state"] == "NO_VALID_SUGGESTION"
+        assert duplicate["disposition"] == "duplicate"
+        assert duplicate["operation_id"] == terminal["operation_id"]
+        assert transport.calls == 1
+    finally:
+        release.set()
+        api.close()
 
 
 def test_real_site_agent_health_remains_available_while_provider_is_blocked(
@@ -2641,17 +2726,144 @@ def test_real_site_agent_health_remains_available_while_provider_is_blocked(
         assert reserved["data"]["state"] == "RESERVED"
         assert entered.wait(5)
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        exception = exchange_request(
+            "exception-correction.json", "exception-recorded"
+        )
+        with ThreadPoolExecutor(max_workers=3) as executor:
             health = executor.submit(request, "GET", "/api/v0/health")
+            staffing = executor.submit(request, "GET", "/api/v1/staffing")
+            manual_exception = executor.submit(
+                request,
+                "POST",
+                "/api/v1/staffing/exceptions",
+                exception,
+            )
             health_status, health_payload = health.result(timeout=2)
+            staffing_status, staffing_payload = staffing.result(timeout=2)
+            exception_status, exception_payload = manual_exception.result(timeout=2)
         assert health_status == 200
         assert health_payload["data"]["service_state"] == "serving"
+        assert staffing_status == 200
+        assert staffing_payload["data"]["schema"] == "nxt-staffing/v1"
+        assert exception_status == 200
+        assert exception_payload["data"]["state"] == "COMMITTED"
         assert release.is_set() is False
     finally:
         release.set()
         api.close()
         server.shutdown()
         service.stop()
+
+
+@pytest.mark.parametrize(
+    ("region", "expected_providers"),
+    (
+        (DeploymentRegion.CN, (Provider.KIMI,)),
+        (
+            DeploymentRegion.GLOBAL,
+            (Provider.OPENAI, Provider.ANTHROPIC),
+        ),
+    ),
+)
+def test_all_configured_provider_outage_keeps_manual_operations_available(
+    tmp_path: Path,
+    region: DeploymentRegion,
+    expected_providers: tuple[Provider, ...],
+) -> None:
+    class UnavailableTransport:
+        def __init__(self) -> None:
+            self.calls: list[Provider] = []
+
+        def post(self, *, endpoint, headers, body, timeout_s):
+            assert timeout_s > 0
+            self.calls.append(endpoint.provider)
+            return HttpResponse(
+                503,
+                {"content-type": "application/json"},
+                b'{"error":{"message":"provider unavailable"}}',
+            )
+
+    transport = UnavailableTransport()
+    if region is DeploymentRegion.CN:
+        settings = cn_settings()
+        gateway = ModelGateway(
+            kimi=KimiAdapter(
+                config=ProviderConfig(Provider.KIMI, "kimi-model", "secret"),
+                transport=transport,
+            ),
+            monotonic=time.monotonic,
+        )
+    else:
+        settings = global_settings()
+        gateway = ModelGateway(
+            openai=OpenAIAdapter(
+                config=ProviderConfig(Provider.OPENAI, "gpt-model", "secret"),
+                transport=transport,
+            ),
+            anthropic=AnthropicAdapter(
+                config=ProviderConfig(
+                    Provider.ANTHROPIC, "claude-model", "secret"
+                ),
+                transport=transport,
+            ),
+            monotonic=time.monotonic,
+        )
+    route = RoutePolicy(region)
+    configured = ConfiguredGateway(gateway, route, gateway.readiness(route))
+    ledger = StaffingLedger(
+        tmp_path / region.value,
+        site_id="site-cn-1",
+        deployment_id="deployment-1",
+    )
+    owner = StaffingOperations(
+        ledger,
+        site_id="site-cn-1",
+        deployment_id="deployment-1",
+        site_timezone="Asia/Shanghai",
+    )
+    worker = BoundedGenerationWorker(
+        owner=owner,
+        configured=configured,
+        settings=settings,
+        audit_clock=lambda: NOW,
+        nonce_factory=lambda: b"u" * 32,
+    )
+    router = StaffingRouteAdapter(
+        owner=owner,
+        worker=worker,
+        configured=configured,
+        site_id="site-cn-1",
+        deployment_id="deployment-1",
+        site_timezone="Asia/Shanghai",
+        audit_clock=lambda: NOW,
+    )
+    api = StaffingApiOperations(router=router, worker=worker, ledger=ledger)
+    try:
+        api.route("POST", "/api/v1/staffing/roster-imports", roster_request())
+        request_id = f"all-providers-out-{region.value.lower()}"
+        api.route(
+            "POST", "/api/v1/staffing/suggestions", generation_payload(request_id)
+        )
+        terminal = wait_for_state(api, request_id, {"UNAVAILABLE"})
+        assert terminal["record"]["failure_code"] == "PROVIDER_UNAVAILABLE"
+        assert tuple(transport.calls) == expected_providers
+
+        manual = exchange_request(
+            "exception-correction.json", "exception-recorded"
+        )
+        committed = api.route(
+            "POST", "/api/v1/staffing/exceptions", manual
+        )
+        snapshot = api.route(
+            "GET", "/api/v1/staffing/dates/2026-10-06", {}
+        )
+        assert committed["state"] == "COMMITTED"
+        assert snapshot["active_exceptions"][0]["staff_id"] == manual["staff_id"]
+        if region is DeploymentRegion.CN:
+            assert Provider.OPENAI not in transport.calls
+            assert Provider.ANTHROPIC not in transport.calls
+    finally:
+        api.close()
 
 
 def test_attempt_boundaries_are_durable_before_transport_and_terminal(tmp_path: Path) -> None:
@@ -4362,3 +4574,295 @@ def test_public_wrapper_redacts_internal_exception_prompt_and_provider_body(
         assert sentinel not in captured.out + captured.err
     finally:
         api.close()
+
+
+def test_integrated_privacy_keeps_local_identity_and_evidence_off_provider_wire(
+    tmp_path: Path, capsys
+) -> None:
+    staff_id = "PRIVATE-STAFF-9"
+    display_name = "PRIVATE-NAME-9"
+    note = "PRIVATE-NOTE-9"
+    source_ref = "PRIVATE-SOURCE-9.csv"
+    raw_provider_marker = "PRIVATE-RAW-PROVIDER-9"
+    reasoning_marker = "PRIVATE-HIDDEN-REASONING-9"
+    api_keys = {
+        Provider.KIMI: "PRIVATE-KIMI-KEY-9",
+        Provider.OPENAI: "PRIVATE-OPENAI-KEY-9",
+        Provider.ANTHROPIC: "PRIVATE-ANTHROPIC-KEY-9",
+    }
+    nonces = (
+        b"PRIVATE-NONCE-A-1234567890123456",
+        b"PRIVATE-NONCE-B-1234567890123456",
+    )
+    assert all(len(value) == 32 for value in nonces)
+
+    class CapturingTransport:
+        def __init__(self) -> None:
+            self.requests: list[tuple[object, dict[str, str], bytes]] = []
+
+        def post(self, *, endpoint, headers, body, timeout_s):
+            assert timeout_s > 0
+            self.requests.append((endpoint, dict(headers), bytes(body)))
+            if endpoint.provider is Provider.OPENAI:
+                response = {
+                    "private_raw_body": raw_provider_marker,
+                    "reasoning": reasoning_marker,
+                }
+                status = 503
+            elif endpoint.provider is Provider.ANTHROPIC:
+                response = valid_anthropic_envelope()
+                response.update(
+                    private_raw_body=raw_provider_marker,
+                    reasoning=reasoning_marker,
+                )
+                status = 200
+            else:
+                response = valid_kimi_envelope()
+                response.update(
+                    private_raw_body=raw_provider_marker,
+                    reasoning=reasoning_marker,
+                )
+                status = 200
+            return HttpResponse(
+                status,
+                {"content-type": "application/json"},
+                json.dumps(response, separators=(",", ":")).encode(),
+            )
+
+    transport = CapturingTransport()
+    cn_gateway = ModelGateway(
+        kimi=KimiAdapter(
+            config=ProviderConfig(
+                Provider.KIMI, "kimi-model", api_keys[Provider.KIMI]
+            ),
+            transport=transport,
+        ),
+        monotonic=time.monotonic,
+    )
+    global_gateway = ModelGateway(
+        openai=OpenAIAdapter(
+            config=ProviderConfig(
+                Provider.OPENAI,
+                "gpt-model",
+                api_keys[Provider.OPENAI],
+            ),
+            transport=transport,
+        ),
+        anthropic=AnthropicAdapter(
+            config=ProviderConfig(
+                Provider.ANTHROPIC,
+                "claude-model",
+                api_keys[Provider.ANTHROPIC],
+            ),
+            transport=transport,
+        ),
+        monotonic=time.monotonic,
+    )
+
+    roster = roster_request()
+    roster["source_ref"] = source_ref
+    roster["workers"][0]["staff_id"] = staff_id
+    roster["workers"][0]["display_name"] = display_name
+    roster["availability"][0]["staff_id"] = staff_id
+    roster["regular_assignments"][0]["staff_id"] = staff_id
+    exception = exchange_request("exception-correction.json", "exception-recorded")
+    exception["staff_id"] = staff_id
+    exception["note"] = note
+
+    local_ledger_texts: list[str] = []
+    public_values: list[object] = []
+    alias_nonce_digests: list[str] = []
+    apis: list[StaffingApiOperations] = []
+
+    cases = (
+        (
+            "cn",
+            ConfiguredGateway(
+                cn_gateway,
+                RoutePolicy(DeploymentRegion.CN),
+                cn_gateway.readiness(RoutePolicy(DeploymentRegion.CN)),
+            ),
+            cn_settings(key=api_keys[Provider.KIMI]),
+            nonces[0],
+        ),
+        (
+            "global",
+            ConfiguredGateway(
+                global_gateway,
+                RoutePolicy(DeploymentRegion.GLOBAL),
+                global_gateway.readiness(RoutePolicy(DeploymentRegion.GLOBAL)),
+            ),
+            global_settings(
+                openai_key=api_keys[Provider.OPENAI],
+                anthropic_key=api_keys[Provider.ANTHROPIC],
+            ),
+            nonces[1],
+        ),
+    )
+
+    try:
+        for label, configured, settings, nonce in cases:
+            ledger_root = tmp_path / label
+            ledger = StaffingLedger(
+                ledger_root,
+                site_id="site-cn-1",
+                deployment_id="deployment-1",
+            )
+            owner = StaffingOperations(
+                ledger,
+                site_id="site-cn-1",
+                deployment_id="deployment-1",
+                site_timezone="Asia/Shanghai",
+            )
+            worker = BoundedGenerationWorker(
+                owner=owner,
+                configured=configured,
+                settings=settings,
+                audit_clock=lambda: NOW,
+                nonce_factory=lambda nonce=nonce: nonce,
+            )
+            router = StaffingRouteAdapter(
+                owner=owner,
+                worker=worker,
+                configured=configured,
+                site_id="site-cn-1",
+                deployment_id="deployment-1",
+                site_timezone="Asia/Shanghai",
+                audit_clock=lambda: NOW,
+            )
+            api = StaffingApiOperations(router=router, worker=worker, ledger=ledger)
+            apis.append(api)
+
+            roster_body = copy.deepcopy(roster)
+            roster_body["request_id"] = f"privacy-roster-{label}"
+            roster_receipt = api.route(
+                "POST", "/api/v1/staffing/roster-imports", roster_body
+            )
+            exception_body = copy.deepcopy(exception)
+            exception_body["request_id"] = f"privacy-exception-{label}"
+            exception_receipt = api.route(
+                "POST", "/api/v1/staffing/exceptions", exception_body
+            )
+            generation = generation_payload(f"privacy-generation-{label}")
+            generation["expected_revisions"]["exception_set"] = 1
+            reserved = api.route(
+                "POST", "/api/v1/staffing/suggestions", generation
+            )
+            terminal = wait_for_state(
+                api,
+                generation["request_id"],
+                {"NO_VALID_SUGGESTION"},
+            )
+            snapshot = api.route("GET", "/api/v1/staffing", {})
+            public_values.extend(
+                (roster_receipt, exception_receipt, reserved, terminal, snapshot)
+            )
+
+            alias_digest = hashlib.sha256(
+                b"staffing-alias-nonce-v1\0" + nonce
+            ).hexdigest()
+            alias_nonce_digests.append(alias_digest)
+            ledger_text = (ledger_root / "staffing.jsonl").read_text(
+                encoding="utf-8"
+            )
+            assert alias_digest in ledger_text
+            local_ledger_texts.append(ledger_text)
+    finally:
+        for api in reversed(apis):
+            api.close()
+
+    assert [request[0].provider for request in transport.requests] == [
+        Provider.KIMI,
+        Provider.OPENAI,
+        Provider.ANTHROPIC,
+    ]
+    request_bodies = b"\n".join(body for _endpoint, _headers, body in transport.requests)
+    request_text = request_bodies.decode("utf-8")
+    header_text = json.dumps(
+        [headers for _endpoint, headers, _body in transport.requests],
+        sort_keys=True,
+    )
+    for private_value in (staff_id, display_name, note, source_ref):
+        assert private_value not in request_text
+        assert private_value not in header_text
+    for api_key in api_keys.values():
+        assert api_key not in request_text
+
+    ledger_text = "\n".join(local_ledger_texts)
+    for private_value in (staff_id, display_name, note, source_ref):
+        assert private_value in ledger_text
+    for api_key in api_keys.values():
+        assert api_key not in ledger_text
+    public_text = json.dumps(public_values, ensure_ascii=False, sort_keys=True)
+    for private_value in (staff_id, display_name, note):
+        assert private_value in public_text
+
+    local_digests: set[str] = set()
+
+    def collect_digests(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if (
+                    key.endswith("digest")
+                    and type(child) is str
+                    and len(child) == 64
+                    and set(child) <= set("0123456789abcdef")
+                ):
+                    local_digests.add(child)
+                collect_digests(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_digests(child)
+
+    for line in ledger_text.splitlines():
+        if line:
+            collect_digests(json.loads(line))
+    assert local_digests
+    assert all(digest not in request_text for digest in local_digests)
+    assert all(digest not in header_text for digest in local_digests)
+    for api_key in api_keys.values():
+        assert api_key in header_text
+
+    console_root = Path(__file__).resolve().parents[3] / "apps/site-agent-console"
+    console_fixture_text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(
+            (
+                console_root / "public/staffing-roster-template.csv",
+                *(
+                    Path(__file__).resolve().parents[2]
+                    / "docs/contracts/staffing-v1/examples"
+                ).glob("*.json"),
+            ),
+            key=str,
+        )
+    )
+    redacted_error = str(
+        public_domain_error(
+            StaffingError("INTEGRITY_FAILURE", raw_provider_marker)
+        )
+    )
+    captured = capsys.readouterr()
+    unauthorized_local_surfaces = (
+        public_text
+        + captured.out
+        + captured.err
+        + redacted_error
+        + console_fixture_text
+    )
+    for secret in api_keys.values():
+        assert secret not in unauthorized_local_surfaces
+    for marker in (raw_provider_marker, reasoning_marker):
+        assert marker not in ledger_text
+        assert marker not in header_text
+        assert marker not in unauthorized_local_surfaces
+    for nonce, nonce_digest in zip(nonces, alias_nonce_digests):
+        nonce_text = nonce.decode("ascii")
+        assert nonce_text not in request_text
+        assert nonce_text not in header_text
+        assert nonce_text not in ledger_text
+        assert nonce_text not in unauthorized_local_surfaces
+        assert nonce_digest not in request_text
+        assert nonce_digest not in header_text
+        assert nonce_digest not in public_text
+        assert nonce_digest not in captured.out + captured.err + console_fixture_text

@@ -203,11 +203,19 @@ replace that evidence.
 ## Expected fixed identity and result
 
 The deterministic fixture produces these values.  Paths, process IDs and
-wall-clock read time are excluded from the causal identities. The canonical
-witness and fixed identities were regenerated on 2026-09-26 after the paused
-recovery and lifecycle-precedence fix changed the source-based engine
-fingerprint; the fixed 3C policy, actions and 600-ball result remain unchanged.
+wall-clock read time are excluded from the causal identities. Regenerate the
+complete owner-produced witnesses and this generated table only with:
 
+```bash
+cd simulation
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  --regenerate-v3-witnesses \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_frozen_acceptance_case \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_runbook_witness_facts_match_normal_loop_fixture \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+<!-- BEGIN GENERATED NORMAL LOOP WITNESS -->
 | Field | Expected value |
 |---|---|
 | `site_id` | `pilot-course-a` |
@@ -217,21 +225,22 @@ fingerprint; the fixed 3C policy, actions and 600-ball result remain unchanged.
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `b3e31f4904a3e58713474a87c879be3480f5ece6bc6b5bd6302311baabba0d29` |
+| `engine_digest` | `0817540a15db39f6f524e0526c3455da70bfb9d8fc3aa0bc1ba8327fe7299538` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `ba7a5c30b5e76a4a3ef365269a9de3544bdd063f2c54c2dda300be9eef8922f9` |
-| `execution_id` | `b7ca35768dce624e48e16de3768a2f9a49aa42f54eff8239273b09a3ec6d806a` |
-| `attempt_id` | `attempt-b7ca35768dce624e48e16de3768a2f9a49aa42f54eff8239273b09a3ec6d806a` |
-| `assignment_id` | `assignment-713bdc41fc512419d45f4f684ab86e094166463c5722da3d9091ab288a94e6b5` |
-| request digest | `7f17324e747f3f1a49fbfec56fc9b8b246e79182b0caa2bdbbe4b5df54a9cd7b` |
-| request high-water digest | `b8a37f7c70cf8856bc2e3a1527c60cb1ec2facda75a5b15d641adfa15d2f6e9e` |
+| `binding_id` | `acda87ebf9db735f7e04e7e08c3564599a9f0103f253afffe1ce9049454e8888` |
+| `execution_id` | `c7bf2de51635182740e651189988124c277021569455620bd6075114098be628` |
+| `attempt_id` | `attempt-c7bf2de51635182740e651189988124c277021569455620bd6075114098be628` |
+| `assignment_id` | `assignment-36b566812b30a7e2083c39ec75ca8f1eab367e2a03926ba3c9e4cbaf9e731e89` |
+| request digest | `790afbae355c0c9fbea72f3bed8a3f503c1df4de4293a0cb6ffb350d6fceceda` |
+| request high-water digest | `c3b91f0e20e3318d6d63c247e2d6193766cff72fcb9f99162455e4b15425fe35` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
-| final `state` / `reason` | `SUCCEEDED` / `UNLOADED_ALL_COLLECTED_BALLS` |
-| `raw_quantity.balls` | `600` to runtime robot `R1` |
-| `unload_quantity.balls` | `600` to bound station `H1` |
-| final assignment `event_digest` | `b628d26337220e4c96833351b9009f1f91568e44bb419081c419baeece4bede9` |
-| final `replay_digest` | `f1bd715bb1143fd8270939aa94171196f08510e44d9695fc665adc8bdadee2ad` |
+| final `state` / `reason` | `SUCCEEDED / UNLOADED_ALL_COLLECTED_BALLS` |
+| `raw_quantity.balls` | `600 to runtime robot R1` |
+| `unload_quantity.balls` | `600 to bound station H1` |
+| final assignment `event_digest` | `2b16d18f66861966cbbe01a980a6a0d50b64b838d97ae639f2f799a0ea9a99bb` |
+| final `replay_digest` | `23a2de9d460406515f0efc35452880da15f575d1cd566324193e5d75f7ebec8d` |
+<!-- END GENERATED NORMAL LOOP WITNESS -->
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not
 invent aliases for them: the real session identity is the
@@ -254,26 +263,10 @@ The observed causal timeline is:
 | Edge result | `effective_state=SUCCEEDED`, `result_verification=VERIFIED`, one `SUCCEEDED` terminal |
 | Planning results | `planning.outcomes=[]`; no outcome was synthesized |
 
-The start event ID is
-`assignment-event-1029d48f558cd223990027787ab58f13561df0c62f1d2de0bded0d902f0635e2`.
-The collection-exit event ID is
-`assignment-event-e729c6caa1958e7ba86fcca85b9d912475d804eb9ce040b9284bff135ecadccf`.
-The unload event ID is
-`assignment-event-b2d3229ae19d274d66b405d2e730d4164a8555adc9e7a2e1d006635257085672`;
-the terminal event ID is
-`assignment-event-9aac5838e82188589ed792d5724c2d932d5ad5dc350eb64f433ea3754bcf53fd`.
-The read projection retains all fifteen raw source event IDs and the six Edge
-record IDs rather than collapsing the evidence to the 600-ball summary.
-Those Edge record IDs in the observed normal loop are:
-
-```text
-rec_1c2fa2aed779de9fe9ba5215
-rec_4a9d45f9de8bb044c8f9e7c5
-rec_4f0e7960fdbb03d02f762db1
-rec_6a350192bc19830abdd936de
-rec_8f3bb8e191900c2bd926ccc6
-rec_fbf9d67c03833c163d455189
-```
+The canonical fixture retains all fifteen raw source event IDs and the six
+Edge record IDs rather than collapsing the evidence to the 600-ball summary.
+Read those source-owned identifiers from the complete JSON witness; they are
+not duplicated as hand-maintained runbook facts.
 
 ### Wait-only proof
 
@@ -432,8 +425,10 @@ Planning outcome completion.  The same process returned a strict
 Its `server_time_utc` was wall time; the execution reads above retained the
 simulation clock.
 
-The durable execution tree hash, excluding process locks and the independent
-Site Agent fixture root, was
+The following durable execution tree hash is historical evidence from the
+separately dated loopback run in this section; it is not rewritten by the
+witness updater. Excluding process locks and the independent Site Agent
+fixture root, it was
 `ca0b622a3cf14b2b89eaf28eae5ca48667485dc03ae79634965372260e64d982`
 both before and after another collection GET.  That is direct service evidence
 that the read appended no execution evidence and did not advance the session.

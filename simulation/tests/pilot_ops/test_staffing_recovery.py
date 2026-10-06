@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import importlib
+import multiprocessing
 import sys
 import threading
-from collections.abc import Mapping
+import traceback
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
+from functools import wraps
 from types import MappingProxyType
 
 import pytest
@@ -39,6 +42,69 @@ UTC = timezone.utc
 SITE_ID = "pilot-course-a"
 DEPLOYMENT_ID = "pilot-a-edge-task-sim-v0"
 NOW = datetime(2026, 10, 5, 0, 0, 0, 123456, tzinfo=UTC)
+RACE_HARD_TIMEOUT_SECONDS = 10
+RACE_PROCESS_STOP_SECONDS = 2
+
+
+def _assert_race_completes_with_hard_timeout(target: Callable[[], None]) -> None:
+    context = multiprocessing.get_context("fork")
+    receive_result, send_result = context.Pipe(duplex=False)
+
+    def run_target() -> None:
+        try:
+            target()
+        except BaseException:
+            send_result.send(("error", traceback.format_exc()))
+            raise
+        else:
+            send_result.send(("ok", None))
+        finally:
+            send_result.close()
+
+    process = context.Process(target=run_target)
+    process.start()
+    send_result.close()
+    process.join(RACE_HARD_TIMEOUT_SECONDS)
+    timed_out = process.is_alive()
+    if timed_out:
+        process.terminate()
+        process.join(RACE_PROCESS_STOP_SECONDS)
+        if process.is_alive():
+            process.kill()
+            process.join(RACE_PROCESS_STOP_SECONDS)
+
+    stopped = not process.is_alive()
+    exitcode = process.exitcode
+    result = None
+    if receive_result.poll():
+        try:
+            result = receive_result.recv()
+        except EOFError:
+            pass
+    receive_result.close()
+    if stopped:
+        process.close()
+
+    if timed_out:
+        assert stopped, "timed-out race subprocess could not be stopped"
+        pytest.fail(
+            f"race witness exceeded hard timeout of {RACE_HARD_TIMEOUT_SECONDS}s",
+            pytrace=False,
+        )
+    if result is not None and result[0] == "error":
+        pytest.fail(f"isolated race witness failed:\n{result[1]}", pytrace=False)
+    assert exitcode == 0
+    assert result == ("ok", None)
+
+
+def _isolated_race_witness(
+    target: Callable[..., None],
+) -> Callable[..., None]:
+    @wraps(target)
+    def wrapper(*args, **kwargs) -> None:
+        _assert_race_completes_with_hard_timeout(lambda: target(*args, **kwargs))
+
+    return wrapper
 
 
 class _DictSubclass(dict):
@@ -2067,6 +2133,167 @@ def test_two_distinct_manager_responses_race_to_one_composite_winner(tmp_path) -
     assert len(manager_events) == 1
     assert manager_events[0].payload.effective_plan_revision == 1
     reopened_ledger.close()
+
+
+@_isolated_race_witness
+def test_manager_accept_racing_new_exception_is_atomically_serialized(
+    tmp_path,
+) -> None:
+    operations = _operations_with_roster(tmp_path)
+    generation_id = _reserve(operations)
+    _issue_valid_suggestion(operations, generation_id)
+    manager_body = _accept_body(request_id="manager-versus-exception")
+    exception_body = _exception_request(request_id="exception-versus-manager")
+    barrier = threading.Barrier(3)
+
+    def accept():
+        barrier.wait(timeout=5)
+        return operations.commit_manager_response(
+            deepcopy(manager_body),
+            suggestion_id=generation_id,
+            recorded_at=NOW,
+        )
+
+    def record_exception():
+        barrier.wait(timeout=5)
+        return operations.record_exception(
+            deepcopy(exception_body), recorded_at=NOW
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        manager_future = pool.submit(accept)
+        exception_future = pool.submit(record_exception)
+        barrier.wait(timeout=5)
+        manager_result = manager_future.result(timeout=5)
+        exception_result = exception_future.result(timeout=5)
+
+    assert type(exception_result) is CommittedReceipt
+    assert type(manager_result) in {CommittedReceipt, ConflictReceipt}
+    events = operations.ledger.read().events
+    exception_events = tuple(
+        event for event in events if event.event_type == "exception_recorded"
+    )
+    manager_events = tuple(
+        event
+        for event in events
+        if event.event_type == "manager_response_committed"
+    )
+    assert len(exception_events) == 1
+    assert len(manager_events) == int(type(manager_result) is CommittedReceipt)
+
+    if type(manager_result) is CommittedReceipt:
+        assert manager_events[0].sequence < exception_events[0].sequence
+        assert manager_events[0].payload.effective_plan_revision == 1
+        assert manager_events[0].payload.effective_schedule is not None
+        assert manager_events[0].payload.schedule_digest is not None
+        replay = operations.commit_manager_response(
+            deepcopy(manager_body),
+            suggestion_id=generation_id,
+            recorded_at=NOW,
+        )
+        assert type(replay) is DuplicateReceipt
+        assert replay.receipt.event_id == manager_result.receipt.event_id
+    else:
+        assert manager_result.code == "STALE_SUGGESTION"
+        projection = operations.date_projection(date(2026, 10, 5))
+        assert projection.effective_plan_schedule is None
+        assert projection.manager_responses == ()
+        before_replay = operations.ledger.verify()
+        replay = operations.commit_manager_response(
+            deepcopy(manager_body),
+            suggestion_id=generation_id,
+            recorded_at=NOW,
+        )
+        assert type(replay) is ConflictReceipt
+        assert replay.code == "STALE_SUGGESTION"
+        assert operations.ledger.verify() == before_replay
+
+
+@_isolated_race_witness
+def test_exception_correction_and_cancellation_race_to_one_atomic_winner(
+    tmp_path,
+) -> None:
+    operations = _operations_with_roster(tmp_path)
+    operations.record_exception(_exception_request(), recorded_at=NOW)
+    exception_id = operations.request_projection(
+        "exception-record", "exception-request-1"
+    ).committed_record.exception_id
+    correction = {
+        "schema": "nxt-staffing-exception-correct/v1",
+        "request_id": "correct-versus-cancel",
+        "exception_id": exception_id,
+        "expected_exception_set_revision": 1,
+        "operator": "course-manager",
+        "replacement": {
+            "kind": "EARLY_DEPARTURE",
+            "time_local": "15:00",
+            "note": "changed",
+        },
+    }
+    cancellation = {
+        "schema": "nxt-staffing-exception-cancel/v1",
+        "request_id": "cancel-versus-correct",
+        "exception_id": exception_id,
+        "expected_exception_set_revision": 1,
+        "operator": "course-manager",
+        "note": "returned",
+    }
+    barrier = threading.Barrier(3)
+    before = operations.ledger.verify()[0]
+
+    def correct():
+        barrier.wait(timeout=5)
+        return operations.correct_exception(deepcopy(correction), recorded_at=NOW)
+
+    def cancel():
+        barrier.wait(timeout=5)
+        return operations.cancel_exception(deepcopy(cancellation), recorded_at=NOW)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        correction_future = pool.submit(correct)
+        cancellation_future = pool.submit(cancel)
+        barrier.wait(timeout=5)
+        results = (
+            correction_future.result(timeout=5),
+            cancellation_future.result(timeout=5),
+        )
+
+    winner = next(result for result in results if type(result) is CommittedReceipt)
+    loser = next(result for result in results if type(result) is ConflictReceipt)
+    assert loser.code == "STALE_REQUEST"
+    assert operations.ledger.verify()[0] == before + 1
+
+    events = operations.ledger.read().events
+    terminal_events = tuple(
+        event
+        for event in events
+        if event.event_type in {"exception_corrected", "exception_cancelled"}
+    )
+    assert len(terminal_events) == 1
+    if terminal_events[0].event_type == "exception_corrected":
+        assert terminal_events[0].payload.exception_set_revision == 2
+        assert terminal_events[0].payload.previous_exception.exception_id == exception_id
+        assert terminal_events[0].payload.replacement_exception.exception_id == exception_id
+        winning_body = correction
+        losing_body = cancellation
+        winning_call = operations.correct_exception
+        losing_call = operations.cancel_exception
+        assert len(operations.date_projection(date(2026, 10, 5)).exceptions) == 1
+    else:
+        assert terminal_events[0].payload.exception_set_revision == 2
+        assert terminal_events[0].payload.cancelled_exception.exception_id == exception_id
+        winning_body = cancellation
+        losing_body = correction
+        winning_call = operations.cancel_exception
+        losing_call = operations.correct_exception
+        assert operations.date_projection(date(2026, 10, 5)).exceptions == ()
+
+    duplicate = winning_call(deepcopy(winning_body), recorded_at=NOW)
+    stable_conflict = losing_call(deepcopy(losing_body), recorded_at=NOW)
+    assert type(duplicate) is DuplicateReceipt
+    assert duplicate.receipt.event_id == winner.receipt.event_id
+    assert type(stable_conflict) is ConflictReceipt
+    assert stable_conflict.code == "STALE_REQUEST"
 
 
 def test_manager_wire_syntax_errors_are_400_before_ledger_access(tmp_path) -> None:

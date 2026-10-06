@@ -42,6 +42,9 @@ CONTINUOUS_TWO_TASK_WITNESS = (
     SIMULATION_ROOT
     / "tests/fixtures/continuous-collection-v4/two-task-active.json"
 )
+RUNBOOK = SIMULATION_ROOT / "docs/collection_execution_v3_runbook.md"
+RUNBOOK_WITNESS_BEGIN = "<!-- BEGIN GENERATED NORMAL LOOP WITNESS -->"
+RUNBOOK_WITNESS_END = "<!-- END GENERATED NORMAL LOOP WITNESS -->"
 SCHEMA = json.loads(
     (SIMULATION_ROOT / "docs/contracts/collection-execution-v1/schema.json").read_text()
 )
@@ -96,7 +99,11 @@ class WallClock:
 
 
 @pytest.fixture(scope="session")
-def normal_loop(tmp_path_factory):
+def normal_loop(
+    tmp_path_factory,
+    regenerate_v3_witnesses,
+    atomic_v3_witness_replace,
+):
     from scripts.course_collection_execution_demo import CourseCollectionExecutionDemo
 
     root = tmp_path_factory.mktemp("acceptance-normal")
@@ -107,11 +114,29 @@ def normal_loop(tmp_path_factory):
     finally:
         runtime.close()
     snapshot = result["collection_executions"]
+    _assert_wire_contract(snapshot)
+    _assert_normal_loop_invariants(snapshot)
+    canonical = (
+        json.dumps(
+            snapshot,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode()
+    if regenerate_v3_witnesses:
+        atomic_v3_witness_replace(RUNTIME_WITNESS, canonical)
     witness_text = RUNTIME_WITNESS.read_text(encoding="utf-8").strip()
     witness = json.loads(witness_text)
     assert snapshot == witness
-    assert json.dumps(snapshot, sort_keys=True, separators=(",", ":")) == witness_text
-    return {"root": root, "result": result, "evidence": evidence}
+    assert canonical == RUNTIME_WITNESS.read_bytes()
+    return {
+        "root": root,
+        "result": result,
+        "evidence": evidence,
+        "snapshot": snapshot,
+    }
 
 
 def _execution(normal_loop):
@@ -121,6 +146,98 @@ def _execution(normal_loop):
 def _assert_wire_contract(snapshot):
     wire_oracle.validator(SCHEMA, "#/$defs/ExecutionSnapshot").validate(snapshot)
     wire_oracle.relations(snapshot)
+
+
+def _assert_normal_loop_invariants(snapshot):
+    assert len(snapshot["bindings"]) == 1
+    assert len(snapshot["requests"]) == 1
+    assert len(snapshot["receipts"]) == 1
+    assert len(snapshot["executions"]) == 1
+    binding = snapshot["bindings"][0]
+    request = snapshot["requests"][0]
+    receipt = snapshot["receipts"][0]
+    execution = snapshot["executions"][0]
+    assert execution["binding_id"] == request["binding_id"] == binding["binding_id"]
+    assert execution["request_id"] == receipt["request_id"] == request["request_id"]
+    assert execution["execution_id"] == receipt["execution_id"]
+    assert execution["state"] == "SUCCEEDED"
+    assert execution["reason"] == "UNLOADED_ALL_COLLECTED_BALLS"
+    assert execution["raw_quantity"]["balls"] == 600
+    assert execution["unload_quantity"]["balls"] == 600
+    assert execution["raw_quantity"]["event_digest"] == execution[
+        "unload_quantity"
+    ]["event_digest"]
+
+
+def _normal_loop_runbook_block(snapshot):
+    _assert_wire_contract(snapshot)
+    _assert_normal_loop_invariants(snapshot)
+    binding = snapshot["bindings"][0]
+    request = snapshot["requests"][0]
+    receipt = snapshot["receipts"][0]
+    execution = snapshot["executions"][0]
+    raw = execution["raw_quantity"]
+    unload = execution["unload_quantity"]
+    rows = (
+        ("`site_id`", binding["site_id"]),
+        ("`deployment_id`", binding["deployment_id"]),
+        ("`series_id`", snapshot["series_id"]),
+        ("`session_id`", snapshot["session_id"]),
+        ("`round_id`", snapshot["round_id"]),
+        ("`request_id`", request["request_id"]),
+        ("`task_id`", request["task_id"]),
+        ("`engine_digest`", snapshot["engine_digest"]),
+        ("`plan_id`", binding["plan_id"]),
+        ("`binding_id`", binding["binding_id"]),
+        ("`execution_id`", execution["execution_id"]),
+        ("`attempt_id`", execution["attempt_id"]),
+        ("`assignment_id`", execution["assignment_id"]),
+        ("request digest", receipt["request_digest"]),
+        (
+            "request high-water digest",
+            receipt["request_log_high_water_digest"],
+        ),
+        ("`policy_id`", execution["policy_id"]),
+        ("`arbiter_version`", execution["arbiter_version"]),
+        (
+            "final `state` / `reason`",
+            f"{execution['state']} / {execution['reason']}",
+        ),
+        (
+            "`raw_quantity.balls`",
+            f"{raw['balls']} to runtime robot {raw['destination_id']}",
+        ),
+        (
+            "`unload_quantity.balls`",
+            f"{unload['balls']} to bound station {unload['destination_id']}",
+        ),
+        ("final assignment `event_digest`", raw["event_digest"]),
+        ("final `replay_digest`", snapshot["replay_digest"]),
+    )
+    return "\n".join(
+        ["| Field | Expected value |", "|---|---|"]
+        + [f"| {field} | `{value}` |" for field, value in rows]
+    )
+
+
+def _replace_unique_marked_block(source, generated):
+    assert source.count(RUNBOOK_WITNESS_BEGIN) == 1, (
+        "runbook normal-loop witness begin marker must be unique"
+    )
+    assert source.count(RUNBOOK_WITNESS_END) == 1, (
+        "runbook normal-loop witness end marker must be unique"
+    )
+    prefix, remainder = source.split(RUNBOOK_WITNESS_BEGIN, 1)
+    _old, suffix = remainder.split(RUNBOOK_WITNESS_END, 1)
+    return (
+        prefix
+        + RUNBOOK_WITNESS_BEGIN
+        + "\n"
+        + generated
+        + "\n"
+        + RUNBOOK_WITNESS_END
+        + suffix
+    )
 
 
 def test_continuous_two_task_witness_is_canonical_and_relation_valid():
@@ -153,6 +270,81 @@ def test_continuous_two_task_witness_is_canonical_and_relation_valid():
     ) == 1
     assert len({row["execution_id"] for row in snapshot["executions"]}) == 2
     assert len({row["request_id"] for row in snapshot["executions"]}) == 2
+
+
+def test_runbook_witness_facts_match_normal_loop_fixture(
+    normal_loop,
+    regenerate_v3_witnesses,
+    atomic_v3_witness_replace,
+):
+    fixture_snapshot = json.loads(RUNTIME_WITNESS.read_text(encoding="utf-8"))
+    assert fixture_snapshot == normal_loop["snapshot"]
+    expected = _normal_loop_runbook_block(fixture_snapshot)
+    source = RUNBOOK.read_text(encoding="utf-8")
+    if regenerate_v3_witnesses:
+        updated = _replace_unique_marked_block(source, expected)
+        atomic_v3_witness_replace(RUNBOOK, updated.encode())
+        source = RUNBOOK.read_text(encoding="utf-8")
+    assert source.count(RUNBOOK_WITNESS_BEGIN) == 1
+    assert source.count(RUNBOOK_WITNESS_END) == 1
+    generated = source.split(RUNBOOK_WITNESS_BEGIN, 1)[1].split(
+        RUNBOOK_WITNESS_END, 1
+    )[0]
+    assert generated.strip() == expected
+
+
+def test_v3_witnesses_remain_unchanged_without_regeneration(
+    regenerate_v3_witnesses,
+    v3_witness_initial_bytes,
+    atomic_v3_witness_replace,
+):
+    if regenerate_v3_witnesses:
+        pytest.skip("explicit regeneration owns witness replacement")
+    target = RUNTIME_WITNESS
+    with pytest.raises(
+        RuntimeError,
+        match="requires --regenerate-v3-witnesses",
+    ):
+        atomic_v3_witness_replace(target, v3_witness_initial_bytes[target])
+    assert {
+        path: path.read_bytes() for path in v3_witness_initial_bytes
+    } == v3_witness_initial_bytes
+
+
+def test_v3_witness_target_guard_rejects_unowned_missing_and_symlink_files(
+    tmp_path,
+    v3_witness_target_validator,
+):
+    regular = tmp_path / "regular.json"
+    regular.write_text("{}\n", encoding="utf-8")
+    assert v3_witness_target_validator(
+        regular, frozenset({regular.absolute()})
+    ) == regular.absolute()
+
+    with pytest.raises(ValueError, match="not an owned V3 witness target"):
+        v3_witness_target_validator(regular, frozenset())
+
+    missing = tmp_path / "missing.json"
+    with pytest.raises(FileNotFoundError):
+        v3_witness_target_validator(missing, frozenset({missing.absolute()}))
+
+    symlink = tmp_path / "link.json"
+    symlink.symlink_to(regular)
+    with pytest.raises(RuntimeError, match="regular non-symlink"):
+        v3_witness_target_validator(symlink, frozenset({symlink.absolute()}))
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "no generated markers",
+        RUNBOOK_WITNESS_BEGIN * 2 + RUNBOOK_WITNESS_END,
+        RUNBOOK_WITNESS_BEGIN + RUNBOOK_WITNESS_END * 2,
+    ),
+)
+def test_runbook_witness_update_rejects_missing_or_duplicate_markers(source):
+    with pytest.raises(AssertionError, match="marker must be unique"):
+        _replace_unique_marked_block(source, "generated")
 
 
 def _iso(identity, seconds):

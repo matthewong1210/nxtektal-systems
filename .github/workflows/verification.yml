@@ -162,6 +162,14 @@ jobs:
         run: >-
           uv run --no-sync python -B -m pytest -o addopts='' -q
           -p no:cacheprovider tests/model_gateway
+      - name: Test staffing contract, HTTP seam, and composition
+        working-directory: simulation
+        run: |
+          uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+            tests/pilot_ops/test_staffing_wire_contract.py \
+            tests/site_agent/test_staffing_api.py \
+            tests/site_agent/test_api.py \
+            tests/site_agent/test_staffing_composition.py
       - name: Test architecture, imports, and safety
         working-directory: simulation
         run: |
@@ -261,6 +269,14 @@ jobs:
 
           for name in shipped:
               import_module(name)
+          staffing = import_module("nxt_pilot_ops.staffing")
+          staffing_operations = import_module("nxt_pilot_ops.staffing.operations")
+          assert staffing_operations.__all__ == ("StaffingOperations",)
+          assert staffing_operations.StaffingOperations.__module__ == (
+              "nxt_pilot_ops.staffing.operations"
+          )
+          assert "StaffingOperations" not in getattr(staffing, "__all__", ())
+          assert not hasattr(staffing, "StaffingOperations")
           for name in absent:
               assert find_spec(name) is None, f"unexpected package installed: {name}"
           print("isolated wheel imports passed:", version("nxt-sim"))

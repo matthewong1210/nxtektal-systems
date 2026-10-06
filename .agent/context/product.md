@@ -48,6 +48,13 @@ runtime dependency.
 - **Shadow Ops:** `nxt_pilot_ops` decision trust, trace, evaluation, human
   workflow, and tamper-evident ledger around named policies. It is advisory and
   downstream, not a duplicate general decision engine.
+- **Staffing advisory:** `nxt_pilot_ops.staffing` owns durable local roster,
+  exception, suggestion, and manager-response evidence. The sole dual-owner
+  composition point is `simulation/scripts/staffing_operations.py`, which may
+  call `nxt_model_gateway` and inject `/api/v1/staffing` into the Site Agent.
+  The same-origin Console is presentation/input only. Its suggestions are not
+  HR, payroll, attendance, labor-compliance, notification, scheduling, robot,
+  or execution truth.
 - **Course World Model:** immutable, versioned spatial truth in
   `nxt_course_world_model` — the course-local frame bound to the
   commissioned coordinate reference, the elevation surface, semantic course
@@ -78,8 +85,24 @@ runtime dependency.
 - Model keys enter only through composition-root injection. Production endpoints
   are private constants, never UI/API/CSV/environment configuration. CN uses Kimi;
   GLOBAL uses OpenAI with one possible Anthropic fallback only for availability
-  codes. No model call enters Agent Runtime, Site Agent, Edge Task or robot/control
-  packages. Gateway implementation and offline tests do not imply deployment readiness.
+  codes. No gateway/provider import enters Agent Runtime, Site Agent, Edge Task,
+  or robot/control packages; model execution remains owned by the staffing
+  composition script. Gateway implementation and offline tests do not imply
+  deployment readiness.
+
+- Staffing is optional and enabled by `--staffing-state-root`; its durable root
+  is `<state-root>/<site_id>/<deployment_id>/staffing-v1/`, separate from
+  volatile `--out`. The integrated service and Console are loopback-only and
+  unauthenticated. Provider configuration uses the CLI flags
+  `--staffing-region`, `--staffing-language`, `--kimi-model`, `--openai-model`,
+  and `--anthropic-model`, with secret values supplied only through the names
+  `MOONSHOT_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY`.
+
+- Staffing generation permits one active plus four waiting requests. Lost
+  responses are recovered by request GET; `RESULT_UNKNOWN` requires an explicit
+  new request ID whose `retry_of` names the old suggestion ID. The Console caps
+  strict UTF-8 RFC 4180 CSV at 512 KiB and normalized JSON at 1 MiB; server-side
+  validation remains authoritative.
 
 - Physical values in the current simulator are placeholder-tagged. Outputs
   validate software pipelines, not robot or facility design.

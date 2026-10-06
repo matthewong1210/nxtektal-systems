@@ -5,16 +5,25 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 import http.client
+import importlib.util
 import json
 from pathlib import Path
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
 
+from nxt_model_gateway import DeploymentRegion, Provider, ProviderConfig, RoutePolicy
+from nxt_model_gateway.kimi import KimiAdapter
+from nxt_model_gateway.routing import ModelGateway
+from nxt_model_gateway.transport import HttpResponse
 from nxt_edge_task.schedules import ScheduleService
 from nxt_edge_task.journal import JsonlJournal
+from nxt_pilot_ops.staffing.ledger import StaffingLedger
+from nxt_pilot_ops.staffing.operations import StaffingOperations
 from nxt_range_ops.core.sim import RangeSimulation
 from nxt_site_agent import SiteAgentApiServer, SiteAgentError
 from scripts import course_collection_execution as execution_api
@@ -51,6 +60,20 @@ TWO_TASK_ACTIVE_WITNESS = (
     Path(__file__).resolve().parents[1]
     / "fixtures/continuous-collection-v4/two-task-active.json"
 )
+SIMULATION_ROOT = Path(__file__).resolve().parents[2]
+COLLECTION_EXECUTION_SCHEMA = json.loads(
+    (
+        SIMULATION_ROOT
+        / "docs/contracts/collection-execution-v1/schema.json"
+    ).read_text()
+)
+_wire_oracle_spec = importlib.util.spec_from_file_location(
+    "continuous_collection_execution_wire_oracle",
+    SIMULATION_ROOT / "tests/pilot_ops/test_collection_execution_wire_contract.py",
+)
+wire_oracle = importlib.util.module_from_spec(_wire_oracle_spec)
+assert _wire_oracle_spec.loader is not None
+_wire_oracle_spec.loader.exec_module(wire_oracle)
 
 
 def call(server, method, path, body=None):
@@ -1074,7 +1097,10 @@ def test_real_http_accepts_second_confirmation_while_first_runs_and_executes_bot
 
 
 def test_two_task_active_fixture_regenerates_from_exact_http_data(
-    tmp_path, launch
+    tmp_path,
+    launch,
+    regenerate_v3_witnesses,
+    atomic_v3_witness_replace,
 ):
     runtime = ContinuousCollectionExecutionRuntime(
         tmp_path / "witness", initialize=True, wall_clock=WallClock()
@@ -1123,6 +1149,13 @@ def test_two_task_active_fixture_regenerates_from_exact_http_data(
             "PENDING",
             "RUNNING",
         }
+        assert execution_api.parse_collection_execution_read_contract(
+            response["data"], "ExecutionSnapshot"
+        ) == response["data"]
+        wire_oracle.validator(
+            COLLECTION_EXECUTION_SCHEMA, "#/$defs/ExecutionSnapshot"
+        ).validate(response["data"])
+        wire_oracle.relations(response["data"])
         canonical = (
             json.dumps(
                 response["data"],
@@ -1132,6 +1165,8 @@ def test_two_task_active_fixture_regenerates_from_exact_http_data(
             )
             + "\n"
         ).encode()
+        if regenerate_v3_witnesses:
+            atomic_v3_witness_replace(TWO_TASK_ACTIVE_WITNESS, canonical)
         assert TWO_TASK_ACTIVE_WITNESS.read_bytes() == canonical
     finally:
         server.shutdown()
@@ -2749,8 +2784,9 @@ def test_restart_between_first_terminal_and_second_due_keeps_all_ids_and_attempt
 
 
 def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
-    tmp_path, monkeypatch, capsys
+    tmp_path, monkeypatch, capsys, caplog
 ):
+    real_threading_event = threading.Event
     with pytest.raises(SystemExit) as help_exit:
         v4_service.main(["--help"])
     assert help_exit.value.code == 0
@@ -2843,6 +2879,12 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
     }
     for name, value in secret_sentinels.items():
         monkeypatch.setenv(name, value)
+    nonce_values = (b"A" * 32, b"B" * 32)
+    nonce_sizes = []
+
+    def token_bytes(size):
+        nonce_sizes.append(size)
+        return nonce_values[len(nonce_sizes) - 1]
 
     def load_settings(env, **kwargs):
         construction["settings"] = (env, kwargs)
@@ -2868,6 +2910,7 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
     )
     monkeypatch.setattr(v4_service.threading, "Event", FakeStop)
     monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(v4_service.secrets, "token_bytes", token_bytes)
 
     state_root = tmp_path / "stable-staffing"
     assert v4_service.main(
@@ -2913,8 +2956,6 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
     assert staffing_kwargs["settings"] is settings
     assert staffing_kwargs["audit_clock"] is v4_service._wall_utc
     assert staffing_kwargs["monotonic"] is v4_service.time.monotonic
-    nonce = staffing_kwargs["nonce_factory"]()
-    assert type(nonce) is bytes and len(nonce) == 32
     assert construction["server"]["staffing_operations"](
         "GET", "/api/v1/staffing", {}
     ) == {"method": "GET", "path": "/api/v1/staffing", "body": {}}
@@ -2932,6 +2973,186 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
         "runtime.close",
         "service.stop",
     ]
+    monkeypatch.setattr(
+        v4_service.threading, "Event", real_threading_event
+    )
+
+    class CapturingTransport:
+        def __init__(self):
+            self.requests = []
+
+        def post(self, *, endpoint, headers, body, timeout_s):
+            assert timeout_s > 0
+            self.requests.append((endpoint, dict(headers), bytes(body)))
+            return HttpResponse(
+                200,
+                {"content-type": "application/json"},
+                json.dumps(
+                    {
+                        "id": "nonce-seam-provider-request",
+                        "choices": [
+                            {
+                                "finish_reason": "stop",
+                                "message": {
+                                    "content": '{"candidates":[]}',
+                                },
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": 1,
+                            "completion_tokens": 1,
+                            "total_tokens": 2,
+                        },
+                    },
+                    separators=(",", ":"),
+                ).encode(),
+            )
+
+    transport = CapturingTransport()
+    real_settings = v4_service.staffing_operations.StaffingProviderSettings(
+        region=DeploymentRegion.CN,
+        language="zh-CN",
+        kimi_model="kimi-nonce-seam",
+        openai_model=None,
+        anthropic_model=None,
+        moonshot_api_key="nonce-seam-key",
+        openai_api_key=None,
+        anthropic_api_key=None,
+    )
+    gateway = ModelGateway(
+        kimi=KimiAdapter(
+            config=ProviderConfig(
+                Provider.KIMI,
+                "kimi-nonce-seam",
+                "nonce-seam-key",
+            ),
+            transport=transport,
+        ),
+        monotonic=time.monotonic,
+    )
+    route = RoutePolicy(DeploymentRegion.CN)
+    configured = v4_service.staffing_operations.ConfiguredGateway(
+        gateway,
+        route,
+        gateway.readiness(route),
+    )
+    ledger_root = tmp_path / "nonce-reservations"
+    ledger = StaffingLedger(
+        ledger_root,
+        site_id=v4_service.SITE_ID,
+        deployment_id=v4_service.DEPLOYMENT_ID,
+    )
+    owner = StaffingOperations(
+        ledger,
+        site_id=v4_service.SITE_ID,
+        deployment_id=v4_service.DEPLOYMENT_ID,
+        site_timezone="Asia/Shanghai",
+    )
+    fixed_now = datetime(2026, 10, 6, 1, 2, 3, 4, tzinfo=timezone.utc)
+    worker = v4_service.staffing_operations.BoundedGenerationWorker(
+        owner=owner,
+        configured=configured,
+        settings=real_settings,
+        audit_clock=lambda: fixed_now,
+        nonce_factory=staffing_kwargs["nonce_factory"],
+    )
+    router = v4_service.staffing_operations.StaffingRouteAdapter(
+        owner=owner,
+        worker=worker,
+        configured=configured,
+        site_id=v4_service.SITE_ID,
+        deployment_id=v4_service.DEPLOYMENT_ID,
+        site_timezone="Asia/Shanghai",
+        audit_clock=lambda: fixed_now,
+    )
+    api = v4_service.staffing_operations.StaffingApiOperations(
+        router=router,
+        worker=worker,
+        ledger=ledger,
+    )
+    public_values = []
+    try:
+        roster = _staffing_contract_request(
+            "roster-import.json", "roster-committed"
+        )
+        roster.update(
+            {
+                "site_id": v4_service.SITE_ID,
+                "deployment_id": v4_service.DEPLOYMENT_ID,
+                "site_timezone": "Asia/Shanghai",
+            }
+        )
+        public_values.append(
+            api.route("POST", "/api/v1/staffing/roster-imports", roster)
+        )
+        request_ids = ("nonce-reservation-1", "nonce-reservation-2")
+        for request_id in request_ids:
+            public_values.append(
+                api.route(
+                    "POST",
+                    "/api/v1/staffing/suggestions",
+                    {
+                        "schema": "nxt-staffing-suggestion-generate/v1",
+                        "request_id": request_id,
+                        "operator": "course-manager",
+                        "service_date": "2026-10-06",
+                        "expected_revisions": {
+                            "roster": 1,
+                            "exception_set": 0,
+                            "effective_plan": 0,
+                        },
+                        "retry_of": None,
+                    },
+                )
+            )
+        for request_id in request_ids:
+            deadline = time.monotonic() + 5
+            while True:
+                receipt = api.route(
+                    "GET",
+                    f"/api/v1/staffing/requests/suggestion-generate/{request_id}",
+                    {},
+                )
+                if receipt["state"] == "NO_VALID_SUGGESTION":
+                    public_values.append(receipt)
+                    break
+                assert time.monotonic() < deadline
+                time.sleep(0.01)
+        public_values.append(api.route("GET", "/api/v1/staffing", {}))
+        ledger_text = (ledger_root / "staffing.jsonl").read_text(
+            encoding="utf-8"
+        )
+    finally:
+        api.close()
+
+    assert nonce_sizes == [32, 32]
+    assert [request[0].provider for request in transport.requests] == [
+        Provider.KIMI,
+        Provider.KIMI,
+    ]
+    transport_text = json.dumps(
+        [
+            {
+                "headers": headers,
+                "body": body.decode("utf-8"),
+            }
+            for _endpoint, headers, body in transport.requests
+        ],
+        sort_keys=True,
+    )
+    public_text = json.dumps(public_values, ensure_ascii=False, sort_keys=True)
+    nonce_digests = tuple(
+        hashlib.sha256(b"staffing-alias-nonce-v1\0" + nonce).hexdigest()
+        for nonce in nonce_values
+    )
+    for nonce, digest in zip(nonce_values, nonce_digests):
+        assert digest in ledger_text
+        assert nonce.decode() not in ledger_text
+        assert nonce.decode() not in transport_text
+        assert nonce.decode() not in public_text
+        assert digest not in transport_text
+        assert digest not in public_text
+
     captured = capsys.readouterr()
     startup = json.loads(captured.out)
     assert startup == {
@@ -2944,6 +3165,10 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
     for sentinel in secret_sentinels.values():
         assert sentinel not in captured.out
         assert sentinel not in captured.err
+    observable_output = captured.out + captured.err + caplog.text
+    for nonce, digest in zip(nonce_values, nonce_digests):
+        assert nonce.decode() not in observable_output
+        assert digest not in observable_output
 
 
 def test_staffing_flags_are_inert_without_a_stable_state_root(
@@ -3251,6 +3476,11 @@ def test_stable_staffing_root_survives_new_out_root_site_reset_and_no_provider(
     monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
     monkeypatch.setattr(v4_service, "threading", SimpleNamespace(Event=FakeStop))
     monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        v4_service,
+        "_wall_utc",
+        lambda: datetime(2026, 10, 6, 1, 2, 3, 4, tzinfo=timezone.utc),
+    )
 
     for volatile in (tmp_path / "run-one", tmp_path / "run-two"):
         assert v4_service.main(

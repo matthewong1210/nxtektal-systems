@@ -348,17 +348,17 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     const next = html.indexOf('data-testid="execution-record-card"', start + 1);
     return html.slice(start, next === -1 ? undefined : next);
   };
-  const RUNNING_ID = "125688930584b23999ff42f630c60f77f7daef28019dfb65c033db17151a3a24";
-  const SUCCEEDED_ID = "75ac1b88002c03ecdec352ed27d9c306893ac4c29674c891eac1ddf96808f215";
+  const RUNNING_ID = "4ceb5de8c632f01235e9a6e149b04e0b339d5ee6729c3f065114bb1e573298a0";
+  const SUCCEEDED_ID = "db832a2d19ed1b9a920d57b8562a91b8efac4bf807f6e76926f843802baf29ba";
 
   it("passes the frozen witness through the real parser with its exact replay digest, ACTIVE session, clock and two records", async () => {
     const { continuousTwoTaskWitness } = await import("./execution-fixtures");
     const witness = continuousTwoTaskWitness();
-    expect(witness.replay_digest).toBe("c9d746864edf6765da7c2f94dc2f7fff4c6fc6850501f63fd4965419a64880f9");
+    expect(witness.replay_digest).toBe("a6c282faf33664c53b105f292e10efbd62bfd8b064da4a4c006703424e6e03f2");
     expect(witness.session_state).toBe("ACTIVE");
     expect(witness.now_sim_t_s).toBe(31800);
     expect(witness.session_id).toBe("collection-execution-session-v3");
-    // The service array order: the RUNNING record first, the earlier SUCCEEDED record second.
+    // Preserve the service array order; do not sort records by lifecycle state.
     expect(witness.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([
       [RUNNING_ID, "RUNNING", "RAW_COLLECTED_TO_ROBOT", 296, 0],
       [SUCCEEDED_ID, "SUCCEEDED", "TERMINAL", 600, 600],

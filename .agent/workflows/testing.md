@@ -30,6 +30,17 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/model_gateway
 ```
 
+Run the Task 1/2/3 staffing contract, HTTP seam, existing API regression, and
+composition files together while iterating:
+
+```bash
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  tests/pilot_ops/test_staffing_wire_contract.py \
+  tests/site_agent/test_staffing_api.py \
+  tests/site_agent/test_api.py \
+  tests/site_agent/test_staffing_composition.py
+```
+
 `tests/edge_task/test_integration_mosquitto.py` needs a local `mosquitto`
 binary; it skips with an explicit reason otherwise, and a skip is not delivery
 evidence for an Edge Task change — attach a local run.
@@ -141,6 +152,14 @@ absent = (
 )
 for name in shipped:
     import_module(name)
+staffing = import_module("nxt_pilot_ops.staffing")
+staffing_operations = import_module("nxt_pilot_ops.staffing.operations")
+assert staffing_operations.__all__ == ("StaffingOperations",)
+assert staffing_operations.StaffingOperations.__module__ == (
+    "nxt_pilot_ops.staffing.operations"
+)
+assert "StaffingOperations" not in getattr(staffing, "__all__", ())
+assert not hasattr(staffing, "StaffingOperations")
 for name in absent:
     assert find_spec(name) is None, f"unexpected package installed: {name}"
 print("isolated wheel imports passed:", version("nxt-sim"))
@@ -235,7 +254,9 @@ serves same-origin; `npm run smoke` serves that export on loopback and
 asserts the title, fixture disclaimer, and traversal defense. The tests
 must keep covering the manager-decision and fixture-control states, the
 explicit missing/stale/no-data rendering, forbidden Python/ROI imports,
-robot-command vocabulary, and hidden browser persistence.
+robot-command vocabulary, and hidden browser persistence. The real Python
+static-server tests, not the Node smoke server, must also assert the exact
+`Content-Security-Policy: connect-src 'self'` response header.
 
 ## Documentation and agent infrastructure
 
@@ -277,7 +298,7 @@ documented in [`docs/CI.md`](../../docs/CI.md).
 - Never call a local command a CI result; only an observed GitHub Actions job
   run is CI evidence.
 
-## Staffing advisory v1 routing (local unmerged branch)
+## Staffing advisory v1 routing and witnesses
 
 Use the exact contract and verification map in
 [staffing_advisory_v1.md](../../simulation/docs/staffing_advisory_v1.md), then
@@ -285,10 +306,51 @@ run the staffing files, `tests/pilot_ops/test_boundaries.py`, and the full
 `tests/pilot_ops` owner suite. Treat the privacy scan's two literal `api_key`
 denylist controls as reviewed expected matches, not credentials.
 
-This current unmerged checkout is a domain library only: there is no staffing
-composition script, staffing Site Agent route, staffing Console/UI, staffing
-provider call, venue deployment, HR write, notification, formal schedule, or
-robot action. Test projections as advisory evidence: roster/exception input is
-not HR/payroll/attendance/access-control truth, `operator` is not authenticated
-identity, and ACCEPT/MODIFY is not execution truth. Only provider-wire material
-is pseudonymous; protected local replay is intentionally private and richer.
+The current checkout includes the optional composition script, injected Site
+Agent routes, and same-origin Console panel. The owner graph remains
+`nxt_pilot_ops.staffing + nxt_model_gateway ->
+scripts/staffing_operations.py -> nxt_site_agent callback -> Console`; only the
+script imports both owners. The service is loopback-only/no-auth. Its stable
+root is `<state-root>/<site_id>/<deployment_id>/staffing-v1/`, separate from
+`--out`, and is enabled with `--staffing-state-root`. Routing flags are
+`--staffing-region`, `--staffing-language`, `--kimi-model`, `--openai-model`,
+and `--anthropic-model`; the only secret configuration names are
+`MOONSHOT_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY`.
+
+The queue is one active plus four waiting. Recover a lost response through the
+original request GET; explicit retry from `RESULT_UNKNOWN` uses a new request
+ID with `retry_of` set to the old suggestion ID. Console CSV is at most 512 KiB
+strict UTF-8 RFC 4180 and normalized JSON is at most 1 MiB before fetch. The
+service revalidates everything. Roster/exception input is not HR/payroll/
+attendance/access-control truth, `operator` is not authenticated identity, and
+ACCEPT/MODIFY is not execution truth.
+
+The V3 witnesses are read-only by default. Only after all Python composition
+and API source is stable, regenerate the two exact JSON witnesses and the
+marked runbook block through their owning workflows:
+
+```bash
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  --regenerate-v3-witnesses \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_frozen_acceptance_case \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_runbook_witness_facts_match_normal_loop_fixture \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+Immediately prove them again without any update flag:
+
+```bash
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  tests/course_monitoring/test_collection_execution_acceptance.py \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+Then, from the repository root, immediately verify the Console's frozen IDs,
+digest, order, rewind, and polling consumers of the two-task witness:
+
+```bash
+cd apps/site-agent-console
+npm test -- tests/execution-panel.test.tsx tests/execution-interaction.test.tsx
+```
+
+Normal tests and CI must never pass `--regenerate-v3-witnesses`.

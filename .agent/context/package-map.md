@@ -28,7 +28,7 @@ owning production behavior or creating cross-surface runtime coupling.
 | `nxt_range_viewer` | Deterministic replay and exported public frames/layout | Direct `nxt_range_ops`; benchmark references via artifact data | Read-only presentation/export; do not turn viewer frames into policy input |
 | `nxt_range_demo` | Streamlit presentation over exported bundles | Viewer bundle contract | No direct runtime ownership or simulator mutation |
 | `nxt_range_twin` | State/layout file validation and USD layers | No production `nxt_*` imports; file contracts; `pxr` in USD modules | Projection only; no simulator imports, physics claims, or upstream feedback |
-| `nxt_pilot_ops` | Named-policy evaluation, decision traces/trust evidence, immutable human workflow, hash-chained ledger | Only `adapters/` may import `nxt_facility.state`; core uses self/stdlib | No commands, ROS, actuator, motion, charging, or e-stop surface; not a second broad manager-rules package |
+| `nxt_pilot_ops` | Named-policy evaluation, decision traces/trust evidence, immutable human workflow, hash-chained ledger, and the staffing roster/exception/advisory evidence owner | Only `adapters/` may import `nxt_facility.state`; core and `staffing` use self/stdlib | No provider client, network, command, ROS, actuator, motion, charging, or e-stop surface; not a second broad manager-rules package |
 | `nxt_commissioning` | Immutable physical site/deployment identity, surveyed spatial facts, declared assets/capabilities/safety limits, sensor binding/calibration, provenance, canonical manifest storage, one-way static projections | Self/stdlib only | No live observations/state/tasks/demand; no runtime/downstream imports; projections are disposable and never write back to the manifest |
 | `nxt_site_runtime` | Input ordering/validation, publication-quality gate, deterministic FacilityState/AssemblyReport envelope, checkpoints/recovery, idempotent state publication coordination | Hot path: `nxt_facility.state` and `nxt_telemetry` observation/assembly contracts; setup-only `composition.py` lazily uses commissioning's existing projection | Orchestration only; no duplicate state/assembler/policy/projection/execution; no simulator, Shadow Ops, memory, twin, viewer, robot, ROS, or actuator imports; only the designated `nxt_agent_runtime` composition layer may import the runtime — no other consumer or upstream package may |
 | `nxt_agent_runtime` | Deterministic runtime lifecycle, deferred source acknowledgement, separate evaluation checkpoint, append-only evaluation journal (durable `NO_ACTION` evidence), pending manager-decision view with non-persistent deferral metadata, local snapshot publisher, read-only health/status | Public `nxt_site_runtime` pipeline/envelope/checkpoint/port surfaces, public `nxt_pilot_ops` adapters/guardian/contracts/workflow/ledger/serialization, `nxt_telemetry.observations` typing | Composition/lifecycle only; owns no observation, state, policy, recommendation, trace, workflow, memory, or execution semantics; no simulator, commissioning, memory, twin, viewer, robot, ROS, actuator, network, wall-clock, or UUID surface; the designated `nxt_site_agent` application boundary is the only package allowed to import it — no other consumer or upstream package may |
@@ -36,9 +36,9 @@ owning production behavior or creating cross-surface runtime coupling.
 | `nxt_workflow_enablement` | Workflow identity registration, versioned per-workflow requirement definitions, shared-site gate evaluation over validated commissioned truth, independent per-workflow readiness verdicts, the deterministic enablement report, and fixture-only launch-plan data | `nxt_commissioning` public contracts/validation/projections only; adapter and runtime facts arrive as declared plain-data evidence from composition roots | Readiness gating only; owns no observation, state, assembly, policy, recommendation, trace, workflow-case, memory, or execution semantics; registration never implies implementation; a NOT_READY workflow gets no runtime or evidence; no transport, network, filesystem, process, robotics, wall-clock, or randomness import; `nxt_site_agent` is its only designated in-package consumer (report/plan verification via the public surface) — no other package may import it; assembling a READY plan belongs to composition roots |
 | `nxt_course_world_model` | Immutable, versioned Course World Model spatial truth: the course-local ENU frame bound to the commissioned coordinate reference, the finite elevation surface, semantic course features (holes, playing surfaces, cart paths, restricted areas), controlled map revisions with content addressing, canonical serialization, and the pure read-only Map Query Service including the narrow trajectory/terrain intersection | `nxt_commissioning` public contracts only (identity, spatial reference, provenance, canonical JSON); consumers receive serialized models or plain-data evidence via composition roots | Spatial truth and queries only; owns no commissioning, observation, state, readiness, policy, projection, memory, or execution semantics; no raw LAS/LAZ or point-cloud ingestion; not a route planner, navigation stack, or geofence enforcer; a restricted-area answer is information, never a command; no transport, network, filesystem, process, robotics, wall-clock, or randomness import; no existing package may import it; deriving readiness evidence and composing with other layers belongs to composition roots |
 | `nxt_edge_task` | SIMULATION-only Edge<->robot task-exchange rehearsal: the three versioned wire contracts (robot status, task request, task event), strict decoding, content-derived `task_id`, the Edge task/device journal derivation (dedup, `(boot_sequence, event_sequence)` ordering, late evidence, absorbing terminals, terminal-conflict authorization gate, session regression by incarnation-prefixed `boot_id`, liveness and read-time freshness), the journal high-water anchor and operator-provisioned identity continuity, the protocol double's executor rules (persist-before-publish, restart branches, full-history replay), dated UTC schedule intent and local inbox acknowledgement/resolution records, and the shared append-only JSONL journal | None; stdlib only. Commissioned site/deployment/robot/zone identities and the manifest digest arrive as plain `AdmissionFacts` from composition roots | Rehearsal contract only; owns no facility state, observation, commissioning, advice, recommendation workflow, remote notification delivery, transport, clock, or physical execution semantics; schedules are single-date intent; human responses cannot resolve active uncertainty or clear authorization gates; `environment.kind` has the single value `SIMULATION` and no live switch exists; no transport, network, subprocess, threading, wall-clock, UUID, or randomness import; no existing package may import it; transport, clocks, processes, the CLI, and the integrated dispatch runner live in `simulation/scripts/`; a task request is a message to a protocol double, never a physical command |
-| `nxt_site_agent` | Local fixture-backed Site Agent application boundary: readiness-gated service lifecycle around the existing Agent Runtime, the versioned loopback-only Manager API (`nxt-site-agent/api/v0`), noncanonical state/evaluation/recommendation/briefing projections, fixture source-cursor persistence, and noncanonical service diagnostics | Public `nxt_agent_runtime`, `nxt_pilot_ops` (contracts/ledger/serialization), and `nxt_workflow_enablement` surfaces only; fixture composition and the optional `/api/v0/task-ops` callback arrive as injected seams from composition roots; no task-package import | Application shell only; owns no observation, state, assembly, policy, recommendation, trace, workflow, ledger, checkpoint, or physical command semantics; refuses to launch without a verified READY report and fixture-only Shadow plan; loopback-only, no authentication; stdlib whitelist guard (no socket/urllib/subprocess/os/wall-clock/randomness); no execution, ROS, actuator, or e-stop surface; no existing package may import it — only composition-root scripts may |
+| `nxt_site_agent` | Local fixture-backed Site Agent application boundary: readiness-gated service lifecycle, versioned loopback-only Manager APIs, optional staffing callback routing, static Console serving, fixture source-cursor persistence, and noncanonical service diagnostics | Public `nxt_agent_runtime`, narrow `nxt_pilot_ops` contracts, and `nxt_workflow_enablement` only; fixture, task, planning, course, and staffing operations arrive as injected callbacks from composition roots | Application shell only; owns no staffing domain, provider, observation, state, policy, workflow, ledger, or physical command semantics; loopback-only and unauthenticated; no execution, ROS, actuator, or e-stop surface; only composition-root scripts may import it |
 | `nxt_model_gateway` | Stateless provider-neutral HTTPS generation; untrusted transient JSON proposals | No first-party imports; composition only in `simulation/scripts/` | No domain semantics or persistence; no decisions, commands, telemetry or execution path; keys enter only through composition-root injection |
-| `simulation/scripts/` | Composition roots for demos, capture, validation, evaluation, and the integrated SIMULATION dispatch runner | May compose public package APIs | Do not use scripts to justify reverse imports in core packages |
+| `simulation/scripts/` | Composition roots for demos, capture, validation, evaluation, the integrated SIMULATION dispatch runner, and staffing advisory service lifecycle | May compose public package APIs; `staffing_operations.py` is the sole importer of both `nxt_model_gateway` and `nxt_pilot_ops.staffing` | Do not use scripts to justify reverse imports in core packages; staffing composition may generate proposals but may not notify, dispatch, or execute |
 
 `simulation/pyproject.toml` ships 16 packages: `nxt_sim`,
 `nxt_range_ops`, `nxt_facility`, `nxt_memory`, `nxt_telemetry`,
@@ -100,6 +100,7 @@ branches, and both decision surfaces before adding a package or engine.
 | Facility-state stream or twin mapping | `spatial_twin_design.md`, stream/mapping source | Entire `tests/twin`, viewer/capture parity, full suite with `twin` extra |
 | Shadow snapshot/trace/workflow | `shadow_ops_v0.md`, adapter and contracts | Entire `tests/pilot_ops`, boundary guards, full suite |
 | Regional Model Gateway contracts, provider envelopes, transport or routing | `model_gateway_v1.md`, gateway contracts and guard | Entire `tests/model_gateway`, `tests/pilot_ops`, `tests/site_agent`, reverse architecture guards, lock/build/isolated-wheel import; provider tests use offline fixtures only |
+| Staffing roster/exception evidence, advisory generation composition, Manager API, or Console panel | `staffing_advisory_v1.md`, staffing contract examples, staffing pilot runbook, [deployment.md](deployment.md) | `tests/pilot_ops/test_staffing_wire_contract.py`, staffing owner/recovery tests, `tests/site_agent/test_staffing_api.py`, `tests/site_agent/test_staffing_composition.py`, architecture guards, full affected suites, and Console typecheck/lint/test/build/smoke |
 | ROI formula/API | ROI README, API contract, `AMBIGUITIES.md`, formula-lock spec | Typecheck, all Vitest tests, build |
 
 Contract changes have a large fan-out. Prefer additive versioned envelopes or
@@ -123,18 +124,42 @@ Edge's opaque `admission_reference` requires an injected gate before due-time
 admission. Missing/expired/invalidated planning evidence blocks pending intent;
 already admitted tasks are immutable. No change permits physical commands.
 
-## Staffing advisory v1 package boundary (local unmerged branch)
+## Staffing advisory v1 ownership and composition
 
 `nxt_pilot_ops.staffing` is an additive subpackage of the existing Shadow Ops
 wheel root. Its single normative contract is
 [staffing_advisory_v1.md](../../simulation/docs/staffing_advisory_v1.md), and
 `StaffingOperations` remains a deep import so the package root stays narrow.
-This current unmerged checkout has no staffing composition script, staffing
-Site Agent route, staffing Console/UI, staffing provider call, venue deployment,
-HR write, notification, formal schedule, or robot action.
+
+The owner graph is deliberately one-way:
+
+```text
+nxt_pilot_ops.staffing (private durable evidence + domain rules)
+        + nxt_model_gateway (stateless provider transport)
+        -> simulation/scripts/staffing_operations.py (only composition owner)
+        -> injected nxt_site_agent /api/v1/staffing callback
+        -> same-origin apps/site-agent-console staffing panel
+```
+
+The integrated continuous-collection service enables this optional path only
+with `--staffing-state-root`. Its stable ledger root is exactly
+`<state-root>/<site_id>/<deployment_id>/staffing-v1/`, must be durable and
+access controlled, and must remain outside volatile `--out`. The service and
+Console bind loopback and have no authentication. Provider routing uses only
+the CLI flags `--staffing-region`, `--staffing-language`, `--kimi-model`,
+`--openai-model`, and `--anthropic-model`; secret values enter only through the
+environment names `MOONSHOT_API_KEY`, `OPENAI_API_KEY`, and
+`ANTHROPIC_API_KEY`.
+
+Generation is bounded to one active plus four waiting requests. Recovery first
+GETs the original operation by request ID; an explicit retry after
+`RESULT_UNKNOWN` uses a new request ID and `retry_of` the old suggestion ID.
+The Console accepts at most 512 KiB of strict UTF-8 RFC 4180 roster CSV and
+caps normalized JSON at 1 MiB before fetch; the service remains authoritative.
 
 Roster/exception input remains operator evidence rather than
 HR/payroll/attendance/access-control truth; `operator` is attribution, not
 authentication; ACCEPT/MODIFY is a local advisory plan, not execution truth.
 Only the provider wire is pseudonymous; the protected local owner retains the
-private replay evidence named by the stable contract.
+private replay evidence named by the stable contract. There is still no venue
+deployment, HR write, notification, formal schedule, or robot action.

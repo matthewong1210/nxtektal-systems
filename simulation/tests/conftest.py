@@ -8,6 +8,10 @@ and runs are fully deterministic regardless of seed.
 from __future__ import annotations
 
 import copy
+import os
+from pathlib import Path
+import stat
+import tempfile
 from typing import Callable, Optional
 
 import pytest
@@ -15,6 +19,103 @@ import pytest
 from nxt_sim.config.loader import build_bundle
 from nxt_sim.interfaces.robot_task_interface import RobotTaskInterface
 from nxt_sim.interfaces.types import FailureReason, Pose2D, TaskResult, TaskStatus
+
+
+SIMULATION_ROOT = Path(__file__).resolve().parents[1]
+V3_WITNESS_TARGETS = frozenset(
+    {
+        SIMULATION_ROOT
+        / "tests/course_monitoring/fixtures/collection-execution-normal-loop-v3.json",
+        SIMULATION_ROOT
+        / "tests/fixtures/continuous-collection-v4/two-task-active.json",
+        SIMULATION_ROOT / "docs/collection_execution_v3_runbook.md",
+    }
+)
+_V3_WITNESS_INITIAL_BYTES = {
+    path: path.read_bytes() for path in V3_WITNESS_TARGETS
+}
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--regenerate-v3-witnesses",
+        action="store_true",
+        default=False,
+        help="atomically regenerate the two owned V3 witnesses and runbook block",
+    )
+
+
+@pytest.fixture(scope="session")
+def regenerate_v3_witnesses(pytestconfig):
+    return bool(pytestconfig.getoption("--regenerate-v3-witnesses"))
+
+
+@pytest.fixture(scope="session")
+def v3_witness_initial_bytes():
+    return dict(_V3_WITNESS_INITIAL_BYTES)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _v3_witness_read_only_session_guard(regenerate_v3_witnesses):
+    yield
+    if not regenerate_v3_witnesses:
+        assert {
+            path: path.read_bytes() for path in _V3_WITNESS_INITIAL_BYTES
+        } == _V3_WITNESS_INITIAL_BYTES
+
+
+def _validated_v3_witness_target(
+    target: Path,
+    allowed_targets=V3_WITNESS_TARGETS,
+) -> Path:
+    target = Path(target).absolute()
+    if target not in allowed_targets:
+        raise ValueError(f"not an owned V3 witness target: {target}")
+    metadata = target.lstat()
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError(f"V3 witness target must be a regular non-symlink: {target}")
+    return target
+
+
+@pytest.fixture(scope="session")
+def v3_witness_target_validator():
+    return _validated_v3_witness_target
+
+
+@pytest.fixture(scope="session")
+def atomic_v3_witness_replace(regenerate_v3_witnesses):
+    def replace(target: Path, content: bytes) -> None:
+        if not regenerate_v3_witnesses:
+            raise RuntimeError(
+                "V3 witness replacement requires --regenerate-v3-witnesses"
+            )
+        target = _validated_v3_witness_target(target)
+        metadata = target.lstat()
+        if type(content) is not bytes:
+            raise TypeError("V3 witness replacement content must be bytes")
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+        )
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.chmod(temporary, stat.S_IMODE(metadata.st_mode))
+            os.replace(temporary, target)
+            directory_fd = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+
+    return replace
 
 
 def make_raw_bundle() -> dict:

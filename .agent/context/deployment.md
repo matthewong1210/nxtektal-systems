@@ -136,6 +136,35 @@ CN uses Kimi only; GLOBAL uses OpenAI with at most one Anthropic fallback only
 for the closed availability codes in
 [`model_gateway_v1.md`](../../simulation/docs/model_gateway_v1.md).
 
+The optional staffing pilot composes that gateway only in
+`simulation/scripts/staffing_operations.py`; the staffing domain package and
+Site Agent do not import it. Start the integrated continuous-collection service
+with `--staffing-state-root` to enable `/api/v1/staffing`; omission leaves
+staffing disabled without disabling the existing service. The exact durable
+ledger root is
+`<state-root>/<site_id>/<deployment_id>/staffing-v1/` and must be outside
+volatile `--out`. The service and same-origin Console are loopback-only and
+have no authentication, so they must not be proxied or exposed to a LAN or the
+internet. The Python static server sets
+`Content-Security-Policy: connect-src 'self'` on successful Console assets so
+browser connections remain on that origin.
+
+Deployment selects `--staffing-region {CN,GLOBAL}`,
+`--staffing-language {zh-CN,en}`, and the applicable `--kimi-model`,
+`--openai-model`, or `--anthropic-model`. Only the environment variable names
+`MOONSHOT_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` are configuration
+surface; never put their values in docs, CLI arguments, browser state, CSV, or
+logs. CN makes one Kimi attempt with no cross-region fallback. GLOBAL uses
+OpenAI first and at most one Anthropic fallback for the closed eligible cases.
+
+The worker admits one active generation plus four waiting generations while
+roster, exception, read, and manager-evidence operations remain local. After a
+lost response, recover the original operation by request GET. A
+`RESULT_UNKNOWN` generation is never resent under its old ID: explicit manager
+retry creates a new request ID with `retry_of` set to the old suggestion ID.
+Roster upload is limited to 512 KiB strict UTF-8 RFC 4180 CSV in the Console
+and 1 MiB normalized JSON before fetch, with full server revalidation.
+
 For a physical facility, commissioning owns **what exists and how it is
 configured**. A validated, immutable `CommissionedSite` manifest is
 authoritative for:
@@ -255,9 +284,10 @@ give Site Runtime ownership of simulation truth.
 | Cross-workflow commissioning readiness: workflow identity registration, requirement definitions, independent readiness verdicts, enablement report, launch-plan data | `nxt_workflow_enablement` (evaluation only; no runtime construction, state, policy, or execution) |
 | Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
 | Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules, dated schedules, and local inbox response evidence | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, and the test-entry CLI / integrated runner stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
-| Local service lifecycle, Manager API projection transport, fixture source-cursor persistence, service diagnostics | `nxt_site_agent` (noncanonical application shell; loopback-only; no state, policy, workflow, or execution semantics) |
+| Local service lifecycle, Manager API projection transport, optional staffing callback, fixture source-cursor persistence, service diagnostics | `nxt_site_agent` (noncanonical application shell; loopback-only/no-auth; no staffing domain, provider, state, policy, workflow, or execution semantics) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
-| Provider-neutral HTTPS generation | `nxt_model_gateway`; script-only composition and key injection; no model call enters Agent Runtime, Site Agent, Edge Task or robot/control packages |
+| Provider-neutral HTTPS generation | `nxt_model_gateway`; script-only composition and key injection; no gateway/provider import enters Agent Runtime, Site Agent, Edge Task or robot/control packages |
+| Staffing roster/exception truth, generation reservations, candidates, manager-response evidence, and replay ledger | `nxt_pilot_ops.staffing`; composed with `nxt_model_gateway` only by `simulation/scripts/staffing_operations.py`; advisory only |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |
 | Continuous evaluation lifecycle, evaluation checkpoint/journal, pending-decision view, runtime status | `nxt_agent_runtime` |
 | Broad state-derived manager advice | `nxt_facility.decisions` |

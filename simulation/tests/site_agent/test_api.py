@@ -395,6 +395,9 @@ def test_static_console_serving_and_traversal_defense(tmp_path, launch):
         assert response.status == 200
         assert "console" in body
         assert response.getheader("Content-Type").startswith("text/html")
+        assert response.getheader("Content-Security-Policy") == (
+            "connect-src 'self'"
+        )
 
         connection.request("GET", "/assets/app.js")
         response = connection.getresponse()
@@ -402,6 +405,9 @@ def test_static_console_serving_and_traversal_defense(tmp_path, launch):
         assert response.status == 200
         assert response.getheader("Content-Type").startswith(
             "text/javascript"
+        )
+        assert response.getheader("Content-Security-Policy") == (
+            "connect-src 'self'"
         )
 
         connection.request("GET", "/../secret.txt")

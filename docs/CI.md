@@ -104,6 +104,11 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -rs -p no:cacheprovider te
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/model_gateway
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  tests/pilot_ops/test_staffing_wire_contract.py \
+  tests/site_agent/test_staffing_api.py \
+  tests/site_agent/test_api.py \
+  tests/site_agent/test_staffing_composition.py
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \
   tests/facility/test_state.py \
@@ -188,6 +193,14 @@ absent = (
 )
 for name in shipped:
     import_module(name)
+staffing = import_module("nxt_pilot_ops.staffing")
+staffing_operations = import_module("nxt_pilot_ops.staffing.operations")
+assert staffing_operations.__all__ == ("StaffingOperations",)
+assert staffing_operations.StaffingOperations.__module__ == (
+    "nxt_pilot_ops.staffing.operations"
+)
+assert "StaffingOperations" not in getattr(staffing, "__all__", ())
+assert not hasattr(staffing, "StaffingOperations")
 for name in absent:
     assert find_spec(name) is None, f"unexpected package installed: {name}"
 print("isolated wheel imports passed:", version("nxt-sim"))
@@ -336,7 +349,63 @@ test -z "$(git ls-files --others --exclude-standard)"
 The production audit must remain at zero vulnerabilities. The console is
 validated as a static presentation surface only: CI performs no hosting or
 deployment, and the local Python service that serves the export is covered
-by `python-verification` (`tests/site_agent`).
+by `python-verification` (`tests/site_agent`). That real static-server suite
+asserts `Content-Security-Policy: connect-src 'self'` on successful Console
+responses; the independent Node smoke server is not the production CSP
+oracle.
+
+The staffing panel is the same-origin UI for an optional local advisory
+composition, not a separate deployment. `--staffing-state-root` enables it and
+resolves exactly to
+`<state-root>/<site_id>/<deployment_id>/staffing-v1/`, outside volatile
+`--out`. The service is loopback-only and has no authentication. Provider
+selection uses `--staffing-region`, `--staffing-language`, `--kimi-model`,
+`--openai-model`, and `--anthropic-model`; CI and documentation name only
+`MOONSHOT_API_KEY`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY`, never values.
+The bounded worker permits one active plus four waiting requests. Lost
+responses recover by request GET; an explicit `RESULT_UNKNOWN` retry uses a new
+request ID with `retry_of` set to the old suggestion ID. The Console accepts at
+most 512 KiB strict UTF-8 RFC 4180 CSV and caps normalized JSON at 1 MiB, while
+the service performs authoritative validation.
+
+The staffing owner graph is
+`nxt_pilot_ops.staffing + nxt_model_gateway ->
+simulation/scripts/staffing_operations.py -> injected nxt_site_agent callback
+-> same-origin Console`. No package or browser surface owns that composition,
+and advisory acceptance cannot notify, dispatch, or execute.
+
+### V3 witness maintenance
+
+CI consumes the V3 fixtures and generated runbook block read-only. After all
+Python composition/API source is stable, a maintainer may run the explicit,
+default-false whole-artifact updater:
+
+```bash
+cd simulation
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  --regenerate-v3-witnesses \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_frozen_acceptance_case \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_runbook_witness_facts_match_normal_loop_fixture \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+Immediately verify the complete artifacts in ordinary read-only mode:
+
+```bash
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  tests/course_monitoring/test_collection_execution_acceptance.py \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+Then, from the repository root, immediately verify the Console's exact frozen
+IDs, replay digest, ordering, rewind, and polling consumers:
+
+```bash
+cd apps/site-agent-console
+npm test -- tests/execution-panel.test.tsx tests/execution-interaction.test.tsx
+```
+
+The hosted workflow never passes `--regenerate-v3-witnesses`.
 
 ### Replay and demo
 
