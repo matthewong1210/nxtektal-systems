@@ -70,6 +70,7 @@ def test_every_endpoint_carries_schema_and_disclaimer(served):
         "/api/v0/recommendations",
         "/api/v0/briefing",
         "/api/v0/demo",
+        "/api/v0/supervisor-snapshot",
     ):
         status, payload = get(connection, path)
         assert status == 200, path
@@ -115,6 +116,7 @@ def test_reads_do_not_mutate_canonical_evidence(served):
         "/api/v0/recommendations",
         "/api/v0/briefing",
         "/api/v0/demo",
+        "/api/v0/supervisor-snapshot",
     ):
         get(connection, path)
     assert evidence_bytes(service) == before

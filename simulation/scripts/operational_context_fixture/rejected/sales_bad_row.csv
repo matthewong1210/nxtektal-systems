@@ -1,0 +1,4 @@
+transaction_id,transaction_time,sku,quantity,status,correction_time,original_transaction_id,refunded_quantity
+TX-X-0001,2026-08-08T08:12:00+08:00,BUCKET-S,1,CAPTURED,,,
+TX-X-0002,2026-08-08T08:35:00+08:00,BUCKET-M,qty-REDACTED-77,CAPTURED,,,
+TX-X-0003,2026-08-08T09:02:00+08:00,BUCKET-L,1,CAPTURED,,,

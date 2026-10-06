@@ -5,13 +5,7 @@ import { ConsoleScreen } from "../components/ConsoleScreen";
 import { createConsoleController, type ConsoleView } from "../lib/actions";
 import { API_SCHEMA, createClient, DISCLAIMER, type FetchLike } from "../lib/api";
 import { createConsoleActions, readConsole, type ConsoleData } from "../lib/console";
-import {
-  sampleBriefing,
-  sampleFixture,
-  sampleHealth,
-  sampleRecommendation,
-  sampleState,
-} from "./fixtures";
+import { sampleConsoleData, sampleRecommendation, sampleSnapshotFor } from "./fixtures";
 
 /** These tests drive the exact composition the page mounts — the typed
  * client over fetch, `readConsole`, the console controller, the page's
@@ -19,13 +13,8 @@ import {
  * responses the test settles in any order. Only the React effect that
  * mounts the controller (`app/page.tsx`) is outside this harness. */
 
-const READ_PATHS = [
-  "/api/v0/health",
-  "/api/v0/state",
-  "/api/v0/recommendations",
-  "/api/v0/briefing",
-  "/api/v0/demo",
-];
+/** The page reads one coherent snapshot; the five projections arrive inside it. */
+const READ_PATHS = ["/api/v0/supervisor-snapshot"];
 
 type Pending = {
   url: string;
@@ -44,14 +33,7 @@ const envelope = (status: number, payload: unknown) =>
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 function snapshot(patch: Partial<ConsoleData> = {}): ConsoleData {
-  return {
-    health: sampleHealth(),
-    state: sampleState(),
-    recommendations: [sampleRecommendation()],
-    briefing: sampleBriefing(),
-    fixture: sampleFixture(),
-    ...patch,
-  };
+  return sampleConsoleData(patch);
 }
 
 const accepted = () =>
@@ -100,9 +82,7 @@ function scriptedService() {
     posts,
     async answerRead(data: ConsoleData, which: "first" | "last" = "first") {
       for (const item of readGroup(which)) {
-        const key = item.url.slice("/api/v0/".length) as keyof ConsoleData | "demo";
-        const value = key === "demo" ? data.fixture : data[key];
-        item.settle(envelope(200, { schema: API_SCHEMA, disclaimer: DISCLAIMER, data: value }));
+        item.settle(envelope(200, { schema: API_SCHEMA, disclaimer: DISCLAIMER, data: sampleSnapshotFor(data) }));
       }
       await tick();
     },

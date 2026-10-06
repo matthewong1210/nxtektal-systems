@@ -64,6 +64,14 @@ runtime dependency.
   Human records clear no gate and command nothing; a receipt proves local
   persistence only. No real notification channel, recovery protocol, real
   device, or authenticated operator exists here.
+- **Operational context ingestion:** `nxt_operational_context` plus its
+  composition root turn synthetic staffing, ball-sales and tee-sheet exports
+  into normalized source-recorded events and deterministic "Staffing today"
+  and "Operations today" projections, served inside one Supervisor Snapshot
+  and shown as two compact Manager Console sections. Every value is labelled
+  planned, recorded, derived or unknown; sold ball units are entitlement
+  evidence, never dispensed inventory; nothing writes to a staffing, POS or
+  payroll system.
 - **Site Runtime:** merged `nxt_site_runtime` orchestration around commissioned
   identity/configuration, sequenced observations, the existing telemetry
   assembler, publication-quality admission, exact FacilityState/AssemblyReport

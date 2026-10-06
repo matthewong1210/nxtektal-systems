@@ -7,8 +7,10 @@ import { BriefingPanel } from "./BriefingPanel";
 import { CourseOperationsPanel } from "./CourseOperationsPanel";
 import { ExceptionsPanel } from "./ExceptionsPanel";
 import { FixtureControls } from "./FixtureControls";
+import { OperationsTodayPanel } from "./OperationsTodayPanel";
 import { PilotOperations } from "./PilotOperations";
 import { RecommendationsPanel } from "./RecommendationsPanel";
+import { StaffingTodayPanel } from "./StaffingTodayPanel";
 import { StatePanel } from "./StatePanel";
 import { StatusBar } from "./StatusBar";
 import { Badge, Section, StaleViewContext } from "./ui";
@@ -110,10 +112,21 @@ export function ConsoleScreen({
           ) : null}
           <div className="console-column">
             <StatusBar health={data.health} />
-            <StatePanel state={data.state} />
+            <StatePanel state={data.state} fixtureSource={data.health.source_type === "fixture"} />
+            <StaffingTodayPanel
+              staffing={data.supervisor.staffing}
+              source={data.supervisor.context_sources.staffing}
+              generation={data.supervisor.generation}
+            />
             <ExceptionsPanel exceptions={data.briefing.exceptions} />
           </div>
           <div className="console-column">
+            <OperationsTodayPanel
+              operations={data.supervisor.operations}
+              sources={data.supervisor.context_sources}
+              physicalStores={data.supervisor.physical_stores}
+              machines={data.supervisor.machines}
+            />
             <RecommendationsPanel
               recommendations={data.recommendations}
               onRespond={actions.respond}

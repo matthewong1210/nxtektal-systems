@@ -787,3 +787,29 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
 /* Service-capability notes: one line per withheld write, next to its control. */
 .capability-note { margin: 6px 0 10px; }
 .planning-capabilities, .dispatch-capabilities { margin: 6px 0 10px; max-width: 110ch; }
+
+/* Business operational-context sections: compact labelled rows. */
+.context-row dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+
+.context-value {
+  font-size: 1.05em;
+}
+
+.context-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+
+.context-table th,
+.context-table td {
+  text-align: left;
+  padding: 2px 8px 2px 0;
+  border-bottom: 1px solid var(--line);
+}

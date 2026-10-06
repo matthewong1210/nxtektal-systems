@@ -21,6 +21,7 @@ UPSTREAM_PACKAGES = (
     "nxt_course_world_model",
     "nxt_edge_task",
     "nxt_edge_interventions",
+    "nxt_operational_context",
 )
 CORE_BANNED_ROOTS = {
     *UPSTREAM_PACKAGES,

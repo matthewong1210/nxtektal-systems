@@ -206,6 +206,13 @@ coupling in named seams:
   `simulation/scripts/` intervention service, loopback test receiver, and
   operator CLI composition roots, which read the Edge journal and never
   write it
+- `nxt_operational_context` as a stdlib-only, filesystem-free leaf owning
+  business operational-context evidence (staffing, ball-unit sales, play
+  sessions) as its own fact class: commissioned identity, declared source
+  profiles and verified journal records reach it as plain data; the
+  `simulation/scripts/` composition root wires the existing JSONL journal
+  under its own schema label and imports synthetic exports; `nxt_site_agent`
+  reads its projection through the `ContextReader` seam and never imports it
 - `simulation/scripts/` for cross-package orchestration
 
 Repository-local benchmark and viewer tools are separate consumers of public
@@ -262,6 +269,7 @@ type:
 | Course World Model commissioning-only imports, purity/transport/execution bans, no canonical-contract duplication, and no reverse dependency | `simulation/tests/course_world_model/test_architecture.py` |
 | Edge Task stdlib-only SIMULATION contract, no reverse dependency, and script-confined transport | `simulation/tests/edge_task/test_architecture.py`, `simulation/tests/edge_task/test_scripts_guard.py` |
 | Site Agent service approved-surface imports, stdlib whitelist, execution/LLM/nondeterminism bans, script transport bans, and no reverse dependency | `simulation/tests/site_agent/test_architecture.py` |
+| Operational Context stdlib whitelist, no repository imports, no clock/file/network/randomness calls, no execution/LLM/HR/inventory vocabulary, composition-root-only imports, and no reverse dependency | `simulation/tests/operational_context/test_architecture.py` |
 | Site Agent Console API-only presentation leaf: no Python/ROI imports, no robot-command vocabulary, no hidden browser persistence, `/api/v0/` only | `apps/site-agent-console/tests/boundaries.test.ts` |
 | Viewer/demo protected upstream trees | `simulation/tests/range_viewer/test_protection.py`, `simulation/tests/range_demo/test_protection.py` |
 | Operational Replay artifact-only, read-only leaf boundary | `apps/operational-replay/tests/boundaries.test.ts` |

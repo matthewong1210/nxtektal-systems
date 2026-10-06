@@ -46,6 +46,8 @@ from nxt_edge_observation import FixtureRawSampleFeed  # noqa: E402
 from nxt_telemetry.observations import SiteConfig  # noqa: E402
 
 from nxt_site_agent import (  # noqa: E402
+    ClockBasis,
+    ClockSource,
     ComposedRuntime,
     CompositionSeam,
     LaunchMaterials,
@@ -85,6 +87,11 @@ from scripts.pilot_course_a_edge_fixture import (  # noqa: E402
     adapter_kit,
     commissioned_site_payload,
     raw_batch,
+)
+from scripts.operational_context_fixture import (  # noqa: E402
+    FIXTURE_AS_OF,
+    admission_from_manifest,
+    fixture_context_for,
 )
 from scripts.pilot_course_a_enablement_fixture import (  # noqa: E402
     BROKEN_CHANNEL,
@@ -398,13 +405,29 @@ def service_composer(
     )
 
 
+def fixture_clock(as_of=FIXTURE_AS_OF) -> ClockSource:
+    """The declared fixture clock for the Supervisor Snapshot: never a wall clock.
+
+    18:30 on operating date 2026-08-08 in Asia/Shanghai, stated in UTC, so
+    the business-context sections and the synthetic exports share one day.
+    """
+    return ClockSource(read=lambda: as_of, basis=ClockBasis.FIXTURE_DECLARED)
+
+
 def service_composition_seam(
-    *, payload_provider=service_manifest_payload
+    *,
+    payload_provider=service_manifest_payload,
+    clock: ClockSource | None = None,
+    context_for=None,
+    with_context: bool = True,
 ) -> CompositionSeam:
     """The full composition seam the service consumes.
 
     ``payload_provider`` exists so tests can compose the broken
-    manifest and prove the NOT_READY refusal path end to end.
+    manifest and prove the NOT_READY refusal path end to end.  By default
+    the seam declares the fixture clock and a per-run operational-context
+    reader over the synthetic exports; ``with_context=False`` composes the
+    service exactly as before this slice (context explicitly UNAVAILABLE).
     """
 
     def materials_for(workflow_evidence_root) -> LaunchMaterials:
@@ -421,10 +444,22 @@ def service_composition_seam(
             payload=payload_provider(),
         )
 
+    if with_context:
+        if clock is None:
+            clock = fixture_clock()
+        if context_for is None:
+            context_for = fixture_context_for(
+                admission_from_manifest(payload_provider())
+            )
+    else:
+        clock, context_for = None, None
+
     return CompositionSeam(
         composer=composer,
         materials_for=materials_for,
         cycle_catalog=service_cycle_catalog(),
+        clock=clock,
+        context_for=context_for,
     )
 
 
@@ -438,6 +473,7 @@ __all__ = [
     "SITE_ID",
     "broken_service_manifest_payload",
     "evaluate_service_enablement",
+    "fixture_clock",
     "service_composer",
     "service_composition_seam",
     "service_cycle_catalog",

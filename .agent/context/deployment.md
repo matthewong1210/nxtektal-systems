@@ -115,6 +115,20 @@ protocol, and acceptance contract), real devices, authenticated operators,
 and a host watchdog. The "Not implemented" rows below are unchanged.
 
 Also added after that baseline (verify merge status against the current
+branch): `nxt_operational_context`, Operational Context Ingestion V0 — a
+stdlib-only, filesystem-free leaf that gives the Site Agent trusted business
+context before any physical inventory sensor exists. Synthetic staffing,
+point-of-sale and tee-sheet exports become normalized source-recorded events
+with content-derived identity, idempotent re-import, append-only corrections
+and whole-batch rejection; projections label every value `PLANNED`,
+`SOURCE_RECORDED`, `DERIVED` or `UNKNOWN` and age each source from its
+coverage end. The Site Agent serves them inside one additive
+`GET /api/v0/supervisor-snapshot`, and the Manager Console adds two compact
+sections (Staffing today, Operations today). Physical ball stores and
+machines remain explicitly unknown; no vendor adapter, schedule write,
+POS or payroll write, demand-versus-coverage advice, or LLM path exists.
+
+Also added after that baseline (verify merge status against the current
 branch): `nxt_site_agent` plus `apps/site-agent-console`, the Pilot Site
 Agent Service V0 — a local, loopback-only, fixture-backed application
 boundary that verifies a READY enablement report, drives the existing
@@ -266,6 +280,7 @@ give Site Runtime ownership of simulation truth.
 | Versioned course spatial truth (course-local frame, elevation, semantic features, map revisions) and deterministic map queries | `nxt_course_world_model` (immutable models and read-only queries; no scan ingestion, live map, navigation, or execution) |
 | Simulated Edge<->robot task-exchange contracts, Edge task/device journal derivation, protocol-double executor rules, dated schedules, and local inbox response evidence | `nxt_edge_task` (SIMULATION rehearsal only; transport, clocks, processes, and the test-entry CLI / integrated runner stay in `simulation/scripts/`; not physical admission, telemetry, state, advice, or execution) |
 | Simulated human-handling cases over the Edge journal, persisted notification intents with bounded loopback delivery, human ack/resolve records | `nxt_edge_interventions` (SIMULATION rehearsal only; HTTP, clocks, processes, the loopback test receiver, and the operator CLI stay in `simulation/scripts/`; human records clear no gate and command nothing; not a real notification channel, recovery protocol, or execution) |
+| Business operational-context records (planned shifts, attendance, shift changes, ball-unit sales, play sessions), their idempotent import, append-only corrections and labelled projections | `nxt_operational_context` (stdlib-only leaf; journal wiring, synthetic imports, the declared clock and the per-run reader stay in `simulation/scripts/operational_context_fixture.py` and the Site Agent composition root; never facility state, inventory, advice or a vendor write) |
 | Local service lifecycle, Manager API projection transport, fixture source-cursor persistence, service diagnostics | `nxt_site_agent` (noncanonical application shell; loopback-only; no state, policy, workflow, or execution semantics) |
 | Canonical point-in-time operational state | `nxt_facility.state.FacilityState` |
 | Input sequencing, quality gate, state envelope, checkpoint/recovery, or state publication coordination | `nxt_site_runtime` |

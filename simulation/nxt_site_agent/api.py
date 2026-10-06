@@ -10,6 +10,10 @@ A deliberately small loopback-only HTTP surface:
 - ``GET  /api/v0/recommendations``  manager decision queue projection
 - ``GET  /api/v0/briefing``         shift briefing projection
 - ``GET  /api/v0/demo``             fixture-only cycle metadata
+- ``GET  /api/v0/supervisor-snapshot`` one coherent snapshot: the five
+  projections above plus business operational context, composed under one
+  service lock acquisition (additive; schema
+  ``nxt-site-agent/supervisor-snapshot/v1`` inside ``data``)
 - ``GET  /api/v1/collection-executions`` saved V3 execution evidence
 - ``GET  /api/v1/collection-executions/requests/{id}`` request receipt
 - ``POST /api/v0/recommendations/{id}/accept|reject|modify``
@@ -75,6 +79,9 @@ _STATUS_BY_CODE = {
     "planning_unavailable": 503,
     "planning_result_unknown": 503,
     "unknown_recommendation": 404,
+    "ledger_unreadable": 503,
+    "queue_unreadable": 503,
+    "journal_unreadable": 503,
     "task_ops_conflict": 409,
     "task_ops_unavailable": 503,
     "invalid_request": 400,
@@ -362,6 +369,10 @@ class _Handler(BaseHTTPRequestHandler):
             elif path == "/api/v0/demo":
                 self._send_json(
                     200, _envelope(self._service.fixture_snapshot())
+                )
+            elif path == "/api/v0/supervisor-snapshot":
+                self._send_json(
+                    200, _envelope(self._service.supervisor_snapshot())
                 )
             elif path.startswith("/api/"):
                 self._send_error_code(

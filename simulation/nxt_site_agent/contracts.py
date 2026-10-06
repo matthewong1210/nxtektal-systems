@@ -21,8 +21,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 
 from nxt_agent_runtime import AgentRuntime
 from nxt_workflow_enablement import RangeOpsLaunchPlan
@@ -30,6 +31,8 @@ from nxt_workflow_enablement import RangeOpsLaunchPlan
 API_SCHEMA_VERSION = "nxt-site-agent/api/v0"
 SERVICE_STATE_SCHEMA = "nxt-site-agent/service-state/v0"
 SERVICE_EVENTS_SCHEMA = "nxt-site-agent/service-events/v0"
+#: The one coherent Supervisor Snapshot served additively on the v0 transport.
+SUPERVISOR_SNAPSHOT_SCHEMA = "nxt-site-agent/supervisor-snapshot/v1"
 
 DISCLAIMER = "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA"
 SERVICE_MODE_LABEL = "fixture-backed Shadow Mode"
@@ -176,6 +179,60 @@ class LaunchMaterials:
 MaterialsFactory = Callable[[Any], LaunchMaterials]
 
 
+class ClockBasis(StrEnum):
+    """Where the Supervisor Snapshot's ``as_of`` instant comes from.
+
+    A fixture declares its clock explicitly; a deployment reads the host's
+    UTC clock.  The basis travels with every snapshot so a reader can never
+    mistake a declared fixture instant for wall time.  Scenario time (the
+    simulation clock behind every existing endpoint) is a third clock and
+    is never subtracted from either of these.
+    """
+
+    FIXTURE_DECLARED = "FIXTURE_DECLARED"
+    SYSTEM_UTC = "SYSTEM_UTC"
+
+
+@dataclass(frozen=True, slots=True)
+class ClockSource:
+    """The composition root's declared clock for the Supervisor Snapshot.
+
+    ``read`` returns a timezone-aware instant.  The service never reads a
+    clock itself; without a declared clock the snapshot's business context
+    is explicitly UNAVAILABLE and every other endpoint stays clock-free.
+    """
+
+    read: Callable[[], datetime]
+    basis: ClockBasis
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.basis, ClockBasis):
+            raise SiteAgentError("invalid_clock", "clock basis must be a ClockBasis")
+        if not callable(self.read):
+            raise SiteAgentError("invalid_clock", "clock read must be callable")
+
+
+class ContextReader(Protocol):
+    """Read-only plain-data view of the business operational context.
+
+    Owned and composed outside this package; the service only reads.
+    ``verify`` reports journal integrity as data; ``snapshot`` returns an
+    envelope ``{status, code, detail, as_of, as_of_basis, context}`` whose
+    ``context`` is the owner's projection or ``None`` when unavailable.
+    """
+
+    def verify(self) -> Mapping[str, Any]: ...
+
+    def snapshot(self, as_of: datetime, as_of_basis: str) -> Mapping[str, Any]: ...
+
+
+#: Builds the context reader for one run root (the service's run directory).
+#: Called at launch, resume, restart and reset so every run reads its own
+#: journal; a factory failure makes the context UNAVAILABLE, never the
+#: service FAILED.
+ContextReaderFactory = Callable[[Any], ContextReader]
+
+
 @dataclass(frozen=True, slots=True)
 class CompositionSeam:
     """Process-lifetime composition callables the service depends on.
@@ -184,12 +241,17 @@ class CompositionSeam:
     ``composer`` assembles one resumable runtime at a cursor; and
     ``cycle_catalog`` is fixture-only, clearly simulated presentation
     data describing the declared storyline cycles — never evidence,
-    never an evaluation input.
+    never an evaluation input.  ``clock`` and ``context_for`` are the
+    optional Supervisor Snapshot seam: both default to ``None``, in which
+    case the snapshot's business context is explicitly UNAVAILABLE and
+    nothing else changes.
     """
 
     composer: RuntimeComposer
     materials_for: MaterialsFactory
     cycle_catalog: tuple[Mapping[str, Any], ...] = field(default_factory=tuple)
+    clock: ClockSource | None = None
+    context_for: ContextReaderFactory | None = None
 
 
 __all__ = [
@@ -199,8 +261,13 @@ __all__ = [
     "SERVICE_EVENTS_SCHEMA",
     "SERVICE_MODE_LABEL",
     "SERVICE_STATE_SCHEMA",
+    "SUPERVISOR_SNAPSHOT_SCHEMA",
+    "ClockBasis",
+    "ClockSource",
     "ComposedRuntime",
     "CompositionSeam",
+    "ContextReader",
+    "ContextReaderFactory",
     "LaunchMaterials",
     "LaunchRefusedError",
     "MaterialsFactory",

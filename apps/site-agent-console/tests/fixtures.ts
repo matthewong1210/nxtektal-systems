@@ -1,10 +1,41 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import type {
   Briefing,
   FixtureInfo,
   Health,
   Recommendation,
   StateProjection,
+  SupervisorSnapshot,
 } from "../lib/api";
+import { joinSnapshot, splitSnapshot, type SplitSnapshot } from "../lib/snapshot";
+
+/** The Supervisor Snapshot the real fixture-backed service produced for
+ * 2026-08-08 18:30 Asia/Shanghai after two storyline cycles (calm, spike):
+ * a checked-in, byte-stable payload, not a live read. */
+export function sampleSupervisorSnapshot(): SupervisorSnapshot {
+  return JSON.parse(readFileSync(join(import.meta.dirname, "supervisor-snapshot.fixture.json"), "utf-8")) as SupervisorSnapshot;
+}
+
+/** The sample projections of this module assembled into one snapshot whose
+ * context sections come from the frozen service payload. */
+export function sampleConsoleData(patch: Partial<SplitSnapshot> = {}): SplitSnapshot {
+  const { supervisor } = splitSnapshot(sampleSupervisorSnapshot());
+  return {
+    health: sampleHealth(),
+    state: sampleState(),
+    recommendations: [sampleRecommendation()],
+    briefing: sampleBriefing(),
+    fixture: sampleFixture(),
+    supervisor,
+    ...patch,
+  };
+}
+
+export function sampleSnapshotFor(data: SplitSnapshot): SupervisorSnapshot {
+  return joinSnapshot(data);
+}
 
 export function sampleHealth(overrides: Partial<Health> = {}): Health {
   return {

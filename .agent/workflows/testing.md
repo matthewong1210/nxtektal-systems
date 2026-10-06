@@ -21,7 +21,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 Examples of `<package>` are `range_ops`, `facility`, `memory`, `telemetry`,
 `twin`, `pilot_ops`, `commissioning`, `site_runtime`, `agent_runtime`,
 `edge_observation`, `workflow_enablement`, `course_world_model`,
-`edge_task`, `edge_interventions`, and `site_agent`.
+`edge_task`, `edge_interventions`, `operational_context`, and `site_agent`.
 
 `tests/edge_task/test_integration_mosquitto.py` and
 `tests/edge_interventions/test_integration_e2e.py` need a local `mosquitto`
@@ -54,6 +54,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/course_world_model/test_architecture.py \
   tests/edge_task/test_architecture.py \
   tests/edge_task/test_scripts_guard.py \
+  tests/operational_context/test_architecture.py \
   tests/site_agent/test_architecture.py \
   tests/edge_interventions/test_architecture.py \
   tests/test_state_machine.py \
@@ -64,8 +65,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 
 For changes to merged Commissioning, Site Runtime, Agent Runtime, the Edge
 Observation adapter kit, Workflow Enablement, the Course World Model, Edge
-Task Exchange, Edge Task Interventions, or Site Agent, run the entire relevant
-package suites in addition to the architecture/safety subset:
+Task Exchange, Edge Task Interventions, Operational Context, or Site Agent, run
+the entire relevant package suites in addition to the architecture/safety
+subset:
 
 ```bash
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
@@ -76,6 +78,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/workflow_enablement \
   tests/course_world_model \
   tests/edge_task \
+  tests/operational_context \
   tests/site_agent \
   tests/edge_interventions
 ```

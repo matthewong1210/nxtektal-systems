@@ -1,10 +1,11 @@
 # Operational Context Ingestion V0 — design specification
 
-**Date:** 2026-10-05, revised 2026-10-06 · **Status:** Proposed design with the
-owner's product decisions recorded (§0.1) and the implementation base fixed
-(§1). Nothing in this document is implemented. No code, package, endpoint,
-console section, or test described here exists on any branch. Revision 3 after
-the branch-reconciliation gate (§15 records what changed).
+**Date:** 2026-10-05, revised 2026-10-06 · **Status:** Design with the owner's
+product decisions recorded (§0.1) and the implementation base fixed (§1). The
+first read-only vertical slice is implemented on `feature/operational-context-v0`
+(stacked on `integration/supervisor-console-ops-context-base`); the stable
+description of what was built is `simulation/docs/operational_context_v0.md`,
+and where it narrows this design (§16) that document wins. Revision 4.
 **Builds on:** the merged Site OS layers on `main` (`e3f63ca`) and the Pilot
 Site Agent service and Manager Console as they stand on the open Codex branch
 `codex/continuous-collection-v4-reviewed` at `2c421f4`, which already contains
@@ -96,7 +97,8 @@ and binds §§3–8:
 | `nxt_sim`, `nxt_range_ops`, `nxt_facility`, `nxt_memory`, `nxt_telemetry`, `nxt_range_twin`, `nxt_pilot_ops`, `nxt_commissioning`, `nxt_site_runtime`, `nxt_agent_runtime`, `nxt_edge_observation`, `nxt_workflow_enablement`, `nxt_course_world_model`, `nxt_edge_task`, `nxt_edge_interventions` (the `simulation/pyproject.toml` wheel list) and the repository-local `nxt_range_agent`, `nxt_range_viewer`, `nxt_range_demo` | merged / on `main` |
 | `nxt_site_agent`, `apps/site-agent-console`, `simulation/docs/site_agent_v0.md`, `scripts/site_agent_fixture.py`, `scripts/site_agent_demo.py`, plus the planning v1, course-ops v1, collection-execution v1/v3/v4, and task-ops services, contracts, scripts, and console panels | implemented on the integration base (open PRs 19 and 20; not on `main`) |
 | `SiteClock` in `scripts/edge_gateway_live_input_v0.py` | implemented on unmerged branch `feature/edge-gateway-live-input-v0` (precedent only) |
-| `nxt_operational_context`, every contract, endpoint, console panel, test, and guard edit named in §§3–11 | proposed |
+| `nxt_operational_context`, `GET /api/v0/supervisor-snapshot`, the two console sections, `scripts/operational_context_fixture.py`, their tests and guard edits | implemented on `feature/operational-context-v0` (see §16 and `operational_context_v0.md`) |
+| The §9 advisory policy, `coverage_recommendations` content, vendor adapters | proposed (out of this slice by owner decision) |
 
 ### 1.3 Which branch carries the latest console work
 
@@ -1619,3 +1621,45 @@ own later gate (Reshape), and the implementation base is fixed (§1.4). The
 slice PR stacks on PR 20 until PR 19 and PR 20 merge; the first implementation
 commit must re-run the §1.5 table against the then-current base. No package
 code has been written.
+
+---
+
+## 16. Implementation record (first slice, 2026-10-06)
+
+The first read-only vertical slice implements §§2–8 with these deliberate
+narrowings; `simulation/docs/operational_context_v0.md` is the stable
+description and wins where they differ:
+
+- **Labels.** The implemented vocabulary is `PLANNED`, `SOURCE_RECORDED`,
+  `DERIVED`, `UNKNOWN` (the owner's wording), in place of §5's
+  `SYSTEM_RECORDED`/`ESTIMATED`/`MEASURED`. `ESTIMATED` and `MEASURED` are
+  never produced; planned instants are labelled `PLANNED` rather than carried
+  only inside payloads.
+- **Adapters.** Three synthetic CSV adapters with fixed, documented column
+  sets (staffing, sales, play) and a profile-declared SKU-to-ball-unit mapping;
+  no vendor adapter, no availability records, no currency or amount columns, no
+  `LATE_RECORDED`. Unexpected columns reject the batch rather than being
+  discarded, which is the stricter reading of §3.3.
+- **Corrections.** One algorithm as in §6.3: a revision (same record id,
+  later `correction_time`) supersedes the head and keeps the original; a
+  reversal targets the captured sale it names; an unknown original is counted
+  as an unmatched reversal and never subtracted; a conflicting re-delivery of
+  the same record rejects the whole batch (`event_conflict`). No quarantine.
+- **Journal.** `nxt_edge_task.journal.JsonlJournal` under
+  `nxt-operational-context/journal/v1` with the closed kinds
+  `import_batch_committed`, `import_batch_rejected`, `import_batch_duplicate`,
+  `event_recorded`, `source_profile_declared`; imports run in-process at
+  launch, resume, restart and reset through the builder protocol and converge
+  idempotently.
+- **Snapshot.** `GET /api/v0/supervisor-snapshot` as in §8, with the context
+  reader returning `{status, code, detail, as_of, as_of_basis, context}`;
+  `physical_stores.clean_balls_in_dispenser` carries both the channel's source
+  kind and the service's observation source and is physical only when the
+  channel says sensor and the service is not a fixture.
+- **Console.** `lib/console.ts::readConsole` performs the single read;
+  the two sections are "Staffing today" and "Operations today" (the owner's
+  name for §8.5's "Demand now"); the state panel labels a sensor-bound channel
+  replayed from a fixture as fixture data.
+- **Fixture.** Pilot Course A, operating date 2026-08-08 in `Asia/Shanghai`,
+  declared clock 18:30 local (`2026-08-08T10:30:00Z`), pseudonymous worker
+  references `W-001` … `W-006`; rejection samples under `rejected/`.

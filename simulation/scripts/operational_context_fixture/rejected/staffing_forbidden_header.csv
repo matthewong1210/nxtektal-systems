@@ -1,0 +1,2 @@
+record_id,record_type,staff_ref,employee_name,occurred_at,role_code,shift_start,shift_end,shift_record_id,request_record_id,correction_time
+SH-X-001,SHIFT_SCHEDULED,W-001,REDACTED,2026-08-01T09:00:00+08:00,RANGE_OPS,2026-08-08T08:00:00+08:00,2026-08-08T16:00:00+08:00,,,
