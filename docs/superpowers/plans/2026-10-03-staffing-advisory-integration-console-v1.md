@@ -2821,6 +2821,12 @@ git commit -m "feat(console): recover staffing advisory operations"
 ### Task 7: Build the compact staffing panel and human-response workflow
 
 **Files:**
+- Modify: `simulation/nxt_pilot_ops/staffing/operations.py`
+- Modify: `simulation/tests/pilot_ops/test_staffing_recovery.py`
+- Modify: `simulation/tests/site_agent/test_staffing_composition.py`
+- Modify: `simulation/docs/contracts/staffing-v1/README.md`
+- Modify: `apps/site-agent-console/lib/staffing-state.ts`
+- Modify: `apps/site-agent-console/tests/staffing-state.test.ts`
 - Create: `apps/site-agent-console/components/StaffingPanel.tsx`
 - Create: `apps/site-agent-console/components/staffing/RosterImport.tsx`
 - Create: `apps/site-agent-console/components/staffing/ExceptionForm.tsx`
@@ -2836,31 +2842,132 @@ git commit -m "feat(console): recover staffing advisory operations"
 - Consumes: independent controller/actions and server-validated snapshot/receipts.
 - Produces: one compact manager surface with no hidden persistence, provider controls, chat, or execution action.
 
-- [ ] **Step 1: Add failing base and in-progress render tests**
+**Task 7 stability and presentation amendment (binding):**
+
+- Freeze `snapshot.assignments` as the service day's materialized regular roster
+  shifts, before active exceptions and independently of an accepted advisory
+  plan. `effective_plan.assignments` remains the separate current advisory
+  schedule. This makes the exception employee picker agree with domain
+  validation after a manager response; add a domain regression test before UI
+  work and never derive choices from an effective-plan replacement.
+- Construct the client/controller/actions bundle exactly once. The controller
+  and actions share one stable getter over `managerLabelRef.current`; the input
+  handler updates the ref synchronously as well as React state. Subscribe before
+  `start()`, initialize from `controller.view()`, and on cleanup call `stop()`
+  and unsubscribe. A changed optional test client does not reconfigure a live
+  bundle.
+- A required post-receipt refresh publishes `read.status === "loading"` and a
+  stale retained snapshot before publishing the committed receipt. That state
+  keeps UI controls aligned with the controller's in-flight lock. Cleanup does
+  not claim to abort an already-issued transport request; instead, every late
+  completion is inert: it cannot publish, mutate the view, or schedule another
+  timer.
+- Keep a pure exported `StaffingView` for state rendering and a lifecycle-only
+  `StaffingPanel` shell. No render path performs a fetch, creates an ID,
+  optimistically changes a server projection, or writes browser storage.
+- Every mutation requires a fresh ready snapshot, a valid nonblank manager
+  label, and no retained `in_flight`, `unknown`, or `busy` write. Initial roster
+  import explicitly permits `snapshot.roster === null`; exception entry,
+  generation, and manager response require a roster. RESERVED/IN_PROGRESS
+  disables only duplicate generation and manager response; exception entry and
+  reads remain available. Unknown maps to receipt recovery, BUSY to same-ID
+  retry or dismiss, committed-but-stale to refresh, definite refusal to
+  acknowledge, and RESULT_UNKNOWN to a fresh-ID generation retry.
+- Derive employee choices only by de-duplicating `snapshot.assignments`. Active
+  exceptions render separately; any cancel/correct controls stay outside the
+  five-field new-exception fieldset. Durable writes never trigger suggestion
+  generation automatically.
+- Count all notes with `Array.from(value).length`: blank becomes null, 501
+  Unicode scalars fails before an action call. Validate the volatile manager
+  label locally against its 128-scalar/formula-safe profile. A MODIFY is offered
+  only when at least one closed patch row exists; REMOVE emits only
+  `assignment_id`, ADD omits display fields and retains a complete offset-aware
+  minute timestamp.
+- Every candidate remains auditable. Only VALID candidates without a durable
+  manager response whose three basis revisions exactly equal the current
+  snapshot revisions expose accept/modify/reject; every rendered candidate carries
+  `AI 建议，需经理确认` and the generation's provider/model provenance. Coverage
+  gaps and operational warnings are different labeled regions. A durable
+  response is rendered from `activeGeneration.manager_response`, never inferred
+  from the transient write banner, and hides all three response controls.
+- Freeze all six `generation_capability` variants. CN and GLOBAL READY permit
+  generation; GLOBAL `DEGRADED_BACKUP_UNCONFIGURED` also permits generation
+  while displaying a degraded warning. Every UNAVAILABLE variant disables only
+  generation: local roster import, exception entry, reads, and a still-valid
+  response to an already-generated suggestion remain usable.
+- Use existing graphite/off-white/lime tokens, the existing sans/mono pairing,
+  and one restrained cool-blue staffing accent (`#83b5c4`). The visual concept
+  is a compact shift ledger: one service-day/roster status rail, a left-aligned
+  quick-entry column, a status column, then asymmetric candidate sheets below.
+  Avoid gradients, decorative animation, a large-number hero, and a grid of
+  interchangeable SaaS cards. Mobile collapses to one column; focus remains
+  globally visible and operation state uses `aria-live`/status roles. The
+  memorable element is the factual shift rail, not decoration.
+- UI production files use only `staffing-*` classes plus safe shared primitives;
+  do not introduce the Task 8 forbidden command vocabulary. Tests use the
+  repository's existing static-markup and happy-dom harnesses, not an added
+  testing-library dependency. Include mount/unmount/remount coverage so one
+  panel owns one poller and a late read completion is inert after cleanup.
+
+- [ ] **Step 0: Freeze regular-assignment semantics and post-receipt locking**
+
+Add the domain and wire regressions before UI work. Prove an accepted plan and
+an active exception do not change top-level regular assignments, a plan-only
+substitute is rejected by exception entry, and the regular worker remains
+accepted. Mark the required refresh loading/stale before publishing a committed
+receipt; prove another submit is locally rejected during that window and that a
+late completion after cleanup cannot mutate, publish, or reschedule.
+
+- [ ] **Step 1: Add failing base, capability, and in-progress render tests**
 
 Render no roster, normal day/zero exception, RESERVED, and IN_PROGRESS. Assert no-roster exposes the template/import control, zero-exception does not demand data entry, and both generation states disable duplicate generation while keeping local reads and exception entry available.
+Render every `generation_capability` branch. Assert GLOBAL degraded shows a
+warning but still enables generation, while each UNAVAILABLE variant disables
+only generation and leaves permitted local mutations and an already-valid
+manager response available.
 
 - [ ] **Step 2: Add failing terminal-state render tests**
 
-Render one candidate, two candidates, one rejected candidate filtered from actions, no valid suggestion with validator gaps, provider unavailable, configuration error, RESULT_UNKNOWN, REVIEW_REQUIRED, stale failure, and the parsed `date-after-manager-response` refresh fixture. Assert the refreshed generation renders its committed response kind, reason, note, operator, and effective-plan revision without depending on in-memory write state. Assert every candidate view contains exact copy `AI 建议，需经理确认` plus provider/model provenance; no view says automatic schedule, verified identity, labor-law compliant, or executed.
+Render initial loading/error, one candidate, two candidates, one rejected
+candidate filtered from actions, no valid suggestion with validator gaps,
+REFUSED, INVALID_RESPONSE, PROVIDER_ERROR, CONFIGURATION_ERROR, SECURITY_ERROR,
+RESULT_UNKNOWN, REVIEW_REQUIRED, stale failure, recovering, fresh committed, and
+the parsed `date-after-manager-response` refresh fixture. Assert the refreshed
+generation renders its committed response kind, reason, note, operator, and
+effective-plan revision without depending on in-memory write state. Assert
+every rendered candidate contains exact copy `AI 建议，需经理确认` plus
+provider/model provenance; no view says automatic schedule, verified identity,
+labor-law compliant, or executed. Use the repository's static-markup or mounted
+happy-dom harness with native DOM queries. Keep static and mounted examples
+separate:
 
 ```typescript
-expect(screen.getAllByText("AI 建议，需经理确认")).toHaveLength(validCandidates);
-expect(screen.getByRole("region", { name: "覆盖缺口" })).toBeVisible();
-expect(screen.getByRole("region", { name: "运营提示" })).toBeVisible();
+const markup = renderToStaticMarkup(<StaffingView {...props} />);
+expect(markup.match(/AI 建议，需经理确认/g) ?? []).toHaveLength(renderedCandidates);
+
+const container = document.createElement("div");
+const root = createRoot(container);
+await act(async () => root.render(<StaffingView {...props} />));
+expect(container.querySelector('[role="region"][aria-label="覆盖缺口"]')).not.toBeNull();
+expect(container.querySelector('[role="region"][aria-label="运营提示"]')).not.toBeNull();
 ```
 
 - [ ] **Step 3: Add failing minimal-form interaction tests**
 
 With the panel-level manager label already entered, record LEAVE/UNAVAILABLE using employee → type → submit, and LATE/EARLY using employee → type → time → submit; note remains optional. Count the interactions and assert every exception path stays within five selections/clicks. Assert the exception fieldset contains only employee, type, conditional time, optional note, submit. After durable exception commit, generating a suggestion is a separate explicit click.
 
-- [ ] **Step 4: Add failing CSV and recovery tests**
+- [ ] **Step 4: Add failing CSV, lifecycle, and recovery tests**
 
 Assert the template link/download, parser errors before POST, server validation errors, saved-but-stale banner, transport-unknown recovery, BUSY same-ID retry, and RESULT_UNKNOWN fresh-ID retry. Capture calls and prove RESERVED/IN_PROGRESS polling invokes only GET request recovery, never a second suggestion POST.
+Prove file selection alone makes no POST, explicit confirmation submits exactly
+once, and a later parse failure clears the previous pending draft. Mount,
+unmount with a pending GET, resolve it late, and remount; assert the old
+completion publishes nothing and schedules no timer, while the new panel owns
+exactly one polling lifecycle.
 
 - [ ] **Step 5: Add failing manager-response tests**
 
-Assert accept sends the exact candidate index; modify strips display fields and sends only `ManagerPatchOperation`; reject requires one of the three rejection reason codes. For accept, modify, and reject, assert an optional response note of at most 500 Unicode scalars is copied only into the local manager-response body, 501 scalars is rejected before fetch, and the note never appears in provider material. Stale suggestion and durable committed receipts render distinctly. Coverage gaps render separately from operational warnings. Render all strings as React text; never use `dangerouslySetInnerHTML` or Markdown parsing.
+Assert accept sends the exact candidate index; modify strips display fields and sends only `ManagerPatchOperation`; reject requires one of the three rejection reason codes. For accept, modify, and reject, assert an optional response note of at most 500 Unicode scalars is copied only into the local manager-response body, 501 scalars is rejected before the action call and before ID creation, and the note never appears in provider material. Invalid manager labels, 501-scalar exception and manager-response notes, empty MODIFY, and ADD timestamps with missing or invalid offsets must likewise fail before actions and ID creation. Roster import and suggestion generation have no note field; keep that frozen shape, while the roster filename-derived `source_ref` retains its existing 256-scalar and formula-safe parser checks. Assert exact key sets for ADD and REMOVE so display fields cannot leak. Response controls require exact equality across the roster, exception-set, and effective-plan basis revisions; a mismatch hides all three. Once `manager_response` is non-null, accept, modify, and reject all remain hidden. Stale suggestion and durable committed receipts render distinctly. Coverage gaps render separately from operational warnings. Render all strings as React text; never use `dangerouslySetInnerHTML` or Markdown parsing.
 
 - [ ] **Step 6: Run component tests and verify RED**
 
@@ -2885,7 +2992,7 @@ interface CandidateEditorProps {
 }
 ```
 
-`StaffingPanel` creates one client/controller/actions bundle with `useRef`, subscribes in an effect, starts it once, and stops/unsubscribes on cleanup. It holds `managerLabel` only in component state and renders it above roster/exception/generation sections with “仅作归属记录，非身份认证”. Empty label disables mutations with local explanatory text; reads remain available. The optional client exists only for tests; production constructs `createStaffingClient(fetch)` and has no URL/provider configuration prop.
+`StaffingPanel` creates one client/controller/actions bundle with `useRef`, subscribes in an effect, starts it once, and stops/unsubscribes on cleanup. It keeps `managerLabel` in state for rendering and mirrors it in a ref for the stable getter; the input event updates the ref synchronously before `setState`, with no persistence. Render it above roster/exception/generation sections with “仅作归属记录，非身份认证”. Empty label disables mutations with local explanatory text; reads remain available. The optional client exists only for tests; production constructs `createStaffingClient(fetch)` and has no URL/provider configuration prop.
 
 - [ ] **Step 8: Implement roster import**
 
@@ -2894,13 +3001,16 @@ interface CandidateEditorProps {
 ```typescript
 const bytes = await file.arrayBuffer();
 const draft = parseStaffingRosterCsv(bytes, file.name);
+setPendingDraft(draft);
 setPreview({
   workers: draft.workers.length,
   assignments: draft.regular_assignments.length,
   timezone: draft.site_timezone,
   effectiveFrom: draft.effective_from_local_date,
 });
-await actions.importRoster(draft);
+
+// This is a separate explicit confirmation handler.
+await actions.importRoster(pendingDraft);
 ```
 
 - [ ] **Step 9: Implement the minimal exception form**
