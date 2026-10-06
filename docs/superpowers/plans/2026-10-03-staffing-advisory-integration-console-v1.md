@@ -2851,8 +2851,8 @@ git commit -m "feat(console): recover staffing advisory operations"
   validation after a manager response; add a domain regression test before UI
   work and never derive choices from an effective-plan replacement.
 - Construct the client/controller/actions bundle exactly once. The controller
-  and actions share one stable getter over `managerLabelRef.current`; the input
-  handler updates the ref synchronously as well as React state. Subscribe before
+  and actions share one stable getter over a private manager-label cell; the
+  input handler updates the cell synchronously as well as React state. Subscribe before
   `start()`, initialize from `controller.view()`, and on cleanup call `stop()`
   and unsubscribe. A changed optional test client does not reconfigure a live
   bundle.
@@ -2885,7 +2885,8 @@ git commit -m "feat(console): recover staffing advisory operations"
   minute timestamp.
 - Every candidate remains auditable. Only VALID candidates without a durable
   manager response whose three basis revisions exactly equal the current
-  snapshot revisions expose accept/modify/reject; every rendered candidate carries
+  snapshot revisions expose candidate-level accept/modify controls and one
+  generation-level reject-all control; every rendered candidate carries
   `AI 建议，需经理确认` and the generation's provider/model provenance. Coverage
   gaps and operational warnings are different labeled regions. A durable
   response is rendered from `activeGeneration.manager_response`, never inferred
@@ -2992,7 +2993,7 @@ interface CandidateEditorProps {
 }
 ```
 
-`StaffingPanel` creates one client/controller/actions bundle with `useRef`, subscribes in an effect, starts it once, and stops/unsubscribes on cleanup. It keeps `managerLabel` in state for rendering and mirrors it in a ref for the stable getter; the input event updates the ref synchronously before `setState`, with no persistence. Render it above roster/exception/generation sections with “仅作归属记录，非身份认证”. Empty label disables mutations with local explanatory text; reads remain available. The optional client exists only for tests; production constructs `createStaffingClient(fetch)` and has no URL/provider configuration prop.
+`StaffingPanel` lazily creates one client/controller/actions bundle, subscribes in an effect, starts it once, and stops/unsubscribes on cleanup. It keeps `managerLabel` in state for rendering and mirrors it in a private stable cell for the getter; the input event updates the cell synchronously before `setState`, with no persistence. Render it above roster/exception/generation sections with “仅作归属记录，非身份认证”. Empty label disables mutations with local explanatory text; reads remain available. The optional client exists only for tests; production constructs `createStaffingClient(fetch)` and has no URL/provider configuration prop.
 
 - [ ] **Step 8: Implement roster import**
 
@@ -3039,7 +3040,7 @@ Reject requires a reason code; its note remains optional. No button invokes Plan
 
 - [ ] **Step 12: Mount independently and add accessible responsive styling**
 
-Import `StaffingPanel` and mount `<div className="dispatch-shell"><StaffingPanel /></div>` as the first child of the existing fragment in `PilotOperations`, before the Planning shell. Do not pass scheduler health, task capabilities, simulation clock, or runtime locks. In `globals.css:740-789`, append staffing-prefixed classes using existing tokens, labeled controls, keyboard-visible focus, `aria-live` for operation state, candidate headings, and compact desktop/mobile stacking.
+Import `StaffingPanel` and mount `<div className="staffing-shell"><StaffingPanel /></div>` as the first child of the existing fragment in `PilotOperations`, before the Planning shell. Do not pass scheduler health, task capabilities, simulation clock, or runtime locks. In `globals.css:740-789`, append staffing-prefixed classes using existing tokens, labeled controls, keyboard-visible focus, `aria-live` for operation state, candidate headings, and compact desktop/mobile stacking.
 
 - [ ] **Step 13: Run GREEN and commit**
 
