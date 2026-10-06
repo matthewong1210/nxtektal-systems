@@ -101,6 +101,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/workflow_enablement
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/course_world_model
 uv run --no-sync python -B -m pytest -o addopts='' -q -rs -p no:cacheprovider tests/edge_task
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/operational_context
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/site_agent
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
@@ -123,6 +124,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/course_world_model/test_architecture.py \
   tests/edge_task/test_architecture.py \
   tests/edge_task/test_scripts_guard.py \
+  tests/operational_context/test_architecture.py \
   tests/site_agent/test_architecture.py \
   tests/test_state_machine.py \
   tests/test_retry_recovery.py \
@@ -148,7 +150,7 @@ uv run --no-sync python -m compileall -q -f \
   nxt_telemetry nxt_range_viewer nxt_range_demo nxt_range_twin \
   nxt_pilot_ops nxt_commissioning nxt_site_runtime nxt_agent_runtime \
   nxt_edge_observation nxt_workflow_enablement nxt_course_world_model \
-  nxt_edge_task nxt_edge_interventions nxt_site_agent scripts ../.github/scripts
+  nxt_edge_task nxt_edge_interventions nxt_operational_context nxt_site_agent scripts ../.github/scripts
 
 python_dist_dir="$ci_tmp/python-dist"
 mkdir -p "$python_dist_dir"
@@ -176,7 +178,8 @@ shipped = (
     "nxt_telemetry", "nxt_range_twin", "nxt_pilot_ops",
     "nxt_commissioning", "nxt_site_runtime", "nxt_agent_runtime",
     "nxt_edge_observation", "nxt_workflow_enablement",
-    "nxt_course_world_model", "nxt_edge_task", "nxt_edge_interventions", "nxt_site_agent",
+    "nxt_course_world_model", "nxt_edge_task", "nxt_edge_interventions",
+    "nxt_operational_context", "nxt_site_agent",
 )
 repository_only = ("nxt_range_agent", "nxt_range_viewer", "nxt_range_demo")
 for name in shipped:

@@ -137,7 +137,8 @@ Use, in order:
    `simulation/docs/workflow_enablement_v0.md`,
    `simulation/docs/course_world_model_v0.md`,
    `simulation/docs/edge_task_v0.md`,
-   `simulation/docs/site_agent_v0.md`, and
+   `simulation/docs/site_agent_v0.md`,
+   `simulation/docs/operational_context_v0.md`, and
    `simulation/docs/pilot_dispatch_v0.md`.
 4. Design documents for rationale.
 5. Recon files, plans, PR descriptions, and generated artifacts for historical
@@ -307,6 +308,32 @@ An untracked document is never repository authority by itself.
   journal and never write it. Real notification channels, recovery or
   re-authorization after a conflict, state loss, or exhausted retries, real
   devices, and a host watchdog remain unimplemented and unowned.
+- Keep `nxt_operational_context` a stdlib-only, filesystem-free leaf that
+  owns business operational-context evidence as its own fact class. It
+  imports no other `nxt_*` package; commissioned identity, declared source
+  profiles and verified journal records reach it as plain data from
+  composition roots. It owns the normalized source-recorded event envelope
+  (content-derived `event_id`, `content_digest`, stable `import_batch_id`),
+  the four evidence labels (`PLANNED`, `SOURCE_RECORDED`, `DERIVED`,
+  `UNKNOWN`), the privacy allow-list, the synthetic CSV adapters for
+  staffing, sales and play, the pure idempotent import decision with
+  append-only corrections and whole-batch rejection, and the deterministic
+  staffing and operations projections aged from each source's coverage end,
+  with UTC storage and operating days derived in the site timezone. It owns
+  no facility state, observation, commissioning, advice, workflow, memory or
+  execution semantics; sold ball units are never dispensed inventory; a
+  schedule is never presence; clocked-in is never availability; a request is
+  never an approval; a booking is never a start. It must not import the
+  simulator, telemetry, edge adapters, Site Runtime, Agent Runtime, Shadow
+  Ops, memory, twin, viewer, robot, ROS, actuator, transport/field-bus,
+  network, filesystem, subprocess, threading, wall-clock, or randomness
+  modules, and no existing package may import it. Journal wiring, synthetic
+  imports, the declared clock and the per-run reader live only in
+  `simulation/scripts/operational_context_fixture.py` and the Site Agent
+  composition root; `nxt_site_agent` reads the projection through its
+  `ContextReader` seam as plain data and never names the package. Vendor
+  adapters, schedule or POS writes, HR or payroll records, demand-versus-
+  coverage advice and any LLM integration remain unimplemented and unowned.
 - Treat `simulation/scripts/` as composition roots, not as permission to move
   orchestration into core packages.
 - Do not duplicate ROI formulas outside `@nxtektal/roi-engine`; semantic formula

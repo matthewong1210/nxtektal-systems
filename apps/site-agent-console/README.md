@@ -2,6 +2,28 @@
 
 SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA.
 
+Operational context v0 changes how the Manager API view is read and adds two
+compact sections. The page performs one `GET /api/v0/supervisor-snapshot` per
+read (`lib/console.ts::readConsole`) and splits it (`lib/snapshot.ts`) into
+the health, state, recommendation, briefing and fixture shapes the existing
+panels already consume, so every section below the header renders the same
+service generation and a failed read commits nothing. "Staffing today" shows
+planned shifts, clocked-in presence, unknown presence, recorded absences,
+approved and pending shift changes, worked intervals and a per-role table;
+"Operations today" shows ball-unit sales, reversals, the recent window, play
+sessions with booked and recorded player counts kept apart, completed-session
+durations, and the physical stores and machines this slice has no evidence
+for, stated as unknown. Every value carries its evidence label (`PLANNED`,
+`RECORDED`, `DERIVED`, `UNKNOWN`) and says in words when its source is stale
+or missing; a stale view downgrades every green badge; an unavailable context
+shows its code and nothing partial. Scheduled is not present, clocked-in is
+not availability, requested is not approved, booked is not started, and sold
+ball units are entitlement evidence, never dispensed inventory. The state
+panel labels a sensor-bound channel replayed from a fixture as fixture data.
+The tests read a frozen snapshot the real service produced
+(`tests/supervisor-snapshot.fixture.json`); no vendor system, schedule write,
+POS or payroll write, or advisory text exists in the console.
+
 Collection execution v1 adds a read-only execution panel between the planning
 panel and the task panel. It consumes only the GET-only
 [`collection-execution-v1` contract](../../simulation/docs/contracts/collection-execution-v1/README.md)

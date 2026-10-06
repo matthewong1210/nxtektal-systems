@@ -149,10 +149,17 @@ diagnostics captured by the composition), persists the cursor, and
 refuses advances once the source is exhausted or the plan's declared
 `max_cycles` bound is reached. The bound is enforced against the
 persisted cursor's resolved-cycle count, so it survives restarts and
-is not consumed by retryable deferrals that make no progress. Wall clock is never read: reading age,
-`responded_at`, and every briefing time use observation/scenario time,
-so identical action sequences produce byte-identical canonical
-evidence across runs (`tests/site_agent/test_service.py` proves it).
+is not consumed by retryable deferrals that make no progress. No canonical
+evidence reads a wall clock: reading age, `responded_at`, and every briefing
+time use observation/scenario time, so identical action sequences produce
+byte-identical canonical evidence across runs
+(`tests/site_agent/test_service.py` proves it). The only clock the service
+ever consults is the composition root's declared `ClockSource`, read solely
+to stamp `GET /api/v0/supervisor-snapshot`'s `generation.generated_at` and to
+age the business operational-context sections; its basis (`FIXTURE_DECLARED`
+or `SYSTEM_UTC`) travels with the snapshot, it never enters canonical
+evidence, `responded_at`, or any other endpoint, and scenario time is never
+subtracted from it.
 
 Failure behavior is conservative and visible: a missing sample is
 explicit MISSING evidence, never zero inventory; a stale reading is
@@ -191,6 +198,7 @@ unread bytes are never parsed as a second request.
 | `GET /api/v0/recommendations` | The existing manager decision queue joined with ledger trace/recommendation/response payloads; owner identity preserved, nothing ranked or reconciled |
 | `GET /api/v0/briefing` | The Shift Briefing projection (below) |
 | `GET /api/v0/demo` | Fixture-only metadata: declared cycle catalog, cursor, next cycle, control availability |
+| `GET /api/v0/supervisor-snapshot` | One coherent snapshot composed under one lock acquisition (`nxt-site-agent/supervisor-snapshot/v1` inside the v0 envelope): the five projections above embedded verbatim, plus the business operational-context sections read through the seam's `ContextReader` (staffing, operations, operating day, per-source coverage-end freshness), physical stores and machines stated as unknown or as fixture facility state, a reserved empty `coverage_recommendations` list, exceptions, `data_quality`, and a `generation` block with a content-derived `snapshot_id`. Business-context failures (no clock, no reader, a torn journal) never raise: they appear in `data_quality` and the affected sections read `unavailable`; facility-evidence read failures keep their existing codes |
 | `POST /api/v0/recommendations/{id}/accept\|reject\|modify` | Transport for the existing workflow operations; `operator_id` and `reason_code` required, `responded_at` defaults to scenario now; ledger legality decides (unknown id → 404, illegal transition → 409) |
 | `POST /api/v0/demo/advance\|restart\|reset` | Fixture-only controls: one bounded cycle; recompose from persisted evidence and cursor; fresh launch into the next empty run directory |
 
