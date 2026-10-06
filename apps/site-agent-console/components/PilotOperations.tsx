@@ -3,6 +3,7 @@
 import { DispatchView, usePilotTaskOps } from "./DispatchPanel";
 import { CollectionExecutionPanel, simulationClockFor, useCollectionExecutions } from "./execution/CollectionExecutionPanel";
 import { PlanningPanel } from "./PlanningPanel";
+import { StaffingPanel } from "./StaffingPanel";
 import { taskOpsCapabilities } from "../lib/task-ops";
 
 /** Mounts the single task-ops poller and hands its validated scheduler
@@ -20,6 +21,9 @@ export function PilotOperations() {
   const capabilities = view.data ? taskOpsCapabilities(view.data) : null;
   return (
     <>
+      <div className="staffing-shell">
+        <StaffingPanel />
+      </div>
       <div className="dispatch-shell">
         <PlanningPanel health={health} healthSource={tracker.current} capabilities={capabilities} />
       </div>

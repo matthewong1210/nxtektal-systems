@@ -691,6 +691,7 @@ body {
 }
 
 /* Pilot task operations consume the Manager API independently of advice. */
+.staffing-shell,
 .dispatch-shell,
 .legacy-heading {
   max-width: 1240px;
@@ -732,7 +733,7 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
   .dispatch-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 }
 @media (max-width: 480px) {
-  .dispatch-shell, .legacy-heading { padding-left: 12px; padding-right: 12px; }
+  .staffing-shell, .dispatch-shell, .legacy-heading { padding-left: 12px; padding-right: 12px; }
   .dispatch-form-grid, .dispatch-response-grid { grid-template-columns: minmax(0, 1fr); }
   .dispatch-kv { grid-template-columns: minmax(0, 1fr); }
 }
@@ -787,3 +788,158 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
 /* Service-capability notes: one line per withheld write, next to its control. */
 .capability-note { margin: 6px 0 10px; }
 .planning-capabilities, .dispatch-capabilities { margin: 6px 0 10px; max-width: 110ch; }
+
+/* Staffing advisory: a compact shift ledger with one factual blue accent. */
+.staffing-boundary { max-width: 88ch; margin: 0 0 12px; color: var(--text-dim); font-size: 13px; }
+.staffing-manager { max-width: 420px; margin-bottom: 12px; }
+.staffing-manager input,
+.staffing-field input,
+.staffing-field select,
+.staffing-field textarea,
+.staffing-file-field input,
+.staffing-response textarea,
+.staffing-reject select,
+.staffing-reject textarea,
+.staffing-candidate-editor input,
+.staffing-candidate-editor textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #68736d;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 7px 8px;
+  font: inherit;
+}
+.staffing-field input[type="time"] { color-scheme: dark; }
+.staffing-manager input:disabled,
+.staffing-field input:disabled,
+.staffing-field select:disabled,
+.staffing-field textarea:disabled,
+.staffing-file-field input:disabled,
+.staffing-response textarea:disabled,
+.staffing-reject select:disabled,
+.staffing-reject textarea:disabled,
+.staffing-candidate-editor input:disabled,
+.staffing-candidate-editor textarea:disabled { opacity: 0.58; }
+.staffing-notice { margin: 8px 0; padding: 9px 11px; border-left: 3px solid #83b5c4; background: var(--panel-inset); font-size: 13px; overflow-wrap: anywhere; }
+.staffing-rail { display: flex; gap: 0; margin: 14px 0 16px; border: 1px solid #5d8290; background: #131918; }
+.staffing-rail-facts { flex: 1; display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); min-width: 0; margin: 0; }
+.staffing-rail-facts > div { min-width: 0; padding: 9px 12px; border-right: 1px solid var(--line); }
+.staffing-rail dt { color: #9dc5d0; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; }
+.staffing-rail dd { margin: 2px 0 0; font-family: var(--mono); font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.staffing-rail .btn { align-self: center; margin: 8px; white-space: nowrap; }
+.staffing-rail-open { grid-column: span 3; }
+.staffing-workbench { display: grid; grid-template-columns: minmax(270px, 0.82fr) minmax(0, 1.18fr); gap: 18px; align-items: start; }
+.staffing-entry-column,
+.staffing-status-column { display: grid; gap: 12px; min-width: 0; }
+.staffing-exception-form,
+.staffing-import,
+.staffing-exceptions,
+.staffing-plan-status,
+.staffing-generation { min-width: 0; border-top: 1px solid var(--line); padding-top: 12px; }
+.staffing-plan-status p { margin: 7px 0 0; color: var(--text-dim); font-size: 12px; }
+.staffing-exception-fields { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.staffing-exception-fields legend,
+.staffing-import h3,
+.staffing-exceptions h3,
+.staffing-generation h3 { margin: 0 0 8px; padding: 0; font-size: 14px; font-weight: 600; }
+.staffing-field,
+.staffing-file-field,
+.staffing-reject,
+.staffing-candidate-editor { display: grid; gap: 5px; min-width: 0; }
+.staffing-field > span,
+.staffing-file-field > span,
+.staffing-response > label,
+.staffing-reject > label,
+.staffing-candidate-editor > label,
+.staffing-editor-row > label { color: var(--text-dim); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+.staffing-hint,
+.staffing-source,
+.staffing-empty,
+.staffing-readonly { margin: 5px 0; color: var(--text-dim); font-size: 12px; }
+.staffing-error,
+.staffing-rejection { margin: 6px 0; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.staffing-subhead { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
+.staffing-subhead p { margin: 2px 0 8px; color: var(--text-dim); font-size: 12px; }
+.staffing-template-link { color: #bad8e1; font-size: 12px; white-space: nowrap; }
+.staffing-import-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin-top: 10px; padding: 10px; border: 1px solid #5d8290; }
+.staffing-import-preview div { min-width: 0; }
+.staffing-import-preview span { display: block; color: var(--text-dim); font-size: 10px; text-transform: uppercase; }
+.staffing-import-preview strong { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.staffing-import-preview .staffing-source,
+.staffing-import-preview .btn { grid-column: 1 / -1; }
+.staffing-exception-list { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.staffing-exception-list li { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(180px, 1.5fr); gap: 5px 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; overflow-wrap: anywhere; }
+.staffing-exception-list li > :last-child:nth-child(4) { grid-column: 1 / -1; color: var(--text-dim); }
+.staffing-capability { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 10px; padding: 9px 10px; border: 1px solid var(--line); font-size: 12px; }
+.staffing-capability strong { color: var(--lime); }
+.staffing-capability-attention { border-color: #665326; background: #211d12; }
+.staffing-capability-attention strong { color: var(--amber); }
+.staffing-code,
+.staffing-time { font-family: var(--mono); font-size: 0.9em; overflow-wrap: anywhere; }
+.staffing-generation-state { margin-top: 10px; padding-left: 10px; border-left: 2px solid #83b5c4; }
+.staffing-generation-state p { margin: 4px 0; color: var(--text-dim); font-size: 13px; }
+.staffing-generation-heading { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; }
+.staffing-generate-button { margin-top: 10px; }
+.staffing-candidates { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.staffing-candidate-list { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr); gap: 14px; align-items: start; }
+.staffing-candidate { min-width: 0; padding: 14px; border: 1px solid var(--line); border-top: 3px solid #83b5c4; background: var(--panel-inset); overflow-wrap: anywhere; }
+.staffing-candidate:nth-child(even) { margin-top: 18px; }
+.staffing-candidate-heading { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.staffing-candidate-heading h3 { margin: 0; font-size: 16px; }
+.staffing-candidate-heading strong { color: #bad8e1; font-family: var(--mono); font-size: 11px; }
+.staffing-advisory-label { margin: 5px 0 8px; color: var(--amber); font-size: 12px; font-weight: 650; }
+.staffing-provenance { display: flex; flex-wrap: wrap; gap: 5px 12px; color: var(--text-dim); font-size: 11px; }
+.staffing-rationale { margin: 12px 0; font-size: 13px; }
+.staffing-adjustments { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.staffing-adjustments li { display: grid; grid-template-columns: auto minmax(110px, 1fr) minmax(0, 1fr); gap: 3px 9px; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.staffing-adjustments li > .staffing-time { grid-column: 2 / -1; }
+.staffing-warnings,
+.staffing-gaps { margin-top: 11px; padding: 9px 10px; border: 1px solid #665326; }
+.staffing-gaps { border-color: #65342c; }
+.staffing-warnings h4,
+.staffing-gaps h4 { margin: 0 0 5px; font-size: 12px; }
+.staffing-warnings ul,
+.staffing-gaps ul { display: grid; gap: 4px; margin: 0; padding-left: 17px; font-size: 12px; }
+.staffing-gaps li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); gap: 3px 9px; }
+.staffing-manager-response { margin-bottom: 14px; padding: 12px; border: 1px solid var(--lime); }
+.staffing-manager-response h3 { margin: 0 0 8px; font-size: 14px; }
+.staffing-manager-response dl { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.staffing-manager-response dt { color: var(--text-dim); font-size: 10px; text-transform: uppercase; }
+.staffing-manager-response dd { margin: 2px 0 0; font-size: 12px; overflow-wrap: anywhere; }
+.staffing-response { display: grid; gap: 7px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--line); }
+.staffing-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.staffing-reject { padding: 10px; border: 1px solid #68736d; }
+.staffing-editor-rows { display: grid; gap: 9px; }
+.staffing-editor-row { display: grid; grid-template-columns: minmax(95px, auto) minmax(0, 1fr); gap: 6px 10px; min-width: 0; margin: 0; padding: 9px; border: 1px solid #68736d; }
+.staffing-editor-row legend { padding: 0 4px; color: #bad8e1; font-size: 12px; }
+.staffing-editor-row label { align-self: center; }
+.staffing-read-actions { margin-top: 10px; }
+
+@media (max-width: 900px) {
+  .staffing-rail-facts { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+  .staffing-rail-open { grid-column: span 1; }
+  .staffing-workbench,
+  .staffing-candidate-list { grid-template-columns: minmax(0, 1fr); }
+  .staffing-candidate:nth-child(even) { margin-top: 0; }
+  .staffing-manager-response dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .staffing-rail { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .staffing-rail-facts { grid-template-columns: minmax(0, 1fr); }
+  .staffing-rail-facts > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .staffing-rail .btn { width: calc(100% - 16px); margin: 8px; }
+  .staffing-exception-list li,
+  .staffing-adjustments li,
+  .staffing-gaps li,
+  .staffing-editor-row,
+  .staffing-manager-response dl { grid-template-columns: minmax(0, 1fr); }
+  .staffing-adjustments li > .staffing-time,
+  .staffing-exception-list li > :last-child:nth-child(4) { grid-column: 1; }
+  .staffing-import-preview { grid-template-columns: minmax(0, 1fr); }
+  .staffing-import-preview .staffing-source,
+  .staffing-import-preview .btn { grid-column: 1; }
+  .staffing-subhead { display: grid; }
+}
