@@ -2351,6 +2351,16 @@ git commit -m "feat(staffing): compose bounded regional generation"
 - Consumes: optional deployment CLI/config, stable state root, current Site Agent and Continuous V4 lifecycles.
 - Produces: one integrated local service where staffing failure cannot prevent or lock existing capabilities.
 
+**Stability preflight amendment (authoritative over the older snippets below):**
+
+- Staffing evidence uses the same `SITE_ID` and `DEPLOYMENT_ID` passed to `SiteAgentService.launch`; it must not use the continuous task fixture's different deployment identity. The site timezone comes from the already-constructed runtime site. `--staffing-state-root` remains independent of `--out`, initialization, and Site Agent reset.
+- With no `--staffing-state-root`, every staffing region/model flag is inert: composition does not read provider environment variables, construct settings, create a root, or install a staffing callback. With a root, environment access is confined to the narrow staffing-construction block and only the three named API-key variables are consumed by `load_provider_settings`.
+- Production construction passes `time.monotonic` and a non-configurable `lambda: secrets.token_bytes(32)`. The architecture guard blanket-bans stdlib `os`, `time`, and `secrets` from service scripts, then grants the continuous V4 composition script a path-specific exception locked to one exact `load_provider_settings(os.environ, ...)` call, `time.monotonic`, and `secrets.token_bytes(32)`; `os.getenv`, any other environment read/iteration, and every other randomness/time API remain forbidden. Every other service script retains all three bans; this is not a global whitelist relaxation. Production-source AST guards separately freeze the gateway-importer set, staffing-domain-importer set, and their intersection to exactly `simulation/scripts/staffing_operations.py`; the V4 script may import only that composition module, never either owner. Tests are excluded from this production-source inventory. `staffing_operations.py` keeps injected settings/clocks/entropy and therefore continues to forbid `os`, `time`, and `secrets`; its dedicated allowlist permits the existing `urllib.parse.unquote`, public gateway contracts/adapters/`StdlibHttpsTransport`, and staffing deep imports while rejecting direct HTTP/TLS/provider SDKs, endpoint literals/overrides, and Edge/simulator/robot execution surfaces.
+- Staffing construction catches ordinary `Exception` only inside the settings/builder block, never `BaseException`, never stores/logs the exception, and installs a fixed unavailable callback that closes over no failure object. Missing provider configuration is a successfully enabled local staffing service, not a construction failure.
+- Startup and callback composition preserve the exact order in Step 1, and `ContinuousCollectionExecutionRuntime.api_callbacks()` remains the original five-entry surface. Startup JSON preserves the existing `url`, `disclaimer`, `transport`, and `scope` fields and adds only `staffing: disabled|enabled|unavailable`; it emits no other staffing metadata, provider/model/key, prompt/result, readiness detail, nonce, digest, exception text, or derived root content.
+- Shutdown attempts server, staffing, continuous runtime, and Site Agent in that order even when an earlier close fails. It records the first cleanup failure in that order without letting later failures replace it; an exception already propagating from the main body remains primary. A staffing-close failure is represented only by a generic shutdown error without chaining or original text. If the first staffing close reports incomplete shutdown, composition retains the wrapper, completes runtime and Site Agent cleanup, then retries `staffing.close()` until the bounded worker has exited and the ledger closes; it neither returns nor lets `__main__` unwind while the wrapper can still write. After complete cleanup it surfaces the previously recorded generic failure. Tests cover fail-once/succeed-on-retry, all later cleanup calls, deterministic failure priority, and absence of the original staffing exception text.
+- Task 4 test commands explicitly deselect `tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data`. Neither frozen witness is regenerated until Task 8, when the deselection is removed and both are regenerated and verified.
+
 - [ ] **Step 1: Add failing CLI and lifecycle-order tests**
 
 Add parser expectations for:
@@ -2399,7 +2409,8 @@ Import a roster into a stable root, run `--initialize` with two different `--out
 cd simulation
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_agent/test_continuous_collection_execution_service.py \
-  tests/site_agent/test_architecture.py
+  tests/site_agent/test_architecture.py \
+  --deselect tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
 ```
 
 - [ ] **Step 4: Add optional construction and safe-failure callback**
@@ -2422,15 +2433,22 @@ server = SiteAgentApiServer(
 
 - [ ] **Step 5: Implement exact shutdown and stdout redaction**
 
-Stop server first, then staffing, runtime, service. The startup JSON may report `staffing: enabled|unavailable|disabled` and readiness category but never root contents beyond operator-supplied path, provider key, prompt, or model response. Test with sentinel key strings captured from stdout/stderr.
+Stop server first, then staffing, runtime, service. The startup JSON preserves the existing four fields and adds only `staffing: enabled|unavailable|disabled`; it never reports readiness, root/path metadata, provider key, prompt, or model response. Test with sentinel key strings captured from stdout/stderr.
 
 - [ ] **Step 6: Extend architecture guards for the unique composition point**
 
-Keep `nxt_model_gateway` banned from `nxt_site_agent` and every package. Prove only `simulation/scripts/staffing_operations.py` contains both `nxt_model_gateway` and `nxt_pilot_ops.staffing`. Give this script a dedicated guard allowing composition-only `os`/`secrets` but rejecting direct `http.client`, `ssl`, provider SDKs, Edge/simulator/robot execution imports, command tokens, and endpoint literals. Existing V4 script guard remains unchanged.
+Keep `nxt_model_gateway` banned from `nxt_site_agent` and every package. Over production source only, separately prove that the gateway-importer set, staffing-domain-importer set, and their intersection are each exactly `{simulation/scripts/staffing_operations.py}`; V4 may import `scripts.staffing_operations` only. Give the staffing script a dedicated guard that retains injected settings/time/entropy (no `os`, `time`, or `secrets`), allows its existing `urllib.parse` and public gateway/domain imports, and rejects direct `http.client`, `ssl`, sockets, provider SDK roots, provider endpoints/overrides, Edge/simulator/robot execution imports, and exact command tokens. Add synthetic negative controls for alternate import syntax and endpoint/command violations. Keep the blanket service-script bans, granting only V4 the exact path-specific `os.environ`, `time.monotonic`, and `secrets.token_bytes(32)` uses required above.
 
 - [ ] **Step 7: Write the pilot runbook and run GREEN**
 
-Document initial roster import, stable-path ownership/permissions, CN/GLOBAL environment/CLI examples that reference shell variables such as `$OPENAI_API_KEY` without assigning secret values, degraded/manual behavior, request recovery, result unknown/new retry, shutdown, backup/retention, and the loopback/no-auth limitation. Run Step 3 plus `tests/site_agent`.
+Document initial roster import, stable-path ownership/permissions, CN/GLOBAL environment/CLI examples that reference shell variables such as `$OPENAI_API_KEY` without assigning secret values, degraded/manual behavior, request recovery, result unknown/new retry, shutdown, backup/retention, and the loopback/no-auth limitation. State explicitly that provider wire data is minimized and pseudonymized, not anonymous or certified non-reidentifiable; role/time/exception patterns remain quasi-identifiers. The local ledger/API/UI and any backup retain real identity and free text and require access control and encrypted backup handling. API keys, authorization headers, raw provider bodies, hidden reasoning, and nonce values never enter ledger/API/log/browser surfaces. A nonce digest is retained only in the protected local ledger for replay integrity and never enters provider transport, public API, logs, or browser surfaces. Operators must still never place secrets in names, notes, source refs, or operator fields. `operator` is self-declared attribution, not authenticated identity; CN/Kimi routing is not a data-residency or regulatory claim; every proposal and manager response remains advisory, not an HR schedule, labor-compliance proof, notification, task, or execution command. Run Step 3, then run `tests/site_agent` with the same exact two-task witness node deselected; Task 8 removes the deselection.
+
+```bash
+cd simulation
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  tests/site_agent \
+  --deselect tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
 
 - [ ] **Step 8: Commit service wiring**
 
