@@ -2466,20 +2466,33 @@ git commit -m "feat(staffing): wire advisory service lifecycle"
 - Create: `apps/site-agent-console/public/staffing-roster-template.csv`
 - Create: `apps/site-agent-console/tests/staffing-contract.test.ts`
 - Create: `apps/site-agent-console/tests/staffing-csv.test.ts`
+- Modify: `apps/site-agent-console/tests/boundaries.test.ts:82-104`
 
 **Interfaces:**
 - Consumes: Task 1 schema/examples and one local CSV file.
 - Produces: strict TypeScript API types/parsers/client and exact normalized roster request; no domain validation, external URL, dependency, or browser persistence.
 
+**Stability preflight amendment (authoritative over the older snippets below and the Task 6 `path`/`body` snippets):**
+
+- `schema.json` plus the seven success fixture files and `errors.json` are the wire authority; abbreviated TypeScript in this plan is not. Port every closed object and semantic branch, including `operator` in both manager-response records and summaries. Validate Unicode lengths by scalar (`Array.from`), reject unpaired surrogates/control characters, parse calendar dates without JavaScript normalization, require fixed-six UTC audit timestamps, require whole-minute operational timestamps, reject signed-zero offsets, and require every JSON integer to be a finite safe integer. This last rule is an intentional TypeScript fail-closed narrowing where JSON Schema has no integer maximum.
+- Replace independently supplied mutation paths and bodies with one exported closed `StaffingMutation` discriminated union. It binds `operationKind`, the exact request body family, and, only where needed, a raw `targetId`. `StaffingClient.submit(mutation)` validates that union at runtime and constructs the only legal same-origin path internally; it applies `encodeURIComponent` exactly once to each raw target ID. Callers cannot submit arbitrary paths. The mapping is roster-import/`RosterImportRequest`, exception-record/`ExceptionRecordRequest`, exception-cancel/`ExceptionCancelRequest`, exception-correct/`ExceptionCorrectRequest`, suggestion-generate/`SuggestionGenerateRequest`, and manager-response/one exact ACCEPT, MODIFY, or REJECT request branch. Task 6 stores and replays this detached mutation value, not a caller-built URL.
+- Before fetch, `submit` performs closed route-specific runtime request validation; TypeScript assertions are never treated as validation. A local invalid request is `ManagerApiError(400, {code: "staffing_invalid_request", ...})` and performs no fetch. Then serialize the complete validated request exactly once, reject a UTF-8 body over 1 MiB as `ManagerApiError(413, {code: "body_too_large", detail: <fixed generic text>})` before fetch, and send those exact serialized bytes. Exactly 1 MiB is allowed. The raw CSV limit remains 512 KiB before decode.
+- Correlate every successful response with its request. A POST receipt must have the same request ID and operation kind. Roster counts must equal the submitted worker/regular-assignment/coverage array lengths. Exception-record must retain submitted staff ID, kind, and note. Correction must have both `record.replaced_exception_id` and `record.replacement.exception_id` equal to the raw target ID and retain the request replacement's kind and note; for LATE compare `time_local` with the replacement end minute and for EARLY_DEPARTURE compare it with the replacement start minute. Staff ID and service date are server-inherited and are not compared with a correction body that does not carry them. Cancel must match the target exception ID. Generation service date, retry target, and basis revisions must match the request. Manager records must match target suggestion ID and the request's response kind, reason, operator, and note; ACCEPT/MODIFY require a non-null `CURRENT` plan and REJECT requires null. Lookup must match both requested values and have `disposition: "duplicate"`; a dated GET must return the requested service date. Only root/date/lookup and ordinary mutations accept HTTP 200; only suggestion generation accepts 202.
+- Preserve ambiguity in `ManagerApiError.status`: malformed 2xx success data keeps its actual 200/202 status; malformed or unknown non-2xx data keeps its actual status; fixed error envelopes preserve their actual status/code; fetch and Abort failures propagate unchanged. Never convert a possibly committed response into a local 400. The seven staffing-domain pairs are the only trusted staffing error code/status pairs; exact Manager API `413/body_too_large` is separately trusted as definitely pre-commit. Every other Manager transport failure remains status-preserving but uses a fixed generic invalid-staffing-response code/detail, with no response body echoed. Error text never contains response JSON, CSV cell content, names, notes, secrets, endpoints, headers, prompts, raw model output, reasoning, nonce material, or exception text.
+- Validate complete Task 1 semantics, not only shapes: the 16 receipt triples; generation state/failure/record matrices; capability branches; the three legal provider/region/route tuples and two-attempt fallback order; common provenance input digest; contiguous candidate indexes 1 then 2; VALID/rejected candidate coherence; SUCCEEDED/NO_VALID candidate rules; and `0 <= assigned_count < required_count`. Reject sparse arrays, duplicates where forbidden, every unknown nested key, and provider-only/privacy fields including aliases/maps, nonce/digest, credentials, headers, prompt/raw response/reasoning, endpoint/timeout, and exception text.
+- `parseStaffingRosterCsv(bytes, filename)` accepts only `ArrayBuffer | Uint8Array` and returns only `RosterImportDraft = Omit<RosterImportRequest, "request_id" | "operator" | "expected_roster_revision" | "site_id" | "deployment_id">`. It never fabricates identity, revision, request ID, or manager attribution. Preserve CSV/list row order for deterministic byte-equivalent output. Formula detection left-trims ASCII space/tab and rejects `=`, `+`, `-`, or `@` in every nonempty cell and the filename. Apply the wire text/identifier bounds and local reference checks, but do not claim eligibility, skills, DST, coverage, labor, or scheduling validation.
+- Freeze the public surface now. Runtime exports from `staffing.ts` are exactly `STAFFING_SCHEMA`, `parseStaffingSnapshot`, `parseStaffingReceipt`, `parseStaffingRequestBody`, `createStaffingClient`, and `newStaffingRequestId`. Its exported types are `StaffingClient`, `OperationKind`, `OperationState`, `StaffingMutation`, `RevisionVector`, `StaffingDateSnapshot`, `GenerationCapability`, `GenerationProjection`, `CandidateProjection`, `CandidateOperationProjection`, `CoverageGap`, `AssignmentProjection`, `ExceptionProjection`, `EffectivePlanProjection`, `ManagerResponseSummary`, `ProviderProvenance`, `RosterImportRequest`, `ExceptionRecordRequest`, `ExceptionCancelRequest`, `ExceptionCorrectRequest`, `SuggestionGenerateRequest`, `ManagerAcceptRequest`, `ManagerModifyRequest`, `ManagerRejectRequest`, `ManagerResponseRequest`, `ExceptionReplacementInput`, `ManagerPatchOperation`, `StaffingRequestBody`, `StaffingReceipt`, `RosterImportedRecord`, `ExceptionRecordedRecord`, `ExceptionCancelledRecord`, `ExceptionCorrectedRecord`, `GenerationReservedRecord`, `GenerationInProgressRecord`, `GenerationInterruptedRecord`, `SuggestionIssuedRecord`, `SuggestionUnavailableRecord`, and `ManagerResponseCommittedRecord`. `staffing-csv.ts` exports only the type `RosterImportDraft` and value `parseStaffingRosterCsv`. Validator internals, URL root, status map, tokenizer states, and formula helpers remain private; tests freeze runtime export names and compile-time consumers freeze the type surface.
+- Task 5 owns the minimal `boundaries.test.ts` update needed for its own GREEN run: allow only literal same-origin `/api/v1/staffing`, its slash descendants, and its template suffix form. Do not hide paths by string splitting. Task 8 still owns the broader final privacy/architecture guards.
+
 - [ ] **Step 1: Add failing cross-language success-contract tests**
 
-Load every exchange from the seven `nxt-staffing-exchanges/v1` files with `readFileSync`; pass `exchange.body.data` to `parseStaffingSnapshot` or `parseStaffingReceipt` according to the presence of `operation_kind`. Assert foreign container/envelope schema, extra top-level/nested keys, invalid operation state, missing revision, malformed candidate/gap, provider alias fields, and wrong environment/mode throw `ManagerApiError`. From `manager-response.json` parse `date-after-manager-response` and assert the matching generation retains the closed response summary after a fresh read:
+Load every exchange from the seven `nxt-staffing-exchanges/v1` files with `readFileSync`; independently assert the fixture document and exchange exact keys, then pass `exchange.body.data` to `parseStaffingSnapshot` or `parseStaffingReceipt` according to the presence of `operation_kind`. Exercise full envelopes through a scripted `createStaffingClient`; do not ask a data-only parser to validate its absent container. Assert foreign envelope schema, extra top-level/nested keys, invalid operation state, missing revision, malformed candidate/gap, provider alias fields, and wrong environment/mode throw `ManagerApiError`. From `manager-response.json`, derive the expected operator/note from the `manager-accepted` request, parse `date-after-manager-response`, and assert the matching generation retains that closed response summary after a fresh read:
 
 ```typescript
 const refreshed = parseStaffingSnapshot(exchange("date-after-manager-response").body.data);
 expect(refreshed.generations[0].manager_response).toEqual({
-  response_kind: "ACCEPT", reason_code: "APPROVED", operator: "经理甲",
-  note: "采用一号方案",
+  response_kind: accepted.request.kind, reason_code: accepted.request.reason_code,
+  operator: accepted.request.operator, note: accepted.request.note,
   effective_plan: expect.objectContaining({ revision: 1, status: "CURRENT" }),
 });
 ```
@@ -2509,7 +2522,7 @@ for (const exchange of errors.exchanges) {
 }
 ```
 
-Also mutate schema, disclaimer, error code, and status independently and assert the parser fails closed rather than remapping them.
+Also mutate schema, disclaimer, error code, and status independently and assert the parser fails closed rather than remapping them. Add unreadable/malformed 200, 202, 413, and 503 responses and assert their actual HTTP status is preserved with fixed redacted detail; include one local-invalid request and prove it returns 400 without invoking fetch.
 
 - [ ] **Step 3: Freeze the CSV header and row grammar**
 
@@ -2534,7 +2547,7 @@ Every field not listed for that row type must be empty. `operator` comes from th
 
 - [ ] **Step 4: Add failing RFC 4180, UTF-8, BOM, and formula tests**
 
-Cover quoted commas/newlines, doubled quotes, CRLF/LF, final newline/no final newline, one leading BOM, misplaced BOM, fatal invalid UTF-8, duplicate/missing/unknown header, duplicate worker, unknown row type, absent required row class, extra populated cell, list parsing, raw >512 KiB, normalized JSON >1 MiB, every cell whose left-trimmed nonempty content starts `=`, `+`, `-`, or `@`, and a formula-prefixed selected filename before it can become `source_ref`.
+Cover quoted commas/newlines, doubled quotes, CRLF/LF, final newline/no final newline, one leading BOM, misplaced BOM, fatal invalid UTF-8, duplicate/missing/unknown header, duplicate worker, unknown row type, absent required row class, extra populated cell, list parsing, raw >512 KiB, and every cell whose ASCII-space/tab-left-trimmed nonempty content starts `=`, `+`, `-`, or `@`, plus a formula-prefixed selected filename before it can become `source_ref`. In client tests, construct a valid complete request whose normalized JSON crosses 1 MiB, assert rejection before fetch, and assert the exact 1 MiB boundary remains accepted.
 
 - [ ] **Step 5: Run client/CSV tests and verify RED**
 
@@ -2551,7 +2564,7 @@ Port the exact Task 1 unions into `staffing.ts`. First validate common receipt k
 const unreachable = (value: never): never => {
   throw new ManagerApiError(200, {
     code: "invalid_staffing_receipt",
-    detail: `unsupported receipt branch: ${String(value)}`,
+    detail: "staffing receipt is invalid",
   });
 };
 ```
@@ -2562,30 +2575,31 @@ Do not cast an arbitrary record object to the union after checking only common f
 
 Validate every field the UI reads: revisions, assignments, active exceptions, effective plan, generation capability, generation states, candidate patch discriminators, gaps, provenance, nullable manager-response summary, and all array bounds. A non-null response must be one closed object: ACCEPT/APPROVED and MODIFY/APPROVED_WITH_CHANGES require a non-null effective plan, while REJECT plus one of its three reason codes requires null. Reject unknown fields in every request, receipt, snapshot, envelope, and nested contract object; this mirrors Task 1's closed Python schema exactly.
 
-- [ ] **Step 8: Implement the same-origin client and exact path union**
+- [ ] **Step 8: Implement the same-origin client and closed mutation union**
 
-In `staffing.ts`, export closed request/projection/receipt types, exact runtime validators, `newStaffingRequestId(kind)` using `crypto.randomUUID()`, and:
+In `staffing.ts`, export closed request/projection/receipt types, exact runtime validators, `newStaffingRequestId(kind)` using `crypto.randomUUID()`, and one discriminated mutation value. The following replaces the older independent path/body API:
 
 ```typescript
-type StaffingMutationPath =
-  | "/roster-imports"
-  | "/exceptions"
-  | `/exceptions/${string}/cancel`
-  | `/exceptions/${string}/correct`
-  | "/suggestions"
-  | `/suggestions/${string}/accept`
-  | `/suggestions/${string}/modify`
-  | `/suggestions/${string}/reject`;
+type StaffingMutation =
+  | { operationKind: "roster-import"; body: RosterImportRequest }
+  | { operationKind: "exception-record"; body: ExceptionRecordRequest }
+  | { operationKind: "exception-cancel"; targetId: string;
+      body: ExceptionCancelRequest }
+  | { operationKind: "exception-correct"; targetId: string;
+      body: ExceptionCorrectRequest }
+  | { operationKind: "suggestion-generate"; body: SuggestionGenerateRequest }
+  | { operationKind: "manager-response"; targetId: string;
+      body: ManagerResponseRequest };
 
 interface StaffingClient {
   current(): Promise<StaffingDateSnapshot>;
   date(serviceDate: string): Promise<StaffingDateSnapshot>;
-  submit(path: StaffingMutationPath, body: StaffingRequestBody): Promise<StaffingReceipt>;
+  submit(mutation: StaffingMutation): Promise<StaffingReceipt>;
   lookup(operationKind: OperationKind, requestId: string): Promise<StaffingReceipt>;
 }
 ```
 
-Use same-origin fetch, `cache: "no-store"`, 8-second abort, v0 envelope validation, typed errors, and no configurable base URL in production calls.
+Use same-origin fetch, `cache: "no-store"`, 8-second abort, v0 envelope validation, typed errors, and no configurable base URL in production calls. The client derives every path from the mutation discriminant and raw target ID; no public path builder or arbitrary path input exists. `date` and `lookup` also validate their raw date/operation/identifier inputs before fetch and apply `encodeURIComponent` exactly once to every accepted path segment.
 
 - [ ] **Step 9: Implement fatal UTF-8/BOM handling and RFC 4180 tokenization**
 
@@ -2593,7 +2607,7 @@ Decode bytes with `new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })` s
 
 - [ ] **Step 10: Implement row grammar and exact roster normalization**
 
-Validate header/row grammar, split list columns on `|` with duplicate rejection, resolve worker/rule references, and build the exact `RosterImportRequest` arrays from Task 1. Compute the serialized UTF-8 body length with `new TextEncoder().encode(JSON.stringify(body)).byteLength` and reject over 1 MiB before fetch. Browser validation checks only syntax/references it can know and does not claim eligibility, skills, DST, or coverage correctness.
+Validate header/row grammar, split list columns on `|` with duplicate rejection, resolve worker/rule references, and build the exact `RosterImportDraft` arrays from Task 1. The CSV layer enforces the pre-decode 512 KiB raw limit; `StaffingClient.submit` owns the final complete-request 1 MiB serialization boundary described above. Browser validation checks only syntax/references it can know and does not claim eligibility, skills, DST, or coverage correctness.
 
 - [ ] **Step 11: Add the downloadable template, run GREEN, and verify no dependency drift**
 
@@ -2615,7 +2629,8 @@ git add apps/site-agent-console/lib/staffing.ts \
   apps/site-agent-console/lib/staffing-csv.ts \
   apps/site-agent-console/public/staffing-roster-template.csv \
   apps/site-agent-console/tests/staffing-contract.test.ts \
-  apps/site-agent-console/tests/staffing-csv.test.ts
+  apps/site-agent-console/tests/staffing-csv.test.ts \
+  apps/site-agent-console/tests/boundaries.test.ts
 git commit -m "feat(console): parse staffing roster and api"
 ```
 
@@ -2636,10 +2651,7 @@ Use:
 
 ```typescript
 interface StaffingMutationAttempt {
-  operationKind: OperationKind;
-  requestId: string;
-  path: StaffingMutationPath;
-  body: StaffingRequestBody;
+  mutation: StaffingMutation;
 }
 type StaffingWriteState =
   | ({ status: "in_flight" } & StaffingMutationAttempt)
@@ -2668,20 +2680,16 @@ interface ExceptionDraft {
   time_local: string | null;
   note: string | null;
 }
-type RosterImportDraft = Omit<
-  RosterImportRequest,
-  "request_id" | "operator" | "expected_roster_revision" |
-  "site_id" | "deployment_id"
->;
+// RosterImportDraft is imported from staffing-csv.ts; it is not redefined here.
 ```
 
 - [ ] **Step 2: Add failing tests for mutation ambiguity and recovery**
 
-Only an ambiguous transport abort/timeout or mutation 5xx for which a durable commit cannot be ruled out makes the write `unknown`; fixed 400/409/429 responses are definite rejections/busy states. Recovery GET with any receipt commits the write; a `RESULT_UNKNOWN` receipt therefore becomes the durable terminal active-generation state, never another transport-unknown error. Explicit `staffing_request_not_found` permits one replay of the identical path/body/ID; any other lookup failure remains unknown. A committed mutation whose refresh fails is `savedButStale`, not unknown. Unmount suppresses late publish.
+Once fetch was invoked, every result that is neither a validated mutation-correlated receipt nor a trusted definite-precommit error becomes `unknown`: this includes transport abort/timeout, malformed or unreadable 200/202, an unexpected success status, an unknown/mismatched error code/status, and every potentially committed 5xx. Only the exact validated staffing 400/404/409 pairs, exact 429/`staffing_busy`, and exact Manager 413/`body_too_large` are definite; a local validation error is also definite because fetch was never invoked. Only exact 429/`staffing_busy` enters `busy`. Pin malformed 200, malformed 202, and an unknown 409 pair as `unknown`; pin an exact staffing 409 as `rejected`, exact 429/`staffing_busy` as `busy`, and local/exact 413 as definite no-fetch/pre-commit rejection. Recovery GET with any correlated receipt commits the write; a `RESULT_UNKNOWN` receipt therefore becomes the durable terminal active-generation state, never another transport-unknown error. Explicit `staffing_request_not_found` permits one replay of the identical closed mutation/request ID and therefore the same derived path and serialized body; any other lookup failure remains unknown. A committed mutation whose refresh fails is `savedButStale`, not unknown. Unmount suppresses late publish.
 
 - [ ] **Step 3: Add failing BUSY and generation-state tests**
 
-429 `staffing_busy` is definitely uncommitted and retains same ID/body for an explicit retry. RESERVED/IN_PROGRESS causes only request GET polling at 1 second and never repeats POST. Terminal `RESULT_UNKNOWN` stops polling and offers explicit new-ID `retry_of`; terminal success/failure refreshes snapshot. Start a new controller from the refreshed manager-response fixture with no prior in-memory write state and assert `activeGeneration.manager_response` remains committed and renderable. Normal snapshot polling is 5 seconds and never overlaps an active read/write/request poll.
+429 `staffing_busy` is definitely uncommitted and retains the same frozen mutation for an explicit byte-equivalent retry. RESERVED/IN_PROGRESS causes only request GET polling at 1 second and never repeats POST. Terminal `RESULT_UNKNOWN` stops polling and offers explicit new-ID `retry_of`; terminal success/failure refreshes snapshot. Start a new controller from the refreshed manager-response fixture with no prior in-memory write state and assert `activeGeneration.manager_response` remains committed and renderable. Normal snapshot polling is 5 seconds and never overlaps an active read/write/request poll.
 
 - [ ] **Step 4: Run controller tests and verify RED**
 
@@ -2701,8 +2709,7 @@ interface StaffingController {
   start(): void;
   stop(): void;
   refresh(): Promise<void>;
-  submit(operationKind: OperationKind, path: StaffingMutationPath,
-         body: StaffingRequestBody): Promise<StaffingReceipt>;
+  submit(mutation: StaffingMutation): Promise<StaffingReceipt>;
   recover(): Promise<StaffingReceipt>;
   retryBusy(): Promise<StaffingReceipt>;
   retryUnknownGeneration(): Promise<StaffingReceipt>;
@@ -2714,7 +2721,7 @@ interface StaffingController {
 
 - [ ] **Step 6: Implement mutation submission and same-ID recovery**
 
-Keep the exact `path`, operation kind, request ID, and a deep-cloned/frozen `body` in `StaffingMutationAttempt` so later form edits cannot change recovery bytes. On ambiguous fetch failure, publish `unknown`. `recover()` first calls request GET; a receipt commits. Only explicit `staffing_request_not_found` may replay the byte-equivalent body once, tracked by `replayedAfterNotFound`; a second not-found remains unknown. A mutation receipt commits before calling `refresh()`, so a failed refresh produces `savedButStale: true`.
+Keep only a deep-cloned/frozen closed `mutation` in `StaffingMutationAttempt` so later form edits cannot change recovery bytes or the raw target ID. Derive the operation kind and request ID only from `mutation.operationKind` and `mutation.body.request_id`, and assert the same correlation before every lookup or replay; never accept duplicate independent values. On an ambiguous result, publish `unknown`. `recover()` first calls request GET; a correlated receipt commits. Only explicit `staffing_request_not_found` may replay the byte-equivalent mutation once, tracked by `replayedAfterNotFound`; a second not-found remains unknown. A mutation receipt commits before calling `refresh()`, so a failed refresh produces `savedButStale: true`.
 
 - [ ] **Step 7: Implement non-overlapping polling and explicit generation retry**
 
