@@ -3241,7 +3241,9 @@ git commit -m "feat(staffing): replay advisory workflow operations"
 
 - [ ] **Step 1: Add failing staffing-specific boundary guards**
 
-For non-ledger staffing modules allow only owner-local/stdlib pure imports. For `ledger.py`, additionally allow only `fcntl`, `os`, `pathlib`, and `threading`. Reject network roots, `nxt_model_gateway`, Site Agent, Edge, runtime/facility/simulator packages, provider names/SDKs, wall-clock/UUID/random calls, and all command/robot/actuator/e-stop tokens. Add negative controls that demonstrate one forbidden import and one execution token are caught.
+Freeze the exact common standard-library roots as `{"__future__", "dataclasses", "datetime", "enum", "hashlib", "hmac", "math", "re", "types", "typing", "unicodedata", "zoneinfo"}`. Only `ledger.py` may additionally import `{"contextlib", "fcntl", "json", "os", "pathlib", "stat", "threading", "weakref"}`. Relative imports may target only another `nxt_pilot_ops.staffing` module or the single parent utility `..serialization`; reject every absolute third-party or `nxt_*` import, including model gateway, Site Agent, Edge, runtime, facility, simulator, and provider SDK/client/network roots. The closed `KIMI|OPENAI|ANTHROPIC` string vocabulary remains legal persisted provenance; it is data, not provider coupling.
+
+Implement the boundary mechanically over the AST rather than broad source-text matches. Reject dynamic imports; bare `open`, `exec`, `eval`, and `compile`; hidden wall-clock calls (`now`, `utcnow`, `today`); UUID/random APIs; `os.urandom`, environment/process/spawn/exec calls; and normalized command/robot/actuator/e-stop/execute/execution identifiers or attributes. Do not flag legitimate evidence/schema words such as `prompt`, `provider`, `model_id`, the `operations.py` non-command docstring, `datetime.time`, or `re.compile`. Helpers accept source plus relative path and return a sorted violation tuple. Add negative controls proving `import socket` and `dispatch_robot_command()` are caught. Also assert staffing adds no separate wheel package root: the existing package list continues to include `nxt_pilot_ops`, staffing remains its subpackage, `operations.__all__ == ("StaffingOperations",)`, and `staffing.__init__` does not re-export it.
 
 - [ ] **Step 2: Run the focused guard and verify RED**
 
@@ -3253,7 +3255,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 
 - [ ] **Step 3: Write stable domain and evidence documentation**
 
-`simulation/docs/staffing_advisory_v1.md` must include the exact normalized roster/exception/patch shapes, revision selection, DST rules, rejection codes, coverage segmentation, pseudonym projection, event/state machine, idempotency ordering, composite events, hash/anchor recovery, permissions, privacy limits, and explicit non-execution/non-HR scope. Update the existing owner/source/testing docs without claiming the feature is on `main`.
+`simulation/docs/staffing_advisory_v1.md` is the single normative staffing-domain document and must include the exact normalized roster/exception/patch shapes, revision selection, DST rules, all thirteen rejection codes, coverage segmentation, pseudonym projection, event/state machine, idempotency ordering, composite events, hash/anchor recovery, permissions, privacy limits, and explicit non-execution/non-HR scope. Keep it focused (roughly 250–350 lines); the other six documents add only ownership, truth/boundary, test-routing, and stable-doc links rather than copying the protocol.
+
+Every document must say this is a domain library in the current unmerged checkout: no staffing composition script, staffing Site Agent route, staffing Console/UI, staffing provider call, venue deployment, HR write, notification, formal schedule, or robot action exists yet. Operator-supplied roster/exception data is evidence, not HR/payroll/attendance/access-control truth; manager `operator` is attribution, not authenticated identity; ACCEPT/MODIFY produces a local advisory plan, not execution truth. Only the provider wire is pseudonymous. The protected local ledger/replay state retains local identifiers, names, notes, source refs, alias maps, nonce digest, and minimized provider-projection evidence; public local projections expose only their declared local identifiers, names, notes, and source refs, and omit alias maps, nonce material/digests, and private provider payloads. Distinguish the legacy `JsonlEventLedger` (not externally anchored) from `staffing.StaffingLedger`: the latter has a co-located fsynced high-water anchor that detects anchored-prefix rollback/rewrite, permits crash-lag repair, is not external/nonrepudiable, and cannot detect coordinated ledger-plus-anchor replacement. The stable document must also state that a lagging anchor advances only on a later successful append; duplicate/conflict reads do not repair it. Keep `StaffingOperations` as a deep import and leave the package root narrow. Preserve historical verification counts as historical; record only newly observed checkout results in a separate current-verification section.
 
 - [ ] **Step 4: Run the full staffing and owner suites**
 
@@ -3279,10 +3283,16 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider tests/
 cd simulation
 build_dir="$(mktemp -d)"
 uv build --out-dir "$build_dir"
-python -m zipfile -l "$build_dir"/*.whl | rg "nxt_pilot_ops/staffing/"
-uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider
+uv run --no-sync python -B -m zipfile -l "$build_dir"/*.whl | rg "nxt_pilot_ops/staffing/"
+wheel_path="$(printf '%s\n' "$build_dir"/*.whl)"
+uv run --no-sync python -B -c 'import sys; sys.path.insert(0, sys.argv[1]); import nxt_pilot_ops.staffing; from nxt_pilot_ops.staffing.operations import StaffingOperations' "$wheel_path"
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  --ignore=tests/course_monitoring/test_collection_execution_acceptance.py \
+  --deselect=tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
 uv run --no-sync python -B scripts/validate_configs.py
 ```
+
+The omitted V3 witness group is a deliberate cross-cutting finalization boundary, not a pass: staffing source changes invalidate the engine fingerprint embedded in `collection-execution-normal-loop-v3.json`, `two-task-active.json`, and `collection_execution_v3_runbook.md`, with many derived digests. Do not patch a hash or refresh these broad witnesses in domain Task 8. Integration Task 8, after every remaining Python/composition/API/UI change is stable, must regenerate both JSON artifacts through their authoritative workflows, update the runbook, and run the complete unfiltered suite once. Domain Task 8 records the filtered all-other-tests result and the exact 23 deferred nodes: all 22 nodes in `test_collection_execution_acceptance.py` plus the single deselected two-task fixture-regeneration node.
 
 - [ ] **Step 6: Run hygiene/privacy scans and self-review Review Focus**
 
@@ -3290,11 +3300,13 @@ uv run --no-sync python -B scripts/validate_configs.py
 git diff --check
 rg -n "UNFINISHED|PLACEHOLDER" simulation/nxt_pilot_ops/staffing \
   simulation/tests/pilot_ops/test_staffing_*.py simulation/docs/staffing_advisory_v1.md
-rg -n "openai|anthropic|moonshot|api[_-]?key|Authorization|x-api-key|RobotTaskInterface|apply_directive" \
+rg -n "api[_-]?key|Authorization|x-api-key|RobotTaskInterface|apply_directive" \
   simulation/nxt_pilot_ops/staffing
 ```
 
-Expected: no unfinished markers, provider/secret vocabulary, or execution surface. Map every Review Focus item to a named test before claiming completion.
+The final privacy scan is reviewed, not required to be empty: mechanically assert that the only allowed `api_key` matches are the literal forbidden-key controls in `projection.py` and `workflow.py`; every other match fails. Closed provider provenance strings are intentionally absent from this text scan because the AST import/call guard owns SDK/network coupling. No secret value, credential read, authorization header, raw provider response, forbidden raw `reasoning` field or hidden chain-of-thought, nonce value, or execution interface may appear in ledger/API/UI/log output. Bounded candidate `rationale` and warnings remain allowed protocol fields.
+
+Expected: the unfinished-marker scan is empty; the privacy scan contains exactly the two reviewed `api_key` forbidden-key-control literals in `projection.py` and `workflow.py`, with no other credential, header, or execution-interface match. Closed provider provenance is governed by the AST coupling guard. Map every Review Focus item to a named test before claiming completion.
 
 - [ ] **Step 7: Request independent review, address findings, and commit**
 

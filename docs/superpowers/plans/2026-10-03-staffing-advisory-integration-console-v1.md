@@ -2893,6 +2893,9 @@ git commit -m "feat(console): add staffing exception advisory panel"
 **Files:**
 - Modify: `apps/site-agent-console/tests/boundaries.test.ts:1-111`
 - Modify: `apps/site-agent-console/README.md:90-202`
+- Modify: `simulation/tests/conftest.py`
+- Modify: `simulation/tests/course_monitoring/test_collection_execution_acceptance.py`
+- Modify: `simulation/tests/site_agent/test_continuous_collection_execution_service.py`
 - Modify: `simulation/tests/site_agent/test_architecture.py:16-151,204-287`
 - Modify: `.agent/context/package-map.md:18-40`
 - Modify: `.agent/context/deployment.md:96-116,236-252`
@@ -2900,6 +2903,9 @@ git commit -m "feat(console): add staffing exception advisory panel"
 - Modify: `.agent/workflows/testing.md:15-82,96-121,159-177`
 - Modify: `docs/CI.md:15-31,97-153,305-332`
 - Modify: `.github/workflows/verification.yml:123-192,401-447`
+- Modify: `simulation/tests/course_monitoring/fixtures/collection-execution-normal-loop-v3.json`
+- Modify: `simulation/tests/fixtures/continuous-collection-v4/two-task-active.json`
+- Modify: `simulation/docs/collection_execution_v3_runbook.md:205-209,436-487`
 
 **Interfaces:**
 - Consumes: the complete gateway + staffing domain + integration + Console path.
@@ -2945,7 +2951,36 @@ Race two identical suggestion POSTs and assert one reservation/provider call plu
 
 Parameterize reservation fsync, attempt-start fsync, outbound-before-finish, attempt-finish fsync, terminal fsync, HTTP response loss, and shutdown with four waiting items. Assert no old-ID resend, waiting shutdown items become `RESULT_UNKNOWN` without transport, and terminal-fsynced outcomes recover through request GET.
 
-- [ ] **Step 7: Run the focused Python integration matrix**
+- [ ] **Step 7: Regenerate and freeze the final cross-cutting V3 witnesses**
+
+Register an explicit, default-false `--regenerate-v3-witnesses` pytest option in root `tests/conftest.py`; normal tests and CI never pass it and remain read-only. The updater may target only the two exact regular JSON files and the exact regular runbook file, must reject symlinks or missing/duplicate runbook markers, and must replace through same-directory temporary files plus `os.replace` rather than truncate a witness in place.
+
+The existing `normal_loop` session fixture remains the owner of the normal-loop witness: build a fresh `CourseCollectionExecutionDemo(..., initialize=True, wall_clock=WallClock())`, call `run(advance=2)`, validate the complete snapshot through the existing wire/relations/invariant checks, and only under the explicit option write `json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"`. It must then perform the same byte-for-byte assertion and twenty-case matrix. The two-task owner remains the existing real loopback HTTP workflow with fixed `WallClock`, two Planning chains, and the frozen `advance_until` terminal/nonterminal/ACTIVE condition; after all state and relation checks, the explicit option atomically writes the complete canonical response data and the test still performs its byte-for-byte assertion. Neither updater may replace only `engine_digest` or bypass an owning workflow.
+
+Add unique generated-block markers around the runbook's `Expected fixed identity and result` table. Derive and atomically rewrite only that block from the freshly generated normal-loop snapshot, receipt, binding, execution, quantities, and digests; replace the old hand-maintained regeneration-date sentence with the exact command below. Keep separately dated loopback/tree-hash evidence explicitly historical unless that owning service evidence was rerun. Add a default-read-only `test_runbook_witness_facts_match_normal_loop_fixture`; it must parse the marked block, fail on missing/duplicate markers, and prove every generated fact equals the complete fixture-derived values.
+
+After every Python/composition/API/UI source change is stable, run the authoritative whole-artifact updater (loopback bind permission is required):
+
+```bash
+cd simulation
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  --regenerate-v3-witnesses \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_frozen_acceptance_case \
+  tests/course_monitoring/test_collection_execution_acceptance.py::test_runbook_witness_facts_match_normal_loop_fixture \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+Immediately prove the regenerated artifacts in ordinary read-only mode; no ignore, deselection, or update flag is permitted:
+
+```bash
+uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
+  tests/course_monitoring/test_collection_execution_acceptance.py \
+  tests/site_agent/test_continuous_collection_execution_service.py::test_two_task_active_fixture_regenerates_from_exact_http_data
+```
+
+Any later review fix touching `nxt_*` or a script covered by the V3 engine fingerprint returns to this step before final verification.
+
+- [ ] **Step 8: Run the focused Python integration matrix**
 
 ```bash
 cd simulation
@@ -2959,7 +2994,7 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_agent/test_architecture.py
 ```
 
-- [ ] **Step 8: Run the complete Console verification**
+- [ ] **Step 9: Run the complete Console verification**
 
 ```bash
 cd apps/site-agent-console
@@ -2972,11 +3007,22 @@ npm run smoke
 npm audit --omit=dev
 ```
 
-- [ ] **Step 9: Update operator/developer docs and CI commands**
+- [ ] **Step 10: Update operator/developer docs and CI commands**
 
-Update the listed README/context/testing/CI files with the exact stable root, loopback/no-auth limitation, CLI flags, environment variable names only, 1+4 queue, request recovery/new retry, CSV limits, focused commands, and ownership graph. Add the Task 1/2/3 focused tests plus Console typecheck/test/build to the existing verification workflow blocks; preserve current triggers and permissions.
+Update the listed README/context/testing/CI files with the exact stable root, loopback/no-auth limitation, CLI flags, environment variable names only, 1+4 queue, request recovery/new retry, CSV limits, focused commands, witness-update/read-only verification commands, and ownership graph. Add the Task 1/2/3 focused tests plus Console typecheck/test/build to the existing verification workflow blocks; preserve current triggers and permissions. In the existing isolated-wheel job's `python -I` block, retain the top-level `nxt_pilot_ops` import and add this exact persistent oracle after the `shipped` loop; mirror the same behavior in `.agent/workflows/testing.md` and `docs/CI.md`:
 
-- [ ] **Step 10: Run full Python, package, config, and hygiene verification**
+```python
+staffing = import_module("nxt_pilot_ops.staffing")
+staffing_operations = import_module("nxt_pilot_ops.staffing.operations")
+assert staffing_operations.__all__ == ("StaffingOperations",)
+assert staffing_operations.StaffingOperations.__module__ == (
+    "nxt_pilot_ops.staffing.operations"
+)
+assert "StaffingOperations" not in getattr(staffing, "__all__", ())
+assert not hasattr(staffing, "StaffingOperations")
+```
+
+- [ ] **Step 11: Run full Python, package, config, and hygiene verification**
 
 ```bash
 cd simulation
@@ -2989,7 +3035,7 @@ cd ..
 git diff --check
 ```
 
-- [ ] **Step 11: Scan for secrets, unfinished work, forbidden dependency, and route drift**
+- [ ] **Step 12: Scan for secrets, unfinished work, forbidden dependency, and route drift**
 
 ```bash
 rg -n "TO[D]O|T[B]D|FIX[M]E|Not[I]mplemented" simulation/nxt_model_gateway \
@@ -3003,16 +3049,24 @@ rg -n "localStorage|sessionStorage|indexedDB|WebSocket|EventSource|sendBeacon" \
 
 Review matches manually: environment variable names and header-name fixture assertions are allowed; values, logging, storage, and external browser networking are not.
 
-- [ ] **Step 12: Self-review all Review Focus items and request independent review**
+- [ ] **Step 13: Self-review all Review Focus items and request independent review**
 
 Map every Review Focus bullet to named tests and current-head results. Use `superpowers:requesting-code-review`; ask the reviewer to trace one exception from CSV/roster through generation/acceptance/restart and prove there is no execution path or secret/private-data leak. Fix confirmed findings with regression tests first.
 
-- [ ] **Step 13: Commit final guard/docs corrections if needed**
+- [ ] **Step 14: Commit final guard/docs corrections if needed**
 
 ```bash
-git add apps/site-agent-console simulation/tests/site_agent \
+git add apps/site-agent-console \
+  simulation/tests/conftest.py \
+  simulation/tests/course_monitoring/test_collection_execution_acceptance.py \
+  simulation/tests/course_monitoring/fixtures/collection-execution-normal-loop-v3.json \
+  simulation/tests/site_agent \
+  simulation/tests/fixtures/continuous-collection-v4/two-task-active.json \
+  simulation/docs/collection_execution_v3_runbook.md \
   .agent docs/CI.md .github/workflows/verification.yml
 git commit -m "test(staffing): close advisory integration verification"
+git diff --exit-code HEAD --
+test -z "$(git ls-files --others --exclude-standard)"
 ```
 
 Skip this commit when the tree is clean.
