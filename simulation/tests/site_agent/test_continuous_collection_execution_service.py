@@ -9,6 +9,7 @@ import http.client
 import json
 from pathlib import Path
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -2761,14 +2762,26 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
         "--driver-interval",
         "--console",
         "--api-only",
+        "--staffing-state-root",
+        "--staffing-region",
+        "--staffing-language",
+        "--kimi-model",
+        "--openai-model",
+        "--anthropic-model",
     ):
         assert flag in help_text
 
     events = []
+    construction = {}
 
     class FakeRuntime:
         def __init__(self, root, *, initialize, step_interval_s):
-            events.append(("runtime.init", Path(root), initialize, step_interval_s))
+            construction["runtime"] = (
+                Path(root),
+                initialize,
+                step_interval_s,
+            )
+            self.site = SimpleNamespace(timezone="Asia/Shanghai")
 
         def start(self):
             events.append("runtime.start")
@@ -2787,7 +2800,8 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
     class FakeService:
         @classmethod
         def launch(cls, **kwargs):
-            events.append(("service.launch", kwargs["runs_root"]))
+            construction["service"] = kwargs
+            events.append("service.launch")
             return cls()
 
         def stop(self):
@@ -2797,7 +2811,8 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
         url = "http://127.0.0.1:0"
 
         def __init__(self, service, **kwargs):
-            events.append(("server.init", kwargs["port"], kwargs["console_dir"]))
+            construction["server"] = kwargs
+            events.append("server.init")
 
         def start_background(self):
             events.append("server.start")
@@ -2813,12 +2828,48 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
         def set(self):
             events.append("signal.stop")
 
+    class FakeStaffing:
+        def route(self, method, path, body):
+            return {"method": method, "path": path, "body": body}
+
+        def close(self):
+            events.append("staffing.close")
+
+    settings = object()
+    secret_sentinels = {
+        "MOONSHOT_API_KEY": "moonshot-key-must-not-escape",
+        "OPENAI_API_KEY": "openai-key-must-not-escape",
+        "ANTHROPIC_API_KEY": "anthropic-key-must-not-escape",
+    }
+    for name, value in secret_sentinels.items():
+        monkeypatch.setenv(name, value)
+
+    def load_settings(env, **kwargs):
+        construction["settings"] = (env, kwargs)
+        return settings
+
+    def build_staffing(state_root, **kwargs):
+        construction["staffing"] = (Path(state_root), kwargs)
+        events.append("staffing.build")
+        return FakeStaffing()
+
     monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
     monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
     monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "load_provider_settings",
+        load_settings,
+    )
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "build_staffing_operations",
+        build_staffing,
+    )
     monkeypatch.setattr(v4_service.threading, "Event", FakeStop)
     monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
 
+    state_root = tmp_path / "stable-staffing"
     assert v4_service.main(
         [
             "--out",
@@ -2829,18 +2880,820 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
             "--driver-interval",
             "0.25",
             "--api-only",
+            "--staffing-state-root",
+            str(state_root),
+            "--staffing-region",
+            "GLOBAL",
+            "--staffing-language",
+            "en",
+            "--openai-model",
+            "gpt-test",
+            "--anthropic-model",
+            "claude-test",
         ]
     ) == 0
+    assert construction["runtime"] == (tmp_path / "cli", True, 0.25)
+    assert construction["service"]["runs_root"] == tmp_path / "cli" / "site-agent"
+    assert construction["service"]["site_id"] == v4_service.SITE_ID
+    assert construction["service"]["deployment_id"] == v4_service.DEPLOYMENT_ID
+    assert construction["settings"][0] is v4_service.os.environ
+    assert construction["settings"][1] == {
+        "region": "GLOBAL",
+        "language": "en",
+        "kimi_model": None,
+        "openai_model": "gpt-test",
+        "anthropic_model": "claude-test",
+    }
+    staffing_root, staffing_kwargs = construction["staffing"]
+    assert staffing_root == state_root
+    assert staffing_kwargs["site_id"] == v4_service.SITE_ID
+    assert staffing_kwargs["deployment_id"] == v4_service.DEPLOYMENT_ID
+    assert staffing_kwargs["site_timezone"] == "Asia/Shanghai"
+    assert staffing_kwargs["volatile_out"] == tmp_path / "cli"
+    assert staffing_kwargs["settings"] is settings
+    assert staffing_kwargs["audit_clock"] is v4_service._wall_utc
+    assert staffing_kwargs["monotonic"] is v4_service.time.monotonic
+    nonce = staffing_kwargs["nonce_factory"]()
+    assert type(nonce) is bytes and len(nonce) == 32
+    assert construction["server"]["staffing_operations"](
+        "GET", "/api/v1/staffing", {}
+    ) == {"method": "GET", "path": "/api/v1/staffing", "body": {}}
     assert events == [
-        ("runtime.init", tmp_path / "cli", True, 0.25),
         "runtime.start",
-        ("service.launch", tmp_path / "cli" / "site-agent"),
+        "service.launch",
+        "staffing.build",
         "runtime.callbacks",
-        ("server.init", 0, None),
+        "server.init",
         "server.start",
         "runtime.start_driver",
         "wait",
         "server.shutdown",
+        "staffing.close",
         "runtime.close",
         "service.stop",
+    ]
+    captured = capsys.readouterr()
+    startup = json.loads(captured.out)
+    assert startup == {
+        "disclaimer": v4_service.DISCLAIMER,
+        "scope": "continuous Planning collection tasks",
+        "staffing": "enabled",
+        "transport": "in_memory",
+        "url": "http://127.0.0.1:0",
+    }
+    for sentinel in secret_sentinels.values():
+        assert sentinel not in captured.out
+        assert sentinel not in captured.err
+
+
+def test_staffing_flags_are_inert_without_a_stable_state_root(
+    tmp_path, monkeypatch, capsys
+):
+    captured = {}
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def api_callbacks(self):
+            return {"collection_executions": lambda: {"available": True}}
+
+        def start_driver(self):
+            return True
+
+        def close(self):
+            pass
+
+    class FakeService:
+        @classmethod
+        def launch(cls, **_kwargs):
+            return cls()
+
+        def stop(self):
+            pass
+
+    class FakeServer:
+        url = "http://127.0.0.1:0"
+
+        def __init__(self, _service, **kwargs):
+            captured.update(kwargs)
+
+        def start_background(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    class FakeStop:
+        def wait(self, _seconds):
+            return True
+
+        def set(self):
+            pass
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("staffing configuration was touched without a stable root")
+
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
+    monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(v4_service.threading, "Event", FakeStop)
+    monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        v4_service.staffing_operations, "load_provider_settings", forbidden
+    )
+    monkeypatch.setattr(
+        v4_service.staffing_operations, "build_staffing_operations", forbidden
+    )
+
+    assert v4_service.main(
+        [
+            "--out",
+            str(tmp_path / "volatile"),
+            "--api-only",
+            "--staffing-region",
+            "CN",
+            "--staffing-language",
+            "en",
+            "--kimi-model",
+            "ignored-model",
+        ]
+    ) == 0
+    assert "staffing_operations" not in captured
+    assert json.loads(capsys.readouterr().out)["staffing"] == "disabled"
+    assert not (tmp_path / "ignored-model").exists()
+
+
+def test_corrupt_staffing_evidence_degrades_only_staffing_callbacks(
+    tmp_path, monkeypatch, capsys
+):
+    stable_root = tmp_path / "stable"
+    staffing_root = (
+        stable_root
+        / v4_service.SITE_ID
+        / v4_service.DEPLOYMENT_ID
+        / "staffing-v1"
+    )
+    staffing_root.mkdir(parents=True)
+    secret_detail = "corrupt-secret-detail-must-not-escape"
+    (staffing_root / "staffing.anchor.json").write_text(
+        secret_detail, encoding="utf-8"
+    )
+    observations = {}
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            observations["runtime_started"] = True
+
+        def api_callbacks(self):
+            return {
+                "task_operations": lambda *_args: {"task_ops": "available"},
+                "planning_operations": lambda *_args: {"planning": "available"},
+                "collection_executions": lambda: {"collection": "available"},
+                "collection_execution_request": lambda request_id: {
+                    "request_id": request_id
+                },
+                "collection_execution_parser": lambda value, _field: value,
+            }
+
+        def start_driver(self):
+            observations["driver_started"] = True
+            return True
+
+        def close(self):
+            observations["runtime_closed"] = True
+
+    class FakeService:
+        @classmethod
+        def launch(cls, **_kwargs):
+            observations["service_launched"] = True
+            return cls()
+
+        def stop(self):
+            observations["service_stopped"] = True
+
+    class FakeServer:
+        url = "http://127.0.0.1:0"
+
+        def __init__(self, _service, **callbacks):
+            observations["task_ops"] = callbacks["task_operations"](
+                "GET", "/api/v0/task-ops", {}
+            )
+            observations["planning"] = callbacks["planning_operations"](
+                "GET", "/api/v1/planning", {}
+            )
+            observations["collection"] = callbacks[
+                "collection_executions"
+            ]()
+            with pytest.raises(SiteAgentError) as raised:
+                callbacks["staffing_operations"](
+                    "GET", "/api/v1/staffing", {}
+                )
+            observations["staffing_error"] = (
+                raised.value.code,
+                raised.value.detail,
+            )
+
+        def start_background(self):
+            observations["server_started"] = True
+
+        def shutdown(self):
+            observations["server_stopped"] = True
+
+    class FakeStop:
+        def wait(self, _seconds):
+            return True
+
+        def set(self):
+            pass
+
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
+    monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(v4_service.threading, "Event", FakeStop)
+    monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+
+    assert v4_service.main(
+        [
+            "--out",
+            str(tmp_path / "volatile"),
+            "--api-only",
+            "--staffing-state-root",
+            str(stable_root),
+        ]
+    ) == 0
+    assert observations == {
+        "runtime_started": True,
+        "service_launched": True,
+        "task_ops": {"task_ops": "available"},
+        "planning": {"planning": "available"},
+        "collection": {"collection": "available"},
+        "staffing_error": (
+            "staffing_unavailable",
+            "staffing evidence is unavailable",
+        ),
+        "server_started": True,
+        "driver_started": True,
+        "server_stopped": True,
+        "runtime_closed": True,
+        "service_stopped": True,
+    }
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["staffing"] == "unavailable"
+    assert secret_detail not in captured.out
+    assert secret_detail not in captured.err
+
+
+def _staffing_contract_request(filename, name):
+    examples = (
+        Path(__file__).resolve().parents[2]
+        / "docs/contracts/staffing-v1/examples"
+    )
+    document = json.loads((examples / filename).read_text(encoding="utf-8"))
+    return deepcopy(
+        next(row["request"] for row in document["exchanges"] if row["name"] == name)
+    )
+
+
+def test_stable_staffing_root_survives_new_out_root_site_reset_and_no_provider(
+    tmp_path, monkeypatch, capsys
+):
+    stable_root = tmp_path / "stable"
+    snapshots = []
+    server_count = 0
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def api_callbacks(self):
+            return {"collection_executions": lambda: {"available": True}}
+
+        def start_driver(self):
+            return True
+
+        def close(self):
+            pass
+
+    class FakeServer:
+        url = "http://127.0.0.1:0"
+
+        def __init__(self, service, **callbacks):
+            nonlocal server_count
+            server_count += 1
+            route = callbacks["staffing_operations"]
+            if server_count == 1:
+                roster = _staffing_contract_request(
+                    "roster-import.json", "roster-committed"
+                )
+                roster.update(
+                    {
+                        "site_id": v4_service.SITE_ID,
+                        "deployment_id": v4_service.DEPLOYMENT_ID,
+                        "site_timezone": "Asia/Shanghai",
+                    }
+                )
+                roster_receipt = route(
+                    "POST", "/api/v1/staffing/roster-imports", roster
+                )
+                exception = _staffing_contract_request(
+                    "exception-correction.json", "exception-recorded"
+                )
+                exception_receipt = route(
+                    "POST", "/api/v1/staffing/exceptions", exception
+                )
+                snapshots.append(
+                    (
+                        roster_receipt,
+                        exception_receipt,
+                        route("GET", "/api/v1/staffing", {}),
+                    )
+                )
+            else:
+                service.reset()
+                snapshots.append(route("GET", "/api/v1/staffing", {}))
+
+        def start_background(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    class FakeStop:
+        def wait(self, _seconds):
+            return True
+
+        def set(self):
+            pass
+
+    for key in (
+        "MOONSHOT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(v4_service, "threading", SimpleNamespace(Event=FakeStop))
+    monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+
+    for volatile in (tmp_path / "run-one", tmp_path / "run-two"):
+        assert v4_service.main(
+            [
+                "--out",
+                str(volatile),
+                "--initialize",
+                "--api-only",
+                "--staffing-state-root",
+                str(stable_root),
+            ]
+        ) == 0
+
+    roster_receipt, exception_receipt, first = snapshots[0]
+    second = snapshots[1]
+    assert roster_receipt["state"] == "COMMITTED"
+    assert exception_receipt["state"] == "COMMITTED"
+    assert first["revisions"] == {
+        "roster": 1,
+        "exception_set": 1,
+        "effective_plan": 0,
+    }
+    assert second["revisions"] == first["revisions"]
+    assert second["active_exceptions"] == first["active_exceptions"]
+    assert second["generation_capability"]["failure_code"] == (
+        "PROVIDER_UNCONFIGURED"
+    )
+    assert (tmp_path / "run-one" / "site-agent").is_dir()
+    assert (tmp_path / "run-two" / "site-agent").is_dir()
+    assert len(list(stable_root.rglob("staffing.jsonl"))) == 1
+    assert list((tmp_path / "run-one").rglob("staffing.jsonl")) == []
+    assert list((tmp_path / "run-two").rglob("staffing.jsonl")) == []
+    startups = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [row["staffing"] for row in startups] == ["enabled", "enabled"]
+
+
+def test_staffing_construction_does_not_catch_base_exception(
+    tmp_path, monkeypatch
+):
+    events = []
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            events.append("runtime.start")
+
+        def close(self):
+            events.append("runtime.close")
+
+    class FakeService:
+        @classmethod
+        def launch(cls, **_kwargs):
+            events.append("service.launch")
+            return cls()
+
+        def stop(self):
+            events.append("service.stop")
+
+    def interrupt(*_args, **_kwargs):
+        events.append("staffing.build")
+        raise KeyboardInterrupt("construction interrupt")
+
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "load_provider_settings",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "build_staffing_operations",
+        interrupt,
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="construction interrupt"):
+        v4_service.main(
+            [
+                "--out",
+                str(tmp_path / "volatile"),
+                "--api-only",
+                "--staffing-state-root",
+                str(tmp_path / "stable"),
+            ]
+        )
+    assert events == [
+        "runtime.start",
+        "service.launch",
+        "staffing.build",
+        "runtime.close",
+        "service.stop",
+    ]
+
+
+@pytest.mark.parametrize("failure_point", ("constructor", "start"))
+def test_server_partial_initialization_failure_closes_staffing_and_owners(
+    failure_point, tmp_path, monkeypatch
+):
+    events = []
+
+    class InjectedServerFailure(BaseException):
+        pass
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            events.append("runtime.start")
+
+        def api_callbacks(self):
+            events.append("runtime.callbacks")
+            return {"collection_executions": lambda: {}}
+
+        def start_driver(self):
+            pytest.fail("driver must not start after server startup failure")
+
+        def close(self):
+            events.append("runtime.close")
+
+    class FakeService:
+        @classmethod
+        def launch(cls, **_kwargs):
+            events.append("service.launch")
+            return cls()
+
+        def stop(self):
+            events.append("service.stop")
+
+    class FakeStaffing:
+        def route(self, *_args):
+            return {}
+
+        def close(self):
+            events.append("staffing.close")
+
+    class FakeServer:
+        url = "http://127.0.0.1:0"
+
+        def __init__(self, _service, **_kwargs):
+            events.append("server.init")
+            if failure_point == "constructor":
+                raise InjectedServerFailure("server constructor failed")
+
+        def start_background(self):
+            events.append("server.start")
+            if failure_point == "start":
+                raise InjectedServerFailure("server start failed")
+
+        def shutdown(self):
+            events.append("server.shutdown")
+
+    staffing = FakeStaffing()
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
+    monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "load_provider_settings",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "build_staffing_operations",
+        lambda *_args, **_kwargs: (events.append("staffing.build") or staffing),
+    )
+
+    with pytest.raises(InjectedServerFailure):
+        v4_service.main(
+            [
+                "--out",
+                str(tmp_path / "volatile"),
+                "--api-only",
+                "--staffing-state-root",
+                str(tmp_path / "stable"),
+            ]
+        )
+    prefix = [
+        "runtime.start",
+        "service.launch",
+        "staffing.build",
+        "runtime.callbacks",
+        "server.init",
+    ]
+    if failure_point == "constructor":
+        assert events == prefix + [
+            "staffing.close",
+            "runtime.close",
+            "service.stop",
+        ]
+    else:
+        assert events == prefix + [
+            "server.start",
+            "server.shutdown",
+            "staffing.close",
+            "runtime.close",
+            "service.stop",
+        ]
+
+
+def test_shutdown_retries_incomplete_staffing_after_all_other_cleanup(
+    tmp_path, monkeypatch, capsys
+):
+    events = []
+
+    class InjectedStaffingBaseFailure(BaseException):
+        pass
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def api_callbacks(self):
+            return {"collection_executions": lambda: {}}
+
+        def start_driver(self):
+            return True
+
+        def close(self):
+            events.append("runtime.close")
+            raise RuntimeError("runtime-later")
+
+    class FakeService:
+        @classmethod
+        def launch(cls, **_kwargs):
+            return cls()
+
+        def stop(self):
+            events.append("service.stop")
+            raise RuntimeError("service-later")
+
+    class FakeStaffing:
+        def __init__(self):
+            self.attempts = 0
+
+        def route(self, *_args):
+            return {}
+
+        def close(self):
+            self.attempts += 1
+            events.append(f"staffing.close.{self.attempts}")
+            if self.attempts == 1:
+                raise InjectedStaffingBaseFailure("staffing-secret-close-detail")
+
+    class FakeServer:
+        url = "http://127.0.0.1:0"
+
+        def __init__(self, _service, **_kwargs):
+            pass
+
+        def start_background(self):
+            pass
+
+        def shutdown(self):
+            events.append("server.shutdown")
+
+    class FakeStop:
+        def wait(self, _seconds):
+            return True
+
+        def set(self):
+            pass
+
+    staffing = FakeStaffing()
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
+    monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(v4_service.threading, "Event", FakeStop)
+    monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "load_provider_settings",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "build_staffing_operations",
+        lambda *_args, **_kwargs: staffing,
+    )
+
+    try:
+        raise LookupError("ambient caller exception")
+    except LookupError:
+        with pytest.raises(
+            v4_service.staffing_operations.StaffingShutdownError
+        ) as raised:
+            v4_service.main(
+                [
+                    "--out",
+                    str(tmp_path / "volatile"),
+                    "--api-only",
+                    "--staffing-state-root",
+                    str(tmp_path / "stable"),
+                ]
+            )
+    assert str(raised.value) == "staffing shutdown failed"
+    assert raised.value.__cause__ is None
+    assert "staffing-secret-close-detail" not in repr(raised.value)
+    captured = capsys.readouterr()
+    assert "staffing-secret-close-detail" not in captured.out
+    assert "staffing-secret-close-detail" not in captured.err
+    assert events == [
+        "server.shutdown",
+        "staffing.close.1",
+        "runtime.close",
+        "service.stop",
+        "staffing.close.2",
+    ]
+
+
+def test_shutdown_preserves_body_error_and_first_cleanup_failure_priority(
+    tmp_path, monkeypatch
+):
+    events = []
+    body_failure = None
+
+    class FakeRuntime:
+        site = SimpleNamespace(timezone="Asia/Shanghai")
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def api_callbacks(self):
+            return {"collection_executions": lambda: {}}
+
+        def start_driver(self):
+            return True
+
+        def close(self):
+            events.append("runtime.close")
+            raise RuntimeError("runtime-later")
+
+    class FakeService:
+        @classmethod
+        def launch(cls, **_kwargs):
+            return cls()
+
+        def stop(self):
+            events.append("service.stop")
+            raise RuntimeError("service-later")
+
+    class FakeStaffing:
+        def __init__(self):
+            self.attempts = 0
+
+        def route(self, *_args):
+            return {}
+
+        def close(self):
+            self.attempts += 1
+            events.append(f"staffing.close.{self.attempts}")
+            if self.attempts == 1:
+                raise v4_service.staffing_operations.StaffingShutdownError(
+                    "staffing-later-secret"
+                )
+
+    class FakeServer:
+        url = "http://127.0.0.1:0"
+
+        def __init__(self, _service, **_kwargs):
+            pass
+
+        def start_background(self):
+            pass
+
+        def shutdown(self):
+            events.append("server.shutdown")
+            raise RuntimeError("server-first")
+
+    class FakeStop:
+        def wait(self, _seconds):
+            events.append("wait")
+            if body_failure is not None:
+                raise body_failure
+            return True
+
+        def set(self):
+            pass
+
+    staffing = FakeStaffing()
+    monkeypatch.setattr(v4_service, "ContinuousCollectionExecutionRuntime", FakeRuntime)
+    monkeypatch.setattr(v4_service, "SiteAgentService", FakeService)
+    monkeypatch.setattr(v4_service, "SiteAgentApiServer", FakeServer)
+    monkeypatch.setattr(v4_service.threading, "Event", FakeStop)
+    monkeypatch.setattr(v4_service.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "load_provider_settings",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(
+        v4_service.staffing_operations,
+        "build_staffing_operations",
+        lambda *_args, **_kwargs: staffing,
+    )
+    argv = [
+        "--out",
+        str(tmp_path / "volatile"),
+        "--api-only",
+        "--staffing-state-root",
+        str(tmp_path / "stable"),
+    ]
+
+    with pytest.raises(RuntimeError, match="server-first") as cleanup:
+        v4_service.main(argv)
+    assert cleanup.value.__cause__ is None
+    assert "staffing-later-secret" not in repr(cleanup.value)
+    assert events == [
+        "wait",
+        "server.shutdown",
+        "staffing.close.1",
+        "runtime.close",
+        "service.stop",
+        "staffing.close.2",
+    ]
+
+    events.clear()
+    staffing.attempts = 0
+    body_failure = LookupError("body-primary")
+    with pytest.raises(LookupError, match="body-primary") as body:
+        v4_service.main(argv)
+    assert body.value.__cause__ is None
+    assert "server-first" not in repr(body.value)
+    assert "staffing-later-secret" not in repr(body.value)
+    assert events == [
+        "wait",
+        "server.shutdown",
+        "staffing.close.1",
+        "runtime.close",
+        "service.stop",
+        "staffing.close.2",
     ]

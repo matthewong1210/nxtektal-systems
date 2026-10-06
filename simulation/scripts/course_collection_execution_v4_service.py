@@ -14,10 +14,13 @@ from datetime import datetime, timezone
 import fcntl
 import json
 import math
+import os
 from pathlib import Path
+import secrets
 import signal
 import sys
 import threading
+import time
 from typing import Any, Callable, Mapping
 
 SIM_ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +54,7 @@ from nxt_site_agent import (  # noqa: E402
 from nxt_workflow_enablement import RANGE_OPS_WORKFLOW_ID  # noqa: E402
 from scripts import course_collection_execution as execution_api  # noqa: E402
 from scripts import course_session_v3  # noqa: E402
+from scripts import staffing_operations  # noqa: E402
 from scripts.course_collection_execution_demo import (  # noqa: E402
     CONFIG_PATH,
     DISCLAIMER,
@@ -92,6 +96,65 @@ _SEALED_RECOVERY = frozenset({"EDGE_WITHOUT_COMMIT", "REPLAY_MISMATCH"})
 
 def _wall_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _staffing_unavailable(
+    _method: str, _path: str, _payload: dict[str, Any]
+) -> dict[str, Any]:
+    raise SiteAgentError(
+        "staffing_unavailable", "staffing evidence is unavailable"
+    )
+
+
+def _shutdown_service_components(
+    *,
+    server: Any,
+    staffing: Any,
+    runtime: Any,
+    service: Any,
+    suppress_failure: bool,
+) -> None:
+    first_failure: BaseException | None = None
+    staffing_retry_required = False
+
+    if server is not None:
+        try:
+            server.shutdown()
+        except BaseException as error:
+            first_failure = error
+
+    if staffing is not None:
+        try:
+            staffing.close()
+        except BaseException:
+            staffing_retry_required = True
+            if first_failure is None:
+                first_failure = staffing_operations.StaffingShutdownError(
+                    "staffing shutdown failed"
+                )
+
+    try:
+        runtime.close()
+    except BaseException as error:
+        if first_failure is None:
+            first_failure = error
+
+    if service is not None:
+        try:
+            service.stop()
+        except BaseException as error:
+            if first_failure is None:
+                first_failure = error
+
+    while staffing_retry_required:
+        try:
+            staffing.close()
+        except BaseException:
+            continue
+        staffing_retry_required = False
+
+    if first_failure is not None and not suppress_failure:
+        raise first_failure from None
 
 
 def classify_continuous_runtime(
@@ -1007,6 +1070,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="serve the local API without requiring a console export",
     )
+    parser.add_argument("--staffing-state-root", type=Path)
+    parser.add_argument("--staffing-region", choices=("CN", "GLOBAL"))
+    parser.add_argument(
+        "--staffing-language", choices=("zh-CN", "en"), default="zh-CN"
+    )
+    parser.add_argument("--kimi-model")
+    parser.add_argument("--openai-model")
+    parser.add_argument("--anthropic-model")
     args = parser.parse_args(argv)
 
     runtime = ContinuousCollectionExecutionRuntime(
@@ -1016,7 +1087,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     service = None
     server = None
+    staffing = None
+    staffing_callback = None
+    staffing_status = "disabled"
     stop = threading.Event()
+    body_failed = False
     try:
         # Initialization must precede creation of the sibling Site Agent root:
         # --initialize requires a new empty continuous evidence directory.
@@ -1028,11 +1103,40 @@ def main(argv: list[str] | None = None) -> int:
             workflow_id=RANGE_OPS_WORKFLOW_ID,
             seam=service_composition_seam(),
         )
+        if args.staffing_state_root is not None:
+            try:
+                settings = staffing_operations.load_provider_settings(
+                    os.environ,
+                    region=args.staffing_region,
+                    language=args.staffing_language,
+                    kimi_model=args.kimi_model,
+                    openai_model=args.openai_model,
+                    anthropic_model=args.anthropic_model,
+                )
+                staffing = staffing_operations.build_staffing_operations(
+                    args.staffing_state_root,
+                    site_id=SITE_ID,
+                    deployment_id=DEPLOYMENT_ID,
+                    site_timezone=runtime.site.timezone,
+                    volatile_out=args.out,
+                    settings=settings,
+                    audit_clock=_wall_utc,
+                    monotonic=time.monotonic,
+                    nonce_factory=lambda: secrets.token_bytes(32),
+                )
+                staffing_callback = staffing.route
+                staffing_status = "enabled"
+            except Exception:
+                staffing_callback = _staffing_unavailable
+                staffing_status = "unavailable"
+        callbacks = runtime.api_callbacks()
+        if staffing_callback is not None:
+            callbacks["staffing_operations"] = staffing_callback
         server = SiteAgentApiServer(
             service,
             port=args.port,
             console_dir=None if args.api_only else args.console,
-            **runtime.api_callbacks(),
+            **callbacks,
         )
         server.start_background()
         runtime.start_driver()
@@ -1045,6 +1149,7 @@ def main(argv: list[str] | None = None) -> int:
                     "disclaimer": DISCLAIMER,
                     "transport": "in_memory",
                     "scope": "continuous Planning collection tasks",
+                    "staffing": staffing_status,
                 },
                 sort_keys=True,
             ),
@@ -1054,12 +1159,17 @@ def main(argv: list[str] | None = None) -> int:
             # Keep read APIs online after ending, protection or fail-stop.
             pass
         return 0
+    except BaseException:
+        body_failed = True
+        raise
     finally:
-        if server is not None:
-            server.shutdown()
-        runtime.close()
-        if service is not None:
-            service.stop()
+        _shutdown_service_components(
+            server=server,
+            staffing=staffing,
+            runtime=runtime,
+            service=service,
+            suppress_failure=body_failed,
+        )
 
 
 __all__ = [

@@ -9,6 +9,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 SIMULATION_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = SIMULATION_ROOT / "nxt_site_agent"
 
@@ -147,6 +149,8 @@ COLLECTION_EXECUTION_SERVICE = (
 CONTINUOUS_COLLECTION_EXECUTION_SERVICE = (
     SIMULATION_ROOT / "scripts" / "course_collection_execution_v4_service.py"
 )
+STAFFING_COMPOSITION = SIMULATION_ROOT / "scripts" / "staffing_operations.py"
+STAFFING_COMPOSITION_RELATIVE = "scripts/staffing_operations.py"
 
 SCRIPT_BANNED_IMPORT_ROOTS = {
     "rclpy",
@@ -165,12 +169,143 @@ SCRIPT_BANNED_IMPORT_ROOTS = {
     "ssl",
     "urllib",
     "requests",
+    "os",
     "subprocess",
     "multiprocessing",
     "time",
     "uuid",
     "random",
     "secrets",
+}
+
+STAFFING_BANNED_IMPORT_ROOTS = {
+    "aiohttp",
+    "anthropic",
+    "google",
+    "http",
+    "langchain",
+    "moonshot",
+    "openai",
+    "os",
+    "requests",
+    "secrets",
+    "socket",
+    "ssl",
+    "time",
+}
+
+STAFFING_ALLOWED_STDLIB_TARGETS = {
+    "__future__.annotations",
+    "collections.abc.Callable",
+    "collections.abc.Mapping",
+    "collections.abc.Sequence",
+    "collections.deque",
+    "copy.deepcopy",
+    "dataclasses.dataclass",
+    "dataclasses.field",
+    "datetime.date",
+    "datetime.datetime",
+    "datetime.timedelta",
+    "datetime.timezone",
+    "hashlib",
+    "pathlib.Path",
+    "re",
+    "threading",
+    "types.MappingProxyType",
+    "typing.Any",
+    "typing.Literal",
+    "typing.TypeVar",
+    "urllib.parse.unquote",
+    "zoneinfo.ZoneInfo",
+}
+
+STAFFING_ALLOWED_GATEWAY_TARGETS = {
+    "nxt_model_gateway.AttemptObserverError",
+    "nxt_model_gateway.AttemptRecord",
+    "nxt_model_gateway.AttemptStarted",
+    "nxt_model_gateway.DeploymentRegion",
+    "nxt_model_gateway.FailureCode",
+    "nxt_model_gateway.GatewayContractError",
+    "nxt_model_gateway.GenerationMessage",
+    "nxt_model_gateway.GenerationRequest",
+    "nxt_model_gateway.GenerationResult",
+    "nxt_model_gateway.GenerationStatus",
+    "nxt_model_gateway.MessageRole",
+    "nxt_model_gateway.ModelGateway",
+    "nxt_model_gateway.Provider",
+    "nxt_model_gateway.ProviderConfig",
+    "nxt_model_gateway.RoutePolicy",
+    "nxt_model_gateway.RouteReadiness",
+    "nxt_model_gateway.RouteReadinessStatus",
+    "nxt_model_gateway.stable_digest",
+    "nxt_model_gateway.anthropic.AnthropicAdapter",
+    "nxt_model_gateway.kimi.KimiAdapter",
+    "nxt_model_gateway.openai.OpenAIAdapter",
+    "nxt_model_gateway.transport.StdlibHttpsTransport",
+}
+
+STAFFING_ALLOWED_DOMAIN_TARGETS = {
+    "nxt_pilot_ops.staffing.contracts.AssignmentProjection",
+    "nxt_pilot_ops.staffing.contracts.AttemptFinishedEvidence",
+    "nxt_pilot_ops.staffing.contracts.AttemptRouteEvidence",
+    "nxt_pilot_ops.staffing.contracts.AttemptStartedEvidence",
+    "nxt_pilot_ops.staffing.contracts.CandidateOperationProjection",
+    "nxt_pilot_ops.staffing.contracts.CandidateProjection",
+    "nxt_pilot_ops.staffing.contracts.CommittedReceipt",
+    "nxt_pilot_ops.staffing.contracts.ConflictReceipt",
+    "nxt_pilot_ops.staffing.contracts.CoverageGap",
+    "nxt_pilot_ops.staffing.contracts.DateProjection",
+    "nxt_pilot_ops.staffing.contracts.DuplicateReceipt",
+    "nxt_pilot_ops.staffing.contracts.ExceptionCommittedProjection",
+    "nxt_pilot_ops.staffing.contracts.ExceptionProjection",
+    "nxt_pilot_ops.staffing.contracts.GenerationCommittedProjection",
+    "nxt_pilot_ops.staffing.contracts.GenerationProjectionView",
+    "nxt_pilot_ops.staffing.contracts.GenerationRouteEvidence",
+    "nxt_pilot_ops.staffing.contracts.ManagerCommittedProjection",
+    "nxt_pilot_ops.staffing.contracts.ManagerResponseProjection",
+    "nxt_pilot_ops.staffing.contracts.ReceiptResult",
+    "nxt_pilot_ops.staffing.contracts.RequestProjection",
+    "nxt_pilot_ops.staffing.contracts.ResultEvidence",
+    "nxt_pilot_ops.staffing.contracts.RosterCommittedProjection",
+    "nxt_pilot_ops.staffing.contracts.StaffingError",
+    "nxt_pilot_ops.staffing.ledger.StaffingLedger",
+    "nxt_pilot_ops.staffing.operations.StaffingOperations",
+    "nxt_pilot_ops.staffing.projection.GenerationProjection",
+    "nxt_pilot_ops.staffing.projection.STAFFING_SUGGESTION_OUTPUT_SCHEMA",
+    "nxt_pilot_ops.staffing.projection.canonical_generation_input",
+    "nxt_pilot_ops.staffing.prompt.PROMPT_TEMPLATE_VERSION",
+}
+
+STAFFING_BANNED_FIRST_PARTY_PREFIXES = (
+    "nxt_edge_task",
+    "nxt_sim",
+    "nxt_range_ops",
+    "nxt_range_agent",
+    "nxt_range_twin",
+    "nxt_course_world_model",
+    "nxt_agent_runtime",
+    "scripts.course_collection",
+    "scripts.course_session",
+    "scripts.edge_task",
+)
+
+PROVIDER_ENDPOINT_TOKENS = (
+    "api.openai.com",
+    "api.anthropic.com",
+    "api.moonshot.cn",
+    "api.moonshot.ai",
+)
+
+ENDPOINT_OVERRIDE_NAMES = {
+    "api_base",
+    "base_url",
+    "endpoint",
+    "endpoint_url",
+    "host",
+}
+
+NON_PRODUCTION_TOOL_SCRIPTS = {
+    "scripts/inspect_environment.py",
 }
 
 
@@ -196,6 +331,304 @@ def _imports_of(path: Path) -> set[str]:
             if node.module is not None:
                 modules.add(node.module)
     return modules
+
+
+def _dynamic_import_aliases(tree: ast.AST) -> set[str]:
+    aliases = {"__import__", "import_module"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module == "importlib":
+            selected = "import_module"
+        elif node.module == "builtins":
+            selected = "__import__"
+        else:
+            continue
+        for alias in node.names:
+            if alias.name == selected:
+                aliases.add(alias.asname or alias.name)
+    return aliases
+
+
+def _dynamic_import(
+    call: ast.Call, aliases: set[str]
+) -> tuple[bool, str | None]:
+    is_dynamic = (
+        isinstance(call.func, ast.Name)
+        and call.func.id in aliases
+    ) or (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr in {"__import__", "import_module"}
+    )
+    if not is_dynamic:
+        return False, None
+    target = None
+    if (
+        call.args
+        and isinstance(call.args[0], ast.Constant)
+        and isinstance(call.args[0].value, str)
+    ):
+        target = call.args[0].value
+    return True, target
+
+
+def _import_targets(source: str) -> set[str]:
+    tree = ast.parse(source)
+    dynamic_aliases = _dynamic_import_aliases(tree)
+    modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            if node.module is None:
+                continue
+            modules.update(
+                f"{node.module}.{alias.name}" for alias in node.names
+            )
+        elif isinstance(node, ast.Call):
+            is_dynamic, target = _dynamic_import(node, dynamic_aliases)
+            if is_dynamic and target is not None:
+                modules.add(target)
+    return modules
+
+
+def _dynamic_import_violations(source: str) -> list[str]:
+    tree = ast.parse(source)
+    dynamic_aliases = _dynamic_import_aliases(tree)
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root == "builtins":
+                    violations.append(f"builtins import {alias.name}")
+                if root == "importlib" and not (
+                    alias.name == "importlib.metadata"
+                    and alias.asname is None
+                    and node in tree.body
+                    and len(node.names) == 1
+                ):
+                    violations.append(f"unsafe importlib import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            if root in {"builtins", "importlib"}:
+                violations.append(f"unsafe from-import {node.module}")
+        elif isinstance(node, ast.Name) and node.id in dynamic_aliases:
+            violations.append(f"dynamic import name {node.id}")
+        elif (
+            isinstance(node, ast.Attribute)
+            and node.attr in {"__import__", "import_module"}
+        ):
+            violations.append(f"dynamic import attribute {node.attr}")
+    return violations
+
+
+def _repo_source_python_files() -> list[Path]:
+    roots = [SIMULATION_ROOT / "scripts"]
+    roots.extend(
+        path
+        for path in SIMULATION_ROOT.iterdir()
+        if path.is_dir() and path.name.startswith("nxt_")
+    )
+    return [
+        path
+        for root in roots
+        for path in root.rglob("*.py")
+        if "__pycache__" not in path.parts
+    ]
+
+
+def _production_python_files() -> list[Path]:
+    return [
+        path
+        for path in _repo_source_python_files()
+        if path.relative_to(SIMULATION_ROOT).as_posix()
+        not in NON_PRODUCTION_TOOL_SCRIPTS
+    ]
+
+
+def _owner_importers(prefix: str) -> set[str]:
+    importers = set()
+    for path in _repo_source_python_files():
+        targets = _import_targets(path.read_text(encoding="utf-8"))
+        if any(
+            target == prefix or target.startswith(f"{prefix}.")
+            for target in targets
+        ):
+            importers.add(path.relative_to(SIMULATION_ROOT).as_posix())
+    return importers
+
+
+def _staffing_composition_violations(source: str) -> list[str]:
+    tree = ast.parse(source)
+    violations = _dynamic_import_violations(source)
+    for module in sorted(_import_targets(source)):
+        root = module.split(".")[0]
+        parts = module.split(".")
+        allowed = module in STAFFING_ALLOWED_STDLIB_TARGETS
+        if root == "nxt_model_gateway":
+            allowed = module in STAFFING_ALLOWED_GATEWAY_TARGETS
+        elif module.startswith("nxt_pilot_ops.staffing."):
+            allowed = module in STAFFING_ALLOWED_DOMAIN_TARGETS
+        elif module == "nxt_site_agent.SiteAgentError":
+            allowed = True
+        if module.endswith(".*") or any(
+            part.startswith("_") for part in parts[1:]
+        ):
+            allowed = False
+        if not allowed:
+            violations.append(f"unapproved import {module}")
+        if root in STAFFING_BANNED_IMPORT_ROOTS:
+            violations.append(f"banned import {module}")
+        if module.startswith(STAFFING_BANNED_FIRST_PARTY_PREFIXES):
+            violations.append(f"execution import {module}")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            lowered = node.value.lower()
+            if "http://" in lowered or "https://" in lowered:
+                violations.append("direct endpoint literal")
+            for token in PROVIDER_ENDPOINT_TOKENS:
+                if token in lowered:
+                    violations.append(f"provider endpoint {token}")
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                name = None
+                if isinstance(target, ast.Name):
+                    name = target.id
+                elif isinstance(target, ast.Attribute):
+                    name = target.attr
+                if (
+                    name is not None
+                    and name.lower() in ENDPOINT_OVERRIDE_NAMES
+                ):
+                    violations.append(f"endpoint override assignment {name}")
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg in ENDPOINT_OVERRIDE_NAMES:
+                    violations.append(f"endpoint override {keyword.arg}")
+    for token in EXECUTION_TOKENS:
+        if token in source:
+            violations.append(f"execution token {token}")
+    return violations
+
+
+def _privileged_v4_stdlib_violations(source: str) -> list[str]:
+    tree = ast.parse(source)
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    violations = _dynamic_import_violations(source)
+    privileged = {"os", "time", "secrets"}
+    import_counts = {name: 0 for name in privileged}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root not in privileged:
+                    continue
+                allowed = (
+                    node in tree.body
+                    and len(node.names) == 1
+                    and alias.name == root
+                    and alias.asname is None
+                )
+                if allowed:
+                    import_counts[root] += 1
+                else:
+                    violations.append(f"privileged import {alias.name}")
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            if root in privileged:
+                violations.append(f"privileged from-import {node.module}")
+    for name, count in import_counts.items():
+        if count != 1:
+            violations.append(f"privileged import {name} count {count}")
+
+    counts = {"os.environ": 0, "time.monotonic": 0, "secrets.token_bytes": 0}
+    allowed_module_loads: set[ast.Name] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute) or not isinstance(node.value, ast.Name):
+            continue
+        expression = f"{node.value.id}.{node.attr}"
+        if node.value.id not in privileged:
+            continue
+        parent = parents.get(node)
+        if expression == "os.environ":
+            allowed = (
+                isinstance(parent, ast.Call)
+                and parent.args
+                and parent.args[0] is node
+                and isinstance(parent.func, ast.Attribute)
+                and isinstance(parent.func.value, ast.Name)
+                and parent.func.value.id == "staffing_operations"
+                and parent.func.attr == "load_provider_settings"
+                and len(parent.args) == 1
+                and {
+                    keyword.arg for keyword in parent.keywords
+                }
+                == {
+                    "region",
+                    "language",
+                    "kimi_model",
+                    "openai_model",
+                    "anthropic_model",
+                }
+            )
+        elif expression == "time.monotonic":
+            allowed = (
+                isinstance(parent, ast.keyword)
+                and parent.arg == "monotonic"
+                and parent.value is node
+                and isinstance(parents.get(parent), ast.Call)
+                and isinstance(parents[parent].func, ast.Attribute)
+                and isinstance(parents[parent].func.value, ast.Name)
+                and parents[parent].func.value.id == "staffing_operations"
+                and parents[parent].func.attr == "build_staffing_operations"
+            )
+        elif expression == "secrets.token_bytes":
+            call = parent
+            lambda_node = parents.get(call) if isinstance(call, ast.Call) else None
+            keyword = parents.get(lambda_node) if isinstance(lambda_node, ast.Lambda) else None
+            owner_call = parents.get(keyword) if isinstance(keyword, ast.keyword) else None
+            allowed = (
+                isinstance(call, ast.Call)
+                and call.func is node
+                and len(call.args) == 1
+                and isinstance(call.args[0], ast.Constant)
+                and call.args[0].value == 32
+                and not call.keywords
+                and isinstance(lambda_node, ast.Lambda)
+                and not lambda_node.args.args
+                and lambda_node.body is call
+                and getattr(keyword, "arg", None) == "nonce_factory"
+                and isinstance(owner_call, ast.Call)
+                and isinstance(owner_call.func, ast.Attribute)
+                and isinstance(owner_call.func.value, ast.Name)
+                and owner_call.func.value.id == "staffing_operations"
+                and owner_call.func.attr == "build_staffing_operations"
+            )
+        else:
+            allowed = False
+        if allowed:
+            counts[expression] += 1
+            allowed_module_loads.add(node.value)
+        else:
+            violations.append(f"privileged expression {expression}")
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in privileged
+            and node not in allowed_module_loads
+        ):
+            violations.append(f"privileged module load {node.id}")
+    for expression, count in counts.items():
+        if count != 1:
+            violations.append(f"{expression} count {count}")
+    return violations
 
 
 def test_service_imports_only_the_approved_surfaces():
@@ -276,9 +709,221 @@ def test_service_scripts_import_no_transport_or_robot_stack():
         assert path.is_file(), f"{relative} is missing"
         for module in _imports_of(path):
             root = module.split(".")[0]
+            if (
+                relative == "scripts/course_collection_execution_v4_service.py"
+                and root in {"os", "secrets", "time"}
+            ):
+                continue
             assert root not in SCRIPT_BANNED_IMPORT_ROOTS, (
                 f"{relative} imports banned module {module}"
             )
+
+
+def test_staffing_has_one_unique_gateway_domain_composition_point():
+    gateway_importers = _owner_importers("nxt_model_gateway")
+    staffing_domain_importers = _owner_importers("nxt_pilot_ops.staffing")
+    expected = {STAFFING_COMPOSITION_RELATIVE}
+    assert gateway_importers == expected
+    assert staffing_domain_importers == expected
+    assert gateway_importers & staffing_domain_importers == expected
+
+    v4_targets = _import_targets(
+        CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+    )
+    assert "scripts.staffing_operations" in v4_targets
+    assert not any(
+        target == "nxt_model_gateway"
+        or target.startswith("nxt_model_gateway.")
+        or target == "nxt_pilot_ops.staffing"
+        or target.startswith("nxt_pilot_ops.staffing.")
+        for target in v4_targets
+    )
+
+
+def test_owner_import_inventory_detects_alternate_import_syntax():
+    assert "nxt_model_gateway.openai" in _import_targets(
+        "import nxt_model_gateway.openai as provider"
+    )
+    assert "nxt_pilot_ops.staffing" in _import_targets(
+        "from nxt_pilot_ops import staffing as domain"
+    )
+    assert "nxt_model_gateway" in _import_targets(
+        'provider = __import__("nxt_model_gateway")'
+    )
+    assert "nxt_model_gateway.transport" in _import_targets(
+        'provider = importlib.import_module("nxt_model_gateway.transport")'
+    )
+    assert "nxt_model_gateway" in _import_targets(
+        'import builtins\nprovider = builtins.__import__("nxt_model_gateway")'
+    )
+    assert "nxt_model_gateway.transport" in _import_targets(
+        "from importlib import import_module as load\n"
+        'provider = load("nxt_model_gateway.transport")'
+    )
+
+
+def test_nonproduction_dynamic_guard_exclusion_preserves_owner_inventory():
+    repo_sources = {
+        path.relative_to(SIMULATION_ROOT).as_posix()
+        for path in _repo_source_python_files()
+    }
+    production_sources = {
+        path.relative_to(SIMULATION_ROOT).as_posix()
+        for path in _production_python_files()
+    }
+    assert NON_PRODUCTION_TOOL_SCRIPTS <= repo_sources
+    assert NON_PRODUCTION_TOOL_SCRIPTS.isdisjoint(production_sources)
+
+
+def test_production_sources_have_no_dynamic_import_bypass():
+    offenders = {
+        path.relative_to(SIMULATION_ROOT).as_posix(): violations
+        for path in _production_python_files()
+        if (
+            violations := _dynamic_import_violations(
+                path.read_text(encoding="utf-8")
+            )
+        )
+    }
+    assert offenders == {}
+
+
+def test_only_top_level_unaliased_importlib_metadata_is_allowed():
+    assert _dynamic_import_violations("import importlib.metadata") == []
+    for source in (
+        "import importlib.util",
+        "import importlib.metadata as metadata",
+        "def nested():\n    import importlib.metadata",
+    ):
+        assert _dynamic_import_violations(source)
+
+
+def test_staffing_composition_retains_injected_io_time_and_execution_boundary():
+    source = STAFFING_COMPOSITION.read_text(encoding="utf-8")
+    assert _staffing_composition_violations(source) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "from http import client",
+        "import ssl",
+        "import httpx",
+        "import openai as provider_sdk",
+        "from pathlib import os",
+        "from nxt_model_gateway.openai import *",
+        "from nxt_model_gateway.openai import _DEFAULT_ENDPOINT",
+        "from nxt_model_gateway.transport import AlternateTransport",
+        "from nxt_pilot_ops.staffing.contracts import UnlistedContract",
+        'provider = __import__("nxt_model_gateway")',
+        'provider = __import__("nxt_model_gateway.transport", '
+        'fromlist=["_OPENAI_ENDPOINT"])',
+        'provider = import_module("nxt_model_gateway.transport")',
+        'import builtins\nprovider = builtins.__import__("nxt_model_gateway")',
+        "from importlib import import_module as load\n"
+        'provider = load("nxt_model_gateway.transport")',
+        "from nxt_edge_task import EdgeGateway",
+        'BASE_URL = "https://api.openai.com/v1"',
+        'PROVIDER_URL = "https://provider.invalid/v1"',
+        "BASE_URL = provider_host",
+        'build_gateway(endpoint="https://provider.invalid")',
+        "send_robot_command(payload)",
+    ),
+)
+def test_staffing_composition_guard_rejects_network_provider_and_execution_bypasses(
+    source,
+):
+    assert _staffing_composition_violations(source)
+
+
+def test_continuous_v4_has_only_exact_privileged_stdlib_uses():
+    source = CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+    assert _privileged_v4_stdlib_violations(source) == []
+
+
+@pytest.mark.parametrize(
+    ("injection", "expected_violation"),
+    (
+        (
+            "value = os.getenv('OPENAI_API_KEY')",
+            "privileged expression os.getenv",
+        ),
+        ("value = dict(os.environ)", "privileged expression os.environ"),
+        ("value = getattr(os, 'environ')", "privileged module load os"),
+        ("value = __import__('os')", "dynamic import name __import__"),
+        (
+            "import builtins\nvalue = builtins.__import__('os')",
+            "builtins import builtins",
+        ),
+        (
+            "from importlib import import_module as load\nvalue = load('time')",
+            "unsafe from-import importlib",
+        ),
+        (
+            "import importlib.util",
+            "unsafe importlib import importlib.util",
+        ),
+        ("load = __import__", "dynamic import name __import__"),
+        ("value = time.time()", "privileged expression time.time"),
+        (
+            "value = secrets.token_hex(32)",
+            "privileged expression secrets.token_hex",
+        ),
+        (
+            "value = secrets.token_bytes(16)",
+            "privileged expression secrets.token_bytes",
+        ),
+    ),
+)
+def test_continuous_v4_privileged_stdlib_guard_rejects_broader_access(
+    injection, expected_violation
+):
+    source = (
+        CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+        + f"\n{injection}\n"
+    )
+    assert expected_violation in _privileged_v4_stdlib_violations(source)
+
+
+@pytest.mark.parametrize(
+    ("injection", "expected_violation"),
+    (
+        (
+            "def nested_import():\n    import os as ambient",
+            "privileged import os",
+        ),
+        ("from os import getenv", "privileged from-import os"),
+        (
+            "if True:\n    import time",
+            "privileged import time",
+        ),
+        (
+            "import secrets as entropy",
+            "privileged import secrets",
+        ),
+    ),
+)
+def test_continuous_v4_privileged_imports_are_exact_and_top_level(
+    injection, expected_violation
+):
+    source = (
+        CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+        + f"\n{injection}\n"
+    )
+    assert expected_violation in _privileged_v4_stdlib_violations(source)
+
+
+def test_continuous_v4_provider_environment_call_has_exact_keywords():
+    source = CONTINUOUS_COLLECTION_EXECUTION_SERVICE.read_text(encoding="utf-8")
+    needle = "anthropic_model=args.anthropic_model,\n"
+    assert source.count(needle) == 1
+    broadened = source.replace(
+        needle,
+        needle + "                    endpoint_override=args.openai_model,\n",
+    )
+    assert "privileged expression os.environ" in (
+        _privileged_v4_stdlib_violations(broadened)
+    )
 
 
 def test_collection_execution_service_has_one_simulator_path_and_no_mock_or_physical_path():
