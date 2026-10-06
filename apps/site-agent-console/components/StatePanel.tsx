@@ -54,16 +54,18 @@ export function provenanceLabel(grade: string | null | undefined): string {
   return "Published but unverified";
 }
 
-/** Per-channel source kind, taken from the channel's own reference and never
- * from the service-wide fixture flag. Synthetic data labels itself. */
-export function sourceTypeBadge(source: SourceReference | null | undefined): { tone: Tone; label: string } {
+/** Per-channel source kind from the channel's own reference. A row that says
+ * simulation is simulated whatever the service says; a row that says sensor
+ * is a sensor binding, and when the service's observation source is a fixture
+ * it is labelled as fixture data, never as a live sensor reading. */
+export function sourceTypeBadge(source: SourceReference | null | undefined, fixtureSource = false): { tone: Tone; label: string } {
   if (source?.source_type === "simulation") return { tone: "sim", label: "SIMULATED" };
-  if (source?.source_type === "sensor") return { tone: "info", label: "SENSOR" };
-  if (source?.source_type === "external_system") return { tone: "info", label: "EXTERNAL SYSTEM" };
+  if (source?.source_type === "sensor") return fixtureSource ? { tone: "sim", label: "SENSOR BINDING · FIXTURE DATA" } : { tone: "info", label: "SENSOR" };
+  if (source?.source_type === "external_system") return fixtureSource ? { tone: "sim", label: "EXTERNAL SYSTEM · FIXTURE DATA" } : { tone: "info", label: "EXTERNAL SYSTEM" };
   return { tone: "muted", label: "SOURCE TYPE UNKNOWN" };
 }
 
-export function StatePanel({ state }: { state: StateProjection }) {
+export function StatePanel({ state, fixtureSource = false }: { state: StateProjection; fixtureSource?: boolean }) {
   if (!state.available || !state.dispenser || !state.envelope) {
     return (
       <Section title="Current Facility State">
@@ -84,8 +86,8 @@ export function StatePanel({ state }: { state: StateProjection }) {
   const verdict = readingVerdict(dispenser, report);
   const reading = readingTone(verdict.status);
   const aggregate = readingTone(verdict.aggregate);
-  const countSource = sourceTypeBadge(dispenser.count_source);
-  const sensedSource = sourceTypeBadge(dispenser.sensed_source);
+  const countSource = sourceTypeBadge(dispenser.count_source, fixtureSource);
+  const sensedSource = sourceTypeBadge(dispenser.sensed_source, fixtureSource);
   return (
     <Section
       title="Current Facility State"

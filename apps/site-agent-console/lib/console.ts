@@ -1,43 +1,24 @@
 /**
  * The page-level read and action bindings for the Manager Console.
  *
- * `readConsole` is the single consistent read behind the fixture panels;
- * `createConsoleActions` binds the typed client to a console controller
- * exactly as `app/page.tsx` mounts it, so tests can exercise the same
- * request path the page uses.
+ * `readConsole` is the single consistent read behind the fixture panels:
+ * one `GET /api/v0/supervisor-snapshot`, split into the shapes the panels
+ * already consume. `createConsoleActions` binds the typed client to a
+ * console controller exactly as `app/page.tsx` mounts it, so tests can
+ * exercise the same request path the page uses.
  */
 
 import type { ConsoleController } from "./actions";
-import type {
-  Briefing,
-  FixtureInfo,
-  Health,
-  ManagerApiClient,
-  Recommendation,
-  RespondInput,
-  StateProjection,
-} from "./api";
+import type { ManagerApiClient, RespondInput } from "./api";
+import { splitSnapshot, type SplitSnapshot } from "./snapshot";
 
-export interface ConsoleData {
-  health: Health;
-  state: StateProjection;
-  recommendations: Recommendation[];
-  briefing: Briefing;
-  fixture: FixtureInfo;
-}
+export type ConsoleData = SplitSnapshot;
 
-/** One consistent read of every panel's projection. A single failing
- * endpoint fails the whole read so a partially updated view is never
- * committed; the last good view stays visible instead. */
+/** One read, one generation. The whole snapshot is composed by the service
+ * under one lock, so every panel below renders the same generation; a
+ * failed read commits nothing and the last good view stays visible. */
 export async function readConsole(client: ManagerApiClient): Promise<ConsoleData> {
-  const [health, state, recommendations, briefing, fixture] = await Promise.all([
-    client.health(),
-    client.state(),
-    client.recommendations(),
-    client.briefing(),
-    client.fixture(),
-  ]);
-  return { health, state, recommendations, briefing, fixture };
+  return splitSnapshot(await client.supervisorSnapshot());
 }
 
 export interface ConsoleActions {

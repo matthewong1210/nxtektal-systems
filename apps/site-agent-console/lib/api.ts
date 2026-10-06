@@ -10,6 +10,8 @@
 
 export const API_SCHEMA = "nxt-site-agent/api/v0";
 export const DISCLAIMER = "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA";
+/** The one coherent Supervisor Snapshot served additively on the v0 transport. */
+export const SUPERVISOR_SNAPSHOT_SCHEMA = "nxt-site-agent/supervisor-snapshot/v1";
 
 export interface SourceCursor {
   consumed_cycles: number;
@@ -230,6 +232,200 @@ export interface FixtureInfo {
   controls: { advance: boolean; restart: boolean; reset: boolean };
 }
 
+// ---------------------------------------------------------------------------
+// Supervisor Snapshot: business operational context beside the five projections
+// ---------------------------------------------------------------------------
+
+/** The four evidence labels the operational-context owner emits. They are
+ * never merged: a plan is not a record, a record is not a derivation, and
+ * UNKNOWN always carries null and a reason, never a zero. */
+export type EvidenceLabel = "PLANNED" | "SOURCE_RECORDED" | "DERIVED" | "UNKNOWN";
+
+export interface ContextValue<T = unknown> {
+  value: T | null;
+  label: EvidenceLabel;
+  basis: string;
+  /** Freshness of the source this value came from: ok, stale or missing. */
+  source_status: string;
+  reason: string | null;
+}
+
+/** A section the service could not produce: no clock, no reader, or an
+ * unreadable journal. Nothing partial is ever presented in its place. */
+export interface UnavailableSection {
+  status: "unavailable";
+  code: string;
+  detail: string;
+}
+
+export interface RoleCoverage {
+  role_code: string;
+  scheduled_now: number;
+  present_now: number;
+  unknown_now: number;
+  absent_now: number;
+  label: EvidenceLabel;
+}
+
+export interface OperatingDay {
+  date: string;
+  timezone: string;
+  start_utc: string;
+  end_utc: string;
+}
+
+export interface StaffingSection {
+  status: string;
+  operating_day: OperatingDay;
+  scheduled_today: ContextValue<number>;
+  scheduled_now: ContextValue<number>;
+  confirmed_present_now: ContextValue<number>;
+  confirmed_absent_today: ContextValue<number>;
+  presence_unknown_now: ContextValue<number>;
+  present_unscheduled_now: ContextValue<number>;
+  present_scheduled_now?: ContextValue<number>;
+  by_role: RoleCoverage[];
+  worked_intervals_today: ContextValue<{ count: number; total_minutes: number }>;
+  open_clock_ins: ContextValue<number>;
+  next_material_change: ContextValue<{ at_utc: string; kind: string; count: number }>;
+  approved_shift_changes_today: ContextValue<number>;
+  pending_change_requests: ContextValue<number>;
+  notes: string[];
+}
+
+export interface SalesSection {
+  status: string;
+  ball_units_sold_today: ContextValue<number>;
+  transactions_today: ContextValue<number>;
+  reversals_today: ContextValue<number>;
+  unmapped_sku_transactions_today: ContextValue<number>;
+  unmatched_reversals: ContextValue<number>;
+  recent_window: ContextValue<{
+    window_s: number;
+    ball_units: number;
+    transactions: number;
+    window_fully_covered: boolean;
+    coverage_end: string | null;
+  }>;
+  notes: string[];
+}
+
+export interface PlaySection {
+  status: string;
+  booked_sessions_today: ContextValue<number>;
+  booked_players_today: ContextValue<number>;
+  upcoming_booked_players: ContextValue<number>;
+  started_sessions_today: ContextValue<number>;
+  active_sessions_now: ContextValue<number>;
+  active_players_booked: ContextValue<number>;
+  active_players_confirmed: ContextValue<number>;
+  completed_sessions_today: ContextValue<{
+    count: number;
+    mean_minutes: number | null;
+    min_minutes: number | null;
+    max_minutes: number | null;
+  }>;
+  sessions_missing_finish: ContextValue<number>;
+  notes: string[];
+}
+
+export interface OperationsSection {
+  status: string;
+  sales: SalesSection;
+  play: PlaySection;
+}
+
+export interface SourceFreshness {
+  status: string;
+  coverage_end: string | null;
+  coverage_basis: string | null;
+  age_s: number | null;
+  stale_after_s: number | null;
+  accepted_batches: number;
+  rejected_batches: number;
+  duplicate_batches: number;
+  last_rejection: {
+    import_batch_id: string | null;
+    recorded_at: string | null;
+    error_count: number | null;
+    errors: { row_number: number | null; column: string | null; reason: string }[];
+  } | null;
+  reason: string | null;
+}
+
+export interface UnknownField {
+  value: null;
+  label: "UNKNOWN";
+  reason: string;
+}
+
+export interface PhysicalStoreValue {
+  value: number;
+  label: string;
+  physical: boolean;
+  source_type: string;
+  service_source: string;
+  source_status: string | null;
+  reason: null;
+}
+
+export interface SupervisorSnapshot {
+  snapshot_schema: string;
+  identity: {
+    site_id: string;
+    deployment_id: string;
+    workflow_id: string;
+    mode_label: string;
+    fixture_mode: boolean;
+    disclaimer: string;
+    run_directory: string;
+  };
+  health: Health;
+  state: StateProjection;
+  recommendations: Recommendation[];
+  briefing: Briefing;
+  fixture: FixtureInfo;
+  staffing: StaffingSection | UnavailableSection;
+  operations: OperationsSection | UnavailableSection;
+  operating_day: OperatingDay | null;
+  context_sources: Record<string, SourceFreshness>;
+  physical_stores: {
+    clean_balls_in_dispenser: PhysicalStoreValue | UnknownField;
+    clean_ball_weight_kg: UnknownField;
+    awaiting_wash_balls: UnknownField;
+    note: string;
+  };
+  machines: Record<string, UnknownField>;
+  /** Reserved for a separately gated advisory slice; always empty here. */
+  coverage_recommendations: unknown[];
+  exceptions: { code: string; source_system: string | null; detail: string | null }[];
+  data_quality: {
+    context: {
+      status: string;
+      code: string | null;
+      detail: string | null;
+      as_of: string | null;
+      as_of_basis: string | null;
+      clock_declared: boolean;
+      reader_declared: boolean;
+    };
+    facility: {
+      state_available: boolean;
+      missing_channels: string[];
+      stale_channels: string[];
+      service_state: string | null;
+      degraded: boolean;
+    };
+  };
+  generation: {
+    snapshot_id: string;
+    generated_at: string | null;
+    clock_basis: string | null;
+    scenario_now: string | null;
+    run_directory: string;
+  };
+}
+
 export interface ApiError {
   code: string;
   detail: string;
@@ -317,6 +513,7 @@ export function createClient(fetchImpl: FetchLike, base = "") {
     recommendations: () => get<Recommendation[]>("/api/v0/recommendations"),
     briefing: () => get<Briefing>("/api/v0/briefing"),
     fixture: () => get<FixtureInfo>("/api/v0/demo"),
+    supervisorSnapshot: () => get<SupervisorSnapshot>("/api/v0/supervisor-snapshot"),
     respond: (recommendationId: string, kind: string, input: RespondInput) =>
       post<Recommendation>(
         `/api/v0/recommendations/${encodeURIComponent(recommendationId)}/${kind}`,

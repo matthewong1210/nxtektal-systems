@@ -44,6 +44,19 @@ describe("row-level source kind", () => {
     expect(html).toContain("inventory.dispenser.sensed");
   });
 
+  it("labels a sensor-bound channel as fixture data while the service replays a fixture, and still honors a row that says simulation", () => {
+    const state = sampleState();
+    state.dispenser!.count_source!.source_type = "sensor";
+    const live = renderToStaticMarkup(<StatePanel state={state} fixtureSource={false} />);
+    expect(live).toContain(">SENSOR<");
+    const fixture = renderToStaticMarkup(<StatePanel state={state} fixtureSource />);
+    expect(fixture).toContain("SENSOR BINDING · FIXTURE DATA");
+    expect(fixture).not.toContain(">SENSOR<");
+    state.dispenser!.count_source!.source_type = "simulation";
+    expect(renderToStaticMarkup(<StatePanel state={state} fixtureSource={false} />)).toContain("SIMULATED");
+    expect(sourceTypeBadge({ ...state.dispenser!.count_source!, source_type: "sensor" }, true).tone).toBe("sim");
+  });
+
   it("reports an absent or unrecognized source kind as unknown rather than guessing", () => {
     expect(sourceTypeBadge(null).label).toBe("SOURCE TYPE UNKNOWN");
     expect(sourceTypeBadge({ ...sampleState().dispenser!.count_source!, source_type: "robot" }).label).toBe("SOURCE TYPE UNKNOWN");

@@ -9,17 +9,11 @@ import { describe, expect, it } from "vitest";
 import { ConsoleScreen } from "../components/ConsoleScreen";
 import { initialConsoleView, type ConsoleView } from "../lib/actions";
 import type { ConsoleActions, ConsoleData } from "../lib/console";
-import { sampleBriefing, sampleFixture, sampleHealth, sampleRecommendation, sampleState } from "./fixtures";
+import { sampleConsoleData, sampleState } from "./fixtures";
 
 const noop = async () => {};
 const actions: ConsoleActions = { refresh: noop, respond: noop, advance: noop, restart: noop, reset: noop };
-const data = (): ConsoleData => ({
-  health: sampleHealth(),
-  state: sampleState(),
-  recommendations: [sampleRecommendation()],
-  briefing: sampleBriefing(),
-  fixture: sampleFixture(),
-});
+const data = (): ConsoleData => sampleConsoleData();
 const screen = (view: ConsoleView<ConsoleData>) => renderToStaticMarkup(<ConsoleScreen view={view} actions={actions} />);
 
 describe("stale Manager API view", () => {
@@ -37,6 +31,7 @@ describe("stale Manager API view", () => {
     expect(stale).toContain("SERVING · stale view");
     expect(stale).toContain("reading OK · stale view");
     expect(stale).toContain("READY_FOR_FIXTURE_SHADOW_MODE · stale view");
+    expect(stale).toContain("STAFFING SOURCE OK · stale view"); // the new sections obey the same rule
     expect(stale).toContain("2,400"); // last-known inventory remains visible
     expect(stale).toContain("Showing the last successful view");
   });

@@ -1,0 +1,1114 @@
+{
+  "briefing": {
+    "counts": {
+      "manager_decisions": 0,
+      "no_action": 1,
+      "pending_review": 1
+    },
+    "cycles": {
+      "admitted": 2,
+      "rejected": 0
+    },
+    "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+    "exceptions": [],
+    "identity": {
+      "deployment_id": "pilot-a-site-agent-v0",
+      "mode_label": "fixture-backed Shadow Mode",
+      "run_directory": "run-001",
+      "site_id": "pilot-course-a",
+      "workflow_id": "range.closed_loop_collection_handoff"
+    },
+    "labels": {
+      "mode": "SIMULATED",
+      "source": "fixture"
+    },
+    "timeline": [
+      {
+        "order": 0,
+        "references": {},
+        "scenario_t_s": null,
+        "scenario_time": null,
+        "tag": "SERVICE",
+        "text": "Service launched fresh from a READY enablement report."
+      },
+      {
+        "order": 1,
+        "references": {
+          "envelope_id": "fse:14110d172b1b1c4547aaa4a7f59d9e110519d1c1346e3bc4e995065706555685",
+          "evaluation_id": "aev_442ed0ed4d260807a4bed298"
+        },
+        "scenario_t_s": 63000.0,
+        "scenario_time": "17:30",
+        "tag": "OBSERVED",
+        "text": "Cycle admitted at sequence 0: 17:30 calibrated dispenser and equipment state."
+      },
+      {
+        "order": 3,
+        "references": {
+          "evaluation_id": "aev_442ed0ed4d260807a4bed298",
+          "missing_data_reasons": [
+            "R1: collection_permission_unknown",
+            "R1: missing_capabilities",
+            "R1: missing_expected_clean_ball_yield",
+            "R1: missing_replenishment_eta",
+            "R1: washing_requirement_unknown",
+            "R2: collection_permission_unknown",
+            "R2: missing_capabilities",
+            "R2: missing_expected_clean_ball_yield",
+            "R2: missing_replenishment_eta",
+            "R2: washing_requirement_unknown",
+            "collection permission unavailable",
+            "committed inbound batch ETAs unavailable in FacilityState",
+            "current demand rate unavailable in FacilityState",
+            "global collection permission unavailable in FacilityState",
+            "robot capability, ETA, expected yield, and washing requirement unavailable in FacilityState",
+            "washer availability unavailable",
+            "washer availability unavailable in FacilityState"
+          ],
+          "trace_id": "trace_1be1453852a26ba37111d3c9"
+        },
+        "scenario_t_s": 63000.0,
+        "scenario_time": "17:30",
+        "tag": "DETECTED",
+        "text": "Policy evaluation: NO_ACTION — Used clean_sensed=6000 balls; retained clean_available=6000 separately."
+      },
+      {
+        "order": 2,
+        "references": {
+          "envelope_id": "fse:6e00b2152728c06bb717e24ae05d9cafc94ed1ea15b355d05d028ab987493dd1",
+          "evaluation_id": "aev_7e19fd0cb28f777e606658e5"
+        },
+        "scenario_t_s": 66600.0,
+        "scenario_time": "18:30",
+        "tag": "OBSERVED",
+        "text": "Cycle admitted at sequence 1: 18:30 evening spike has drained the dispenser."
+      },
+      {
+        "order": 4,
+        "references": {
+          "evaluation_id": "aev_7e19fd0cb28f777e606658e5",
+          "missing_data_reasons": [
+            "R1: collection_permission_unknown",
+            "R1: missing_capabilities",
+            "R1: missing_expected_clean_ball_yield",
+            "R1: missing_replenishment_eta",
+            "R1: washing_requirement_unknown",
+            "R2: collection_permission_unknown",
+            "R2: missing_capabilities",
+            "R2: missing_expected_clean_ball_yield",
+            "R2: missing_replenishment_eta",
+            "R2: washing_requirement_unknown",
+            "collection permission unavailable",
+            "committed inbound batch ETAs unavailable in FacilityState",
+            "current demand rate unavailable in FacilityState",
+            "global collection permission unavailable in FacilityState",
+            "robot capability, ETA, expected yield, and washing requirement unavailable in FacilityState",
+            "washer availability unavailable",
+            "washer availability unavailable in FacilityState"
+          ],
+          "recommendation_id": "rec_8523e92396ae7704aae07762"
+        },
+        "scenario_t_s": 66600.0,
+        "scenario_time": "18:30",
+        "tag": "RECOMMENDED",
+        "text": "Recommendation issued: operator_intervention (fails closed rather than fabricating missing dispatch facts)."
+      }
+    ],
+    "unresolved": [
+      "Recommendation awaiting manager review: Recommend operator intervention: no eligible collector can arrive before and extend the first stockout."
+    ]
+  },
+  "context_sources": {
+    "play": {
+      "accepted_batches": 1,
+      "age_s": 0.0,
+      "coverage_basis": "declared_export_time",
+      "coverage_end": "2026-08-08T10:40:00.000000Z",
+      "duplicate_batches": 0,
+      "last_rejection": null,
+      "reason": null,
+      "rejected_batches": 0,
+      "stale_after_s": 3600,
+      "status": "ok"
+    },
+    "sales": {
+      "accepted_batches": 1,
+      "age_s": 0.0,
+      "coverage_basis": "declared_export_time",
+      "coverage_end": "2026-08-08T10:40:00.000000Z",
+      "duplicate_batches": 0,
+      "last_rejection": null,
+      "reason": null,
+      "rejected_batches": 0,
+      "stale_after_s": 3600,
+      "status": "ok"
+    },
+    "staffing": {
+      "accepted_batches": 1,
+      "age_s": 0.0,
+      "coverage_basis": "declared_export_time",
+      "coverage_end": "2026-08-08T10:40:00.000000Z",
+      "duplicate_batches": 0,
+      "last_rejection": null,
+      "reason": null,
+      "rejected_batches": 0,
+      "stale_after_s": 7200,
+      "status": "ok"
+    }
+  },
+  "coverage_recommendations": [],
+  "data_quality": {
+    "context": {
+      "as_of": "2026-08-08T10:30:00.000000Z",
+      "as_of_basis": "FIXTURE_DECLARED",
+      "clock_declared": true,
+      "code": null,
+      "detail": null,
+      "reader_declared": true,
+      "status": "ok"
+    },
+    "facility": {
+      "degraded": false,
+      "missing_channels": [],
+      "service_state": "serving",
+      "stale_channels": [],
+      "state_available": true
+    }
+  },
+  "exceptions": [],
+  "fixture": {
+    "controls": {
+      "advance": true,
+      "reset": true,
+      "restart": true
+    },
+    "cursor": {
+      "consumed_cycles": 2,
+      "next_sequence_number": 2
+    },
+    "cycle_catalog": [
+      {
+        "cycle_index": 0,
+        "label": "17:30 calibrated dispenser and equipment state",
+        "scenario_t_s": 63000.0,
+        "scenario_time": "17:30",
+        "source": "SIMULATED",
+        "variant": "nominal"
+      },
+      {
+        "cycle_index": 1,
+        "label": "18:30 evening spike has drained the dispenser",
+        "scenario_t_s": 66600.0,
+        "scenario_time": "18:30",
+        "source": "SIMULATED",
+        "variant": "nominal"
+      },
+      {
+        "cycle_index": 2,
+        "label": "19:00 dispenser load cell silent",
+        "scenario_t_s": 68400.0,
+        "scenario_time": "19:00",
+        "source": "SIMULATED",
+        "variant": "missing_dispenser"
+      },
+      {
+        "cycle_index": 3,
+        "label": "19:30 stale robot heartbeat",
+        "scenario_t_s": 70200.0,
+        "scenario_time": "19:30",
+        "source": "SIMULATED",
+        "variant": "stale_robot"
+      },
+      {
+        "cycle_index": 4,
+        "label": "19:30 uncalibrated dispenser reading",
+        "scenario_t_s": 70200.0,
+        "scenario_time": "19:30",
+        "source": "SIMULATED",
+        "variant": "uncalibrated_dispenser"
+      },
+      {
+        "cycle_index": 5,
+        "label": "19:30 corrected redelivery",
+        "scenario_t_s": 70200.0,
+        "scenario_time": "19:30",
+        "source": "SIMULATED",
+        "variant": "nominal"
+      }
+    ],
+    "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+    "fixture_mode": true,
+    "next_cycle": {
+      "cycle_index": 2,
+      "label": "19:00 dispenser load cell silent",
+      "scenario_t_s": 68400.0,
+      "scenario_time": "19:00",
+      "source": "SIMULATED",
+      "variant": "missing_dispenser"
+    }
+  },
+  "generation": {
+    "clock_basis": "FIXTURE_DECLARED",
+    "generated_at": "2026-08-08T10:30:00.000000Z",
+    "run_directory": "run-001",
+    "scenario_now": "2026-08-08T18:30:00.000000Z",
+    "snapshot_id": "svs_0e9c925738671aee7ae19cce"
+  },
+  "health": {
+    "degraded": false,
+    "deployment_id": "pilot-a-site-agent-v0",
+    "event_append_failures": 0,
+    "fixture_mode": true,
+    "last_failure_code": null,
+    "last_failure_detail": null,
+    "mode_label": "fixture-backed Shadow Mode",
+    "pending_recommendation_count": 1,
+    "report_id": "wer_d97850a11c73035caa5e0778",
+    "run_directory": "run-001",
+    "runtime": {
+      "cycles_completed": 2,
+      "deferred_decision_count": 0,
+      "degraded": false,
+      "deployment_id": "pilot-a-site-agent-v0",
+      "evaluation_checkpoint_has_pending": false,
+      "evaluations_completed": 2,
+      "last_effective_confidence": 1.0,
+      "last_evaluated_envelope_id": "fse:6e00b2152728c06bb717e24ae05d9cafc94ed1ea15b355d05d028ab987493dd1",
+      "last_evaluated_sequence": 1,
+      "last_evaluation_id": "aev_7e19fd0cb28f777e606658e5",
+      "last_failure_code": null,
+      "last_failure_detail": null,
+      "last_observation_timestamp_s": 66600.0,
+      "last_observed_sequence": 1,
+      "last_published_envelope_id": "fse:6e00b2152728c06bb717e24ae05d9cafc94ed1ea15b355d05d028ab987493dd1",
+      "last_published_sequence": 1,
+      "last_verdict": "recommend",
+      "pending_decision_count": 1,
+      "runtime_state": "running",
+      "site_checkpoint_has_pending_publish": false,
+      "site_id": "pilot-course-a",
+      "source_exhausted": false
+    },
+    "service_state": "serving",
+    "site_id": "pilot-course-a",
+    "source": {
+      "cursor": {
+        "consumed_cycles": 2,
+        "next_sequence_number": 2
+      },
+      "declared_cycles": 6,
+      "exhausted": false,
+      "max_cycles": 8
+    },
+    "source_type": "fixture",
+    "workflow_id": "range.closed_loop_collection_handoff",
+    "workflow_readiness": "READY_FOR_FIXTURE_SHADOW_MODE"
+  },
+  "identity": {
+    "deployment_id": "pilot-a-site-agent-v0",
+    "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
+    "fixture_mode": true,
+    "mode_label": "fixture-backed Shadow Mode",
+    "run_directory": "run-001",
+    "site_id": "pilot-course-a",
+    "workflow_id": "range.closed_loop_collection_handoff"
+  },
+  "machines": {
+    "dispenser_running": {
+      "label": "UNKNOWN",
+      "reason": "no machine evidence source is connected in this slice",
+      "value": null
+    },
+    "washer_fault": {
+      "label": "UNKNOWN",
+      "reason": "no machine evidence source is connected in this slice",
+      "value": null
+    },
+    "washer_running": {
+      "label": "UNKNOWN",
+      "reason": "no machine evidence source is connected in this slice",
+      "value": null
+    }
+  },
+  "operating_day": {
+    "date": "2026-08-08",
+    "end_utc": "2026-08-08T16:00:00.000000Z",
+    "start_utc": "2026-08-07T16:00:00.000000Z",
+    "timezone": "Asia/Shanghai"
+  },
+  "operations": {
+    "play": {
+      "active_players_booked": {
+        "basis": "booked headcount of active sessions; a booking is not a confirmed player",
+        "label": "PLANNED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 6
+      },
+      "active_players_confirmed": {
+        "basis": "recorded actual player counts of active sessions",
+        "label": "UNKNOWN",
+        "reason": "no actual player count recorded for every active session",
+        "source_status": "ok",
+        "value": null
+      },
+      "active_sessions_now": {
+        "basis": "recorded start at or before as_of, no recorded finish at or before as_of, not cancelled",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 2
+      },
+      "booked_players_today": {
+        "basis": "sum of booked player counts today; a booking is not a start",
+        "label": "PLANNED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 21
+      },
+      "booked_sessions_today": {
+        "basis": "bookings with a scheduled start today, cancellations removed",
+        "label": "PLANNED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 7
+      },
+      "completed_sessions_today": {
+        "basis": "sessions with both a recorded start and a recorded finish today; duration from those two records only",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": {
+          "count": 2,
+          "max_minutes": 74.0,
+          "mean_minutes": 70.5,
+          "min_minutes": 67.0
+        }
+      },
+      "notes": [
+        "Booked is not started. Started is not finished. Duration needs both a start and a finish."
+      ],
+      "sessions_missing_finish": {
+        "basis": "started sessions with no recorded finish; their duration is unknown",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 2
+      },
+      "started_sessions_today": {
+        "basis": "sessions with a recorded actual start today at or before as_of",
+        "label": "SOURCE_RECORDED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 4
+      },
+      "status": "ok",
+      "upcoming_booked_players": {
+        "basis": "booked players for sessions scheduled after as_of today",
+        "label": "PLANNED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 9
+      }
+    },
+    "sales": {
+      "ball_units_sold_today": {
+        "basis": "ball units of captured sales today minus reversed units, by the declared SKU mapping; unmapped SKUs excluded and counted separately",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 2450
+      },
+      "notes": [
+        "Sold ball units are entitlement evidence only; they say nothing about physical ball stores or about what any machine handed out."
+      ],
+      "recent_window": {
+        "basis": "mapped ball units of captured sales minus reversals inside (as_of - window, as_of]; partial coverage is flagged, never extrapolated",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": {
+          "ball_units": 750,
+          "coverage_end": "2026-08-08T10:40:00.000000Z",
+          "transactions": 3,
+          "window_fully_covered": true,
+          "window_s": 3600
+        }
+      },
+      "reversals_today": {
+        "basis": "void and refund records dated today",
+        "label": "SOURCE_RECORDED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 2
+      },
+      "status": "ok",
+      "transactions_today": {
+        "basis": "captured sale records dated today",
+        "label": "SOURCE_RECORDED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 15
+      },
+      "unmapped_sku_transactions_today": {
+        "basis": "captured sales today whose SKU has no declared ball-unit mapping; their units are unknown",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 1
+      },
+      "unmatched_reversals": {
+        "basis": "reversals naming an original transaction this journal has not recorded; not subtracted",
+        "label": "DERIVED",
+        "reason": null,
+        "source_status": "ok",
+        "value": 0
+      }
+    },
+    "status": "ok"
+  },
+  "physical_stores": {
+    "awaiting_wash_balls": {
+      "label": "UNKNOWN",
+      "reason": "no evidence source for awaiting-wash balls in this slice",
+      "value": null
+    },
+    "clean_ball_weight_kg": {
+      "label": "UNKNOWN",
+      "reason": "no weight sensor is connected in this slice",
+      "value": null
+    },
+    "clean_balls_in_dispenser": {
+      "label": "FIXTURE_FACILITY_STATE",
+      "physical": false,
+      "reason": null,
+      "service_source": "fixture",
+      "source_status": "ok",
+      "source_type": "sensor",
+      "value": 2400
+    },
+    "note": "Sold ball units never appear here; business records say nothing about physical ball stores."
+  },
+  "recommendations": [
+    {
+      "action": "operator_intervention",
+      "case_status": "pending",
+      "deferral_note": null,
+      "deferred_until": null,
+      "evaluation_id": "aev_7e19fd0cb28f777e606658e5",
+      "execute_before": "2026-08-08T19:26:20.000000Z",
+      "issued_at": "2026-08-08T18:30:00.000000Z",
+      "manager_response": null,
+      "policy_id": "ball-availability-guardian",
+      "policy_version": "0.1.0",
+      "recommendation": {
+        "action": "operator_intervention",
+        "decision_trace_id": "trace_c5c688ba9fc8534f5ba62b6b",
+        "deployment_id": "pilot-a-site-agent-v0",
+        "execute_before": "2026-08-08T19:26:20.000000Z",
+        "expected_stockout_with_action_minutes": null,
+        "expected_stockout_without_action_minutes": 68.33333333333333,
+        "issued_at": "2026-08-08T18:30:00.000000Z",
+        "policy_id": "ball-availability-guardian",
+        "policy_version": "0.1.0",
+        "projected_stockout_delay_minutes": 0.0,
+        "protected_through_horizon": false,
+        "recommendation_id": "rec_8523e92396ae7704aae07762",
+        "site_id": "pilot-course-a",
+        "summary": "Recommend operator intervention: no eligible collector can arrive before and extend the first stockout.",
+        "target_robot_id": null
+      },
+      "recommendation_id": "rec_8523e92396ae7704aae07762",
+      "response_kind": null,
+      "source_envelope_id": "fse:6e00b2152728c06bb717e24ae05d9cafc94ed1ea15b355d05d028ab987493dd1",
+      "source_sequence": 1,
+      "summary": "Recommend operator intervention: no eligible collector can arrive before and extend the first stockout.",
+      "target_robot_id": null,
+      "trace": {
+        "candidates": [
+          {
+            "eligible": false,
+            "exclusion_reasons": [
+              "collection_permission_unknown",
+              "missing_capabilities",
+              "missing_expected_clean_ball_yield",
+              "missing_replenishment_eta",
+              "washing_requirement_unknown"
+            ],
+            "robot_id": "R1"
+          },
+          {
+            "eligible": false,
+            "exclusion_reasons": [
+              "collection_permission_unknown",
+              "missing_capabilities",
+              "missing_expected_clean_ball_yield",
+              "missing_replenishment_eta",
+              "washing_requirement_unknown"
+            ],
+            "robot_id": "R2"
+          }
+        ],
+        "data_completeness_score": 0.5714285714285714,
+        "missing_data_reasons": [
+          "R1: collection_permission_unknown",
+          "R1: missing_capabilities",
+          "R1: missing_expected_clean_ball_yield",
+          "R1: missing_replenishment_eta",
+          "R1: washing_requirement_unknown",
+          "R2: collection_permission_unknown",
+          "R2: missing_capabilities",
+          "R2: missing_expected_clean_ball_yield",
+          "R2: missing_replenishment_eta",
+          "R2: washing_requirement_unknown",
+          "collection permission unavailable",
+          "committed inbound batch ETAs unavailable in FacilityState",
+          "current demand rate unavailable in FacilityState",
+          "global collection permission unavailable in FacilityState",
+          "robot capability, ETA, expected yield, and washing requirement unavailable in FacilityState",
+          "washer availability unavailable",
+          "washer availability unavailable in FacilityState"
+        ],
+        "policy_id": "ball-availability-guardian",
+        "policy_version": "0.1.0",
+        "projected_stockout_without_action_minutes": 68.33333333333333,
+        "rationale": [
+          "Used clean_sensed=2400 balls; retained clean_available=2400 separately.",
+          "Used forecast_demand over a 150-minute horizon.",
+          "First projected stockout without new action is in 68.3 minutes.",
+          "Every collector candidate was excluded; reasons are recorded per robot.",
+          "Conservative missing-data handling recorded 17 reason(s)."
+        ],
+        "selected_robot_id": null,
+        "trace_id": "trace_c5c688ba9fc8534f5ba62b6b"
+      },
+      "trace_id": "trace_c5c688ba9fc8534f5ba62b6b"
+    }
+  ],
+  "snapshot_schema": "nxt-site-agent/supervisor-snapshot/v1",
+  "staffing": {
+    "approved_shift_changes_today": {
+      "basis": "approval records dated today; only approvals change the effective schedule",
+      "label": "SOURCE_RECORDED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 0
+    },
+    "by_role": [
+      {
+        "absent_now": 0,
+        "label": "DERIVED",
+        "present_now": 1,
+        "role_code": "FRONT_DESK",
+        "scheduled_now": 1,
+        "unknown_now": 0
+      },
+      {
+        "absent_now": 0,
+        "label": "DERIVED",
+        "present_now": 1,
+        "role_code": "RANGE_OPS",
+        "scheduled_now": 2,
+        "unknown_now": 1
+      }
+    ],
+    "confirmed_absent_today": {
+      "basis": "absence records naming today's shifts",
+      "label": "SOURCE_RECORDED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 1
+    },
+    "confirmed_present_now": {
+      "basis": "workers with a recorded clock-in today and no later clock-out at as_of; presence only, never readiness to work",
+      "label": "DERIVED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 2
+    },
+    "next_material_change": {
+      "basis": "earliest planned shift boundary after as_of within the operating day",
+      "label": "PLANNED",
+      "reason": null,
+      "source_status": "ok",
+      "value": {
+        "at_utc": "2026-08-08T13:00:00.000000Z",
+        "count": 1,
+        "kind": "shift_end"
+      }
+    },
+    "notes": [
+      "Scheduled is not present. Clocked-in is not available. Requested is not approved."
+    ],
+    "open_clock_ins": {
+      "basis": "clock-ins today without a later clock-out; no duration is derived",
+      "label": "DERIVED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 2
+    },
+    "operating_day": {
+      "date": "2026-08-08",
+      "end_utc": "2026-08-08T16:00:00.000000Z",
+      "start_utc": "2026-08-07T16:00:00.000000Z",
+      "timezone": "Asia/Shanghai"
+    },
+    "pending_change_requests": {
+      "basis": "change requests with no approval or rejection; requests never change coverage",
+      "label": "SOURCE_RECORDED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 1
+    },
+    "presence_unknown_now": {
+      "basis": "scheduled now, neither clocked in nor recorded absent; unknown is not absent",
+      "label": "DERIVED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 1
+    },
+    "present_scheduled_now": {
+      "basis": "scheduled now and clocked in",
+      "label": "DERIVED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 2
+    },
+    "present_unscheduled_now": {
+      "basis": "clocked in at as_of with no planned shift covering as_of",
+      "label": "DERIVED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 0
+    },
+    "scheduled_now": {
+      "basis": "planned shifts whose interval covers as_of",
+      "label": "PLANNED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 3
+    },
+    "scheduled_today": {
+      "basis": "planned shifts overlapping the operating day, cancellations removed, approved changes applied",
+      "label": "PLANNED",
+      "reason": null,
+      "source_status": "ok",
+      "value": 6
+    },
+    "status": "ok",
+    "worked_intervals_today": {
+      "basis": "closed clock-in/clock-out pairs today; open intervals carry no duration",
+      "label": "DERIVED",
+      "reason": null,
+      "source_status": "ok",
+      "value": {
+        "count": 3,
+        "total_minutes": 932.0
+      }
+    }
+  },
+  "state": {
+    "available": true,
+    "dispenser": {
+      "clean_available_balls": 2400,
+      "clean_sensed_balls": 2400.0,
+      "count_source": {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "CAL-LC-PILOTA-2026",
+        "channel": "inventory.dispenser.count",
+        "confidence": 1.0,
+        "reference_id": "inventory.dispenser.count:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-lc-dispenser-count",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      "reading_age_s": 5.0,
+      "reading_status": "ok",
+      "sensed_reading_age_s": 5.0,
+      "sensed_source": {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "CAL-LC-PILOTA-2026",
+        "channel": "inventory.dispenser.sensed",
+        "confidence": 1.0,
+        "reference_id": "inventory.dispenser.sensed:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-lc-dispenser-sensed",
+        "source_type": "sensor",
+        "status": "ok"
+      }
+    },
+    "envelope": {
+      "deployment_id": "pilot-a-site-agent-v0",
+      "envelope_id": "fse:6e00b2152728c06bb717e24ae05d9cafc94ed1ea15b355d05d028ab987493dd1",
+      "observation_timestamp_s": 66600.0,
+      "schema_version": "nxt-site-runtime/facility-snapshot/v1",
+      "sequence_number": 1,
+      "site_id": "pilot-course-a"
+    },
+    "facility_meta": {
+      "facility_open": true,
+      "minute_of_day": 1110.0,
+      "scenario_name": "pilot-course-a-site-agent-service",
+      "t_s": 66600.0
+    },
+    "quality": {
+      "assembly_report": {
+        "consistency_issues": [],
+        "missing_channels": [],
+        "overall_confidence": 1.0,
+        "provenance_grade": "high",
+        "stale_channels": []
+      },
+      "runtime_quality": {
+        "assembly_confidence": 1.0,
+        "effective_confidence": 1.0,
+        "upstream_confidence": 1.0
+      }
+    },
+    "reason": null,
+    "source_references": [
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.activity",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.activity:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-activity",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.assigned_zone",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.assigned_zone:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-assigned_zone",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.awaiting_human",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.awaiting_human:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-awaiting_human",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.battery_frac",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.battery_frac:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-battery_frac",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.destination",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.destination:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-destination",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.estop_latched",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.estop_latched:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-estop_latched",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.health",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.health:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-health",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.location",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.location:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-location",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R1.payload_balls",
+        "confidence": 1.0,
+        "reference_id": "robot.R1.payload_balls:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R1-payload_balls",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.activity",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.activity:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-activity",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.assigned_zone",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.assigned_zone:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-assigned_zone",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.awaiting_human",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.awaiting_human:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-awaiting_human",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.battery_frac",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.battery_frac:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-battery_frac",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.destination",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.destination:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-destination",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.estop_latched",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.estop_latched:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-estop_latched",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.health",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.health:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-health",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.location",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.location:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-location",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "robot.R2.payload_balls",
+        "confidence": 1.0,
+        "reference_id": "robot.R2.payload_balls:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-fleet-R2-payload_balls",
+        "source_type": "external_system",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "station.ST1.docked",
+        "confidence": 1.0,
+        "reference_id": "station.ST1.docked:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-di-handoff-docked",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "station.ST1.is_open",
+        "confidence": 1.0,
+        "reference_id": "station.ST1.is_open:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-di-station-ready",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "calibration:not-required",
+        "channel": "zone.Z1.is_open",
+        "confidence": 1.0,
+        "reference_id": "zone.Z1.is_open:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-di-zone-gate",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "CAL-LC-PILOTA-2026",
+        "channel": "inventory.dispenser.count",
+        "confidence": 1.0,
+        "reference_id": "inventory.dispenser.count:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-lc-dispenser-count",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "CAL-LC-PILOTA-2026",
+        "channel": "inventory.dispenser.sensed",
+        "confidence": 1.0,
+        "reference_id": "inventory.dispenser.sensed:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-lc-dispenser-sensed",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "CAL-LC-PILOTA-2026",
+        "channel": "inventory.station.ST1.buffer_balls",
+        "confidence": 1.0,
+        "reference_id": "inventory.station.ST1.buffer_balls:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-lc-station-buffer",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "CAL-LC-PILOTA-2026",
+        "channel": "wash.washer.wip",
+        "confidence": 1.0,
+        "reference_id": "wash.washer.wip:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "sensor-lc-washer-wip",
+        "source_type": "sensor",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "cal:synthetic:pilot-a",
+        "channel": "charger.site.queue_length",
+        "confidence": 1.0,
+        "reference_id": "charger.site.queue_length:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "synthetic.facility_system",
+        "source_type": "simulation",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "cal:synthetic:pilot-a",
+        "channel": "staff.site.busy",
+        "confidence": 1.0,
+        "reference_id": "staff.site.busy:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "synthetic.facility_system",
+        "source_type": "simulation",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "cal:synthetic:pilot-a",
+        "channel": "staff.site.queued",
+        "confidence": 1.0,
+        "reference_id": "staff.site.queued:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "synthetic.facility_system",
+        "source_type": "simulation",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "cal:synthetic:pilot-a",
+        "channel": "station.ST1.queue_length",
+        "confidence": 1.0,
+        "reference_id": "station.ST1.queue_length:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "synthetic.facility_system",
+        "source_type": "simulation",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "cal:synthetic:pilot-a",
+        "channel": "scan.zone.Z1.balls",
+        "confidence": 1.0,
+        "reference_id": "scan.zone.Z1.balls:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "synthetic.scanrig",
+        "source_type": "simulation",
+        "status": "ok"
+      },
+      {
+        "available_timestamp_s": 66600.0,
+        "calibration_id": "cal:synthetic:pilot-a",
+        "channel": "upstream.site",
+        "confidence": 1.0,
+        "reference_id": "upstream.site:o000001",
+        "sample_timestamp_s": 66595.0,
+        "source_id": "synthetic.upstream",
+        "source_type": "simulation",
+        "status": "ok"
+      }
+    ]
+  }
+}
