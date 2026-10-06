@@ -1,0 +1,7 @@
+record_type,timezone,effective_from_local_date,effective_until_local_date,staff_id,display_name,skill_codes,eligibility,max_daily_minutes,weekday,role_code,area_code,start_local,end_local,required_skill_codes,minimum_staff
+META,Asia/Shanghai,2026-10-06,,,,,,,,,,,,,
+WORKER,,,,staff-demo-001,Demo Range Attendant,BALL_PICKING,RANGE_ATTENDANT@RANGE_A,480,,,,,,,
+AVAILABILITY,,,,staff-demo-001,,,,,1,,,08:00,17:00,,
+ASSIGNMENT_RULE,,,,,,,,,,RANGE_ATTENDANT,RANGE_A,,,BALL_PICKING,
+REGULAR_ASSIGNMENT,,,,staff-demo-001,,,,,1,RANGE_ATTENDANT,RANGE_A,09:00,17:00,,
+COVERAGE,,,,,,,,,1,RANGE_ATTENDANT,RANGE_A,09:00,17:00,,1
