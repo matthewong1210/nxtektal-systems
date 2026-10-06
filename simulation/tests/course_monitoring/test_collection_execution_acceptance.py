@@ -163,7 +163,7 @@ def test_continuous_two_task_witness_is_canonical_and_relation_valid():
     assert len({row["execution_id"] for row in snapshot["executions"]}) == 2
     assert len({row["request_id"] for row in snapshot["executions"]}) == 2
     assert snapshot["replay_digest"] == (
-        "cfecebbe163ae6eecdb93e5e8971d407f607419b121a13f32a3c434d729152d8"
+        "2000dcf7a36a9b10894dd36eaba0d80bca8994117b222934d1784d2c31994d6f"
     )
 
 

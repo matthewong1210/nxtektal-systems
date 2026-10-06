@@ -348,13 +348,13 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     const next = html.indexOf('data-testid="execution-record-card"', start + 1);
     return html.slice(start, next === -1 ? undefined : next);
   };
-  const RUNNING_ID = "0a54e06a6ceed7799b428ffabff95875ed03da1998804bb52aa2976a24b6d6b2";
-  const SUCCEEDED_ID = "f1dd7ae28567763cf4036027741c620338e3497fbce4c8a955659f6645b3c301";
+  const RUNNING_ID = "1d0a38608fd4cd16775795c530869374a8a35135bb2d063a7e94c5b63a0cabfd";
+  const SUCCEEDED_ID = "2fc7a0fed1da1f1d8f5a775354fb6b3afebffc9f6a302173147035a3dca139d5";
 
   it("passes the frozen witness through the real parser with its exact replay digest, ACTIVE session, clock and two records", async () => {
     const { continuousTwoTaskWitness } = await import("./execution-fixtures");
     const witness = continuousTwoTaskWitness();
-    expect(witness.replay_digest).toBe("cfecebbe163ae6eecdb93e5e8971d407f607419b121a13f32a3c434d729152d8");
+    expect(witness.replay_digest).toBe("2000dcf7a36a9b10894dd36eaba0d80bca8994117b222934d1784d2c31994d6f");
     expect(witness.session_state).toBe("ACTIVE");
     expect(witness.now_sim_t_s).toBe(31800);
     expect(witness.session_id).toBe("collection-execution-session-v3");
@@ -407,7 +407,7 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
   it("strictly parses the backend-generated PENDING response in its own service order", async () => {
     const { continuousTwoTaskPending } = await import("./execution-fixtures");
     const pending = continuousTwoTaskPending();
-    expect(pending.replay_digest).toBe("d99b14e6fb85f6376771dd5af9826659978608b9aeb131971936ef9f4f6ad113");
+    expect(pending.replay_digest).toBe("7a99f5c26bc46bc6fc98f8f90d834ebe5fe1c1b28e3ab1c2fc6e0bb1f6267dcc");
     expect(pending.session_state).toBe("ACTIVE");
     expect(pending.now_sim_t_s).toBe(31200);
     expect(pending.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([
@@ -424,7 +424,7 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
   it("strictly parses the backend-generated recovery response in its own service order", async () => {
     const { continuousTwoTaskRunningAfterRecovery } = await import("./execution-fixtures");
     const running = continuousTwoTaskRunningAfterRecovery();
-    expect(running.replay_digest).toBe("00bb71ea44864911443922b8071c370e1d82cfab8da48c659d4c055b0f7ca430");
+    expect(running.replay_digest).toBe("b02e5830219e7e3e9c5a605130ca8fbe30235cca370db76b1edcb44d65ff7d93");
     expect(running.session_state).toBe("ACTIVE");
     expect(running.now_sim_t_s).toBe(31800);
     expect(running.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([

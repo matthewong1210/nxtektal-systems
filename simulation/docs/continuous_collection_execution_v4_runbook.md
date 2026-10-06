@@ -10,7 +10,10 @@ not replace the fixed single-task 3C service documented in
 
 The original live-service proof was recorded on 2026-10-01. The frozen
 witnesses and source-derived identities below were refreshed on 2026-10-05
-using the merged engine and real Manager API callbacks. Task states, action
+using the merged engine and real Manager API callbacks, and again on
+2026-10-06 through the same service flows when the `nxt_operational_context`
+leaf was added and `nxt_site_agent` gained the Supervisor Snapshot seam (the
+engine fingerprint hashes every `nxt_*` Python file). Task states, action
 order, timestamps, and ledger-backed 600/600 and 296/296 quantities are unchanged.
 The original live-service purity hash in §11 remains a dated historical record.
 The branch remains local and unmerged.
@@ -383,7 +386,7 @@ ledger-backed quantity. The process was not restarted.
 | scheduler after first / second terminal | `RUNNING` / `RUNNING` |
 | Planning outcomes | `[]` |
 | config digest | `518deac1f992a453ea40a440b346ebfcf3fcf54f8b1cb9c32b6cb1ee694393b3` |
-| engine digest | `33f7e7f3b233bc15677484b124b75918f33e94895b825ced7a261f53ad6c1a6c` |
+| engine digest | `59b290daec0f52d6bd209d056a6e259e1999213639b9a20fd1c80d225a018a31` |
 | final replay digest | `7854b8c3b63c1edb051f9f741ad64545542061d361eabf5a93db125aa1272202` |
 
 ### 8.2 Complete causal identities
@@ -397,11 +400,11 @@ ledger-backed quantity. The process was not restarted.
 | confirmation | `confirmation_3a06c3c3f65c7aebee43a54f` | `confirmation_676eaa75723a52b123d8ac09` |
 | schedule | `schedule_b7cb7f2d896ab910ace1a1e1` | `schedule_826becf5e8d940da07d59423` |
 | task | `task_e67abab7fe5666824af72300` | `task_51b158a10d9deba0b1aae545` |
-| binding | `c2bcda7c1aeee17a2bc7eb7e975cade829c4487fb7c6c86d52ac311c1e950497` | `f28213f450dab6887b20ce7eb9239d03d630648dbd58e14acfc86a4c83d864ed` |
-| execution request | `exec_req_7850d5410913611cfb8db699` | `exec_req_69f6ba76c06e875215b6fb3e` |
-| execution | `f1dd7ae28567763cf4036027741c620338e3497fbce4c8a955659f6645b3c301` | `0a54e06a6ceed7799b428ffabff95875ed03da1998804bb52aa2976a24b6d6b2` |
-| attempt | `attempt-f1dd7ae28567763cf4036027741c620338e3497fbce4c8a955659f6645b3c301` | `attempt-0a54e06a6ceed7799b428ffabff95875ed03da1998804bb52aa2976a24b6d6b2` |
-| assignment | `assignment-153cf4125a76c704820bd8cf6de329feaaa4c617e2b4aa5930b3dab497027558` | `assignment-1b055067bb05174d89341470b9a6e103b8950b90eea155e8a231b43cfc9b545e` |
+| binding | `e73127a1beb85093b5796e30380172331fa97bdad095c0146b7b3815836f0ff6` | `8b1342ebbfaf14bb6e9a593c8b07b65152b02ac1134dc4542f37cc2e95d6198f` |
+| execution request | `exec_req_d9868c8b13cfde62e6cd9be1` | `exec_req_84f2819cd9ee88f33997db9c` |
+| execution | `2fc7a0fed1da1f1d8f5a775354fb6b3afebffc9f6a302173147035a3dca139d5` | `1d0a38608fd4cd16775795c530869374a8a35135bb2d063a7e94c5b63a0cabfd` |
+| attempt | `attempt-2fc7a0fed1da1f1d8f5a775354fb6b3afebffc9f6a302173147035a3dca139d5` | `attempt-1d0a38608fd4cd16775795c530869374a8a35135bb2d063a7e94c5b63a0cabfd` |
+| assignment | `assignment-02ff5a9d7b8124a3e6c74ba31174b6ca969f116416c4ce56137be1a71891c96d` | `assignment-1ab55d0414efacad77a63d598aeb4ccf9c1d3b0262e8c08760b35eca977de51f` |
 
 Both schedules finished as `DISPATCHED`, with no schedule reason or detail. Task
 1 was created at `2026-09-16T08:10:00.000000Z` and ended Edge-side as
@@ -423,7 +426,7 @@ These are separate owner vocabularies, not a contradiction.
 | quantity source | `RANGE_SIMULATION_BALL_LEDGER` | `RANGE_SIMULATION_BALL_LEDGER` |
 | collection exit | `ROBOT_PAYLOAD_FULL` | `ZONE_EMPTY` |
 | event sequence | 1–19, complete | 1–12, complete |
-| event digest | `6031f3f9fef6e970279272314c59126d0d81b7e646c63679bde708695cc959af` | `2575ae5008072085ac4237717cf005e6055c9d0819cd47ea6d47128f281351cb` |
+| event digest | `cc13626fc1a38c34e0b504055d80daaaae2b5e34d1615d1a67e44669df75b552` | `2575ae5008072085ac4237717cf005e6055c9d0819cd47ea6d47128f281351cb` |
 | conservation | passed | passed |
 | payload parity | passed | passed |
 | device protection | none | none |
@@ -437,40 +440,40 @@ projection rule for a partial collection result.
 Chain 1 raw source events:
 
 ```text
-assignment-event-bb87ad62ab9271ef029400fbcf62a28fb99eef33428972845228a81d0d287cb8
-assignment-event-44d14002097a43bca1a45a28dca393dfe33f928105e9ee64749f3367f8214fc6
-assignment-event-5ce35e8d96ee9c2313377a992403217b7b0173505fc3e0e2c95d79bb9239948e
-assignment-event-eb01e1247283699ec640c6a140934ff4a4240568bf0b904bf38d8dca1546377a
-assignment-event-851b6fc59af601d59153d954a756d14c3f8eb9717e008f6f9037c15b316d3454
-assignment-event-74d897233f3b7120504e8f428d4353ef7571c4f7567ba5ecd4eda6f253cdfd92
-assignment-event-638e140100319e016d700f5388e76ba375e04f0b9fc28dc70c651d7750f33b52
-assignment-event-a89d3b0584cede86d122b2015664d7dccdafb9d54267c7467fba4bc40a3a7a56
-assignment-event-3c8d8268350b45a7d1b286be4c92e333ea3a6525543787d9acb89f5f017869a7
-assignment-event-89d7f7ea48343186cb0314f352e5d270af64e2d5377dd2574841dfef257f782c
-assignment-event-dd5b7c677c0c4b6074d66e9b050c4e022c643453e3b018ae5049965dafb1db4e
-assignment-event-a5fc9ff7115b982b9953b24326abaa09cb36b96adacedb5e411bf5eafa975168
-assignment-event-1e67e8233adb2c377464e1d062c88f40bbc95520eac93b694cf57639ad9435fc
-assignment-event-dd86c7b98f3874871b000d13b13f05c0931f0c027caf818498b736265e2771ad
-assignment-event-95a5ff77f6197526747939fb537a0bf39fdcf8f17b50fffd44499652fafe4466
+assignment-event-a1f2589b02355412e4674a6622f3d81bb1f1bfbeec76bfcd0eb75bbb64191183
+assignment-event-ff8ad1b9e4ef2af475b5c67fd295746b941dcd6b116758e842514f19e83fb2f4
+assignment-event-3ff9f3b93a5f4a936609e0bdc9ba6093485c326f327db8b3a0105c5491e4d1ba
+assignment-event-0121c6c7097a226f13761d775712b30e497d55168008f39553ca13c1e946985a
+assignment-event-4520301d25cf1a424b97c9c7b29508e28e368672e525f5bee3a21d6e964c022b
+assignment-event-cc64eb673bf4085eb3290b60ddeb8851c8885944c4d0f8664ccdb39f4e2b0d2e
+assignment-event-8792d0a9f185269a4e5d6f7ab55e21f69aa067ea4c7b54afc4a07f5fa36f7da9
+assignment-event-16cbd547cd778cb18e6fde110c1a693871f6bf11c5777b17acbdcb4c7e77a23c
+assignment-event-48897a13bc8f4612843b8073c4a647ec266c071a360113c37d365a36b202d153
+assignment-event-c208045b42b95f33f0cbaad9e53b043cb19ffb843dd3f0b940aa1810999f754f
+assignment-event-95601ae1a0d70ba2966555a0e4060f56d527938ce99b28e9aea10aa8040d3a3e
+assignment-event-d96e3dbfc264d1805e626aa84b997dcc85421106a482795919fbe70154922949
+assignment-event-5415e12ac6687532db9c05064c1b4215e995f71a8720afff3c1ff8a614ac6dae
+assignment-event-7fd93380ececbb1fc026812b885f3f3fb1444f43b22f49b1b36d6102706d1478
+assignment-event-69213619f2d8613cc75190ab24bdbd5c806c00b3585341f0b1322a88cfb75476
 ```
 
 Chain 1 unload source event:
 
 ```text
-assignment-event-a331b1017f03134ce5c196626197be1ff9c52342daf604806723826c0ade7f38
+assignment-event-e6f11783f2a90f5a52374ab248375eb68e034214ca72bab25e7e9ae3ade95ae4
 ```
 
 Chain 2 raw source events:
 
 ```text
-assignment-event-7cf0388859ed3abdcbdba79a82cd3f6d5aca8f6c3d94a92c0cd744e6289fb1cb
-assignment-event-046ce61a3671d0a8deadf048b641f55a1ce834e254db5db2b93e482e7fd34c2e
-assignment-event-937ef0d72912b650acccd638d952c030e3e353cba77421620e1c2d331f6395f5
-assignment-event-b3af3995d81f21867e75073cf8066e24a2b71bea18f2ce9297590ea358272abb
-assignment-event-ec3993622d32ae568ca3f56665cb45e8c64539937e802988ee6d473d32696883
-assignment-event-2000fb1a93bb020d2711a1843b91625018a1e495f75bf53649cb4be033934ae3
-assignment-event-fe61a9c0f4092e6fd97318a2b45f5e044ee9a9860a30700f961f48a33b58ecf4
-assignment-event-a23e00f7721bc1587ac17a5b1b8a0dc7d77b23cf629fdc4511fdb4a76815ac68
+assignment-event-7e3581536895ea8e843520faf0e8ef50bf53433d852acb51d7939e13f8b4263f
+assignment-event-09a648f268a9d202c5cc1467edad52f0590da9fa1b235d88392d4aa3ac4f3f8c
+assignment-event-bebc80a28aaed2be2b6f7b6696b4ad95933b10265e662db937f0c7f094416331
+assignment-event-a1c07a2393af7bd2083781af8acd84a0c9a27cf3f7ae1a68e88d11bc44451d33
+assignment-event-5a3b0b29ce85e2583a0816658ce488830392fdd547c972106ae41aaae485485b
+assignment-event-bade50ec57c972513f99b328b5dcf42bc06b57748c1e13fb65c499b520bbae37
+assignment-event-818a703bf0af8545e0a5e8a8a8c74087a7131b03ce1f7134229062b6abfca3b6
+assignment-event-19197ba25baf5235196747268140d9a6c8a3d9272e13c75fd950ee4c59fd045f
 ```
 
 Chain 2 unload source event:
@@ -483,8 +486,8 @@ The verified Edge record IDs were:
 
 | Chain | Edge records |
 |---|---|
-| 1 | `rec_7ec428d4f05ccb33a207729f`, `rec_83ef63f96780f7a3e6f68469`, `rec_8edce7985e38494ca554e618`, `rec_9d608ba4ea16fa2af9064585`, `rec_c8ec41a972dd6ca8b6c8778e`, `rec_ddbb23cbd9413c968b5602b5` |
-| 2 | `rec_194a83e296a26046396edbe6`, `rec_2a420f734bbb93fc85503cc9`, `rec_3b0f637f850ee67b3d23968d`, `rec_570d7451ad690975c69062fe`, `rec_c6adc5de158af68d53c710f3`, `rec_de9a3e38f2dcba667c8fd3b1` |
+| 1 | `rec_4acb37c0e660cc0357314073`, `rec_7c9a3dfc4bdaa73161f08b11`, `rec_83ef63f96780f7a3e6f68469`, `rec_9031c454a7111e27ee68b6ca`, `rec_db2a6de47871c9bc918c06df`, `rec_efa584dbbbbacfe0286c5bd2` |
+| 2 | `rec_194a83e296a26046396edbe6`, `rec_44c2d0f01aa2dcde0bf504cf`, `rec_3b0f637f850ee67b3d23968d`, `rec_570d7451ad690975c69062fe`, `rec_d2d6d1d4bf7d5c6beafe122f`, `rec_de9a3e38f2dcba667c8fd3b1` |
 
 ## 9. Resume the same durable root
 
@@ -530,8 +533,8 @@ Observed timeline:
 | initial | 08:20 | chain 1 RUNNING, 600 raw / 0 unload; chain 2 then submitted | `84680b3d3dd2e2c29e7f952296b09331c12956ff0f712fa19f76c624daaa55ac` |
 | initial | 08:30 | chain 1 SUCCEEDED 600/600; chain 2 not due | `04bc0da286caf67479517fd3d8f4b7e553bedde5e6ef2a216e0044277b3d9b9e` |
 | immediate restart | 08:30 | identical durable state before advancement | `04bc0da286caf67479517fd3d8f4b7e553bedde5e6ef2a216e0044277b3d9b9e` |
-| restart | 08:40 | chain 2 due; execution not yet started | `d99b14e6fb85f6376771dd5af9826659978608b9aeb131971936ef9f4f6ad113` |
-| restart | 08:50 | chain 2 RUNNING, 296 raw / 0 unload | `00bb71ea44864911443922b8071c370e1d82cfab8da48c659d4c055b0f7ca430` |
+| restart | 08:40 | chain 2 due; execution not yet started | `7a99f5c26bc46bc6fc98f8f90d834ebe5fe1c1b28e3ab1c2fc6e0bb1f6267dcc` |
+| restart | 08:50 | chain 2 RUNNING, 296 raw / 0 unload | `b02e5830219e7e3e9c5a605130ca8fbe30235cca370db76b1edcb44d65ff7d93` |
 | restart | 09:00 | chain 2 PARTIAL, 296/296 | `72f68cd3bd8be42b6d8f596b25c5730cc4f29fde515fb2c7f87a075741ffcddd` |
 
 All confirmation, schedule, task, binding, execution-request, execution,
@@ -624,8 +627,8 @@ these 11 GETs, and recompute after each round:
 7. `/api/v1/planning/requests/continuous-input-002`
 8. `/api/v1/planning/requests/continuous-plan-002`
 9. `/api/v1/planning/requests/continuous-confirmation-002`
-10. `/api/v1/collection-executions/requests/exec_req_69f6ba76c06e875215b6fb3e`
-11. `/api/v1/collection-executions/requests/exec_req_7850d5410913611cfb8db699`
+10. `/api/v1/collection-executions/requests/exec_req_84f2819cd9ee88f33997db9c`
+11. `/api/v1/collection-executions/requests/exec_req_d9868c8b13cfde62e6cd9be1`
 
 Every response must be HTTP 200, and request recovery must return the original
 request's durable receipt. On 2026-10-01, all three hash points were identical:
