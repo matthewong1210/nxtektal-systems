@@ -435,3 +435,20 @@ measured input, system calculations and actual results stay distinct. New
 plan confirmation is an explicit simulation action; accepting an old Guardian
 recommendation still only records human workflow. Names are attribution, not
 access control, and no physical deployment is implemented.
+
+## Staffing advisory v1 handoff (local unmerged checkout)
+
+Start with the sole normative
+[staffing advisory contract](../simulation/docs/staffing_advisory_v1.md). The
+current unmerged checkout contains a domain library only: no staffing
+composition script, staffing Site Agent route, staffing Console/UI, staffing
+provider call, venue deployment, HR write, notification, formal schedule, or
+robot action exists yet.
+
+Treat operator-supplied roster and exception values as evidence, not
+HR/payroll/attendance/access-control truth. Treat `operator` as attribution, not
+authenticated identity, and ACCEPT/MODIFY as a local advisory plan, not
+execution truth. Only outbound provider-wire data is pseudonymous; the protected
+local ledger/replay record intentionally retains the private evidence specified
+by the contract. Do not describe its co-located high-water anchor as external or
+nonrepudiable.

@@ -122,3 +122,19 @@ clock and injects an optional planning callback into the local Manager API.
 Edge's opaque `admission_reference` requires an injected gate before due-time
 admission. Missing/expired/invalidated planning evidence blocks pending intent;
 already admitted tasks are immutable. No change permits physical commands.
+
+## Staffing advisory v1 package boundary (local unmerged branch)
+
+`nxt_pilot_ops.staffing` is an additive subpackage of the existing Shadow Ops
+wheel root. Its single normative contract is
+[staffing_advisory_v1.md](../../simulation/docs/staffing_advisory_v1.md), and
+`StaffingOperations` remains a deep import so the package root stays narrow.
+This current unmerged checkout has no staffing composition script, staffing
+Site Agent route, staffing Console/UI, staffing provider call, venue deployment,
+HR write, notification, formal schedule, or robot action.
+
+Roster/exception input remains operator evidence rather than
+HR/payroll/attendance/access-control truth; `operator` is attribution, not
+authentication; ACCEPT/MODIFY is a local advisory plan, not execution truth.
+Only the provider wire is pseudonymous; the protected local owner retains the
+private replay evidence named by the stable contract.

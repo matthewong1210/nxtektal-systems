@@ -276,3 +276,19 @@ documented in [`docs/CI.md`](../../docs/CI.md).
 - Never copy historical PR test totals as the result of the current change.
 - Never call a local command a CI result; only an observed GitHub Actions job
   run is CI evidence.
+
+## Staffing advisory v1 routing (local unmerged branch)
+
+Use the exact contract and verification map in
+[staffing_advisory_v1.md](../../simulation/docs/staffing_advisory_v1.md), then
+run the staffing files, `tests/pilot_ops/test_boundaries.py`, and the full
+`tests/pilot_ops` owner suite. Treat the privacy scan's two literal `api_key`
+denylist controls as reviewed expected matches, not credentials.
+
+This current unmerged checkout is a domain library only: there is no staffing
+composition script, staffing Site Agent route, staffing Console/UI, staffing
+provider call, venue deployment, HR write, notification, formal schedule, or
+robot action. Test projections as advisory evidence: roster/exception input is
+not HR/payroll/attendance/access-control truth, `operator` is not authenticated
+identity, and ACCEPT/MODIFY is not execution truth. Only provider-wire material
+is pseudonymous; protected local replay is intentionally private and richer.

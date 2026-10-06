@@ -388,3 +388,20 @@ and produces only a SIMULATION schedule through the existing Edge admission.
 Old recommendation acceptance remains workflow-only. The API receives a
 callback, Edge receives an opaque admission reference/gate, and neither imports
 the other's domain. No LLM, advisor or physical device gains execution access.
+
+## Staffing advisory v1 extension (local unmerged checkout)
+
+Follow the sole normative
+[`simulation/docs/staffing_advisory_v1.md`](simulation/docs/staffing_advisory_v1.md)
+contract. `nxt_pilot_ops.staffing` remains under the existing Shadow Ops package;
+keep `StaffingOperations` a deep import and do not add provider, runtime, Edge,
+simulator, network, robot, or control dependencies.
+
+This checkout contains only the staffing domain library: no staffing composition
+script, staffing Site Agent route, staffing Console/UI, staffing provider call,
+venue deployment, HR write, notification, formal schedule, or robot action
+exists yet. Roster/exception input is evidence rather than
+HR/payroll/attendance/access-control truth; `operator` is attribution rather
+than authenticated identity; ACCEPT/MODIFY is a local advisory plan rather than
+execution truth. Only the provider wire is pseudonymous; do not redact away the
+protected local evidence required for deterministic replay.

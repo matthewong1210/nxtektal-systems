@@ -227,3 +227,19 @@ semantics remain in Shadow Ops. This does not claim the planning records have
 Shadow Ops ledger hash-chain guarantees. Operator text is attribution only.
 A task status is never a ball quantity; even an entered SUPPLIED quantity does
 not mutate live stock. Physical admission/execution remains absent.
+
+### Staffing advisory v1 (local unmerged branch)
+
+The sole normative staffing-domain description is
+[staffing_advisory_v1.md](../../simulation/docs/staffing_advisory_v1.md). This
+current unmerged checkout contains only the domain library: no staffing
+composition script, staffing Site Agent route, staffing Console/UI, staffing
+provider call, venue deployment, HR write, notification, formal schedule, or
+robot action exists yet.
+
+Operator-supplied roster/exception values are evidence, not
+HR/payroll/attendance/access-control truth. `operator` is attribution rather
+than authenticated identity, and ACCEPT/MODIFY establishes only a local
+advisory plan, never execution truth. Only the provider wire is pseudonymous;
+protected local replay necessarily retains the private evidence enumerated in
+the stable contract.

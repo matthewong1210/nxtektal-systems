@@ -224,3 +224,19 @@ the environment, so no unconfigured-tool result is claimed.
   external anchor for the previously trusted head hash.
 - UI, command bridge, automatic execution, LLM policy calls, RL, and policy
   self-modification are deferred and absent.
+
+## Staffing advisory v1 (current unmerged checkout)
+
+Shadow Ops now owns the local staffing advisory domain described by the single
+normative [staffing advisory v1 contract](staffing_advisory_v1.md). This current
+unmerged checkout is a domain library only: it has no staffing composition
+script, staffing Site Agent route, staffing Console/UI, staffing provider call,
+venue deployment, HR write, notification, formal schedule, or robot action.
+
+Roster/exception input is operator-supplied evidence, not
+HR/payroll/attendance/access-control truth; `operator` is attribution, not an
+authenticated identity; and ACCEPT/MODIFY creates a local advisory plan, not
+execution truth. Only the provider wire is pseudonymous. Protected local replay
+retains the private evidence needed for verification. The legacy
+`JsonlEventLedger` is not externally anchored; staffing's distinct co-located
+high-water anchor is also not an external or nonrepudiable witness.
