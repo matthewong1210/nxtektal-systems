@@ -104,6 +104,19 @@ describe("console boundaries", () => {
     }
   });
 
+  it("has no hash- or history-driven navigation that could bypass the mutation lock", () => {
+    // Every change control shares one lock (`canMutateConsole`: committed
+    // view, not busy, not stale). No console code reads or writes the URL
+    // fragment or history, so no navigation can switch a view while a
+    // locked write is in flight; adding such navigation must revisit the
+    // lock rather than silently bypass it.
+    const navigation = /location\.hash|hashchange|pushState|replaceState|window\.location\b/;
+    for (const file of sourceFiles()) {
+      const text = readFileSync(file, "utf-8");
+      expect(navigation.test(text), `${file} navigates by URL`).toBe(false);
+    }
+  });
+
   it("declares the static-export output so no server runtime ships", () => {
     const config = readFileSync(join(APP_ROOT, "next.config.ts"), "utf-8");
     expect(config).toContain('output: "export"');

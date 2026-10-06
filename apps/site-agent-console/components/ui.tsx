@@ -1,10 +1,22 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 
 export type Tone = "ok" | "warn" | "bad" | "muted" | "info" | "sim";
 
+/** True while the enclosing view shows a last-known snapshot after a failed
+ * or expired read. Every Badge inside such a view downgrades its "ok" tone
+ * and says so in text, so a stale view can never show a green status. */
+export const StaleViewContext = createContext(false);
+
 /** Text-first status chip: the label carries the meaning, color assists. */
 export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
-  return <span className={`badge badge-${tone}`}>{children}</span>;
+  const staleView = useContext(StaleViewContext);
+  const downgraded = staleView && tone === "ok";
+  return (
+    <span className={`badge badge-${downgraded ? "warn" : tone}`}>
+      {children}
+      {downgraded ? " · stale view" : null}
+    </span>
+  );
 }
 
 export function Section({

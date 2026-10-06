@@ -11,7 +11,7 @@ import { PilotOperations } from "./PilotOperations";
 import { RecommendationsPanel } from "./RecommendationsPanel";
 import { StatePanel } from "./StatePanel";
 import { StatusBar } from "./StatusBar";
-import { Badge, Section } from "./ui";
+import { Badge, Section, StaleViewContext } from "./ui";
 
 /** The whole console page as a function of one request-state view. The
  * page mounts the controller; this component only renders its output. */
@@ -84,6 +84,9 @@ export function ConsoleScreen({
           </Section>
         </div>
       ) : (
+        // A failed refresh keeps the last good view but marks the whole
+        // view stale: every panel badge inside downgrades its green tone.
+        <StaleViewContext.Provider value={error !== null}>
         <main className="console-main">
           {error !== null ? (
             <div className="load-warning" role="alert">
@@ -126,6 +129,7 @@ export function ConsoleScreen({
             />
           </div>
         </main>
+        </StaleViewContext.Provider>
       )}
     </>
   );

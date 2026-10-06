@@ -97,6 +97,11 @@ export async function runHttpSmoke() {
     assert.match(html, /SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA/);
     assert.match(html, /Site Agent/);
     assert.match(html, /Manager Console/);
+    // The prerendered page is the pending state: reads have not completed,
+    // so no projection, no inventory number and no green badge is baked in.
+    assert.match(html, /Loading the Site Agent projections/);
+    assert.doesNotMatch(html, /badge-ok/);
+    assert.doesNotMatch(html, /clean balls in dispenser/);
 
     const traversal = await fetch(
       `http://127.0.0.1:${port}/..%2fpackage.json`,
