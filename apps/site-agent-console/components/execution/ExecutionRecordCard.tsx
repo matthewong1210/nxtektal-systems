@@ -12,7 +12,7 @@ export function BindingOnlyCard({ binding }: { binding: Binding }) {
           Task <span className="mono">{binding.task_id}</span>
         </strong>
       </div>
-      <p className="rec-summary">Bound, no durable execution request yet. Nothing has been accepted, started or collected for this binding.</p>
+      <p className="rec-summary">Bound, no durable execution request yet. No execution result has been recorded for this task; nothing has been accepted, started or collected for this binding.</p>
       <p className="fineprint">
         Plan <span className="mono">{binding.plan_id}</span> v{binding.plan_version} · confirmation <span className="mono">{binding.confirmation_id}</span> · admitted (lower bound) at{" "}
         {utcLabel(binding.task_created_at_utc)} · bound at {simSeconds(binding.bound_at_sim_t_s)}

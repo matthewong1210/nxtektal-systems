@@ -43,7 +43,7 @@ const inputRecord = record<InputRecord>("InputRequest");
 const plan = { ...record<PlanRecord>("PlanRequest"), current_status: "CONFIRMED" as const };
 const confirmation: ConfirmationRecord = { ...record<ConfirmationRecord>("ConfirmationRequest"), schedule_status: "DISPATCHED", task_id: "task_example_001" };
 
-type ExecMode = "ok" | "network" | "missing" | "invalid" | "hang";
+type ExecMode = "ok" | "network" | "missing" | "invalid" | "hang" | "unavailable503" | "unavailable500";
 
 function scriptedService() {
   const state = {
@@ -87,6 +87,8 @@ function scriptedService() {
       if (init?.signal) state.executionSignals.push(init.signal);
       if (state.execMode === "network") throw new TypeError("fetch failed");
       if (state.execMode === "missing") return envelope(404, { code: "collection_execution_not_found", detail: "route not connected" });
+      if (state.execMode === "unavailable503") return envelope(503, { code: "collection_execution_unavailable", detail: "execution evidence store is unavailable" });
+      if (state.execMode === "unavailable500") return envelope(500, { code: "collection_execution_unavailable", detail: "unexpected failure" });
       if (state.execMode === "hang") return new Promise<Response>((resolve) => { state.hung.push(resolve); });
       if (state.paused) {
         const paused = structuredClone(state.executions) as { session_state: string };
@@ -223,6 +225,39 @@ describe("read-only collection execution panel mounted in PilotOperations", () =
     expect(panel()!.querySelectorAll(".exec-record")).toHaveLength(0);
     expect(text()).toContain("SCHEDULER RUNNING");
     expect(buttonNamed("Record UNLOADED")?.disabled).toBe(false);
+  });
+
+  it("treats HTTP 503 collection_execution_unavailable as UNAVAILABLE with the route connected, and keeps the last snapshot stale", async () => {
+    const service = scriptedService();
+    service.state.execMode = "unavailable503";
+    await mount(service);
+    expect(panelText()).toContain("UNAVAILABLE");
+    expect(panelText()).toContain("route is connected");
+    expect(panelText()).not.toContain("not connected");
+    expect(panelText()).not.toContain("OFFLINE");
+    expect(panel()!.querySelectorAll(".exec-record")).toHaveLength(0);
+    // Not a missing route: the schedule form must not fall back to the legacy wall-clock rule.
+    const { simulationClockFor } = await import("../components/execution/CollectionExecutionPanel");
+    expect(simulationClockFor({ data: null, loading: false, error: "x", unavailable: false, serviceUnavailable: true, invalid: false, lastReadAtMs: null, nowMs: 0 }).status).toBe("stale");
+    service.state.execMode = "ok";
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("READ FRESH");
+    service.state.execMode = "unavailable503";
+    await tick(COLLECTION_EXECUTIONS_POLL_MS + 50);
+    expect(panelText()).toContain("UNAVAILABLE");
+    expect(panelText()).toContain("remains below marked stale");
+    expect(panelText()).toContain("READ STALE");
+    expect(panel()!.querySelectorAll(".exec-record")).toHaveLength(1);
+  });
+
+  it("treats any other status carrying collection_execution_unavailable as an ordinary read failure, never UNAVAILABLE", async () => {
+    const service = scriptedService();
+    service.state.execMode = "unavailable500";
+    await mount(service);
+    expect(panelText()).toContain("OFFLINE");
+    expect(panelText()).toContain("collection_execution_unavailable");
+    expect(panelText()).not.toContain("UNAVAILABLE");
+    expect(panelText()).not.toContain("not connected");
   });
 
   it("keeps the last valid snapshot marked stale when the route disappears after a successful read", async () => {

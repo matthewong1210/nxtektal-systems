@@ -20,8 +20,12 @@ export type ExecutionReadView = {
   data: CollectionExecutionsSnapshot | null;
   loading: boolean;
   error: string | null;
-  /** The service has no collection-executions route (404). */
+  /** The service has no collection-executions route (404): not connected. */
   unavailable: boolean;
+  /** The route is connected but the service answered HTTP 503 with
+   * `collection_execution_unavailable`: evidence unavailable right now. Any
+   * other status, with or without that code, is an ordinary read failure. */
+  serviceUnavailable?: boolean;
   /** The latest response was rejected by the strict contract parser. */
   invalid: boolean;
   lastReadAtMs: number | null;
@@ -29,7 +33,7 @@ export type ExecutionReadView = {
 };
 
 export const INITIAL_EXECUTION_VIEW: ExecutionReadView = {
-  data: null, loading: true, error: null, unavailable: false, invalid: false, lastReadAtMs: null, nowMs: 0,
+  data: null, loading: true, error: null, unavailable: false, serviceUnavailable: false, invalid: false, lastReadAtMs: null, nowMs: 0,
 };
 
 /** Pure render of one read state. No control here starts, retries, recovers
@@ -39,6 +43,7 @@ export function CollectionExecutionView({ view, onRetry }: { view: ExecutionRead
   const age = view.lastReadAtMs === null ? null : Math.max(0, Math.round((view.nowMs - view.lastReadAtMs) / 1000));
   const expired = view.lastReadAtMs !== null && view.nowMs - view.lastReadAtMs > EXECUTION_READ_EXPIRY_MS;
   const stale = data !== null && (view.error !== null || expired);
+  const bindingsWithoutRequest = data ? data.bindings.filter((binding) => !data.requests.some((request) => request.binding_id === binding.binding_id)) : [];
   return (
     <Section
       title={COLLECTION_EXECUTION_PANEL_TITLE}
@@ -62,6 +67,14 @@ export function CollectionExecutionView({ view, onRetry }: { view: ExecutionRead
             integration.{data ? ` The last valid snapshot, read ${age ?? "?"} s ago, remains below marked stale.` : ""}
           </p>
         </div>
+      ) : view.serviceUnavailable ? (
+        <div className="dispatch-service-note" role="status">
+          <Badge tone="warn">UNAVAILABLE</Badge>
+          <p>
+            The service reports that collection execution evidence is unavailable right now (collection_execution_unavailable, HTTP 503). The route is connected; this is a
+            service-side unavailability, not a missing integration.{data ? ` The last valid snapshot, read ${age ?? "?"} s ago, remains below marked stale.` : " No execution evidence is available."}
+          </p>
+        </div>
       ) : view.error !== null ? (
         <div className="load-warning" role="alert">
           <Badge tone={data ? "warn" : "bad"}>{data ? "READ STALE" : "OFFLINE"}</Badge> {view.error}{" "}
@@ -77,18 +90,22 @@ export function CollectionExecutionView({ view, onRetry }: { view: ExecutionRead
         <div className="exec-body" key={`${data.series_id}:${data.session_id}:${data.round_id}`}>
           <ExecutionSessionStrip snapshot={data} stale={stale} expired={expired} loading={view.loading} lastReadAtMs={view.lastReadAtMs} nowMs={view.nowMs} onRetry={onRetry} />
           <div className="exec-list">
+            <p className="fineprint exec-counts">
+              {data.bindings.length} admitted and bound task{data.bindings.length === 1 ? "" : "s"} · {data.executions.length} with an execution record ·{" "}
+              {bindingsWithoutRequest.length} bound without any execution result{stale ? " · last-known counts from the stale snapshot" : ""}
+            </p>
             {data.executions.map((record) => (
               <ExecutionRecordCard key={record.execution_id} record={record} snapshot={data} />
             ))}
-            {data.bindings
-              .filter((binding) => !data.requests.some((request) => request.binding_id === binding.binding_id))
-              .map((binding) => (
-                <BindingOnlyCard key={binding.binding_id} binding={binding} />
-              ))}
-            {data.executions.length === 0 && data.bindings.length === 0 ? <EmptyNote>No execution record or binding exists in this session yet.</EmptyNote> : null}
+            {bindingsWithoutRequest.map((binding) => (
+              <BindingOnlyCard key={binding.binding_id} binding={binding} />
+            ))}
+            {data.executions.length === 0 && data.bindings.length === 0 ? (
+              <EmptyNote>No execution record or binding exists in this session yet.{stale ? " This is the last-known state of the session; the read is stale." : ""}</EmptyNote>
+            ) : null}
           </div>
         </div>
-      ) : view.error === null && !view.unavailable ? null : (
+      ) : view.error === null && !view.unavailable && !view.serviceUnavailable ? null : (
         <div className="form-actions">
           <button type="button" className="btn" onClick={onRetry} disabled={view.loading}>
             Retry execution read
@@ -157,7 +174,7 @@ export function useCollectionExecutions(): { view: ExecutionReadView; retry: () 
         const data = await client.read(request.signal);
         if (active) {
           const now = Date.now();
-          setView({ data, loading: false, error: null, unavailable: false, invalid: false, lastReadAtMs: now, nowMs: now });
+          setView({ data, loading: false, error: null, unavailable: false, serviceUnavailable: false, invalid: false, lastReadAtMs: now, nowMs: now });
         }
       } catch (cause) {
         if (active) {
@@ -167,7 +184,11 @@ export function useCollectionExecutions(): { view: ExecutionReadView; retry: () 
             ...previous,
             loading: false,
             error: describe(cause),
+            // 404 alone means the route is not connected. Only HTTP 503 with
+            // the service's own code means evidence is unavailable; every
+            // other status is a read failure.
             unavailable: status === 404,
+            serviceUnavailable: status === 503 && code === "collection_execution_unavailable",
             invalid: status !== 404 && code === "invalid_collection_executions",
             nowMs: Date.now(),
           }));
