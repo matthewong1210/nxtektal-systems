@@ -2197,19 +2197,23 @@ Exercise Task 5's authoritative transition/replay rules through the operation la
 
 - [ ] **Step 2: Add failing idempotency and CAS tests**
 
-For every operation kind, assert the idempotency key is `(site_id, deployment_id, operation_kind, request_id)` and every mutating payload persists a lowercase 64-hex `request_digest = stable_digest(payload)` when the payload is already a dict, otherwise `stable_digest(to_primitive(payload))`. Same key plus same digest returns the original receipt before new stale checks; same key plus changed digest returns `IDEMPOTENCY_CONFLICT`; same request ID under `roster-import` and `exception-record` creates two independent receipts and never conflicts. Test roster, exception, cancellation, correction, reservation, and manager response revisions under concurrent builders. Reserve a suggestion, import a future-effective roster revision, and prove the earlier suggestion is stale even though its service date still selects the older roster.
+For every operation kind, assert the idempotency key is `(site_id, deployment_id, operation_kind, request_id)`. Each mutation first produces one detached canonical request body. `_request_digest` returns `stable_digest(detached_body)` for roster, exception, reservation, cancellation, and correction; manager response alone returns `stable_digest({"suggestion_id": suggestion_id, "body": detached_body})` because its route context is semantic. The exact resulting lowercase 64-hex value is passed through the locked builder and copied unchanged into the event payload; normalized DTOs never recompute it. Same key plus same digest returns the original receipt before new stale checks; same key plus changed digest returns `IDEMPOTENCY_CONFLICT`; same request ID under `roster-import` and `exception-record` creates two independent receipts and never conflicts. Test roster, exception, cancellation, correction, reservation, and manager response revisions under concurrent builders. Reserve a suggestion, import a future-effective roster revision, and prove the earlier suggestion is stale even though its service date still selects the older roster.
+
+The detached request body is a strict wire snapshot, not a generic serialization. Before any request parser or digest, recursively accept only exact `dict` containers with exact-string keys, exact `list` containers, and exact `None|bool|int|float|str` scalars; integers are limited to the portable signed 64-bit range, floats must be finite, and strings valid UTF-8. Return fresh exact built-ins, reject ancestor cycles, container depth greater than 32, and occurrence 524,290 after a maximum of 524,289 visited occurrences. A shared non-cyclic subtree is allowed and copied independently. Reject without invoking hooks every tuple, mapping/list subclass or proxy, dataclass, date/datetime, enum, set, bytes, non-string key, unsupported or out-of-range scalar, non-finite float, invalid-Unicode string, and cyclic/over-limit tree. The entire traversal/root/fresh-copy boundary catches every ordinary `Exception` and replaces it with the caller-supplied input code before ledger access; it never catches `BaseException`. Regression-test each rejected family and a greater-than-64-bit exact integer through generation, manager, and one roster/exception entry point; assert zero ledger writes and prove none is treated as a duplicate of the corresponding legal JSON request. Add a coordinated exact-dict size-mutation race while the detacher traverses a large child and assert any resulting traversal failure is the same fixed input error with no probe/append call, never raw `RuntimeError`.
 
 Expose a read-only queue admission check, while keeping the append builder as the authority:
 
 ```python
 def probe_request(self, operation_kind: str, payload: object
                   ) -> DuplicateReceipt | ConflictReceipt | None:
-    parsed = parse_request_payload(operation_kind, payload)
-    digest = stable_digest(parsed) if isinstance(parsed, dict) else stable_digest(to_primitive(parsed))
+    if operation_kind != "suggestion-generate":
+        raise StaffingError("staffing_invalid_evidence", "probe operation_kind")
+    parsed = parse_generation_request(payload)
+    digest = _request_digest("suggestion-generate", parsed)
     return self.ledger.probe_request(operation_kind, parsed["request_id"], digest)
 ```
 
-Test `probe_request` returns `None`, the original duplicate receipt, or an idempotency conflict, and test that a subsequent reserve rechecks under the append lock so a probe cannot create a TOCTOU acceptance.
+`probe_request` is intentionally narrow: integration uses it only for duplicate-first generation queue admission. Generalizing it would require path context for manager responses and exception routes, so every other operation kind fails closed as local invalid evidence. Test the suggestion probe returns `None`, the original duplicate receipt, or an idempotency conflict, and test that a subsequent reserve rechecks under the append lock so a probe cannot create a TOCTOU acceptance. Probe and reserve must consume the same detached parser result and `_request_digest` recipe.
 
 Add boundary assertions that an invalid roster/unknown staff/invalid time remains a domain `400` error and a hash-chain or anchor corruption remains an unavailable `503` error; neither is converted to `STALE_REQUEST`.
 
@@ -2260,6 +2264,126 @@ def closed_request_id(value: object, *, code: str) -> str:
     except StaffingError as error:
         raise StaffingError(code, "request_id") from error
 
+MAX_REQUEST_DEPTH = 32
+MAX_REQUEST_OCCURRENCES = 524_289
+MIN_REQUEST_INTEGER = -(2 ** 63)
+MAX_REQUEST_INTEGER = (2 ** 63) - 1
+
+class _InvalidRequestTree(Exception):
+    pass
+
+def _detach_request_body(value: object, *, code: str) -> dict[str, object]:
+    occurrences = 0
+    ancestors: set[int] = set()
+
+    def fail() -> NoReturn:
+        raise _InvalidRequestTree
+
+    def visit(item: object, depth: int) -> object:
+        nonlocal occurrences
+        occurrences += 1
+        if occurrences > MAX_REQUEST_OCCURRENCES:
+            fail()
+        if type(item) in (dict, list):
+            if depth > MAX_REQUEST_DEPTH:
+                fail()
+            identity = id(item)
+            if identity in ancestors:
+                fail()
+            ancestors.add(identity)
+            try:
+                if type(item) is dict:
+                    output: dict[str, object] = {}
+                    for key, child in item.items():
+                        if type(key) is not str:
+                            fail()
+                        try:
+                            key.encode("utf-8")
+                        except UnicodeError:
+                            fail()
+                        output[key] = visit(child, depth + 1)
+                    return output
+                return [visit(child, depth + 1) for child in item]
+            finally:
+                ancestors.remove(identity)
+        if item is None or type(item) is bool:
+            return item
+        if type(item) is int:
+            if not MIN_REQUEST_INTEGER <= item <= MAX_REQUEST_INTEGER:
+                fail()
+            return item
+        if type(item) is float:
+            if not math.isfinite(item):
+                fail()
+            return item
+        if type(item) is str:
+            try:
+                item.encode("utf-8")
+            except UnicodeError:
+                fail()
+            return item
+        fail()
+
+    try:
+        detached = visit(value, 0)
+        if type(detached) is not dict:
+            fail()
+        return detached
+    except Exception:
+        raise StaffingError(code, "request body") from None
+
+GENERATION_REQUEST_KEYS = frozenset({
+    "schema", "request_id", "operator", "service_date",
+    "expected_revisions", "retry_of",
+})
+
+def parse_generation_request(value: object) -> dict[str, object]:
+    detached = _detach_request_body(value, code="staffing_invalid_request")
+    body = require_exact_object(
+        detached, GENERATION_REQUEST_KEYS,
+        code="staffing_invalid_request", detail="generation request fields",
+    )
+    if body["schema"] != "nxt-staffing-suggestion-generate/v1":
+        raise StaffingError("staffing_invalid_request", "schema")
+    try:
+        request_id = validate_identifier(body["request_id"], "request_id")
+        operator = validate_human_text(
+            body["operator"], "operator", maximum=128, formula_safe=True,
+        )
+        service_date = parse_local_date(body["service_date"], "service_date")
+        retry_of = (None if body["retry_of"] is None else
+                    validate_identifier(body["retry_of"], "retry_of"))
+    except StaffingError:
+        raise StaffingError("staffing_invalid_request", "generation request") from None
+    revisions = require_exact_object(
+        body["expected_revisions"], {"roster", "exception_set", "effective_plan"},
+        code="staffing_invalid_request", detail="expected_revisions",
+    )
+    if any(type(item) is not int or item < 0 for item in revisions.values()):
+        raise StaffingError("staffing_invalid_request", "expected_revisions")
+    return {
+        "schema": body["schema"], "request_id": request_id, "operator": operator,
+        "service_date": service_date.isoformat(),
+        "expected_revisions": {
+            "roster": revisions["roster"],
+            "exception_set": revisions["exception_set"],
+            "effective_plan": revisions["effective_plan"],
+        },
+        "retry_of": retry_of,
+    }
+
+def _request_digest(kind: str, detached_body: dict[str, object], *,
+                    suggestion_id: str | None = None) -> str:
+    if type(detached_body) is not dict:
+        raise StaffingError("staffing_invalid_evidence", "request body")
+    if kind == "manager-response":
+        if suggestion_id is None:
+            raise StaffingError("staffing_invalid_evidence", "suggestion_id")
+        return stable_digest({"suggestion_id": suggestion_id, "body": detached_body})
+    if suggestion_id is not None:
+        raise StaffingError("staffing_invalid_evidence", "request digest context")
+    return stable_digest(detached_body)
+
 class StaffingOperations:
     def __init__(self, ledger: StaffingLedger, *, site_id: str,
                  deployment_id: str, site_timezone: str) -> None:
@@ -2267,48 +2391,77 @@ class StaffingOperations:
         self.site_id, self.deployment_id = site_id, deployment_id
         self.site_timezone = site_timezone
     def import_roster(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("roster-import",
-            closed_request_id(payload, code="staffing_invalid_roster"), payload,
-            lambda h: event_for_roster(
-            h, validate_roster_import(payload, site_id=self.site_id, deployment_id=self.deployment_id,
-                                      site_timezone=self.site_timezone), payload, recorded_at))
+        body = _detach_request_body(payload, code="staffing_invalid_roster")
+        digest = _request_digest("roster-import", body)
+        return self._append_request(
+            "roster-import", closed_request_id(body, code="staffing_invalid_roster"), digest,
+            lambda h, d: event_for_roster(
+                h, validate_roster_import(
+                    body, site_id=self.site_id, deployment_id=self.deployment_id,
+                    site_timezone=self.site_timezone,
+                ), body, recorded_at, request_digest=d,
+            ),
+        )
     def record_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("exception-record",
-            closed_request_id(payload, code="staffing_invalid_roster"), payload,
-            lambda h: event_for_exception(
-            h, normalize_exception(
-                payload, roster=self._roster_for_history(h, payload)),
-            payload, recorded_at))
+        body = _detach_request_body(payload, code="staffing_invalid_roster")
+        digest = _request_digest("exception-record", body)
+        return self._append_request(
+            "exception-record", closed_request_id(body, code="staffing_invalid_roster"), digest,
+            lambda h, d: event_for_exception(
+                h, normalize_exception(
+                    body, roster=self._roster_for_history(h, body),
+                ), body, recorded_at, request_digest=d,
+            ),
+        )
     def cancel_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("exception-cancel",
-            closed_request_id(payload, code="staffing_invalid_roster"), payload,
-            lambda h: event_for_cancel(h, payload, recorded_at))
+        body = parse_exception_cancel_request(
+            _detach_request_body(payload, code="staffing_invalid_roster")
+        )
+        digest = _request_digest("exception-cancel", body)
+        return self._append_request(
+            "exception-cancel", body["request_id"], digest,
+            lambda h, d: event_for_cancel(h, body, recorded_at, request_digest=d),
+        )
     def correct_exception(self, payload: object, *, recorded_at: datetime) -> ReceiptResult:
-        return self._append_request("exception-correct",
-            closed_request_id(payload, code="staffing_invalid_roster"), payload,
-            lambda h: event_for_correction(h, payload, recorded_at))
+        body = parse_exception_correction_request(
+            _detach_request_body(payload, code="staffing_invalid_roster")
+        )
+        digest = _request_digest("exception-correct", body)
+        return self._append_request(
+            "exception-correct", body["request_id"], digest,
+            lambda h, d: event_for_correction(h, body, recorded_at, request_digest=d),
+        )
     def reserve_generation(self, payload: object, *, alias_nonce: bytes,
                            route_evidence: GenerationRouteEvidence,
                            prompt_template_version: str, language: str,
                            recorded_at: datetime) -> ReceiptResult:
-        def build(history: StaffingHistory) -> StaffingEvent:
-            basis = build_staffing_basis(history, date.fromisoformat(payload["service_date"]))
+        body = parse_generation_request(payload)
+        request_digest = _request_digest("suggestion-generate", body)
+        def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
+            basis = build_staffing_basis(history, date.fromisoformat(body["service_date"]))
+            expected = body["expected_revisions"]
+            if expected["roster"] != basis.basis.roster_revision:
+                raise StaffingError("STALE_ROSTER_REVISION", "expected_revisions")
+            if expected["exception_set"] != basis.basis.exception_set_revision:
+                raise StaffingError("STALE_EXCEPTION_SET_REVISION", "expected_revisions")
+            if expected["effective_plan"] != basis.basis.effective_plan_revision:
+                raise StaffingError("STALE_EFFECTIVE_PLAN_REVISION", "expected_revisions")
             projection = project_generation_request(
                 basis, alias_nonce=alias_nonce,
                 prompt_template_version=prompt_template_version, language=language)
-            return event_for_reservation(history, payload, projection, route_evidence, recorded_at)
+            return event_for_reservation(
+                history, body, projection, route_evidence, recorded_at,
+                request_digest=authoritative_digest,
+            )
         return self._append_request(
-            "suggestion-generate", closed_request_id(payload, code="INVALID_TRANSITION"),
-            payload, build)
+            "suggestion-generate", body["request_id"], request_digest, build)
 
-def _append_request(self, kind: str, request_id: str, payload: object,
-                    build: Callable[[StaffingHistory], StaffingEvent],
-                    *, digest_payload: object | None = None) -> ReceiptResult:
-        canonical = payload if digest_payload is None else digest_payload
-        digest = stable_digest(canonical) if isinstance(canonical, dict) else stable_digest(to_primitive(canonical))
+def _append_request(self, kind: str, request_id: str, request_digest: str,
+                    build: Callable[[StaffingHistory, str], StaffingEvent]
+                    ) -> ReceiptResult:
         def locked_builder(state):
             try:
-                prior = state.request(kind, request_id, digest)
+                prior = state.request(kind, request_id, request_digest)
             except StaffingError as error:
                 if error.code != "IDEMPOTENCY_CONFLICT":
                     raise
@@ -2316,7 +2469,7 @@ def _append_request(self, kind: str, request_id: str, payload: object,
             if prior is not None:
                 return ReturnReceiptDecision(prior)
             try:
-                return AppendEventDecision(build(state.history))
+                return AppendEventDecision(build(state.history, request_digest))
             except StaffingError as error:
                 if error.code not in {
                     "STALE_ROSTER_REVISION", "STALE_EXCEPTION_SET_REVISION",
@@ -2334,7 +2487,7 @@ def _append_request(self, kind: str, request_id: str, payload: object,
         return self.ledger.append_via(locked_builder)
 ```
 
-Each method supplies a builder to `StaffingLedger.append_via`; the builder replays and checks idempotency/CAS within the lock. `generation_reserved` stores its ledger sequence. Manager acceptance scans later records for any roster import and rejects it as `STALE_SUGGESTION`, while exception/effective-plan revisions remain scoped to the suggestion service date.
+Each public mutation first produces one closed, detached request body and calls `_request_digest` exactly once. Its event builder accepts that exact digest and copies it into the payload; no event helper may recompute a digest from a normalized DTO or timestamp. For the five bodies whose route identity is already injected into the object, the digest is `stable_digest(detached_body)`; manager response alone binds `{"suggestion_id": suggestion_id, "body": detached_body}`. Each method then supplies a builder to `StaffingLedger.append_via`; the builder replays and checks idempotency before CAS/build within the lock. `generation_reserved` stores its ledger sequence. Generation reservation compares all three parsed expected revisions to the current locked basis before projection and maps each mismatch to `STALE_REQUEST`. Manager acceptance scans later records for any roster import and rejects it as `STALE_SUGGESTION`, while exception/effective-plan revisions remain scoped to the suggestion service date.
 
 Use these closed manager helpers; local IDs never enter a provider patch:
 
@@ -2342,30 +2495,34 @@ Use these closed manager helpers; local IDs never enter a provider patch:
 def manager_identifier(value: object, field: str) -> str:
     try:
         return validate_identifier(value, field)
-    except StaffingError as error:
-        raise StaffingError("INVALID_TRANSITION", field) from error
+    except StaffingError:
+        raise StaffingError("staffing_invalid_request", field) from None
 
 def manager_code(value: object, field: str) -> str:
     try:
         return validate_code(value, field)
-    except StaffingError as error:
-        raise StaffingError("INVALID_TRANSITION", field) from error
+    except StaffingError:
+        raise StaffingError("staffing_invalid_request", field) from None
 
 def manager_human_text(value: object, field: str, *, minimum: int = 1,
                        maximum: int, formula_safe: bool = False) -> str:
     try:
         return validate_human_text(value, field, minimum=minimum, maximum=maximum,
                                    formula_safe=formula_safe)
-    except StaffingError as error:
-        raise StaffingError("INVALID_TRANSITION", field) from error
+    except StaffingError:
+        raise StaffingError("staffing_invalid_request", field) from None
 
-def parse_manager_response(value: object, *, suggestion_id: str) -> ManagerResponseRequest:
-    body = require_exact_object(value, {"schema", "request_id", "operator", "kind",
+def parse_manager_response(
+    value: object, *, suggestion_id: str,
+) -> tuple[ManagerResponseRequest, dict[str, object]]:
+    detached = _detach_request_body(value, code="staffing_invalid_request")
+    body = require_exact_object(detached, {"schema", "request_id", "operator", "kind",
                                         "expected_revisions", "candidate_index",
                                         "edited_operations", "reason_code", "note"},
-                                code="INVALID_TRANSITION", detail="manager response fields")
+                                code="staffing_invalid_request",
+                                detail="manager response fields")
     if body["schema"] != "nxt-staffing-manager-response/v1":
-        raise StaffingError("INVALID_TRANSITION", "schema")
+        raise StaffingError("staffing_invalid_request", "schema")
     manager_identifier(body["request_id"], "request_id")
     manager_identifier(suggestion_id, "suggestion_id")
     manager_human_text(body["operator"], "operator", maximum=128, formula_safe=True)
@@ -2374,27 +2531,28 @@ def parse_manager_response(value: object, *, suggestion_id: str) -> ManagerRespo
     kind = body["kind"]
     reason = body["reason_code"]
     if type(kind) is not str or kind not in {"ACCEPT", "MODIFY", "REJECT"}:
-        raise StaffingError("INVALID_TRANSITION", "unknown kind")
+        raise StaffingError("staffing_invalid_request", "unknown kind")
     if type(reason) is not str or reason not in MANAGER_REASON_CODES:
-        raise StaffingError("INVALID_TRANSITION", "unknown reason_code")
+        raise StaffingError("staffing_invalid_request", "unknown reason_code")
     revisions = require_exact_object(
         body["expected_revisions"], {"roster", "exception_set", "effective_plan"},
-        code="INVALID_TRANSITION", detail="expected_revisions")
+        code="staffing_invalid_request", detail="expected_revisions")
     if any(type(item) is not int or item < 0 for item in revisions.values()):
-        raise StaffingError("INVALID_TRANSITION", "expected_revisions")
+        raise StaffingError("staffing_invalid_request", "expected_revisions")
     expected = RevisionVector(revisions["roster"], revisions["exception_set"], revisions["effective_plan"])
     raw_operations = body["edited_operations"]
     if kind in {"ACCEPT", "REJECT"}:
         if raw_operations is not None:
-            raise StaffingError("INVALID_TRANSITION", "edited_operations must be null")
+            raise StaffingError("staffing_invalid_request", "edited_operations must be null")
         raw_operations = ()
     elif kind == "MODIFY":
         if type(raw_operations) is not list or not 1 <= len(raw_operations) <= 32:
-            raise StaffingError("INVALID_TRANSITION", "MODIFY requires 1..32 edited operations")
+            raise StaffingError("staffing_invalid_request", "MODIFY requires 1..32 edited operations")
     operations = []
+    wire_operations = []
     for item in raw_operations:
         if type(item) is not dict:
-            raise StaffingError("INVALID_TRANSITION", "edited operation object")
+            raise StaffingError("staffing_invalid_request", "edited operation object")
         operation = dict(item)
         if operation.get("operation") == "REMOVE" and set(operation) == {"operation", "assignment_id"}:
             assignment_id = manager_identifier(operation["assignment_id"], "assignment_id")
@@ -2408,35 +2566,51 @@ def parse_manager_response(value: object, *, suggestion_id: str) -> ManagerRespo
                                                   area_code, parse_manager_datetime(operation["start_at"]),
                                                   parse_manager_datetime(operation["end_at"])))
         else:
-            raise StaffingError("INVALID_TRANSITION", "edited_operations")
+            raise StaffingError("staffing_invalid_request", "edited_operations")
+        wire_operations.append(operation)
     remove_ids = tuple(item.assignment_id for item in operations
                        if item.operation == "REMOVE")
     if len(remove_ids) != len(set(remove_ids)):
-        raise StaffingError("INVALID_TRANSITION", "duplicate REMOVE")
+        raise StaffingError("staffing_invalid_request", "duplicate REMOVE")
     candidate_index = body["candidate_index"]
     if kind == "ACCEPT" and (type(candidate_index) is not int
                              or candidate_index not in (1, 2) or reason != "APPROVED"):
-        raise StaffingError("INVALID_TRANSITION", "ACCEPT requires candidate and APPROVED")
+        raise StaffingError("staffing_invalid_request", "ACCEPT requires candidate and APPROVED")
     if kind == "MODIFY" and (type(candidate_index) is not int
                              or candidate_index not in (1, 2)
                              or reason != "APPROVED_WITH_CHANGES"):
-        raise StaffingError("INVALID_TRANSITION", "MODIFY requires APPROVED_WITH_CHANGES")
+        raise StaffingError("staffing_invalid_request", "MODIFY requires APPROVED_WITH_CHANGES")
     if kind == "REJECT" and (candidate_index is not None or reason not in {
             "MANUAL_HANDLING", "INSUFFICIENT_CONTEXT", "OTHER"}):
-        raise StaffingError("INVALID_TRANSITION", "REJECT reason/candidate mismatch")
-    return ManagerResponseRequest(body["request_id"], suggestion_id, body["operator"], kind, expected,
-                                  candidate_index, tuple(operations), reason, body["note"])
+        raise StaffingError("staffing_invalid_request", "REJECT reason/candidate mismatch")
+    request = ManagerResponseRequest(
+        body["request_id"], suggestion_id, body["operator"], kind, expected,
+        candidate_index, tuple(operations), reason, body["note"],
+    )
+    canonical_body = {
+        "schema": body["schema"], "request_id": body["request_id"],
+        "operator": body["operator"], "kind": kind,
+        "expected_revisions": {
+            "roster": revisions["roster"],
+            "exception_set": revisions["exception_set"],
+            "effective_plan": revisions["effective_plan"],
+        },
+        "candidate_index": candidate_index,
+        "edited_operations": None if kind in {"ACCEPT", "REJECT"} else wire_operations,
+        "reason_code": reason, "note": body["note"],
+    }
+    return request, canonical_body
 
 def parse_manager_datetime(value: object) -> datetime:
     if (type(value) is not str
             or re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00(?:Z|[+-](?!00:00)\d{2}:\d{2})", value) is None):
-        raise StaffingError("INVALID_TRANSITION", "manager timestamp must be RFC3339")
+        raise StaffingError("staffing_invalid_request", "manager timestamp must be RFC3339")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as error:
-        raise StaffingError("INVALID_TRANSITION", "manager timestamp must be RFC3339") from error
+    except ValueError:
+        raise StaffingError("staffing_invalid_request", "manager timestamp must be RFC3339") from None
     if parsed.tzinfo is None or parsed.second or parsed.microsecond:
-        raise StaffingError("INVALID_TRANSITION", "manager timestamp must be aware minute precision")
+        raise StaffingError("staffing_invalid_request", "manager timestamp must be aware minute precision")
     return parsed
 
 def stored_candidate(history: StaffingHistory, generation_id: str,
@@ -2479,9 +2653,9 @@ Add a cross-plan field-set assertion before parsing: the routed request keys are
 
 Parametrize the parser with ACCEPT/REJECT carrying `edited_operations=None` and MODIFY carrying a nonempty array of at most 32 items; assert null becomes the internal empty tuple only for ACCEPT/REJECT, while null, empty, missing, or 33 items for MODIFY is rejected. Require every expected revision to have exact integer type and be nonnegative, rejecting booleans. Assert a manager basis/roster conflict returns `ConflictReceipt.code == "STALE_SUGGESTION"` and maps to HTTP `staffing_stale_suggestion` (409); ordinary stale revision conflicts remain `STALE_REQUEST`.
 
-Add a table-driven total-parser matrix that substitutes `list`, `dict`, `bool`, control-bearing strings, and overlong strings into `kind`, `reason_code`, `request_id`, `operator`, `assignment_id`, `staff_id`, `role_code`, and `area_code`. Direct parser calls must raise only `StaffingError("INVALID_TRANSITION", ...)`, never raw `TypeError`/`KeyError`; membership or duplicate-set checks run only after exact scalar validation. Repeat the matrix through the real `commit_manager_response` entry point: a non-object, missing, or malformed `request_id` raises that stable `StaffingError` before ledger access because no idempotency identity exists, while a valid request ID plus any other illegal field returns `ConflictReceipt.code == "INVALID_TRANSITION"`. It must never be rewritten to `STALE_REQUEST`; only the three stale revisions and template mismatch use that code, while `STALE_SUGGESTION` remains distinct. Reject space-separated datetimes, missing seconds, fractional seconds, naive values, lowercase `z`, signed zero (`+00:00`/`-00:00`), and malformed/out-of-range offsets. The exact manager ADD timestamp profile is `YYYY-MM-DDTHH:MM:00Z` for zero offset or the same form with a signed nonzero `±HH:MM` suffix before Task 3 applies timezone/service-date semantics.
+Add a table-driven total-parser matrix that substitutes `list`, `dict`, `bool`, control-bearing strings, and overlong strings into `kind`, `reason_code`, `request_id`, `operator`, `assignment_id`, `staff_id`, `role_code`, and `area_code`. Direct parser calls and the real `commit_manager_response` entry point must raise only `StaffingError("staffing_invalid_request", ...)` before ledger access for every closed-wire syntax failure: non-object input, missing/unknown fields (including hidden `suggestion_id`/`generation_id`), schema mismatch, malformed request ID, wrong scalar/container types, invalid branch coherence, and lexical timestamp failure. Integration maps that code to HTTP 400. Membership or duplicate-set checks run only after exact scalar validation. Valid syntax whose referenced suggestion/candidate/alias is absent, whose generation is not exactly one prior `suggestion_issued`, or whose generation already has a manager response is a locked lifecycle conflict and returns `ConflictReceipt.code == "INVALID_TRANSITION"` (HTTP 409). It must never be rewritten to `STALE_REQUEST`; only the three stale revisions and template mismatch use that code, while `STALE_SUGGESTION` remains distinct. Reject space-separated datetimes, missing seconds, fractional seconds, naive values, lowercase `z`, signed zero (`+00:00`/`-00:00`), and malformed/out-of-range offsets. The exact manager ADD timestamp profile is `YYYY-MM-DDTHH:MM:00Z` for zero offset or the same form with a signed nonzero `±HH:MM` suffix before Task 3 applies timezone/service-date semantics.
 
-Under one ledger builder, mutate exception/plan revisions after reservation while retaining the old expected vector and assert the current-basis digest comparison still returns `STALE_SUGGESTION`. Submit identical manager bodies with the same request ID to two suggestion IDs and assert their canonical digests differ, so neither is treated as a duplicate of the other.
+Under one ledger builder, mutate exception/plan revisions after reservation while retaining the old expected vector and assert the current-basis digest comparison still returns `STALE_SUGGESTION`. Submit identical manager bodies with the same request ID to two suggestion IDs and assert their canonical digests differ, so neither is treated as a duplicate of the other. Freeze separate valid MODIFY bodies using `Z`, `+08:00`, `-04:00`, and `-05:00`; the request digest binds each original validated wire spelling from the detached body while the event builder receives that authoritative digest directly, so DTO datetime normalization can never change idempotency identity.
 
 `parse_manager_response` maps `kind` to the internal `decision` field only when constructing `ManagerResponseCommittedPayload`; it maps the injected `suggestion_id` to `generation_id`, and `edited_operations` stays a closed local-operation union until each ID is inverse-mapped and validated.
 
@@ -2602,13 +2776,30 @@ def interrupt_generation(self, generation_id: str, *, recorded_at: datetime
 
 def commit_manager_response(self, payload: object, *, suggestion_id: str,
                             recorded_at: datetime) -> ReceiptResult:
-    request_id = closed_request_id(payload, code="INVALID_TRANSITION")
-    def build(history: StaffingHistory) -> StaffingEvent:
-        request = parse_manager_response(payload, suggestion_id=suggestion_id)
-        reservation = history.reservation(suggestion_id)
-        reservation_sequence = max(event.sequence for event in history.events
-                                   if event.event_type == "generation_reserved"
-                                   and event.payload.generation_id == suggestion_id)
+    request, body = parse_manager_response(payload, suggestion_id=suggestion_id)
+    request_digest = _request_digest(
+        "manager-response", body, suggestion_id=suggestion_id,
+    )
+    def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
+        reservations = tuple(
+            event for event in history.events
+            if event.event_type == "generation_reserved"
+            and event.payload.generation_id == suggestion_id
+        )
+        suggestions = tuple(
+            event for event in history.events
+            if event.event_type == "suggestion_issued"
+            and event.payload.generation_id == suggestion_id
+        )
+        responses = tuple(
+            event for event in history.events
+            if event.event_type == "manager_response_committed"
+            and event.payload.generation_id == suggestion_id
+        )
+        if len(reservations) != 1 or len(suggestions) != 1 or responses:
+            raise StaffingError("INVALID_TRANSITION", "manager response lifecycle")
+        reservation = reservations[0].payload
+        reservation_sequence = reservations[0].sequence
         if any(event.sequence > reservation_sequence and event.event_type == "roster_imported"
                for event in history.events):
             raise StaffingError("STALE_SUGGESTION", suggestion_id)
@@ -2660,11 +2851,13 @@ def commit_manager_response(self, payload: object, *, suggestion_id: str,
             effective = validation.materialized_schedule
         else:
             effective = None
-        return manager_response_event(history, request, reservation.basis_snapshot,
-                                      effective, recorded_at)
+        return manager_response_event(
+            history, request, reservation.basis_snapshot, effective, recorded_at,
+            request_digest=authoritative_digest,
+        )
     return self._append_request(
-        "manager-response", request_id, payload, build,
-        digest_payload={"suggestion_id": suggestion_id, "body": payload})
+        "manager-response", request.request_id, request_digest, build,
+    )
 def recover_interrupted_generations(self, *, recorded_at: datetime
                                     ) -> tuple[EventCommit | ConflictReceipt, ...]:
     history = self.ledger.read()

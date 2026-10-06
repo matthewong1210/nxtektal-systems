@@ -1856,7 +1856,7 @@ CONFLICT_TO_HTTP_ERROR = {
     ),
 }
 INVALID_INPUT_CODES = frozenset({
-    "staffing_invalid_roster", "staffing_unknown_field",
+    "staffing_invalid_request", "staffing_invalid_roster", "staffing_unknown_field",
     "staffing_identity_mismatch", "invalid_exception_time",
     "unknown_staff_or_shift",
 })
