@@ -96,6 +96,10 @@ BANNED_FIRST_PARTY_MENTIONS = (
     # only Range Operations projections and never touches the map layer.
     "nxt_course_world_model",
     "nxt_edge_task",
+    # Business operational-context records reach the service only as plain
+    # data through the composition seam's context reader; the service never
+    # imports or names the leaf that owns them.
+    "nxt_operational_context",
 )
 
 OTHER_PACKAGES = (
@@ -116,6 +120,7 @@ OTHER_PACKAGES = (
     "nxt_workflow_enablement",
     "nxt_course_world_model",
     "nxt_edge_task",
+    "nxt_operational_context",
 )
 
 BANNED_CALL_NAMES = {

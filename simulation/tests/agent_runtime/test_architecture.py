@@ -106,6 +106,7 @@ OTHER_PACKAGES = (
     "nxt_course_world_model",
     "nxt_edge_task",
     "nxt_edge_interventions",
+    "nxt_operational_context",
 )
 
 

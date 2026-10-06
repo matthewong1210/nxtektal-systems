@@ -160,6 +160,7 @@ OTHER_PACKAGES = (
     # data from composition roots and must not import the adapter kit.
     "nxt_site_agent",
     "nxt_edge_interventions",
+    "nxt_operational_context",
 )
 
 

@@ -1,0 +1,9 @@
+{
+  "schema": "nxt-operational-context/source-profile/v1",
+  "profiles": {
+    "staffing": {"adapter_id": "csv-staffing", "adapter_version": "0.1.0", "source_timezone": "Asia/Shanghai", "stale_after_s": 7200, "clock_skew_tolerance_s": 300, "demand_window_s": 3600, "sku_ball_units": {}},
+    "sales": {"adapter_id": "csv-sales", "adapter_version": "0.1.0", "source_timezone": "Asia/Shanghai", "stale_after_s": 3600, "clock_skew_tolerance_s": 300, "demand_window_s": 3600, "sku_ball_units": {"BUCKET-S": 50, "BUCKET-M": 100, "BUCKET-L": 150}},
+    "play": {"adapter_id": "csv-play", "adapter_version": "0.1.0", "source_timezone": "Asia/Shanghai", "stale_after_s": 3600, "clock_skew_tolerance_s": 300, "demand_window_s": 3600, "sku_ball_units": {}}
+  },
+  "exported_at": {"staffing": "2026-08-08T18:40:00+08:00", "sales": "2026-08-08T18:40:00+08:00", "play": "2026-08-08T18:40:00+08:00"}
+}
