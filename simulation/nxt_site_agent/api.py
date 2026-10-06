@@ -30,6 +30,7 @@ cross-origin headers: the console is served same-origin.
 from __future__ import annotations
 
 import json
+import math
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,8 +45,12 @@ from .contracts import (
 from .service import SiteAgentService
 
 _MAX_BODY_BYTES = 65536
+_MAX_ROSTER_BODY_BYTES = 1_048_576
 _COLLECTION_EXECUTIONS_PATH = "/api/v1/collection-executions"
 _COLLECTION_REQUESTS_PATH = f"{_COLLECTION_EXECUTIONS_PATH}/requests/"
+_STAFFING_PATH = "/api/v1/staffing"
+_STAFFING_ROSTER_IMPORTS_PATH = f"{_STAFFING_PATH}/roster-imports"
+_STAFFING_SUGGESTIONS_PATH = f"{_STAFFING_PATH}/suggestions"
 _COLLECTION_ERROR_CODES = frozenset(
     {
         "collection_execution_invalid_request",
@@ -56,6 +61,20 @@ _COLLECTION_ERROR_CODES = frozenset(
         "collection_execution_result_unknown",
     }
 )
+_STAFFING_ERROR_DETAILS = {
+    "staffing_invalid_request": "request body is invalid",
+    "staffing_not_found": "staffing resource was not found",
+    "staffing_request_not_found": (
+        "no committed request in verified evidence"
+    ),
+    "staffing_conflict": (
+        "request_id is already bound to different content"
+    ),
+    "staffing_stale_suggestion": "staffing basis has changed",
+    "staffing_busy": "generation capacity is full",
+    "staffing_unavailable": "staffing evidence is unavailable",
+}
+_STAFFING_ERROR_CODES = frozenset(_STAFFING_ERROR_DETAILS)
 
 _STATUS_BY_CODE = {
     "course_ops_unavailable": 503,
@@ -74,6 +93,13 @@ _STATUS_BY_CODE = {
     "planning_not_ready": 409,
     "planning_unavailable": 503,
     "planning_result_unknown": 503,
+    "staffing_invalid_request": 400,
+    "staffing_not_found": 404,
+    "staffing_request_not_found": 404,
+    "staffing_conflict": 409,
+    "staffing_stale_suggestion": 409,
+    "staffing_busy": 429,
+    "staffing_unavailable": 503,
     "unknown_recommendation": 404,
     "task_ops_conflict": 409,
     "task_ops_unavailable": 503,
@@ -132,6 +158,66 @@ def _is_collection_execution_path(path: str) -> bool:
     return path == _COLLECTION_EXECUTIONS_PATH or path.startswith(
         f"{_COLLECTION_EXECUTIONS_PATH}/"
     )
+
+
+def _classify_staffing_path(path: str) -> tuple[bool, str | None]:
+    """Return namespace membership and the exact route's allowed method."""
+
+    if path != _STAFFING_PATH and not path.startswith(
+        f"{_STAFFING_PATH}/"
+    ):
+        return False, None
+    parts = tuple(path[1:].split("/"))
+    if parts == ("api", "v1", "staffing"):
+        return True, "GET"
+    if (
+        len(parts) == 5
+        and parts[:4] == ("api", "v1", "staffing", "dates")
+        and bool(parts[4])
+    ):
+        return True, "GET"
+    if (
+        len(parts) == 6
+        and parts[:4] == ("api", "v1", "staffing", "requests")
+        and bool(parts[4])
+        and bool(parts[5])
+    ):
+        return True, "GET"
+    if parts in (
+        ("api", "v1", "staffing", "roster-imports"),
+        ("api", "v1", "staffing", "exceptions"),
+        ("api", "v1", "staffing", "suggestions"),
+    ):
+        return True, "POST"
+    if (
+        len(parts) == 6
+        and parts[:4] == ("api", "v1", "staffing", "exceptions")
+        and bool(parts[4])
+        and parts[5] in ("cancel", "correct")
+    ):
+        return True, "POST"
+    if (
+        len(parts) == 6
+        and parts[:4] == ("api", "v1", "staffing", "suggestions")
+        and bool(parts[4])
+        and parts[5] in ("accept", "modify", "reject")
+    ):
+        return True, "POST"
+    return True, None
+
+
+def _is_staffing_path(path: str) -> bool:
+    in_namespace, _ = _classify_staffing_path(path)
+    return in_namespace
+
+
+def _staffing_method(path: str) -> str | None:
+    _, expected_method = _classify_staffing_path(path)
+    return expected_method
+
+
+def _is_staffing_route(method: str, path: str) -> bool:
+    return _staffing_method(path) == method
 
 
 def _valid_identifier(value: object) -> bool:
@@ -276,7 +362,12 @@ class _Handler(BaseHTTPRequestHandler):
             return False, f"cross-origin request from {origin!r} refused"
         return True, None
 
-    def _read_body(self) -> dict[str, Any]:
+    def _read_body(
+        self,
+        *,
+        max_bytes: int = _MAX_BODY_BYTES,
+        strict_json: bool = False,
+    ) -> dict[str, Any]:
         # An unsupported framing (chunked) or an error before the body is
         # read leaves bytes on a keep-alive socket that would be parsed
         # as the next request, so close the connection in those cases.
@@ -298,22 +389,58 @@ class _Handler(BaseHTTPRequestHandler):
             raise SiteAgentError(
                 "invalid_request", "Content-Length must be non-negative"
             )
-        if length > _MAX_BODY_BYTES:
+        if length > max_bytes:
             self.close_connection = True
             raise SiteAgentError(
                 "body_too_large",
-                f"request bodies are limited to {_MAX_BODY_BYTES} bytes",
+                f"request bodies are limited to {max_bytes} bytes",
             )
         if length == 0:
             return {}
         raw = self.rfile.read(length)
         try:
-            payload = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError) as exc:
+            if strict_json:
+
+                def reject_pairs(
+                    pairs: list[tuple[str, Any]],
+                ) -> dict[str, Any]:
+                    result: dict[str, Any] = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise ValueError(f"duplicate JSON key: {key}")
+                        result[key] = value
+                    return result
+
+                def reject_constant(value: str) -> None:
+                    raise ValueError(f"non-finite JSON constant: {value}")
+
+                def parse_finite_float(value: str) -> float:
+                    result = float(value)
+                    if not math.isfinite(result):
+                        raise ValueError(f"non-finite JSON number: {value}")
+                    return result
+
+                payload = json.loads(
+                    raw.decode("utf-8"),
+                    object_pairs_hook=reject_pairs,
+                    parse_constant=reject_constant,
+                    parse_float=parse_finite_float,
+                )
+            else:
+                payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+            if strict_json:
+                raise SiteAgentError(
+                    "staffing_invalid_request", "request body is invalid"
+                ) from exc
             raise SiteAgentError(
                 "invalid_request", f"request body is not valid JSON: {exc}"
             ) from exc
         if not isinstance(payload, dict):
+            if strict_json:
+                raise SiteAgentError(
+                    "staffing_invalid_request", "request body is invalid"
+                )
             raise SiteAgentError(
                 "invalid_request", "request body must be a JSON object"
             )
@@ -324,16 +451,19 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler naming
         path = self.path.split("?", 1)[0]
         try:
+            if self.headers.get("Content-Length") or self.headers.get(
+                "Transfer-Encoding"
+            ):
+                # Set this before any Host/Origin response: an unread GET
+                # body must never remain on a keep-alive connection.
+                self.close_connection = True
             allowed, reason = self._request_allowed()
             if not allowed:
                 self._send_error_code("forbidden_origin", reason or "refused")
                 return
-            if self.headers.get("Content-Length") or self.headers.get(
-                "Transfer-Encoding"
-            ):
-                # A GET carrying an unread body would desync keep-alive.
-                self.close_connection = True
-            if _is_collection_execution_path(path):
+            if _is_staffing_path(path):
+                self._serve_staffing("GET", path, {})
+            elif _is_collection_execution_path(path):
                 self._serve_collection_executions(path)
             elif path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
                 self._serve_course(path)
@@ -390,6 +520,35 @@ class _Handler(BaseHTTPRequestHandler):
             if _is_collection_execution_path(path):
                 self._reject_collection_execution_mutation()
                 return
+            in_staffing, expected_method = _classify_staffing_path(path)
+            if in_staffing and expected_method != "POST":
+                if self.headers.get("Content-Length") or self.headers.get(
+                    "Transfer-Encoding"
+                ):
+                    self.close_connection = True
+                if expected_method is None:
+                    self._send_error_code(
+                        "staffing_not_found",
+                        _STAFFING_ERROR_DETAILS["staffing_not_found"],
+                    )
+                else:
+                    self._send_error_code(
+                        "method_not_allowed",
+                        f"staffing path requires {expected_method}",
+                    )
+                return
+            if in_staffing:
+                max_bytes = (
+                    _MAX_ROSTER_BODY_BYTES
+                    if path == _STAFFING_ROSTER_IMPORTS_PATH
+                    else _MAX_BODY_BYTES
+                )
+                body = self._read_body(
+                    max_bytes=max_bytes,
+                    strict_json=True,
+                )
+                self._serve_staffing("POST", path, body)
+                return
             body = self._read_body()
             if path == "/api/v1/course-ops" or path.startswith("/api/v1/course-ops/"):
                 raise SiteAgentError("method_not_allowed", "course evidence is read-only")
@@ -434,13 +593,31 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _serve_other_mutation_method(self) -> None:
         path = self.path.split("?", 1)[0]
-        if not _is_collection_execution_path(path):
+        is_collection = _is_collection_execution_path(path)
+        is_staffing, expected_method = _classify_staffing_path(path)
+        if not is_collection and not is_staffing:
             self.send_error(501, f"Unsupported method ({self.command!r})")
             return
         allowed, reason = self._request_allowed()
         if not allowed:
             self.close_connection = True
             self._send_error_code("forbidden_origin", reason or "refused")
+            return
+        if is_staffing:
+            if self.headers.get("Content-Length") or self.headers.get(
+                "Transfer-Encoding"
+            ):
+                self.close_connection = True
+            if expected_method is None:
+                self._send_error_code(
+                    "staffing_not_found",
+                    _STAFFING_ERROR_DETAILS["staffing_not_found"],
+                )
+            else:
+                self._send_error_code(
+                    "method_not_allowed",
+                    f"staffing path requires {expected_method}",
+                )
             return
         self._reject_collection_execution_mutation()
 
@@ -580,6 +757,66 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_staffing(
+        self, method: str, path: str, body: dict[str, Any]
+    ) -> None:
+        expected_method = _staffing_method(path)
+        if expected_method is None:
+            raise SiteAgentError(
+                "staffing_not_found",
+                _STAFFING_ERROR_DETAILS["staffing_not_found"],
+            )
+        if not _is_staffing_route(method, path):
+            raise SiteAgentError(
+                "method_not_allowed",
+                f"staffing path requires {expected_method}",
+            )
+        status = (
+            202
+            if method == "POST" and path == _STAFFING_SUGGESTIONS_PATH
+            else 200
+        )
+        self._send_json(
+            status,
+            _envelope(self._route_staffing(method, path, body)),
+        )
+
+    def _route_staffing(
+        self, method: str, path: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        callback = self.server.staffing_operations  # type: ignore[attr-defined]
+        if callback is None:
+            raise SiteAgentError(
+                "staffing_unavailable", "staffing evidence is unavailable"
+            )
+        try:
+            result = callback(method, path, body)
+            if not isinstance(result, dict):
+                raise TypeError("staffing callback returned non-dictionary")
+            normalized = json.loads(
+                json.dumps(
+                    result,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                ).encode("utf-8")
+            )
+            if type(normalized) is not dict:
+                raise TypeError("staffing callback returned non-object JSON")
+            return normalized
+        except SiteAgentError as exc:
+            if exc.code in _STAFFING_ERROR_CODES:
+                raise SiteAgentError(
+                    exc.code, _STAFFING_ERROR_DETAILS[exc.code]
+                ) from exc
+            raise SiteAgentError(
+                "staffing_unavailable", "staffing evidence is unavailable"
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 - injected callback boundary
+            raise SiteAgentError(
+                "staffing_unavailable", "staffing evidence is unavailable"
+            ) from exc
+
     def _route_planning(self, method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
         callback = self.server.planning_operations
         if callback is None:
@@ -694,6 +931,10 @@ class _Server(ThreadingHTTPServer):
         collection_executions: Callable[[], dict[str, Any]] | None = None,
         collection_execution_request: Callable[[str], dict[str, Any]] | None = None,
         collection_execution_parser: Callable[[object, str], dict[str, Any]] | None = None,
+        staffing_operations: Callable[
+            [str, str, dict[str, Any]], dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         self.service = service
         self.console_dir = console_dir
@@ -704,6 +945,7 @@ class _Server(ThreadingHTTPServer):
         self.collection_executions = collection_executions
         self.collection_execution_request = collection_execution_request
         self.collection_execution_parser = collection_execution_parser
+        self.staffing_operations = staffing_operations
         super().__init__(address, _Handler)
 
 
@@ -724,6 +966,10 @@ class SiteAgentApiServer:
         collection_executions: Callable[[], dict[str, Any]] | None = None,
         collection_execution_request: Callable[[str], dict[str, Any]] | None = None,
         collection_execution_parser: Callable[[object, str], dict[str, Any]] | None = None,
+        staffing_operations: Callable[
+            [str, str, dict[str, Any]], dict[str, Any]
+        ]
+        | None = None,
     ) -> None:
         if host not in LOOPBACK_HOSTS:
             raise SiteAgentError(
@@ -755,6 +1001,7 @@ class SiteAgentApiServer:
             collection_executions,
             collection_execution_request,
             collection_execution_parser,
+            staffing_operations,
         )
         self._thread: threading.Thread | None = None
         self._serving = False
