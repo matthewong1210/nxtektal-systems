@@ -492,7 +492,7 @@ In JSON Schema, express this with `oneOf` branches containing `const` values for
 | `suggestion_unavailable` | `suggestion-generate` | terminal state other than `SUCCEEDED` | `SUGGESTION_UNAVAILABLE` |
 | `manager_response_committed` | `manager-response` | `COMMITTED` | `MANAGER_RESPONSE_COMMITTED` |
 
-Composition-owned `project_request_to_wire()` is the sole adapter for this table; the domain `request_projection()` returns only its closed local projection and never imports or manufactures HTTP fields. The composition adapter copies internal `generation_id` to public `suggestion_id`, copies the domain receipt `event_id` to `operation_id`, and rejects an impossible replay tuple rather than manufacturing a fallback record. A recovery GET always uses `disposition: "duplicate"`; a mutation response supplies that field from its `CommittedReceipt`/`DuplicateReceipt` result.
+Composition-owned `project_request_to_wire()` is the sole adapter for this table; the domain `request_projection()` returns only its closed local projection and never imports or manufactures HTTP fields. The composition adapter copies internal `generation_id` to public `suggestion_id`, copies the domain receipt `event_id` to `operation_id`, and rejects an impossible replay tuple rather than manufacturing a fallback record. A recovery GET always uses `disposition: "duplicate"`; a business mutation response supplies that field from its `CommittedReceipt`/`DuplicateReceipt` result. Provider-attempt, suggestion-terminal, and interruption writes instead return the ledger-owned `EventCommit`; worker/observer code may ignore that success value, never passes it to `to_wire_receipt`, and still treats any raised validation, integrity, or I/O error as fail-closed.
 For every candidate, `project_request_to_wire` and `project_date_to_wire` map each domain `CoverageGap` exactly as follows: `required` to `required_count`, `actual` to `assigned_count`, and the constant string `COVERAGE_GAP` to `rejection_code`. The JSON Schema permits only that literal rejection code. Add a projection test that asserts this complete mapping and rejects a missing, renamed, or invented gap field.
 For provenance, pair each internal `AttemptStartedEvidence` with its matching `AttemptFinishedEvidence` by attempt index, then emit one `ProviderProvenance`; `input_digest` comes from the start record and the bounded failure/token fields come from the finish record. The internal attempt status is used only to derive the generation state and terminal record and is not copied into public provenance. An unmatched start changes the generation state to `IN_PROGRESS` but is not serialized as a fake finished provenance row. Alias maps, nonce digests, timeout values, prompts, and raw outputs remain private.
 
@@ -1289,6 +1289,8 @@ class LedgerAttemptObserver:
 ```
 
 Neither mapper may carry raw messages, decoded output, secrets, endpoint, response body, latency, or exception text.
+
+`record_attempt_started`, `record_attempt_finished`, and `commit_generation_result` return `EventCommit`; `interrupt_generation` returns `EventCommit | ConflictReceipt`. `LedgerAttemptObserver` and the generation worker intentionally ignore successful `EventCommit` values. These internal lifecycle results are not `ReceiptResult`, are never converted to HTTP operation records, and cannot be mistaken for a second `suggestion-generate` request.
 
 - [ ] **Step 14: Implement the explicit domain-to-wire projection primitives**
 

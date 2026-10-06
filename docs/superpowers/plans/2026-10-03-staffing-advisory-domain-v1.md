@@ -689,7 +689,7 @@ class VerifiedLedgerState:
         return None
 ```
 
-Operation builders return `ReceiptResult`: `CommittedReceipt` for a new append, `DuplicateReceipt` for an identical canonical payload found before stale checks, or `ConflictReceipt` for a changed payload, stale CAS, or illegal transition. A duplicate never appends a second event.
+The six idempotent business-operation builders represented by `EVENT_TO_OPERATION` return `ReceiptResult`: `CommittedReceipt` for a new append, `DuplicateReceipt` for an identical canonical payload found before stale checks, or `ConflictReceipt` for a changed payload, stale CAS, or illegal transition. A duplicate never appends a second event. Provider-attempt, suggestion-terminal, and interruption events are internal lifecycle records rather than new business requests; Task 6 gives those records the separate `EventCommit` result and they never manufacture a `StaffingReceipt` or extend `EVENT_TO_OPERATION`.
 
 The stored receipt and every `CommittedReceipt` have `duplicate=False`. A duplicate return reconstructs the immutable receipt with `duplicate=True` and wraps it in `DuplicateReceipt`; the stored original remains unchanged. `CommittedReceipt.__post_init__` rejects `duplicate=True`, and `DuplicateReceipt.__post_init__` rejects `duplicate=False`, so wrapper and inner flag always agree.
 
@@ -1924,7 +1924,7 @@ git commit -m "feat(staffing): freeze workflow event replay"
 
 **Interfaces:**
 - Consumes: one resolved staffing root, fixed identity, and a builder returning one locked `AppendDecision`.
-- Produces: fully verified history, one durable append receipt, hash-chain head, and independently fsynced high-water anchor.
+- Produces: fully verified history, a business `ReceiptResult` or internal `EventCommit` as appropriate, hash-chain head, and independently fsynced high-water anchor.
 
 - [ ] **Step 1: Add failing canonical record and anchor tests**
 
@@ -1956,7 +1956,18 @@ class LedgerRecord:
     previous_hash: str
     record_hash: str
     canonical_line: bytes
+
+@dataclass(frozen=True, slots=True)
+class EventCommit:
+    event_id: str
+    sequence: int
+    record_hash: str
+
+class StaffingLedgerIntegrityError(RuntimeError):
+    pass
 ```
+
+`EventCommit` is owned and exported by `ledger.py`; it is the success result only for `provider_attempt_started`, `provider_attempt_finished`, `suggestion_issued`, `suggestion_unavailable`, and `generation_interrupted`. It is frozen/slotted and validates an exact identifier, exact positive integer sequence, and exact digest before any write. It is not a request receipt and is never projected to the Manager API. `append_via` accepts only a newly appended event present in `EVENT_TO_OPERATION`; `append_event_via` accepts only a newly appended event absent from that mapping. Both reject the wrong event category before any filesystem mutation. `StaffingLedgerIntegrityError` is the stable public failure for on-disk JSON, canonicality, chain, anchor, identity, replay, permission, symlink, and unsupported-file-state failures; it contains only fixed path-component/category details, never payload data or an underlying exception string. A builder's own `StaffingError` propagates unchanged.
 
 Freeze anchor keys/schema:
 
@@ -1973,7 +1984,7 @@ Cover partial final line, CRLF/noncanonical whitespace, duplicate key, changed p
 
 - [ ] **Step 3: Add failing concurrency and fsync-order tests**
 
-Construct two `StaffingLedger` instances for the same normalized path and block one builder with a barrier. Prove the other cannot enter replay/precondition until the first releases. Spy on write/flush/fsync/replace/directory fsync order. A refused builder returns no event and leaves ledger/anchor bytes identical.
+Construct two `StaffingLedger` instances for the same normalized path and block one builder with a barrier. Prove the other cannot enter replay/precondition until the first releases. Also block an exclusive writer after it obtains the file lock and prove `read`, `verify`, and `probe_request` cannot observe a ledger/anchor intermediate state through a second instance. Spy on write/flush/fsync/replace/directory fsync order. A duplicate, conflict, refused builder, wrong event category, invalid decision, or result-construction failure returns or raises before any append and leaves ledger/anchor bytes identical.
 
 - [ ] **Step 4: Run ledger tests and verify RED**
 
@@ -1997,11 +2008,15 @@ def _thread_lock(path: Path) -> threading.RLock:
         return _LOCKS.setdefault(key, threading.RLock())
 ```
 
-Every read, verify, replay, builder, append, and anchor update holds this mutex; writes additionally hold exclusive `fcntl` on `.staffing.lock`. Resolve and pin the root once, refuse symlink components/targets, and use `O_NOFOLLOW` where the platform exposes it. Fail construction on non-POSIX. Do not offer production repair/truncate/discard-anchor methods.
+Every read, verify, replay, builder, append, and anchor update holds this mutex. `read`, `verify`, and `probe_request` additionally hold a shared `fcntl` lock on `.staffing.lock`; both append APIs hold an exclusive lock continuously from verified replay through builder execution, ledger fsync, and anchor replacement. Resolve and pin the root once, reject every symlink component before resolution, keep an open root directory descriptor, open all children relative to it, use `O_NOFOLLOW` where the platform exposes it, and require every ledger/anchor/lock/temp target to be a regular non-symlink file. Fail construction on non-POSIX before any filesystem mutation. Force the dedicated root to `0700` and every persistent or temporary child to `0600`. Do not offer production repair/truncate/discard-anchor methods.
+
+Freeze construction as `StaffingLedger(root: str | Path, *, site_id: str, deployment_id: str)`. Validate both identities before filesystem access. The supplied root is the dedicated staffing directory itself; construction may create missing ordinary directories, but must inspect each existing path component without following it and fail if any component is a symlink or non-directory. After opening the final root with directory/no-follow flags, all child opens, stats, temp replacement, and directory fsync operations are relative to that pinned descriptor so no later path lookup can redirect storage.
 
 - [ ] **Step 6: Implement verify → replay → append → fsync → anchor**
 
-Expose:
+Freeze `GENESIS_HASH = "0" * 64`, exact integer record `schema_version = 1`, anchor schema `"nxt-staffing-ledger-anchor/v1"`, and fixed temp name `staffing.anchor.json.tmp`. The anchor is canonical UTF-8 JSON with no trailing newline. A leftover ordinary temp may be truncated and replaced only while the exclusive lock is held; a symlink or non-regular temp fails closed.
+
+Expose two deliberately separate append paths:
 
 ```python
 class StaffingLedger:
@@ -2013,20 +2028,56 @@ class StaffingLedger:
         with self._critical_section():
             state = self._read_verified_unlocked()
             decision = builder(state)
-            if isinstance(decision, ReturnReceiptDecision):
+            if type(decision) is ReturnReceiptDecision:
+                # Require the exact duplicate=False receipt object supplied in
+                # this verified state; a forged equal copy is not accepted.
+                if not any(decision.receipt is item for item in state.receipts):
+                    raise StaffingError("staffing_invalid_evidence", "return receipt")
                 return DuplicateReceipt(replace(decision.receipt, duplicate=True))
-            if isinstance(decision, ConflictDecision):
+            if type(decision) is ConflictDecision:
+                validate_conflict_decision(decision)
                 return ConflictReceipt(decision.operation_kind, decision.request_id, decision.code)
-            next_history = transition(state.history, decision.event)
-            if (next_history.record_count != state.record_count + 1
-                    or decision.event.sequence != state.record_count + 1
-                    or decision.event.site_id != self.site_id
-                    or decision.event.deployment_id != self.deployment_id):
-                raise StaffingError("staffing_invalid_event", "append transition")
-            record = self._canonical_record(state, decision.event)
-            self._append_and_fsync(record)
-            self._write_and_fsync_anchor(record)
-            return CommittedReceipt(receipt_from_record(record, duplicate=False))
+            if type(decision) is not AppendEventDecision:
+                raise StaffingError("staffing_invalid_evidence", "append decision")
+            if decision.event.event_type not in EVENT_TO_OPERATION:
+                raise StaffingError("staffing_invalid_event", "business append category")
+            prepared = self._prepare_append(state, decision.event, business=True)
+            self._persist_prepared(prepared)
+            return prepared.result  # prebuilt exact CommittedReceipt
+
+    @overload
+    def append_event_via(
+        self,
+        builder: Callable[[VerifiedLedgerState], AppendEventDecision],
+    ) -> EventCommit: ...
+
+    @overload
+    def append_event_via(
+        self,
+        builder: Callable[
+            [VerifiedLedgerState], AppendEventDecision | ConflictDecision
+        ],
+    ) -> EventCommit | ConflictReceipt: ...
+
+    def append_event_via(
+        self,
+        builder: Callable[
+            [VerifiedLedgerState], AppendEventDecision | ConflictDecision
+        ],
+    ) -> EventCommit | ConflictReceipt:
+        with self._critical_section():
+            state = self._read_verified_unlocked()
+            decision = builder(state)
+            if type(decision) is ConflictDecision:
+                validate_conflict_decision(decision)
+                return ConflictReceipt(decision.operation_kind, decision.request_id, decision.code)
+            if type(decision) is not AppendEventDecision:
+                raise StaffingError("staffing_invalid_evidence", "event append decision")
+            if decision.event.event_type in EVENT_TO_OPERATION:
+                raise StaffingError("staffing_invalid_event", "internal append category")
+            prepared = self._prepare_append(state, decision.event, business=False)
+            self._persist_prepared(prepared)
+            return prepared.result  # prebuilt exact EventCommit
     def probe_request(self, operation_kind: str, request_id: str,
                       request_digest: str) -> DuplicateReceipt | ConflictReceipt | None:
         with self._critical_section():
@@ -2050,7 +2101,7 @@ class StaffingLedger:
         count = len(parsed)
         head_hash = parsed[-1].record_hash if parsed else GENESIS_HASH
         self._verify_hash_chain(parsed)
-        self._verify_anchor(count, head_hash)
+        self._verify_anchor(parsed)
         replayed = replay_staffing(events, site_id=self.site_id, deployment_id=self.deployment_id)
         receipts = tuple(receipt_from_record(item) for item in parsed
                           if item.event.event_type in EVENT_TO_OPERATION)
@@ -2062,21 +2113,39 @@ def receipt_from_record(record, duplicate=False):
                            payload.request_digest, record.event.event_id, record.sequence,
                            record.record_hash, duplicate)
 
-def _canonical_record(self, state, event):
-    body = {"schema_version": 1, "sequence": state.record_count + 1,
-            "event_id": event.event_id, "event_type": event.event_type,
-            "site_id": event.site_id, "deployment_id": event.deployment_id,
-            "occurred_at_utc": event.occurred_at_utc, "payload": event.payload,
-            "causation_id": event.causation_id, "previous_hash": state.head_hash}
-    body["record_hash"] = stable_digest(to_primitive(body))
-    canonical_line = canonical_json(body).encode("utf-8") + b"\n"
-    return LedgerRecord(event=event, sequence=body["sequence"],
-                        previous_hash=body["previous_hash"],
-                        record_hash=body["record_hash"],
-                        canonical_line=canonical_line)
+def _prepare_append(self, state, supplied_event, *, business):
+    # Validate the direct object, then cross the hostile-object boundary once.
+    transition(state.history, supplied_event)
+    event_primitive = to_primitive(supplied_event)
+    canonical_event = parse_event(
+        event_primitive, site_id=self.site_id, deployment_id=self.deployment_id,
+    )
+    next_history = transition(state.history, canonical_event)
+    if (next_history.record_count != state.record_count + 1
+            or canonical_event.sequence != state.record_count + 1):
+        raise StaffingError("staffing_invalid_event", "append transition")
+    # From here onward use only the detached canonical event/exact built-ins;
+    # never reread supplied_event. Hash and line share this one record body.
+    body = exact_record_body(canonical_event, state.head_hash)
+    record_hash = stable_digest(body)
+    full_body = {**body, "record_hash": record_hash}
+    canonical_line = canonical_json(full_body).encode("utf-8") + b"\n"
+    record = LedgerRecord(canonical_event, canonical_event.sequence,
+                          state.head_hash, record_hash, canonical_line)
+    result = (
+        CommittedReceipt(receipt_from_record(record, duplicate=False))
+        if business else EventCommit(canonical_event.event_id,
+                                     canonical_event.sequence, record_hash)
+    )
+    anchor_bytes = canonical_anchor_bytes(canonical_event.sequence, record_hash)
+    return PreparedAppend(record, result, anchor_bytes)
 ```
 
-Inside the one critical section: verify ledger and anchor, semantically replay, call builder, reject more than one event, ensure an absent anchor is initialized and fsynced at genesis before the first record append, append one canonical line, flush/fsync the ledger, fsync directory, write a `0600` temp anchor, flush/fsync it, `os.replace`, and fsync directory again. Anchor may lag a valid suffix but never lead or disagree at its count; a nonempty ledger with no anchor fails closed because the legitimate first-append crash already has the genesis anchor.
+`_prepare_append` is a behavioral sketch, not permission to retain caller-owned values. It must build the `LedgerRecord`, exact success result, and final anchor bytes before the first write; any serialization, validation, result-construction, or decision-dispatch failure leaves ledger and anchor byte-identical. The one conversion of `supplied_event` to a primitive is the only traversal of the untrusted event for persistence; `parse_event` detaches it, and all later hashing/serialization uses only the canonical event and exact built-ins. Add a stateful `tzinfo`/serialization fixture that changes or throws on a second persistence traversal and prove no self-inconsistent record can be written.
+
+Inside the one critical section: verify ledger and anchor, semantically replay, call the builder, prepare exactly one event/result, ensure an absent anchor is initialized and fsynced at genesis before the first record append, append one canonical line, flush/fsync the ledger, fsync the directory, write the already-prepared final anchor bytes to the `0600` temp, flush/fsync it, `os.replace`, and fsync the directory again. Only actual I/O failure after the ledger fsync may leave a durable record beyond the anchor.
+
+Anchor verification receives the complete parsed record tuple. A missing anchor is allowed only for an empty ledger. Its `record_count` is an exact integer in `0..len(records)`; count zero requires `GENESIS_HASH`, and positive count requires equality with `records[count - 1].record_hash`. A smaller count is a valid lagging prefix, never a comparison against the current head. An anchor ahead of the ledger or disagreeing with its anchored prefix fails closed. Reads, duplicates, conflicts, refused builders, and invalid decisions never advance a lagging anchor; only a successful new append replaces it.
 
 - [ ] **Step 7: Run GREEN and commit**
 
@@ -2425,17 +2494,17 @@ Add the locked generation seam and recovery operations:
 ```python
 def _append_generation_event(self, generation_id: str,
                              make_event: Callable[[StaffingHistory], StaffingEvent]
-                             ) -> ReceiptResult:
-    def build(state: VerifiedLedgerState) -> AppendDecision:
+                             ) -> EventCommit:
+    def build(state: VerifiedLedgerState) -> AppendEventDecision:
         return AppendEventDecision(make_event(state.history))
-    return self.ledger.append_via(build)
+    return self.ledger.append_event_via(build)
 
 def record_attempt_started(self, generation_id: str, evidence: AttemptStartedEvidence,
-                           *, recorded_at: datetime) -> ReceiptResult:
+                           *, recorded_at: datetime) -> EventCommit:
     return self._append_generation_event(
         generation_id, lambda history: started_event(history, evidence, recorded_at))
 def record_attempt_finished(self, generation_id: str, evidence: AttemptFinishedEvidence,
-                            *, recorded_at: datetime) -> ReceiptResult:
+                            *, recorded_at: datetime) -> EventCommit:
     return self._append_generation_event(
         generation_id, lambda history: finished_event(history, evidence, recorded_at))
 
@@ -2467,8 +2536,8 @@ def validate_result_evidence(history: StaffingHistory,
 def commit_generation_result(self, generation_id: str,
                              result_evidence: ResultEvidence,
                              decoded_output: object | None,
-                             *, recorded_at: datetime) -> ReceiptResult:
-    def build(state: VerifiedLedgerState) -> AppendDecision:
+                             *, recorded_at: datetime) -> EventCommit:
+    def build(state: VerifiedLedgerState) -> AppendEventDecision:
         reservation = state.history.reservation(generation_id)
         projection = GenerationProjection(
             basis_snapshot=reservation.basis_snapshot,
@@ -2519,16 +2588,17 @@ def commit_generation_result(self, generation_id: str,
         if detached_output is not None:
             raise StaffingError("staffing_invalid_evidence", "decoded_output")
         return AppendEventDecision(suggestion_unavailable_event(result, (), None, recorded_at))
-    return self.ledger.append_via(build)
+    return self.ledger.append_event_via(build)
 
-def interrupt_generation(self, generation_id: str, *, recorded_at: datetime) -> ReceiptResult:
-    def build(state: VerifiedLedgerState) -> AppendDecision:
+def interrupt_generation(self, generation_id: str, *, recorded_at: datetime
+                         ) -> EventCommit | ConflictReceipt:
+    def build(state: VerifiedLedgerState) -> AppendEventDecision | ConflictDecision:
         generation = state.history.generation(generation_id)
         if generation.is_terminal:
             return ConflictDecision("suggestion-generate", generation.request_id, "INVALID_TRANSITION")
         return AppendEventDecision(
             interrupted_event(state.history, generation_id, generation.request_digest, recorded_at))
-    return self.ledger.append_via(build)
+    return self.ledger.append_event_via(build)
 
 def commit_manager_response(self, payload: object, *, suggestion_id: str,
                             recorded_at: datetime) -> ReceiptResult:
@@ -2596,7 +2666,7 @@ def commit_manager_response(self, payload: object, *, suggestion_id: str,
         "manager-response", request_id, payload, build,
         digest_payload={"suggestion_id": suggestion_id, "body": payload})
 def recover_interrupted_generations(self, *, recorded_at: datetime
-                                    ) -> tuple[ReceiptResult, ...]:
+                                    ) -> tuple[EventCommit | ConflictReceipt, ...]:
     history = self.ledger.read()
     return tuple(self.interrupt_generation(generation_id, recorded_at=recorded_at)
                  for generation_id in recoverable_generation_ids(history))
