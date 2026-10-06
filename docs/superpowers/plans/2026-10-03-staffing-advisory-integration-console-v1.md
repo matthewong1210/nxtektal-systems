@@ -316,7 +316,7 @@ The public `suggestion_id` is the domain `generation_id` serialized unchanged; i
 
 - [ ] **Step 4: Define every request in one closed request union**
 
-Freeze these request interfaces with `additionalProperties: false`; timestamp fields use RFC3339 with explicit UTC offset, date fields use `YYYY-MM-DD`, and every string/array gets the limits from the domain plan:
+Freeze these request interfaces with `additionalProperties: false`; timestamp fields retain the domain plan's exact RFC3339 profiles: zero UTC offset is uppercase `Z`, every nonzero offset remains signed `±HH:MM`, and signed zero `+00:00` or `-00:00` is rejected. Date fields use `YYYY-MM-DD`, and every string/array gets the limits from the domain plan; no other timestamp profile changes.
 
 ```typescript
 interface RequestBase { request_id: string; operator: string }
@@ -989,8 +989,8 @@ def test_coverage_gap_mapping_is_literal_and_complete():
     gap = CoverageGap("BALL_PICKUP", "NORTH", NOW, NOW + timedelta(hours=1), 2, 1)
     assert coverage_gap_to_wire(gap) == {
         "role_code": "BALL_PICKUP", "area_code": "NORTH",
-        "start_at": "2026-10-03T00:00:00+00:00",
-        "end_at": "2026-10-03T01:00:00+00:00",
+        "start_at": "2026-10-03T00:00:00Z",
+        "end_at": "2026-10-03T01:00:00Z",
         "required_count": 2, "assigned_count": 1,
         "rejection_code": "COVERAGE_GAP",
     }
@@ -1027,6 +1027,10 @@ def test_date_projection_joins_one_durable_manager_response_by_generation():
 ```
 
 Add literal `RosterCommittedProjection`, all three `ExceptionCommittedProjection` event types, and `ManagerCommittedProjection` cases to the same table and assert their operation/state/record triples equal `EXPECTED_RECEIPT_TRIPLES`. Add negative cases for a mismatched committed-record class, mismatched operation event ID, a finished attempt without its start, duplicate attempt indexes, missing required ADD/REMOVE local fields, non-UTC audit timestamps, wrong site/deployment/timezone, nullable non-`NO_VALID_SUGGESTION` terminal failure code, duplicate manager responses for one generation, a response whose generation is absent, and any alias/nonce/timeout/raw-provider field appearing in serialized output. Each must raise `StaffingProjectionError`; the public route converts it to generic `staffing_unavailable`.
+
+Freeze `offset_time` independently with exact expected strings: a UTC value emits uppercase `Z`, never `+00:00` or `-00:00`; `Asia/Shanghai` remains `+08:00`; and the two `America/New_York` fall-back instants retain their distinct `-04:00` and `-05:00` suffixes. This change applies only to the zero-offset branch of `offset_time`; audit `utc_time`, server time, model-facing time, local-minute, and every other timestamp profile remain unchanged.
+
+Add the integration half of the domain plan's restart → projection → API → unchanged MODIFY test. Parameterize a real reopened staffing owner and public routes for a UTC site, `Asia/Shanghai`, and both New York fall-back folds. Read the candidate through both date and request APIs, require exact `Z|+08:00|-04:00|-05:00` ADD timestamp suffixes, copy the manager-edit fields and timestamp strings unchanged into `POST /api/v1/staffing/suggestions/{suggestion_id}/modify`, and require an accepted committed response with the same UTC instants and schedule digest and no `OFFSET_TIMEZONE_MISMATCH`. In particular, the UTC-site request must pass the manager parser as uppercase `Z`; add negative controls showing signed-zero `+00:00` and `-00:00` are never emitted and remain rejected on manager input.
 
 - [ ] **Step 5: Add a failing exact-route dispatch test**
 
@@ -1325,9 +1329,17 @@ def _required(value: _T | None, field: str) -> _T:
     return value
 
 def offset_time(value: datetime) -> str:
-    if value.tzinfo is None or value.utcoffset() is None:
+    offset = value.utcoffset() if value.tzinfo is not None else None
+    if offset is None:
         raise StaffingProjectionError("projection timestamp is naive")
-    return value.isoformat()
+    rendered = value.isoformat()
+    if offset == timedelta(0):
+        if not rendered.endswith(("+00:00", "-00:00")):
+            raise StaffingProjectionError("zero-offset timestamp is not canonical")
+        return rendered[:-6] + "Z"
+    if rendered.endswith(("+00:00", "-00:00")):
+        raise StaffingProjectionError("signed zero offset is forbidden")
+    return rendered
 
 def utc_time(value: datetime) -> str:
     if value.tzinfo is None or value.utcoffset() != timedelta(0):
