@@ -125,7 +125,7 @@ FIELD_SETS = {
     GenerationInterruptedPayload: "request_digest generation_id reason interrupted_at_utc",
     ProviderAttemptStartedPayload: "request_digest generation_id evidence",
     ProviderAttemptFinishedPayload: "request_digest generation_id evidence",
-    StoredCandidate: "candidate_index operations rationale operational_warnings rejection_codes coverage_gaps materialized_schedule materialized_schedule_digest",
+    StoredCandidate: "candidate_index operations operation_offset_minutes rationale operational_warnings rejection_codes coverage_gaps materialized_schedule materialized_schedule_digest",
     SuggestionIssuedPayload: "request_digest generation_id result candidates candidate_set_digest",
     SuggestionUnavailablePayload: "request_digest generation_id result candidates candidate_set_digest terminal_state failure_code",
     ManagerResponseCommittedPayload: "request_id request_digest generation_id decision reason_code effective_schedule schedule_digest effective_plan_revision operator note basis_snapshot",

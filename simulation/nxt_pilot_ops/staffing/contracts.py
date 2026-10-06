@@ -1530,12 +1530,39 @@ class ProviderAttemptFinishedPayload(_FrozenContract):
 class StoredCandidate(_FrozenContract):
     candidate_index: Literal[1, 2]
     operations: tuple[RemoveOperation | AddOperation, ...]
+    operation_offset_minutes: tuple[tuple[int | None, int | None], ...]
     rationale: str
     operational_warnings: tuple[str, ...]
     rejection_codes: tuple[str, ...]
     coverage_gaps: tuple[CoverageGap, ...]
     materialized_schedule: tuple[Assignment, ...] | None
     materialized_schedule_digest: str | None
+
+    def __post_init__(self) -> None:
+        _FrozenContract.__post_init__(self)
+        if type(self.candidate_index) is not int or self.candidate_index not in (1, 2):
+            raise StaffingError("staffing_invalid_evidence", "candidate_index")
+        if (
+            type(self.operations) is not tuple
+            or type(self.operation_offset_minutes) is not tuple
+            or len(self.operations) != len(self.operation_offset_minutes)
+        ):
+            raise StaffingError("staffing_invalid_evidence", "operation offsets")
+        for operation, offsets in zip(self.operations, self.operation_offset_minutes):
+            if type(offsets) is not tuple or len(offsets) != 2:
+                raise StaffingError("staffing_invalid_evidence", "operation offsets")
+            start_offset, end_offset = offsets
+            if type(operation) is RemoveOperation:
+                if operation.operation != "REMOVE" or offsets != (None, None):
+                    raise StaffingError("staffing_invalid_evidence", "REMOVE offsets")
+                continue
+            if type(operation) is not AddOperation or operation.operation != "ADD":
+                raise StaffingError("staffing_invalid_evidence", "candidate operation")
+            if any(
+                type(value) is not int or not -1439 <= value <= 1439
+                for value in (start_offset, end_offset)
+            ):
+                raise StaffingError("staffing_invalid_evidence", "ADD offsets")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1802,7 +1829,6 @@ class StaffingHistory(_FrozenContract):
                 "suggestion_issued",
                 "suggestion_unavailable",
                 "generation_interrupted",
-                "manager_response_committed",
             }
             and getattr(event.payload, "generation_id", None) == generation_id
             for event in self.events
