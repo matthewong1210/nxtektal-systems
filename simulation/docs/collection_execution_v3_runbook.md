@@ -203,7 +203,12 @@ replace that evidence.
 ## Expected fixed identity and result
 
 The deterministic fixture produces these values.  Paths, process IDs and
-wall-clock read time are excluded from the causal identities. Regenerate the
+wall-clock read time are excluded from the causal identities. The source-based
+engine fingerprint hashes every `nxt_*` Python file, so the identities below
+were last regenerated on 2026-10-07 after the staffing advisory change (prompt
+template v2, the overlapping-exception conflict, and provider-output
+diagnostics); the fixed 3C policy, actions, timestamps and 600-ball result are
+unchanged, and only derived identities and digests moved. Regenerate the
 complete owner-produced witnesses and this generated table only with:
 
 ```bash
@@ -225,21 +230,21 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `e922860922c230d042bc13f56bbbf4f44539e016b3af9fbe2da8aab974c58080` |
+| `engine_digest` | `e087faec5a54137e806ecde58d3745ba9ad92a3ff061706d32d22a4142300096` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `14c5e06d10e26d41b6a328f5921fefb5fa5fa15b570f6f96b7a0b35319a4c5ce` |
-| `execution_id` | `cfd1a73d7543e6b1ab6d76a1e31c88bc10c6b192b268406b54233878a94afc1b` |
-| `attempt_id` | `attempt-cfd1a73d7543e6b1ab6d76a1e31c88bc10c6b192b268406b54233878a94afc1b` |
-| `assignment_id` | `assignment-0d85a5785449f524d7110b7f6a67bbeb7f85608c98c6f1a75a9378613eab52e8` |
-| request digest | `bd0c7b14a2ffa071a70e7e81453a8f165e115d11ec6b63419530c9f849d8b707` |
-| request high-water digest | `ff5f71e15d1648c7cf675c95fd42ccb55158b0970f1cbdeff09f899f45858675` |
+| `binding_id` | `ef9d0b1d3ecbc7cadcef39a8d274a3c2440134b0caa36e752b57681144a41dfc` |
+| `execution_id` | `40f7eff6c7b60e951d641285832f43841bdbbdff017fd1bb4914985b64206496` |
+| `attempt_id` | `attempt-40f7eff6c7b60e951d641285832f43841bdbbdff017fd1bb4914985b64206496` |
+| `assignment_id` | `assignment-1d4d8d79f1ccf05f8df440741c3f2c32dd5b484ca3d9f3df68ae785f9ce7c6ec` |
+| request digest | `05ba81e540aceb5c09e1b9ae6e68b9422b25d759dde5c735f57140bb4daf8d4f` |
+| request high-water digest | `3502696201acad30587ed868408fed35dc17f9cc74a57d364814cfbb86447d9d` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED / UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600 to runtime robot R1` |
 | `unload_quantity.balls` | `600 to bound station H1` |
-| final assignment `event_digest` | `1e5324ba22a8c77c3e06694d4e933431f7459356c0987648b97837e0fd9bfc98` |
-| final `replay_digest` | `8469fd8e7e4a3bf29d21770fcf7f3394aa4a401bd08f88ecbcda7b40f84fbf3f` |
+| final assignment `event_digest` | `964f57ce8d57ab86e39cdb0f0a0ac99e8f08aa27bfd5da9e3267b5d7d27de2e3` |
+| final `replay_digest` | `cce51fff63561e5cc8df3e86f0404b1d9ac40a4fa439f05ddce3a0919b904ce1` |
 <!-- END GENERATED NORMAL LOOP WITNESS -->
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not

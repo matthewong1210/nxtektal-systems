@@ -348,13 +348,13 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     const next = html.indexOf('data-testid="execution-record-card"', start + 1);
     return html.slice(start, next === -1 ? undefined : next);
   };
-  const RUNNING_ID = "5e422bdb67b83e0835b9bc8b52d2cc7e8d482ba860614627afaf9a1454dcf11c";
-  const SUCCEEDED_ID = "408c96ed51d5e659f5f30cf20fc8ffec6406c8c066615dba08fccbd985a2d20c";
+  const RUNNING_ID = "7213e04dc2e7426365eab1650ab2c3402603aae0615a6dd4d4d10a0460329291";
+  const SUCCEEDED_ID = "3eefa803ef7436dcd80d9158af9a95154481b2e917356b498d4815ba742442d2";
 
   it("passes the frozen witness through the real parser with its exact replay digest, ACTIVE session, clock and two records", async () => {
     const { continuousTwoTaskWitness } = await import("./execution-fixtures");
     const witness = continuousTwoTaskWitness();
-    expect(witness.replay_digest).toBe("8793491cc5fbf08bee586dfc64a4992612f9522603a19c7d4e53337d00318506");
+    expect(witness.replay_digest).toBe("4eedf90beced85dd1c911f80c8f2ddbfc0307218779861ed50e204eed495524a");
     expect(witness.session_state).toBe("ACTIVE");
     expect(witness.now_sim_t_s).toBe(31800);
     expect(witness.session_id).toBe("collection-execution-session-v3");
