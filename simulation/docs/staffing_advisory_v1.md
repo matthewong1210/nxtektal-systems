@@ -382,9 +382,14 @@ translated into physical action by implication.
 
 ## Current verification record
 
-Historical counts in other documents describe their named baselines only. In this checkout the
-boundary file passed 29 tests, the ten staffing/guard files passed 690 tests, and all
-`tests/pilot_ops` passed 1331 tests; unfinished-marker scan was empty and the privacy scan found
-only the two reviewed `api_key` denylist literals. Build and broader verification belong to the
-controller. The broad V3 derived witnesses remain deferred until final integration regenerates
-them through their authoritative flows.
+Historical counts in other documents describe their named baselines only. After the
+overlapping-exception conflict, prompt template v2, and provider-output diagnostics change
+(2026-10-07, all-extras locked environment), the staffing/guard files under `tests/pilot_ops`
+passed 793 tests, all `tests/pilot_ops` passed 1463 tests, the full Python
+suite reported 5067 passed and 11 skipped (the mosquitto-dependent Edge Task integration cases), `scripts/validate_configs.py` reported no errors, `uv lock --check`
+was current, the distribution built and passed inspection, and the console typecheck, lint,
+837 vitest tests, and production build passed. The V3 and V4 witnesses were regenerated through
+their authoritative flows because the engine fingerprint hashes every `nxt_*` source file; only
+derived identities and digests moved. The `staffing-adjustment/v1` ledger fixture under
+`tests/pilot_ops/fixtures/staffing_v1_ledger/` was written by the unmodified v1 code and must
+keep replaying.
