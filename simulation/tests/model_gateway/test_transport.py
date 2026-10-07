@@ -115,7 +115,7 @@ def post(instance, **kwargs):
 
 @pytest.mark.parametrize('endpoint,host,path', [
     (_OPENAI_ENDPOINT, 'api.openai.com', '/v1/responses'),
-    (_KIMI_ENDPOINT, 'api.moonshot.ai', '/v1/chat/completions'),
+    (_KIMI_ENDPOINT, 'api.moonshot.cn', '/v1/chat/completions'),
     (_ANTHROPIC_ENDPOINT, 'api.anthropic.com', '/v1/messages'),
 ])
 def test_direct_verified_tls_identity_encoding_and_close(monkeypatch, endpoint, host, path):
@@ -145,6 +145,7 @@ def test_direct_verified_tls_identity_encoding_and_close(monkeypatch, endpoint, 
     ProviderEndpoint(Provider.OPENAI, 'api.openai.com', 80, '/v1/responses'),
     ProviderEndpoint(Provider.OPENAI, 'api.openai.com', 443, '//attacker.invalid'),
     ProviderEndpoint(Provider.KIMI, 'api.openai.com', 443, '/v1/responses'),
+    ProviderEndpoint(Provider.KIMI, 'api.moonshot.ai', 443, '/v1/chat/completions'),
     'https://api.openai.com/v1/responses',
 ])
 def test_endpoint_rejected_before_resolution(endpoint):

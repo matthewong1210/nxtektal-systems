@@ -30,7 +30,7 @@ class TransportPhase(StrEnum):
     READING = 'READING'
 
 
-_KIMI_ENDPOINT = ProviderEndpoint(Provider.KIMI, 'api.moonshot.ai', 443, '/v1/chat/completions')
+_KIMI_ENDPOINT = ProviderEndpoint(Provider.KIMI, 'api.moonshot.cn', 443, '/v1/chat/completions')
 _OPENAI_ENDPOINT = ProviderEndpoint(Provider.OPENAI, 'api.openai.com', 443, '/v1/responses')
 _ANTHROPIC_ENDPOINT = ProviderEndpoint(Provider.ANTHROPIC, 'api.anthropic.com', 443, '/v1/messages')
 _ENDPOINTS = (_KIMI_ENDPOINT, _OPENAI_ENDPOINT, _ANTHROPIC_ENDPOINT)

@@ -20,6 +20,8 @@ class KimiAdapter(_BaseAdapter):
             }},
             'stream': False,
         }
+        if self.model_id == 'kimi-k2.6':
+            payload['thinking'] = {'type': 'disabled'}
         return self._prepare(request, payload, self._bearer_headers())
 
     def _parse(self, envelope, schema):

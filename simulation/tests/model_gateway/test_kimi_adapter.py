@@ -213,6 +213,18 @@ def test_exact_kimi_envelope_and_metadata():
     assert transport.calls == ['transport.post']
 
 
+def test_kimi_k2_6_disables_default_thinking_in_prepared_request():
+    adapter = KimiAdapter(
+        config=dataclasses.replace(config(Provider.KIMI), model_id='kimi-k2.6'),
+        transport=RecordingTransport(),
+    )
+
+    payload = json.loads(adapter.prepare(request()).body)
+
+    assert payload['model'] == 'kimi-k2.6'
+    assert payload['thinking'] == {'type': 'disabled'}
+
+
 @pytest.mark.parametrize('message,finish,code', [
     ({'content': '{'}, 'stop', 'MALFORMED_PROVIDER_RESPONSE'),
     ({'content': '{"result":[],"result":[]}'}, 'stop', 'MALFORMED_PROVIDER_RESPONSE'),

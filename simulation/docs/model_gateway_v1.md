@@ -49,7 +49,7 @@ cannot change host, port, path or scheme. No arbitrary URL or base-URL option ex
 
 | Provider | Exact HTTPS endpoint |
 |---|---|
-| Kimi | `https://api.moonshot.ai:443/v1/chat/completions` |
+| Kimi (CN) | `https://api.moonshot.cn:443/v1/chat/completions` |
 | OpenAI | `https://api.openai.com:443/v1/responses` |
 | Anthropic | `https://api.anthropic.com:443/v1/messages` |
 
@@ -72,7 +72,7 @@ used as model output or error detail.
 
 | Provider | Request envelope | Accepted answer source |
 |---|---|---|
-| Kimi | `model`, `messages` (`role`, `content`), `max_tokens`, `response_format.type=json_schema`, `response_format.json_schema={name: structured_output, strict: true, schema: ...}`, `stream=false`; Bearer authorization | `choices[0].message.content` with `finish_reason=stop`; `content_filter` or a nonempty string `message.refusal` is refused, `null`/absent is not a refusal, and any other refusal value is malformed |
+| Kimi | `model`, `messages` (`role`, `content`), `max_tokens`, `response_format.type=json_schema`, `response_format.json_schema={name: structured_output, strict: true, schema: ...}`, `stream=false`; `kimi-k2.6` additionally sends `thinking={type: disabled}` (other model IDs omit it); Bearer authorization | `choices[0].message.content` with `finish_reason=stop`; `content_filter` or a nonempty string `message.refusal` is refused, `null`/absent is not a refusal, and any other refusal value is malformed |
 | OpenAI | `model`, `input` (`role`, `content`), `max_output_tokens`, `text.format={type: json_schema, name: structured_output, strict: true, schema: ...}`, `store=false`; Bearer authorization | `status=completed`, exactly one `output_text` in message content; optional message status must be completed; refusal blocks fail; reasoning/tool blocks are not answers and Chat Completions `choices` is rejected |
 | Anthropic | `model`, `max_tokens`, `messages`, optional single leading `system`, `tools=[{name: emit_structured_output, description: ..., input_schema: ...}]`, `tool_choice={type: tool, name: emit_structured_output}`; `x-api-key`, `anthropic-version: 2023-06-01` | `stop_reason=tool_use` and exactly one tool-use block named `emit_structured_output` with object `input`; `stop_reason=refusal` is refused; tool input is data and is never executed |
 
