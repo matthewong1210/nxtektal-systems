@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -25,10 +25,12 @@ from nxt_pilot_ops.staffing.exceptions import (
     build_replacement_exception,
     exception_digest,
     exception_set_revision,
+    find_overlapping_exception,
     normalize_exception,
     normalize_exception_replacement,
     parse_exception_cancel_request,
     parse_exception_correction_request,
+    require_no_overlapping_exception,
     validate_nonoverlapping_exceptions,
 )
 from nxt_pilot_ops.staffing.roster import validate_roster_import
@@ -350,3 +352,66 @@ def test_apply_exceptions_subtracts_full_head_tail_middle_and_adjacency(start, e
     for item in result:
         if (item.start_at, item.end_at) != (assignment.start_at, assignment.end_at):
             assert item.assignment_id != assignment.assignment_id
+
+
+def _leave(request_id: str, staff_id: str = "staff-001"):
+    return normalize_exception(
+        _request(request_id=request_id, staff_id=staff_id, kind="LEAVE", time_local=None),
+        roster=_roster(),
+    )
+
+
+def test_find_overlapping_exception_detects_identical_and_partial_intervals():
+    first = _leave("leave-a")
+    duplicate = _leave("leave-b")
+    assert duplicate.exception_id != first.exception_id
+    assert find_overlapping_exception((first,), duplicate) == first
+    late = normalize_exception(
+        _request(request_id="late-c", kind="LATE", time_local="10:00"), roster=_roster()
+    )
+    assert find_overlapping_exception((first,), late) == first
+    with pytest.raises(StaffingError) as caught:
+        require_no_overlapping_exception((first,), duplicate)
+    assert caught.value.code == "OVERLAPPING_EXCEPTION"
+    assert "staff-001" not in caught.value.detail
+
+
+def test_find_overlapping_exception_allows_adjacency_other_workers_and_self_replacement():
+    first = normalize_exception(
+        _request(request_id="a", kind="LATE", time_local="10:00"), roster=_roster()
+    )
+    adjacent = replace(
+        first,
+        exception_id="exception-b",
+        kind="EARLY_DEPARTURE",
+        unavailable_start=first.unavailable_end,
+        unavailable_end=datetime(2026, 10, 5, 3, tzinfo=UTC),
+    )
+    assert find_overlapping_exception((first,), adjacent) is None
+    other_worker = replace(first, exception_id="exception-c", staff_id="staff-002")
+    assert find_overlapping_exception((first,), other_worker) is None
+    other_date = replace(
+        first,
+        exception_id="exception-d",
+        service_date=date(2026, 10, 6),
+        unavailable_start=first.unavailable_start + timedelta(days=1),
+        unavailable_end=first.unavailable_end + timedelta(days=1),
+    )
+    assert find_overlapping_exception((first,), other_date) is None
+    # A correction keeps its identity and may replace its own interval.
+    replacement = replace(
+        first,
+        unavailable_end=datetime(2026, 10, 5, 2, 30, tzinfo=UTC),
+    )
+    assert find_overlapping_exception((first,), replacement) is None
+    require_no_overlapping_exception((first,), replacement)
+
+
+def test_require_no_overlapping_exception_validates_both_inputs_closed():
+    first = _leave("leave-a")
+    with pytest.raises(StaffingError) as caught:
+        require_no_overlapping_exception((first,), "not-an-exception")  # type: ignore[arg-type]
+    assert caught.value.code == "invalid_exception_time"
+    with pytest.raises(StaffingError) as caught:
+        require_no_overlapping_exception(("corrupt",), first)  # type: ignore[arg-type]
+    assert caught.value.code == "staffing_invalid_evidence"

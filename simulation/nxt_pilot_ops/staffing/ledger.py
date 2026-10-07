@@ -70,7 +70,13 @@ _ANCHOR_KEYS = frozenset(
     {"schema", "site_id", "deployment_id", "record_count", "head_hash"}
 )
 _CONFLICT_CODES = frozenset(
-    {"IDEMPOTENCY_CONFLICT", "STALE_REQUEST", "STALE_SUGGESTION", "INVALID_TRANSITION"}
+    {
+        "IDEMPOTENCY_CONFLICT",
+        "STALE_REQUEST",
+        "STALE_SUGGESTION",
+        "INVALID_TRANSITION",
+        "OVERLAPPING_EXCEPTION",
+    }
 )
 _INTERNAL_EVENT_TYPES = frozenset(
     {

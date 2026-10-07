@@ -18,6 +18,7 @@ import pytest
 
 from nxt_pilot_ops.serialization import canonical_json, stable_digest, to_primitive
 from nxt_pilot_ops.staffing.contracts import (
+    PROMPT_TEMPLATE_VERSION,
     AttemptFinishedEvidence,
     AttemptRouteEvidence,
     AttemptStartedEvidence,
@@ -410,7 +411,7 @@ def test_generation_reservation_probe_and_recovery_are_at_most_once(tmp_path) ->
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -485,7 +486,7 @@ def _reserve(operations):
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -508,7 +509,7 @@ def _reserve_request(
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -668,7 +669,7 @@ def test_close_reopen_generation_crash_matrix_is_at_most_once(tmp_path, phase) -
             route_evidence=GenerationRouteEvidence(
                 "CN", "READY", "KIMI", "kimi-k2", None, None
             ),
-            prompt_template_version="staffing-adjustment/v1",
+            prompt_template_version=PROMPT_TEMPLATE_VERSION,
             language="zh-CN",
             recorded_at=NOW,
         )
@@ -714,7 +715,7 @@ def test_reservation_rejects_nonce_reuse_and_illegal_retry_edges_without_append(
                 route_evidence=GenerationRouteEvidence(
                     "CN", "READY", "KIMI", "kimi-k2", None, None
                 ),
-                prompt_template_version="staffing-adjustment/v1",
+                prompt_template_version=PROMPT_TEMPLATE_VERSION,
                 language="zh-CN",
                 recorded_at=NOW,
             )
@@ -739,7 +740,7 @@ def test_reservation_rejects_nonce_reuse_and_illegal_retry_edges_without_append(
             route_evidence=GenerationRouteEvidence(
                 "CN", "READY", "KIMI", "kimi-k2", None, None
             ),
-            prompt_template_version="staffing-adjustment/v1",
+            prompt_template_version=PROMPT_TEMPLATE_VERSION,
             language="zh-CN",
             recorded_at=NOW,
         )
@@ -763,7 +764,7 @@ def test_reservation_rejects_nonce_reuse_and_illegal_retry_edges_without_append(
             route_evidence=GenerationRouteEvidence(
                 "CN", "READY", "KIMI", "kimi-k2", None, None
             ),
-            prompt_template_version="staffing-adjustment/v1",
+            prompt_template_version=PROMPT_TEMPLATE_VERSION,
             language="zh-CN",
             recorded_at=NOW,
         )
@@ -1266,7 +1267,7 @@ def test_unavailable_route_commits_provider_unconfigured_without_an_attempt(
         route_evidence=GenerationRouteEvidence(
             "CN", "UNAVAILABLE", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -1624,7 +1625,7 @@ def test_nonportable_requests_fail_before_ledger_and_never_become_duplicates(
             route_evidence=GenerationRouteEvidence(
                 "CN", "READY", "KIMI", "kimi-k2", None, None
             ),
-            prompt_template_version="staffing-adjustment/v1",
+            prompt_template_version=PROMPT_TEMPLATE_VERSION,
             language="zh-CN",
             recorded_at=NOW,
         ),
@@ -1691,7 +1692,7 @@ def _operation_case(tmp_path, kind):
                 route_evidence=GenerationRouteEvidence(
                     "CN", "READY", "KIMI", "kimi-k2", None, None
                 ),
-                prompt_template_version="staffing-adjustment/v1",
+                prompt_template_version=PROMPT_TEMPLATE_VERSION,
                 language="zh-CN",
                 recorded_at=NOW,
             )
@@ -1857,7 +1858,7 @@ def test_probe_conflict_and_toctou_are_rechecked_under_append_lock(tmp_path) -> 
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -1873,7 +1874,7 @@ def test_probe_conflict_and_toctou_are_rechecked_under_append_lock(tmp_path) -> 
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -2587,7 +2588,7 @@ def test_restart_projections_restore_utc_and_both_dst_folds_through_one_adapter(
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -2749,7 +2750,7 @@ def test_all_six_committed_record_projections_reopen_detached_and_private(tmp_pa
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -2879,7 +2880,7 @@ def test_restart_marks_accepted_plan_for_review_after_exception_cancellation(
         route_evidence=GenerationRouteEvidence(
             "CN", "READY", "KIMI", "kimi-k2", None, None
         ),
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
         recorded_at=NOW,
     )
@@ -2955,3 +2956,128 @@ def test_restart_marks_accepted_plan_for_review_after_exception_cancellation(
     assert date_view.effective_plan_schedule == manager_view.effective_schedule
     assert date_view.effective_plan_schedule
     reopened_ledger.close()
+
+
+def _leave_request(*, request_id, expected_revision, staff_id="staff-001", note=None):
+    return {
+        "schema": "nxt-staffing-exception/v1",
+        "request_id": request_id,
+        "expected_roster_revision": 1,
+        "expected_exception_set_revision": expected_revision,
+        "service_date": "2026-10-05",
+        "staff_id": staff_id,
+        "kind": "LEAVE",
+        "time_local": None,
+        "operator": "course-manager",
+        "note": note,
+    }
+
+
+def test_duplicate_or_overlapping_leave_is_a_closed_conflict_and_leaves_evidence_intact(
+    tmp_path,
+) -> None:
+    ledger, operations = _open_operations(tmp_path / "ledger")
+    operations.import_roster(roster_import_request(), recorded_at=NOW)
+    original = operations.record_exception(
+        _leave_request(request_id="leave-1", expected_revision=0), recorded_at=NOW
+    )
+    assert type(original) is CommittedReceipt
+    before = ledger.verify()
+
+    # A second LEAVE for the same worker and date under a NEW request ID is a
+    # business conflict, not an internal failure: nothing is appended.
+    duplicate = operations.record_exception(
+        _leave_request(request_id="leave-2", expected_revision=1), recorded_at=NOW
+    )
+    assert type(duplicate) is ConflictReceipt
+    assert duplicate.code == "OVERLAPPING_EXCEPTION"
+    assert duplicate.request_id == "leave-2"
+    assert ledger.verify() == before
+
+    # A partial overlap (LATE inside the leave window) is refused the same way.
+    late = operations.record_exception(
+        _exception_request(request_id="late-3", expected_revision=1), recorded_at=NOW
+    )
+    assert type(late) is ConflictReceipt and late.code == "OVERLAPPING_EXCEPTION"
+    assert ledger.verify() == before
+
+    # A stale revision vector is reported before the overlap check runs.
+    stale = operations.record_exception(
+        _leave_request(request_id="leave-4", expected_revision=0), recorded_at=NOW
+    )
+    assert type(stale) is ConflictReceipt and stale.code == "STALE_REQUEST"
+
+    # The original request ID stays idempotent and its record is unchanged.
+    replay = operations.record_exception(
+        _leave_request(request_id="leave-1", expected_revision=0), recorded_at=NOW
+    )
+    assert type(replay) is DuplicateReceipt
+    assert replay.receipt.event_id == original.receipt.event_id
+    changed = operations.record_exception(
+        _leave_request(request_id="leave-1", expected_revision=0, note="edited"),
+        recorded_at=NOW,
+    )
+    assert type(changed) is ConflictReceipt and changed.code == "IDEMPOTENCY_CONFLICT"
+    assert ledger.verify() == before
+    projection = operations.date_projection(date(2026, 10, 5))
+    assert len(projection.exceptions) == 1
+    assert projection.exception_set_revision == 1
+
+    # The refused request never became a committed request.
+    with pytest.raises(StaffingError) as missing:
+        operations.request_projection("exception-record", "leave-2")
+    assert missing.value.code == "REQUEST_NOT_FOUND"
+
+
+def test_correction_cannot_create_an_overlap_but_may_shrink_its_own_interval(
+    tmp_path,
+) -> None:
+    ledger, operations = _open_operations(tmp_path / "ledger")
+    operations.import_roster(roster_import_request(), recorded_at=NOW)
+    first = operations.record_exception(
+        _exception_request(request_id="late-1", expected_revision=0), recorded_at=NOW
+    )
+    first_id = operations.request_projection("exception-record", "late-1").committed_record.exception.exception_id
+    second = operations.record_exception(
+        {
+            **_exception_request(request_id="early-2", expected_revision=1),
+            "kind": "EARLY_DEPARTURE",
+            "time_local": "15:00",
+        },
+        recorded_at=NOW,
+    )
+    assert type(first) is CommittedReceipt and type(second) is CommittedReceipt
+    second_id = operations.request_projection("exception-record", "early-2").committed_record.exception.exception_id
+    before = ledger.verify()
+
+    # Widening the late arrival into a whole-shift leave would overlap the
+    # early departure of the same worker.
+    overlap = operations.correct_exception(
+        {
+            "schema": "nxt-staffing-exception-correct/v1",
+            "request_id": "correct-1",
+            "exception_id": first_id,
+            "expected_exception_set_revision": 2,
+            "operator": "course-manager",
+            "replacement": {"kind": "LEAVE", "time_local": None, "note": None},
+        },
+        recorded_at=NOW,
+    )
+    assert type(overlap) is ConflictReceipt and overlap.code == "OVERLAPPING_EXCEPTION"
+    assert ledger.verify() == before
+
+    # Moving the same record within free time keeps its identity and commits.
+    shrink = operations.correct_exception(
+        {
+            "schema": "nxt-staffing-exception-correct/v1",
+            "request_id": "correct-2",
+            "exception_id": first_id,
+            "expected_exception_set_revision": 2,
+            "operator": "course-manager",
+            "replacement": {"kind": "LATE", "time_local": "09:30", "note": None},
+        },
+        recorded_at=NOW,
+    )
+    assert type(shrink) is CommittedReceipt
+    active = operations.date_projection(date(2026, 10, 5)).exceptions
+    assert {item.exception_id for item in active} == {first_id, second_id}

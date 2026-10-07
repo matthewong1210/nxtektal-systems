@@ -1123,6 +1123,9 @@ def main(argv: list[str] | None = None) -> int:
                     audit_clock=_wall_utc,
                     monotonic=time.monotonic,
                     nonce_factory=lambda: secrets.token_bytes(32),
+                    diagnostics=lambda event: service.storage.append_event(
+                        dict(event)
+                    ),
                 )
                 staffing_callback = staffing.route
                 staffing_status = "enabled"

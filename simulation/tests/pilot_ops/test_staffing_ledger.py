@@ -18,6 +18,7 @@ import pytest
 
 from nxt_pilot_ops.serialization import canonical_json_bytes, stable_digest, to_primitive
 from nxt_pilot_ops.staffing.contracts import (
+    PROMPT_TEMPLATE_VERSION,
     AppendEventDecision,
     CommittedReceipt,
     ConflictDecision,
@@ -124,7 +125,7 @@ def _reservation_event(
     projection = project_generation_request(
         basis,
         alias_nonce=nonce,
-        prompt_template_version="staffing-adjustment/v1",
+        prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
     )
     generation_id = staffing_generation_id(
@@ -141,7 +142,7 @@ def _reservation_event(
         projection.worker_alias_to_staff_id,
         projection.assignment_alias_to_assignment_id,
         projection.input_digest,
-        "staffing-adjustment/v1",
+        PROMPT_TEMPLATE_VERSION,
         "zh-CN",
         GenerationRouteEvidence("CN", "READY", "KIMI", "kimi-k2", None, None),
         None,

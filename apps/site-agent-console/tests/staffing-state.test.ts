@@ -360,6 +360,7 @@ describe("staffing state controller", () => {
     [new ManagerApiError(400, { code: "staffing_invalid_request", detail: "invalid" }), "rejected"],
     [new ManagerApiError(404, { code: "staffing_not_found", detail: "target absent" }), "rejected"],
     [new ManagerApiError(409, { code: "staffing_conflict", detail: "conflict" }), "rejected"],
+    [new ManagerApiError(409, { code: "staffing_exception_overlap", detail: "overlap" }), "rejected"],
     [new ManagerApiError(409, { code: "staffing_stale_suggestion", detail: "stale" }), "rejected"],
     [new ManagerApiError(413, { code: "body_too_large", detail: "large" }), "rejected"],
   ] as const)("classifies a mutation failure contextually: %#", async (cause, expected) => {

@@ -16,6 +16,7 @@ import { CandidateCards } from "./staffing/CandidateCards";
 import { ExceptionForm } from "./staffing/ExceptionForm";
 import { GenerationStatus } from "./staffing/GenerationStatus";
 import { RosterImport } from "./staffing/RosterImport";
+import { staffingRejectionCopy } from "./staffing/rejections";
 import { Badge, Section } from "./ui";
 
 interface StaffingViewProps {
@@ -113,7 +114,7 @@ function WriteNotice({ view, actions }: { view: StaffingViewState; actions: Staf
   if (write.status === "rejected") {
     return (
       <div className="staffing-notice" role="alert">
-        <Badge tone="bad">未保存</Badge> {write.detail}（{write.code}）{" "}
+        <Badge tone="bad">未保存</Badge> {staffingRejectionCopy(write.code) ?? write.detail}（{write.code}）{" "}
         <button type="button" className="btn btn-quiet" onClick={actions.acknowledgeWrite}>
           知道了
         </button>

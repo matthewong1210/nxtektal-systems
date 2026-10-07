@@ -1892,6 +1892,7 @@ def test_public_error_mapping_is_closed_and_redacts_internal_details() -> None:
         "STALE_REQUEST": "staffing_conflict",
         "INVALID_TRANSITION": "staffing_conflict",
         "STALE_SUGGESTION": "staffing_stale_suggestion",
+        "OVERLAPPING_EXCEPTION": "staffing_exception_overlap",
     }
     for code, expected in expected_conflicts.items():
         error = staffing_error_for_conflict(
@@ -3434,8 +3435,12 @@ class ConstructionOwner:
     def generation_work(self, generation_id):
         semantic = self.semantic
 
+        class Snapshot:
+            # The worker sends exactly the reservation's own template version.
+            prompt_template_version = semantic["template_version"]
+
         class Work:
-            basis_snapshot = object()
+            basis_snapshot = Snapshot()
             provider_payload = object()
             input_digest = stable_digest(semantic)
 
@@ -4866,3 +4871,334 @@ def test_integrated_privacy_keeps_local_identity_and_evidence_off_provider_wire(
         assert nonce_digest not in header_text
         assert nonce_digest not in public_text
         assert nonce_digest not in captured.out + captured.err + console_fixture_text
+
+
+# --- synthetic end-to-end flow: duplicate leave, suggestion, manager plan ---
+
+
+class AliasAwareTransport:
+    """Provider double that reads this generation's aliases from the request.
+
+    Each builder receives the pseudonymous provider wire exactly as the real
+    adapter sent it and returns the structured answer the double should give.
+    """
+
+    def __init__(self, builders) -> None:
+        self.builders = list(builders)
+        self.bodies: list[bytes] = []
+
+    def post(self, *, endpoint, headers, body, timeout_s):
+        self.bodies.append(bytes(body))
+        request = json.loads(body.decode("utf-8"))
+        wire = json.loads(request["messages"][1]["content"])
+        builder = self.builders.pop(0)
+        return HttpResponse(
+            200,
+            {"content-type": "application/json"},
+            json.dumps(valid_kimi_envelope(builder(wire)), separators=(",", ":")).encode(),
+        )
+
+
+FLOW_SERVICE_DATE = "2026-10-06"  # weekday 1
+
+
+def flow_roster(request_id: str, expected_revision: int) -> dict[str, object]:
+    payload = roster_request()
+    payload["request_id"] = request_id
+    payload["expected_roster_revision"] = expected_revision
+    payload["source_ref"] = f"synthetic-roster-{expected_revision + 1}.csv"
+    payload["workers"].append(
+        {
+            "staff_id": "staff-002",
+            "display_name": "Synthetic Worker Two",
+            "skill_codes": ["BALL_PICKING"],
+            "eligibility": [{"role_code": "RANGE_ATTENDANT", "area_code": "RANGE_A"}],
+            "max_daily_minutes": 600,
+        }
+    )
+    payload["availability"].append(
+        {"staff_id": "staff-002", "weekday": 1, "start_local": "08:00", "end_local": "17:00"}
+    )
+    return payload
+
+
+def flow_leave(request_id: str, *, roster: int, exception_set: int, staff_id="staff-001", note="synthetic leave"):
+    return {
+        "schema": "nxt-staffing-exception/v1",
+        "request_id": request_id,
+        "expected_roster_revision": roster,
+        "expected_exception_set_revision": exception_set,
+        "service_date": FLOW_SERVICE_DATE,
+        "staff_id": staff_id,
+        "kind": "LEAVE",
+        "time_local": None,
+        "operator": "manager-1",
+        "note": note,
+    }
+
+
+def flow_generation(request_id: str, *, roster: int, exception_set: int, effective_plan: int):
+    return {
+        "schema": "nxt-staffing-suggestion-generate/v1",
+        "request_id": request_id,
+        "operator": "manager-1",
+        "service_date": FLOW_SERVICE_DATE,
+        "expected_revisions": {
+            "roster": roster,
+            "exception_set": exception_set,
+            "effective_plan": effective_plan,
+        },
+        "retry_of": None,
+    }
+
+
+def _free_worker_alias(wire: dict[str, object]) -> str:
+    unavailable = {row["worker_alias"] for row in wire["unavailable"]}
+    return next(row["worker_alias"] for row in wire["workers"] if row["worker_alias"] not in unavailable)
+
+
+def _replacement_candidate(wire: dict[str, object], *, rationale: str, warnings: list[str]):
+    return {
+        "candidates": [
+            {
+                "candidate_index": 1,
+                "operations": [
+                    {
+                        "operation": "ADD",
+                        "worker_alias": _free_worker_alias(wire),
+                        "role_code": "RANGE_ATTENDANT",
+                        "area_code": "RANGE_A",
+                        "start_at": f"{FLOW_SERVICE_DATE}T09:00:00+08:00",
+                        "end_at": f"{FLOW_SERVICE_DATE}T17:00:00+08:00",
+                    }
+                ],
+                "rationale": rationale,
+                "operational_warnings": warnings,
+            }
+        ]
+    }
+
+
+RAW_RATIONALE_MARKER = "RAW-PROVIDER-RATIONALE-MARKER"
+RAW_WARNING_MARKER = "RAW-PROVIDER-WARNING-MARKER"
+
+
+def _valid_answer(wire):
+    return _replacement_candidate(wire, rationale="由第二位员工顶替请假班次。", warnings=["需经理确认"])
+
+
+def _newline_answer(wire):
+    # Schema-valid, decoder-invalid: a line break inside the rationale.
+    return _replacement_candidate(
+        wire,
+        rationale=f"{RAW_RATIONALE_MARKER}\n第二行",
+        warnings=[f"{RAW_WARNING_MARKER}\t"],
+    )
+
+
+def _schema_invalid_answer(wire):
+    value = _valid_answer(wire)
+    value["candidates"][0]["candidate_index"] = 3
+    return value
+
+
+def flow_api(tmp_path: Path, builders, diagnostics):
+    transport = AliasAwareTransport(builders)
+    gateway = ModelGateway(
+        kimi=KimiAdapter(
+            config=ProviderConfig(Provider.KIMI, "kimi-model", "secret"),
+            transport=transport,
+        ),
+        monotonic=time.monotonic,
+    )
+    route = RoutePolicy(DeploymentRegion.CN)
+    configured = ConfiguredGateway(gateway, route, gateway.readiness(route))
+    ledger = StaffingLedger(tmp_path / "flow", site_id="site-cn-1", deployment_id="deployment-1")
+    owner = StaffingOperations(
+        ledger, site_id="site-cn-1", deployment_id="deployment-1", site_timezone="Asia/Shanghai"
+    )
+    nonces = iter(bytes([value]) * 32 for value in range(1, 20))
+    worker = BoundedGenerationWorker(
+        owner=owner,
+        configured=configured,
+        settings=cn_settings(),
+        audit_clock=lambda: NOW,
+        nonce_factory=lambda: next(nonces),
+        diagnostics=diagnostics,
+    )
+    router = StaffingRouteAdapter(
+        owner=owner,
+        worker=worker,
+        configured=configured,
+        site_id="site-cn-1",
+        deployment_id="deployment-1",
+        site_timezone="Asia/Shanghai",
+        audit_clock=lambda: NOW,
+    )
+    return StaffingApiOperations(router=router, worker=worker, ledger=ledger), ledger, worker, transport
+
+
+def test_synthetic_flow_refuses_duplicate_leave_explicitly_and_reaches_an_effective_plan(
+    tmp_path: Path,
+) -> None:
+    events: list[dict[str, object]] = []
+    api, ledger, worker, transport = flow_api(
+        tmp_path, [_valid_answer, _newline_answer, _schema_invalid_answer], events.append
+    )
+    try:
+        # Roster at revision 3, exactly as in the reported demo state.
+        for revision in range(3):
+            receipt = api.route(
+                "POST", "/api/v1/staffing/roster-imports", flow_roster(f"roster-{revision + 1}", revision)
+            )
+            assert receipt["state"] == "COMMITTED"
+            assert receipt["record"]["roster_revision"] == revision + 1
+
+        # One leave for the only rostered worker.
+        leave = api.route("POST", "/api/v1/staffing/exceptions", flow_leave("leave-1", roster=3, exception_set=0))
+        assert leave["state"] == "COMMITTED"
+        assert leave["record"]["exception_set_revision"] == 1
+        before = ledger.verify()
+
+        # The same worker's leave submitted again under a NEW request ID is an
+        # explicit 409 business rejection, not a generic 503.
+        with pytest.raises(SiteAgentError) as refused:
+            api.route("POST", "/api/v1/staffing/exceptions", flow_leave("leave-2", roster=3, exception_set=1))
+        assert refused.value.code == "staffing_exception_overlap"
+        assert "staff-001" not in refused.value.detail
+        assert ledger.verify() == before
+        with pytest.raises(SiteAgentError) as missing:
+            api.route("GET", "/api/v1/staffing/requests/exception-record/leave-2", {})
+        assert missing.value.code == "staffing_request_not_found"
+
+        # Replaying the ORIGINAL request ID is still idempotent; different
+        # content under that ID is still the existing idempotency conflict.
+        replay = api.route("POST", "/api/v1/staffing/exceptions", flow_leave("leave-1", roster=3, exception_set=0))
+        assert replay["disposition"] == "duplicate"
+        assert replay["operation_id"] == leave["operation_id"]
+        with pytest.raises(SiteAgentError) as changed:
+            api.route(
+                "POST",
+                "/api/v1/staffing/exceptions",
+                flow_leave("leave-1", roster=3, exception_set=0, note="edited"),
+            )
+        assert changed.value.code == "staffing_conflict"
+        assert ledger.verify() == before
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        assert snapshot["revisions"] == {"roster": 3, "exception_set": 1, "effective_plan": 0}
+        assert len(snapshot["active_exceptions"]) == 1
+
+        # A valid replacement suggestion from the scripted Kimi double.
+        api.route(
+            "POST", "/api/v1/staffing/suggestions", flow_generation("generate-1", roster=3, exception_set=1, effective_plan=0)
+        )
+        issued = wait_for_state(api, "generate-1", {"SUCCEEDED"})
+        assert [row["status"] for row in issued["record"]["candidates"]] == ["VALID"]
+        assert events == []
+        sent = json.loads(transport.bodies[0].decode("utf-8"))
+        assert sent["messages"][0]["content"].endswith("with no markdown or surrounding text.")
+        assert "at most 280 characters" in sent["messages"][0]["content"]
+
+        # Manager confirmation creates effective plan revision 1.
+        suggestion_id = issued["record"]["suggestion_id"]
+        accepted = api.route(
+            "POST",
+            f"/api/v1/staffing/suggestions/{suggestion_id}/accept",
+            {
+                "schema": "nxt-staffing-manager-response/v1",
+                "request_id": "accept-1",
+                "operator": "manager-1",
+                "kind": "ACCEPT",
+                "expected_revisions": {"roster": 3, "exception_set": 1, "effective_plan": 0},
+                "candidate_index": 1,
+                "edited_operations": None,
+                "reason_code": "APPROVED",
+                "note": None,
+            },
+        )
+        assert accepted["state"] == "COMMITTED"
+        assert accepted["record"]["effective_plan"]["revision"] == 1
+        assert accepted["record"]["effective_plan"]["status"] == "CURRENT"
+        assert {row["staff_id"] for row in accepted["record"]["effective_plan"]["assignments"]} == {"staff-002"}
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        assert snapshot["revisions"] == {"roster": 3, "exception_set": 1, "effective_plan": 1}
+        assert snapshot["effective_plan"]["status"] == "CURRENT"
+
+        # A decoder-invalid answer is still a closed INVALID_RESPONSE terminal,
+        # and the diagnostic names the rule without any provider text.
+        api.route(
+            "POST", "/api/v1/staffing/suggestions", flow_generation("generate-2", roster=3, exception_set=1, effective_plan=1)
+        )
+        invalid = wait_for_state(api, "generate-2", {"INVALID_RESPONSE"})
+        assert invalid["record"]["failure_code"] == "invalid_provider_shape"
+        assert len(events) == 1
+        event = events[0]
+        rendered = json.dumps(event, ensure_ascii=False, sort_keys=True)
+        assert event["event"] == "staffing_generation_invalid_response"
+        assert event["generation_id"] == invalid["record"]["suggestion_id"]
+        assert event["request_id"] == "generate-2"
+        assert event["provider"] == "KIMI" and event["model_id"] == "kimi-model"
+        assert event["region"] == "CN"
+        assert event["prompt_template_version"] == PROMPT_TEMPLATE_VERSION
+        assert event["failure_code"] == "invalid_provider_shape"
+        assert event["failure_detail"] == "rationale"
+        assert event["control_character_fields"] == ["operational_warnings", "rationale"]
+        assert event["candidate_count"] == 1 and event["max_operation_count"] == 1
+        assert event["max_rationale_length"] == len(f"{RAW_RATIONALE_MARKER}\n第二行")
+        assert event["max_warning_count"] == 1
+        assert len(event["output_digest"]) == 64
+        for secret in (RAW_RATIONALE_MARKER, RAW_WARNING_MARKER, "staff-00", "Synthetic Worker", "worker_", "assignment_", "synthetic leave", "secret"):
+            assert secret not in rendered, secret
+
+        # A gateway-level schema mismatch produces its own closed diagnostic.
+        api.route(
+            "POST", "/api/v1/staffing/suggestions", flow_generation("generate-3", roster=3, exception_set=1, effective_plan=1)
+        )
+        mismatch = wait_for_state(api, "generate-3", {"INVALID_RESPONSE"})
+        assert mismatch["record"]["failure_code"] == "SCHEMA_MISMATCH"
+        assert events[-1]["failure_code"] == "SCHEMA_MISMATCH"
+        assert events[-1]["failure_detail"] is None
+        assert events[-1]["candidate_count"] is None
+        assert worker._failed_closed is False
+        assert transport.builders == []
+    finally:
+        api.close()
+
+
+def test_diagnostics_sink_failures_never_block_the_terminal(tmp_path: Path) -> None:
+    def broken_sink(event):
+        raise RuntimeError("sink offline")
+
+    api, ledger, worker, _ = flow_api(tmp_path, [_newline_answer], broken_sink)
+    try:
+        api.route("POST", "/api/v1/staffing/roster-imports", flow_roster("roster-1", 0))
+        api.route("POST", "/api/v1/staffing/exceptions", flow_leave("leave-1", roster=1, exception_set=0))
+        api.route(
+            "POST", "/api/v1/staffing/suggestions", flow_generation("generate-1", roster=1, exception_set=1, effective_plan=0)
+        )
+        invalid = wait_for_state(api, "generate-1", {"INVALID_RESPONSE"})
+        assert invalid["record"]["failure_code"] == "invalid_provider_shape"
+        assert worker._failed_closed is False
+    finally:
+        api.close()
+
+
+def test_invalid_response_diagnostic_is_none_for_non_content_outcomes() -> None:
+    from scripts.staffing_operations import invalid_response_diagnostic
+
+    item = GenerationWorkItem("request-1", "event-1", "generation-1")
+    unavailable = GenerationResult(
+        "generation-1",
+        GenerationStatus.UNAVAILABLE,
+        None,
+        FailureCode.PROVIDER_UNAVAILABLE,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "a" * 64,
+        None,
+        (),
+    )
+    assert invalid_response_diagnostic(item, object(), RoutePolicy(DeploymentRegion.CN), unavailable) is None  # type: ignore[arg-type]

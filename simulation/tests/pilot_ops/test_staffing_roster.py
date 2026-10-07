@@ -10,6 +10,7 @@ import pytest
 
 from nxt_pilot_ops.serialization import canonical_json, stable_digest, to_primitive
 from nxt_pilot_ops.staffing.contracts import (
+    SUPPORTED_PROMPT_TEMPLATE_VERSIONS,
     AddOperation,
     AppendEventDecision,
     Assignment,
@@ -170,7 +171,10 @@ def _field_names(kind: type) -> tuple[str, ...]:
 
 def test_every_cross_task_contract_is_frozen_slotted_and_exactly_shaped():
     assert len(FIELD_SETS) == 66
-    assert PROMPT_TEMPLATE_VERSION == "staffing-adjustment/v1"
+    assert PROMPT_TEMPLATE_VERSION == "staffing-adjustment/v2"
+    assert SUPPORTED_PROMPT_TEMPLATE_VERSIONS == frozenset(
+        {"staffing-adjustment/v1", "staffing-adjustment/v2"}
+    )
     for kind, expected in FIELD_SETS.items():
         assert is_dataclass(kind), kind.__name__
         assert kind.__dataclass_params__.frozen, kind.__name__

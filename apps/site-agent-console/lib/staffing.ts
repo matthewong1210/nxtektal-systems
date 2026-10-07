@@ -1719,6 +1719,7 @@ const TRUSTED_ERRORS = new Map<string, number>([
   ["staffing_request_not_found", 404],
   ["staffing_not_found", 404],
   ["staffing_conflict", 409],
+  ["staffing_exception_overlap", 409],
   ["staffing_stale_suggestion", 409],
   ["staffing_busy", 429],
   ["staffing_unavailable", 503],

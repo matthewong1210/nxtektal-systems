@@ -768,9 +768,10 @@ describe("staffing same-origin client", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("surfaces all seven trusted staffing error pairs and exact manager body-too-large", async () => {
+  it("surfaces all eight trusted staffing error pairs and exact manager body-too-large", async () => {
     expect(errors.schema).toBe("nxt-staffing-errors/v1");
-    expect(errors.exchanges).toHaveLength(7);
+    expect(errors.exchanges).toHaveLength(8);
+    expect(errors.exchanges.map((item) => item.body.error.code)).toContain("staffing_exception_overlap");
     for (const item of errors.exchanges) {
       expect(Object.keys(item).sort()).toEqual(["body", "http_status", "method", "name", "route_template"]);
       const client = scripted(item.http_status, item.body).client;

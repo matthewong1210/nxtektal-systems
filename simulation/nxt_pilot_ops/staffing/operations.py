@@ -72,6 +72,7 @@ from .contracts import (
 )
 from .exceptions import (
     active_exceptions,
+    require_no_overlapping_exception,
     exception_digest,
     exception_set_revision,
     normalize_exception,
@@ -637,12 +638,15 @@ class StaffingOperations:
                     "PROMPT_TEMPLATE_VERSION_MISMATCH",
                     "INVALID_TRANSITION",
                     "STALE_SUGGESTION",
+                    "OVERLAPPING_EXCEPTION",
                 }:
                     raise
                 if error.code == "STALE_SUGGESTION":
                     code = "STALE_SUGGESTION"
                 elif error.code == "INVALID_TRANSITION":
                     code = "INVALID_TRANSITION"
+                elif error.code == "OVERLAPPING_EXCEPTION":
+                    code = "OVERLAPPING_EXCEPTION"
                 else:
                     code = "STALE_REQUEST"
                 return ConflictDecision(kind, request_id, code)
@@ -712,6 +716,10 @@ class StaffingOperations:
                     "STALE_EXCEPTION_SET_REVISION",
                     "expected_exception_set_revision",
                 )
+            require_no_overlapping_exception(
+                active_exceptions(history.events, exception.service_date),
+                exception,
+            )
             event_payload = ExceptionRecordedPayload(
                 request_id,
                 authoritative_digest,
@@ -807,6 +815,10 @@ class StaffingOperations:
             replacement = normalize_exception_replacement(
                 body, previous=previous, roster=roster
             )
+            require_no_overlapping_exception(
+                active_exceptions(history.events, previous.service_date),
+                replacement,
+            )
             event_payload = ExceptionCorrectedPayload(
                 body["request_id"],
                 authoritative_digest,
@@ -855,7 +867,9 @@ class StaffingOperations:
 
         def build(history: StaffingHistory, authoritative_digest: str) -> StaffingEvent:
             basis = build_staffing_basis(
-                history, date.fromisoformat(body["service_date"])
+                history,
+                date.fromisoformat(body["service_date"]),
+                prompt_template_version=prompt_template_version,
             )
             expected = body["expected_revisions"]
             if expected["roster"] != basis.basis.roster_revision:
@@ -1211,7 +1225,11 @@ class StaffingOperations:
                 for event in history.events
             ):
                 raise StaffingError("STALE_SUGGESTION", suggestion_id)
-            current = build_staffing_basis(history, reservation.service_date)
+            current = build_staffing_basis(
+                history,
+                reservation.service_date,
+                prompt_template_version=reservation.prompt_template_version,
+            )
             current_basis = current.basis
             reserved_basis = reservation.basis_snapshot.basis
             if any(

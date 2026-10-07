@@ -150,6 +150,49 @@ manager decides to retry, create a new request with a new `request_id` and set
 `retry_of` to the prior result's `suggestion_id` (the generation ID), not its
 `request_id`. Recover and retain both receipts.
 
+## Overlapping exceptions
+
+A second record for a worker whose interval intersects an active exception on
+the same service date (for example the same LEAVE submitted twice under a new
+request ID, or a LATE inside an existing leave) is refused with HTTP 409
+`staffing_exception_overlap`. Nothing is appended and the existing record is
+unchanged; the console shows it as an explicit, acknowledged rejection rather
+than an unknown result. Re-sending the original request ID with the same body
+still returns its original receipt. To change the existing record, cancel or
+correct it through its exception ID under a new request ID; to add a different
+interval, record one that does not overlap.
+
+## Refused provider answers
+
+When a provider answer passes the portable schema but the local decoder
+refuses it, the generation ends as `INVALID_RESPONSE` with one of the closed
+codes `invalid_provider_shape`, `provider_sensitive_key`,
+`invalid_provider_timestamp`, or `invalid_candidate_set`; a gateway-level
+`SCHEMA_MISMATCH` or `MALFORMED_PROVIDER_RESPONSE` ends the same way. The
+service also appends one `staffing_generation_invalid_response` event to the
+Site Agent diagnostics stream at
+`<--out>/site-agent/<site_id>/<deployment_id>/service/service_events.jsonl`.
+The event carries the generation, request, and operation identifiers, route
+region, provider, model, template version, input and output digests, the
+closed failure code, the closed field token that tripped (`rationale`,
+`operational_warnings`, `candidate indexes`, `operations`, `operation`,
+`role_code`, `timestamp`, ...), bounded counts (candidates, operations,
+rationale length, warning count and length), and which text fields carried
+control characters. It never contains provider text, aliases, names, notes,
+keys, or prompts. Use it to tell a too-long or multi-line rationale from a bad
+index or operation before retrying with a new request ID. The stream is
+best-effort visibility; the ledger terminal is the record.
+
+## Upgrading to prompt template v2
+
+Current generations reserve prompt template `staffing-adjustment/v2`, which
+states every local decoder bound to the provider. Ledgers written under
+`staffing-adjustment/v1` replay unchanged: stop the service, keep the same
+stable root, start the new build, and read the current projection before new
+writes. Any v1 reservation that had not reached a terminal is recovered as
+`RESULT_UNKNOWN` and is never resent; retry it with a new request ID and
+`retry_of`, which reserves under v2. Nothing in the ledger is rewritten.
+
 ## Shutdown and restart
 
 Stop the process with SIGINT or SIGTERM and wait for it to exit. Shutdown stops

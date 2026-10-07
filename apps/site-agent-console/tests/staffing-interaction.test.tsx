@@ -10,6 +10,7 @@ import {
   StaffingPanel,
   StaffingView as StaffingViewComponent,
 } from "../components/StaffingPanel";
+import { ManagerApiError } from "../lib/api";
 import type { StaffingActions } from "../lib/staffing-actions";
 import {
   type CandidateProjection,
@@ -768,5 +769,69 @@ describe("panel lifecycle", () => {
     });
     expect(service.lookup).toHaveBeenCalledOnce();
     expect(service.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("overlapping exception rejections", () => {
+  it("shows the explicit overlap copy for a rejected write instead of the opaque server detail", async () => {
+    const calls = actionSpies();
+    await mount(
+      <ControlledView
+        value={view(readySnapshot(), {
+          write: {
+            status: "rejected",
+            operationKind: "exception-record",
+            requestId: "request-refused",
+            code: "staffing_exception_overlap",
+            detail: "staffing_exception_overlap: staffing request failed",
+          },
+        })}
+        actions={calls}
+      />,
+    );
+    const notice = field<HTMLElement>(container, ".staffing-notice[role=\"alert\"]");
+    expect(notice.textContent).toMatch(/未保存/);
+    expect(notice.textContent).toMatch(/重叠的异常记录/);
+    expect(notice.textContent).toMatch(/取消或更正原记录/);
+    expect(notice.textContent).toMatch(/staffing_exception_overlap/);
+    expect(notice.textContent).not.toMatch(/staffing request failed/);
+    await click(/知道了/, notice);
+    expect(calls.acknowledgeWrite).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the exception form recoverable and explains the overlap when the service refuses the record", async () => {
+    const calls = actionSpies();
+    calls.recordException = vi.fn<StaffingActions["recordException"]>(async () => {
+      throw new ManagerApiError(409, {
+        code: "staffing_exception_overlap",
+        detail: "staffing request failed",
+      });
+    });
+    await mount(<ControlledView value={view()} actions={calls} />);
+    const form = field<HTMLFieldSetElement>(container, 'fieldset[aria-label="记录人员异常"]');
+
+    await setValue(field<HTMLSelectElement>(form, 'select[name="staff_id"]'), "staff-001");
+    await setValue(field<HTMLSelectElement>(form, 'select[name="kind"]'), "LEAVE");
+    await click(/记录.*异常/, form);
+
+    expect(calls.recordException).toHaveBeenCalledOnce();
+    const alert = field<HTMLElement>(form, '[role="alert"]');
+    expect(alert.textContent).toMatch(/重叠的异常记录/);
+    expect(alert.textContent).not.toMatch(/staffing request failed/);
+    expect(field<HTMLSelectElement>(form, 'select[name="staff_id"]').value).toBe("staff-001");
+    expect(button(/记录.*异常/, form).disabled).toBe(false);
+    expect(form.textContent).not.toMatch(/异常已记录/);
+  });
+
+  it("falls back to the raw message for rejections without dedicated copy", async () => {
+    const calls = actionSpies();
+    calls.recordException = vi.fn<StaffingActions["recordException"]>(async () => {
+      throw new ManagerApiError(409, { code: "staffing_conflict", detail: "staffing request failed" });
+    });
+    await mount(<ControlledView value={view()} actions={calls} />);
+    const form = field<HTMLFieldSetElement>(container, 'fieldset[aria-label="记录人员异常"]');
+    await setValue(field<HTMLSelectElement>(form, 'select[name="staff_id"]'), "staff-001");
+    await click(/记录.*异常/, form);
+    expect(field<HTMLElement>(form, '[role="alert"]').textContent).toMatch(/staffing_conflict/);
   });
 });

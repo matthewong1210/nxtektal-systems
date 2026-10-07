@@ -360,6 +360,47 @@ def validate_nonoverlapping_exceptions(
     return ordered
 
 
+def find_overlapping_exception(
+    active: Sequence[StaffingException], candidate: StaffingException
+) -> StaffingException | None:
+    """Return the first active exception whose half-open interval intersects.
+
+    An active record that shares the candidate's identity is skipped so a
+    correction may replace its own previous interval. The active set is
+    validated and canonically ordered first, so the answer is deterministic.
+    """
+
+    candidate = _validate_exception(candidate, code="invalid_exception_time")
+    for item in validate_nonoverlapping_exceptions(active, replay=True):
+        if item.exception_id == candidate.exception_id:
+            continue
+        if (
+            item.service_date != candidate.service_date
+            or item.staff_id != candidate.staff_id
+        ):
+            continue
+        if (
+            candidate.unavailable_start < item.unavailable_end
+            and item.unavailable_start < candidate.unavailable_end
+        ):
+            return item
+    return None
+
+
+def require_no_overlapping_exception(
+    active: Sequence[StaffingException], candidate: StaffingException
+) -> None:
+    """Refuse a record or correction that would overlap an active exception.
+
+    The closed ``OVERLAPPING_EXCEPTION`` code is a business conflict: the
+    original record stays untouched and the caller may cancel or correct it,
+    or submit a non-overlapping interval, under a new request ID.
+    """
+
+    if find_overlapping_exception(active, candidate) is not None:
+        raise StaffingError("OVERLAPPING_EXCEPTION", "overlapping active exception")
+
+
 def _validate_event_basics(event: object) -> StaffingEvent:
     if type(event) is not StaffingEvent:
         raise StaffingError("staffing_invalid_evidence", "event")

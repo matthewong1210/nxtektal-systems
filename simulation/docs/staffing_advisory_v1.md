@@ -9,7 +9,11 @@ normalizes weekly roster evidence and daily exceptions, builds privacy-minimized
 inputs, validates candidate patches, records manager responses, derives local advisory plans, and
 replays a protected local ledger.
 
-This checkout has no staffing composition script, staffing Site Agent route, staffing Console/UI, staffing provider call, venue deployment, HR write, notification, formal schedule, or robot action.
+On this branch the SIMULATION-only composition exists around the library:
+`simulation/scripts/staffing_operations.py` (bounded generation worker, HTTP
+callback, provider wire through `nxt_model_gateway`), the optional Site Agent
+staffing routes, and the Manager Console staffing panel. There is still no
+venue deployment, HR write, notification, formal schedule, or robot action.
 Those absences are product facts, not merely future test work.
 
 The package imports no model gateway, Site Agent, Edge, Agent Runtime, facility, simulator, provider SDK, network client, robot, or control package.
@@ -128,6 +132,17 @@ replacement exception in one event. Cancellation stores the cancelled value;
 neither operation deletes history. Active exceptions are replay-derived,
 date-scoped, canonically ordered, and non-overlapping per worker.
 
+A new record, or a correction, whose half-open interval would intersect an
+active exception of the same worker on the same service date is refused under
+the append lock with the closed `OVERLAPPING_EXCEPTION` conflict. It is a
+business conflict, not evidence corruption: nothing is appended, the existing
+record is untouched, the same request ID with the same body still replays its
+original receipt, and recovery is a cancel or correction of the existing
+record (or a non-overlapping interval) under a new request ID. Adjacent
+half-open intervals and a correction that shrinks or moves its own record do
+not conflict. Replay keeps its own non-overlap validation as defense in depth.
+The composition root maps the conflict to HTTP 409 `staffing_exception_overlap`.
+
 ## Generation reservation and provider wire
 
 The generation schema is `nxt-staffing-suggestion-generate/v1`; its exact
@@ -137,6 +152,19 @@ expected_revisions{roster, exception_set, effective_plan}, retry_of`.
 Reservation freezes the full local basis, a minimized provider payload, alias
 maps, an alias-nonce digest, input digest, prompt version, language, route
 evidence, and optional retry relation before any future outbound work.
+
+The current prompt template is `staffing-adjustment/v2`; `staffing-adjustment/v1`
+remains a supported template for replay only. A reservation freezes its
+template version, and every later reading (replay, attempt binding, result
+commit, manager basis comparison) rebuilds that reservation's basis, provider
+payload, canonical input, and digest under the frozen version, so a ledger
+written under v1 replays unchanged after the bump and the composition root
+sends a v1 reservation exactly its v1 input. New reservations and projections
+are created only under the current version; requesting a superseded version
+fails closed. The two versions share the byte-identical portable output
+schema; v2 only extends the fixed system text so the provider is told the
+local decoder's count, index, operation, lexical, and text-length bounds that
+the provider-common schema subset cannot express. No decoder bound is relaxed.
 
 Only the provider wire is pseudonymous. A caller injects a fresh byte nonce of
 at least 16 bytes; production composition is responsible for stronger nonce
@@ -166,6 +194,9 @@ rationale, operational_warnings}]`.
 There are at most two candidates, ordered contiguously as `[]`, `[1]`, or
 `[1, 2]`. Each candidate has at most 32 operations, rationale at most 280
 characters, and at most five warnings of at most 200 characters each.
+Rationale and warnings are single-line text: any Unicode control character
+(category C, which includes line breaks and tabs) rejects the whole answer as
+`invalid_provider_shape`.
 
 A provider remove is exactly `{operation: REMOVE, assignment_alias}`. A
 provider add is exactly `{operation: ADD, worker_alias, role_code, area_code,
@@ -281,8 +312,9 @@ revision/lifecycle CAS checks, and event construction. Thus a committed retry
 cannot later become stale.
 
 Revision mismatches map to `STALE_REQUEST`; manager basis drift maps to
-`STALE_SUGGESTION`; invalid lifecycle maps to `INVALID_TRANSITION`. No conflict
-or failed builder mutates the ledger. The narrow generation `probe_request`
+`STALE_SUGGESTION`; invalid lifecycle maps to `INVALID_TRANSITION`; an
+exception record or correction that would overlap an active exception maps to
+`OVERLAPPING_EXCEPTION`. No conflict or failed builder mutates the ledger. The narrow generation `probe_request`
 supports duplicate-first queue admission, but reservation rechecks under lock
 and the probe creates no TOCTOU authority.
 
@@ -330,6 +362,14 @@ free text, so callers must never place secrets in `operator`, `note`,
 chain-of-thought, nonce values, and execution interfaces must not enter ledger
 records or public projections. Bounded candidate `rationale` and
 `operational_warnings` are approved proposal fields, not hidden reasoning.
+
+`diagnose_provider_output()` summarizes one undecodable provider value as a
+closed failure code, a closed field token (for example `rationale`,
+`operational_warnings`, `candidate indexes`), bounded integer counts, and the
+names of text fields that carried control characters. It retains no provider
+text, alias, code, timestamp, identity, note, or prompt, so a composition root
+may route it to noncanonical service diagnostics. It never enters the ledger
+or the public API, and it does not change the terminal record.
 
 The strings `KIMI`, `OPENAI`, and `ANTHROPIC` are legal closed provenance in
 attempt evidence. They do not authorize importing provider clients or making a

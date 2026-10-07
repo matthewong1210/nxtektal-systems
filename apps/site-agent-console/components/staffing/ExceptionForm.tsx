@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type FormEvent } from "react";
 
 import type { AssignmentProjection } from "../../lib/staffing";
 import type { ExceptionDraft } from "../../lib/staffing-state";
+import { describeStaffingFailure } from "./rejections";
 
 export interface ExceptionFormProps {
   assignments: AssignmentProjection[];
@@ -23,7 +24,7 @@ const KIND_LABELS: Record<ExceptionKind, string> = {
 };
 
 function errorText(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
+  return describeStaffingFailure(cause);
 }
 
 function validLocalMinute(value: string): boolean {

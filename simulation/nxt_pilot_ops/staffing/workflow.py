@@ -2232,7 +2232,11 @@ def _validate_reservation_transition(history: StaffingHistory, event: StaffingEv
             outer_prompt_template_version=payload.prompt_template_version,
             outer_language=payload.language,
         )
-        expected_basis = build_staffing_basis(history, payload.service_date)
+        expected_basis = build_staffing_basis(
+            history,
+            payload.service_date,
+            prompt_template_version=payload.prompt_template_version,
+        )
         if not _same_value(expected_basis, payload.basis_snapshot):
             raise _evidence_error("reservation basis")
         _validate_generation_route(payload.route)
@@ -2358,7 +2362,9 @@ def _validate_manager_transition(
         ):
             raise _evidence_error("manager basis")
         current_basis = build_staffing_basis(
-            history, reservation.basis_snapshot.basis.service_date
+            history,
+            reservation.basis_snapshot.basis.service_date,
+            prompt_template_version=reservation.prompt_template_version,
         )
         if (
             not _same_value(payload.basis_snapshot, reservation.basis_snapshot)

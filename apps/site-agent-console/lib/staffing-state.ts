@@ -92,6 +92,7 @@ const DEFINITE_REJECTIONS = new Set([
   "400:staffing_invalid_request",
   "404:staffing_not_found",
   "409:staffing_conflict",
+  "409:staffing_exception_overlap",
   "409:staffing_stale_suggestion",
   "413:body_too_large",
 ]);

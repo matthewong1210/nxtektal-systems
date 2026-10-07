@@ -72,11 +72,16 @@ from nxt_pilot_ops.staffing.contracts import (
 )
 from nxt_pilot_ops.staffing.ledger import StaffingLedger
 from nxt_pilot_ops.staffing.operations import StaffingOperations
-from nxt_pilot_ops.staffing.prompt import PROMPT_TEMPLATE_VERSION
+from nxt_pilot_ops.staffing.prompt import (
+    PROMPT_TEMPLATE_VERSION,
+    SUPPORTED_PROMPT_TEMPLATE_VERSIONS,
+)
 from nxt_pilot_ops.staffing.projection import (
     GenerationProjection,
+    ProviderOutputDiagnostic,
     STAFFING_SUGGESTION_OUTPUT_SCHEMA,
     canonical_generation_input,
+    diagnose_provider_output,
 )
 from nxt_site_agent import SiteAgentError
 
@@ -780,6 +785,64 @@ def result_evidence(
         candidate_count=candidate_count,
         bounded_summary=None,
     )
+
+
+DIAGNOSTIC_EVENT_KIND = "staffing_generation_invalid_response"
+
+
+def invalid_response_diagnostic(
+    item: GenerationWorkItem,
+    work: GenerationProjection,
+    route: RoutePolicy,
+    result: GenerationResult,
+) -> dict[str, object] | None:
+    """Build the noncanonical diagnostic for one undecodable provider answer.
+
+    Returns ``None`` when the answer decodes locally or failed for a reason
+    other than its content. The event carries closed codes, bounded integer
+    counts, digests, and identifiers only: no provider text, alias, code,
+    timestamp, display name, note, prompt, or key ever enters it.
+    """
+
+    if result.status is GenerationStatus.SUCCEEDED:
+        if result.output is None:
+            return None
+        diagnostic = diagnose_provider_output(result.output, work)
+        if diagnostic.failure_code is None:
+            return None
+    elif (
+        result.status is GenerationStatus.INVALID_RESPONSE
+        and result.failure_code is not None
+    ):
+        diagnostic = ProviderOutputDiagnostic(
+            result.failure_code.value, None, None, None, None, None, None, ()
+        )
+    else:
+        return None
+    return {
+        "event": DIAGNOSTIC_EVENT_KIND,
+        "generation_id": item.generation_id,
+        "request_id": item.request_id,
+        "operation_id": item.operation_id,
+        "region": route.region.value,
+        "provider": (
+            None
+            if result.selected_provider is None
+            else result.selected_provider.value
+        ),
+        "model_id": result.selected_model_id,
+        "prompt_template_version": work.basis_snapshot.prompt_template_version,
+        "input_digest": result.input_digest,
+        "output_digest": result.output_digest,
+        "failure_code": diagnostic.failure_code,
+        "failure_detail": diagnostic.failure_detail,
+        "candidate_count": diagnostic.candidate_count,
+        "max_operation_count": diagnostic.max_operation_count,
+        "max_rationale_length": diagnostic.max_rationale_length,
+        "max_warning_count": diagnostic.max_warning_count,
+        "max_warning_length": diagnostic.max_warning_length,
+        "control_character_fields": list(diagnostic.control_character_fields),
+    }
 
 
 class LedgerAttemptObserver:
@@ -2009,6 +2072,10 @@ _CONFLICT_TO_HTTP_ERROR = {
         "staffing_stale_suggestion",
         "staffing basis has changed",
     ),
+    "OVERLAPPING_EXCEPTION": (
+        "staffing_exception_overlap",
+        "an active exception already covers this worker on the service date",
+    ),
 }
 _INVALID_INPUT_CODES = frozenset(
     {
@@ -2292,12 +2359,14 @@ class BoundedGenerationWorker:
         audit_clock: Callable[[], datetime],
         nonce_factory: Callable[[], bytes],
         start: bool = True,
+        diagnostics: Callable[[Mapping[str, object]], object] | None = None,
     ) -> None:
         self._owner = owner
         self._configured = configured
         self._settings = settings
         self._audit_clock = audit_clock
         self._nonce_factory = nonce_factory
+        self._diagnostics = diagnostics
         self._condition = threading.Condition()
         self._waiting: deque[GenerationWorkItem] = deque()
         self._active: GenerationWorkItem | None = None
@@ -2462,10 +2531,16 @@ class BoundedGenerationWorker:
     def _canonical_request(
         item: GenerationWorkItem, work: GenerationProjection, region: DeploymentRegion
     ) -> tuple[GenerationRequest | None, bool]:
+        template_version = work.basis_snapshot.prompt_template_version
+        if (
+            type(template_version) is not str
+            or template_version not in SUPPORTED_PROMPT_TEMPLATE_VERSIONS
+        ):
+            raise _projection("reserved prompt template version is unsupported")
         semantic = canonical_generation_input(
             work.basis_snapshot,
             work.provider_payload,
-            PROMPT_TEMPLATE_VERSION,
+            template_version,
         )
         if not isinstance(semantic, Mapping) or set(semantic) != {
             "template_version",
@@ -2477,7 +2552,7 @@ class BoundedGenerationWorker:
         if stable_digest(semantic) != work.input_digest:
             raise _projection("canonical generation input digest mismatch")
         if (
-            semantic["template_version"] != PROMPT_TEMPLATE_VERSION
+            semantic["template_version"] != template_version
             or semantic["max_output_tokens"] != 2048
             or stable_digest(semantic["output_schema"])
             != stable_digest(STAFFING_SUGGESTION_OUTPUT_SCHEMA)
@@ -2511,7 +2586,7 @@ class BoundedGenerationWorker:
         ]
         request = GenerationRequest(
             request_id=item.generation_id,
-            template_version=PROMPT_TEMPLATE_VERSION,
+            template_version=template_version,
             messages=tuple(messages),
             output_schema=STAFFING_SUGGESTION_OUTPUT_SCHEMA,
             max_output_tokens=2048,
@@ -2579,6 +2654,7 @@ class BoundedGenerationWorker:
         except BaseException:
             self._mark_failed_closed()
             raise
+        self._emit_diagnostic(item, work, route, result)
         try:
             count = candidate_count_hint(result.output)
             evidence = result_evidence(
@@ -2597,6 +2673,24 @@ class BoundedGenerationWorker:
         except BaseException:
             self._mark_failed_closed()
             raise
+
+    def _emit_diagnostic(
+        self,
+        item: GenerationWorkItem,
+        work: GenerationProjection,
+        route: RoutePolicy,
+        result: GenerationResult,
+    ) -> None:
+        """Best-effort visibility; never blocks or fails the terminal commit."""
+
+        if self._diagnostics is None:
+            return
+        try:
+            event = invalid_response_diagnostic(item, work, route, result)
+            if event is not None:
+                self._diagnostics(event)
+        except Exception:
+            return
 
     def _thread_main(self) -> None:
         try:
@@ -2731,6 +2825,7 @@ def build_staffing_operations(
     audit_clock: Callable[[], datetime],
     monotonic: Callable[[], float],
     nonce_factory: Callable[[], bytes],
+    diagnostics: Callable[[Mapping[str, object]], object] | None = None,
 ) -> StaffingApiOperations:
     root = resolve_staffing_root(
         state_root,
@@ -2762,6 +2857,7 @@ def build_staffing_operations(
             audit_clock=audit_clock,
             nonce_factory=nonce_factory,
             start=False,
+            diagnostics=diagnostics,
         )
         router = StaffingRouteAdapter(
             owner=owner,
@@ -2812,6 +2908,7 @@ __all__ = (
     "configured_gateway",
     "generation_capability",
     "generation_route_evidence",
+    "invalid_response_diagnostic",
     "load_provider_settings",
     "project_date_to_wire",
     "project_request_to_wire",

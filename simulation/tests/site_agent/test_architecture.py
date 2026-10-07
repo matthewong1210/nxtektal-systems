@@ -277,9 +277,12 @@ STAFFING_ALLOWED_DOMAIN_TARGETS = {
     "nxt_pilot_ops.staffing.ledger.StaffingLedger",
     "nxt_pilot_ops.staffing.operations.StaffingOperations",
     "nxt_pilot_ops.staffing.projection.GenerationProjection",
+    "nxt_pilot_ops.staffing.projection.ProviderOutputDiagnostic",
     "nxt_pilot_ops.staffing.projection.STAFFING_SUGGESTION_OUTPUT_SCHEMA",
     "nxt_pilot_ops.staffing.projection.canonical_generation_input",
+    "nxt_pilot_ops.staffing.projection.diagnose_provider_output",
     "nxt_pilot_ops.staffing.prompt.PROMPT_TEMPLATE_VERSION",
+    "nxt_pilot_ops.staffing.prompt.SUPPORTED_PROMPT_TEMPLATE_VERSIONS",
 }
 
 STAFFING_BANNED_FIRST_PARTY_PREFIXES = (

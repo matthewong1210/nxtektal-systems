@@ -70,6 +70,9 @@ _STAFFING_ERROR_DETAILS = {
     "staffing_conflict": (
         "request_id is already bound to different content"
     ),
+    "staffing_exception_overlap": (
+        "an active exception already covers this worker on the service date"
+    ),
     "staffing_stale_suggestion": "staffing basis has changed",
     "staffing_busy": "generation capacity is full",
     "staffing_unavailable": "staffing evidence is unavailable",
@@ -97,6 +100,7 @@ _STATUS_BY_CODE = {
     "staffing_not_found": 404,
     "staffing_request_not_found": 404,
     "staffing_conflict": 409,
+    "staffing_exception_overlap": 409,
     "staffing_stale_suggestion": 409,
     "staffing_busy": 429,
     "staffing_unavailable": 503,

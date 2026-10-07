@@ -19,6 +19,7 @@ from .contracts import (
     ExceptionCorrectedPayload,
     ManagerResponseCommittedPayload,
     PROMPT_TEMPLATE_VERSION,
+    SUPPORTED_PROMPT_TEMPLATE_VERSIONS,
     RosterImportedPayload,
     RosterRevision,
     ServiceDayRoster,
@@ -203,7 +204,7 @@ def _validate_snapshot_shape(snapshot: object) -> BasisSnapshot:
     )
     if snapshot.basis.basis_digest != expected_basis_digest:
         raise _invalid("snapshot basis_digest")
-    if snapshot.prompt_template_version != PROMPT_TEMPLATE_VERSION:
+    if snapshot.prompt_template_version not in SUPPORTED_PROMPT_TEMPLATE_VERSIONS:
         raise _invalid("prompt_template_version")
     return snapshot
 
@@ -340,6 +341,7 @@ def _snapshot_from_state(
     service_date: date,
     events: tuple[StaffingEvent, ...],
     plan: EffectivePlanState,
+    prompt_template_version: str = PROMPT_TEMPLATE_VERSION,
 ) -> BasisSnapshot:
     day = materialize_service_day(roster, service_date)
     active = active_exceptions(events, service_date)
@@ -370,7 +372,7 @@ def _snapshot_from_state(
             availability,
             tuple(roster.assignment_rules),
             tuple(day.coverage),
-            PROMPT_TEMPLATE_VERSION,
+            prompt_template_version,
         )
     )
 
@@ -379,6 +381,8 @@ def _expected_snapshot_before_event(
     events: tuple[StaffingEvent, ...],
     service_date: date,
     accepted: Sequence[tuple[StaffingEvent, ManagerResponseCommittedPayload]],
+    *,
+    prompt_template_version: str = PROMPT_TEMPLATE_VERSION,
 ) -> BasisSnapshot:
     prefix_history = StaffingHistory(events)
     try:
@@ -395,6 +399,7 @@ def _expected_snapshot_before_event(
             service_date=service_date,
             events=events,
             plan=plan,
+            prompt_template_version=prompt_template_version,
         )
     except StaffingError as exc:
         if exc.code == "staffing_invalid_evidence":
@@ -421,7 +426,10 @@ def _validated_accepted_records(
         record_date = snapshot.basis.service_date
         prior_for_date = accepted_by_date.get(record_date, [])
         expected_snapshot = _expected_snapshot_before_event(
-            events[:index], record_date, prior_for_date
+            events[:index],
+            record_date,
+            prior_for_date,
+            prompt_template_version=snapshot.prompt_template_version,
         )
         if snapshot != expected_snapshot:
             raise _invalid("manager basis snapshot does not match prior history")
@@ -548,12 +556,25 @@ def validate_active_exceptions_for_roster(
 
 
 def build_staffing_basis(
-    history: StaffingHistory, service_date: date
+    history: StaffingHistory,
+    service_date: date,
+    *,
+    prompt_template_version: str = PROMPT_TEMPLATE_VERSION,
 ) -> BasisSnapshot:
-    """Build the immutable model-advisory baseline for one service date."""
+    """Build the immutable model-advisory baseline for one service date.
+
+    ``prompt_template_version`` is the current template for a new reservation
+    and the stored template when replay rebuilds a historical snapshot; any
+    other value fails closed.
+    """
 
     if type(service_date) is not date:
         raise _invalid("basis input")
+    if (
+        type(prompt_template_version) is not str
+        or prompt_template_version not in SUPPORTED_PROMPT_TEMPLATE_VERSIONS
+    ):
+        raise _invalid("prompt_template_version")
     events = _history_events(history)
     roster = select_effective_roster(roster_revisions(history), service_date)
     plan = effective_plan_state(history, service_date, roster.revision)
@@ -562,4 +583,5 @@ def build_staffing_basis(
         service_date=service_date,
         events=events,
         plan=plan,
+        prompt_template_version=prompt_template_version,
     )

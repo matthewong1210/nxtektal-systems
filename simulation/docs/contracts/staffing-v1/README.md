@@ -122,13 +122,23 @@ Across the inventory there are exactly sixteen unique receipt triples.
 | `staffing_request_not_found` | GET `/api/v1/staffing/requests/{operation_kind}/{request_id}` | 404 |
 | `staffing_not_found` | GET `/api/v1/staffing/dates/{service_date}` | 404 |
 | `staffing_conflict` | POST `/api/v1/staffing/roster-imports` | 409 |
+| `staffing_exception_overlap` | POST `/api/v1/staffing/exceptions` | 409 |
 | `staffing_stale_suggestion` | POST `/api/v1/staffing/suggestions/{suggestion_id}/accept` | 409 |
 | `staffing_busy` | POST `/api/v1/staffing/suggestions` | 429 |
 | `staffing_unavailable` | GET `/api/v1/staffing` | 503 |
 
-These seven codes are the staffing-specific error inventory. Existing Manager API
+These eight codes are the staffing-specific error inventory. Existing Manager API
 transport errors remain outside `errors.json`; a consumer must fail closed on an
 unknown code/status pair rather than silently reclassify it.
+
+`staffing_exception_overlap` is an additive v1 code: a new exception record,
+or a correction, whose half-open interval would intersect an active exception
+of the same worker on the same service date is refused before any append. The
+original record is untouched, the same request ID with the same body still
+replays its original receipt, and recovery is a cancel or correction of the
+existing record (or a non-overlapping interval) under a new request ID. It is
+distinct from `staffing_conflict`, which keeps its idempotency, revision, and
+lifecycle meanings.
 
 ## Domain-to-wire authority
 

@@ -26,7 +26,10 @@ HEX_DIGEST_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 MINUTE_PATTERN = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
 ASCII_TOKEN_PATTERN = re.compile(r"^[\x20-\x7e]+$")
 
-PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v1"
+PROMPT_TEMPLATE_VERSION = "staffing-adjustment/v2"
+SUPPORTED_PROMPT_TEMPLATE_VERSIONS = frozenset(
+    {"staffing-adjustment/v1", "staffing-adjustment/v2"}
+)
 
 EVENT_TYPES = frozenset(
     {
@@ -1748,7 +1751,11 @@ class ConflictReceipt(_FrozenContract):
     operation_kind: str
     request_id: str
     code: Literal[
-        "IDEMPOTENCY_CONFLICT", "STALE_REQUEST", "STALE_SUGGESTION", "INVALID_TRANSITION"
+        "IDEMPOTENCY_CONFLICT",
+        "STALE_REQUEST",
+        "STALE_SUGGESTION",
+        "INVALID_TRANSITION",
+        "OVERLAPPING_EXCEPTION",
     ]
 
 
@@ -1778,7 +1785,11 @@ class ConflictDecision(_FrozenContract):
     operation_kind: str
     request_id: str
     code: Literal[
-        "IDEMPOTENCY_CONFLICT", "STALE_REQUEST", "STALE_SUGGESTION", "INVALID_TRANSITION"
+        "IDEMPOTENCY_CONFLICT",
+        "STALE_REQUEST",
+        "STALE_SUGGESTION",
+        "INVALID_TRANSITION",
+        "OVERLAPPING_EXCEPTION",
     ]
 
 
