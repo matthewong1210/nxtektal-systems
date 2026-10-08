@@ -397,10 +397,15 @@ contract. `nxt_pilot_ops.staffing` remains under the existing Shadow Ops package
 keep `StaffingOperations` a deep import and do not add provider, runtime, Edge,
 simulator, network, robot, or control dependencies.
 
-This checkout contains only the staffing domain library: no staffing composition
-script, staffing Site Agent route, staffing Console/UI, staffing provider call,
-venue deployment, HR write, notification, formal schedule, or robot action
-exists yet. Roster/exception input is evidence rather than
+This checkout composes the domain library through the SIMULATION-only
+`simulation/scripts/staffing_operations.py` (the sole importer of both
+`nxt_model_gateway` and `nxt_pilot_ops.staffing`), the optional injected
+`/api/v1/staffing` Site Agent callback, and the same-origin Manager Console
+staffing panel; the public wire is the closed `nxt-staffing/v1` contract under
+`simulation/docs/contracts/staffing-v1/`, shipped in lockstep between the
+console export and the service of one checkout. No venue deployment, HR write,
+notification, formal schedule, or robot action exists. Roster/exception input
+is evidence rather than
 HR/payroll/attendance/access-control truth; `operator` is attribution rather
 than authenticated identity; ACCEPT/MODIFY is a local advisory plan rather than
 execution truth. Only the provider wire is pseudonymous; do not redact away the
