@@ -362,6 +362,7 @@ describe("staffing state controller", () => {
     [new ManagerApiError(409, { code: "staffing_conflict", detail: "conflict" }), "rejected"],
     [new ManagerApiError(409, { code: "staffing_exception_overlap", detail: "overlap" }), "rejected"],
     [new ManagerApiError(409, { code: "staffing_stale_suggestion", detail: "stale" }), "rejected"],
+    [new ManagerApiError(409, { code: "staffing_suggestion_expired", detail: "ended" }), "rejected"],
     [new ManagerApiError(413, { code: "body_too_large", detail: "large" }), "rejected"],
   ] as const)("classifies a mutation failure contextually: %#", async (cause, expected) => {
     const h = harness();

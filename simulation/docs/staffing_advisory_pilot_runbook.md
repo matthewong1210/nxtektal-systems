@@ -162,6 +162,20 @@ still returns its original receipt. To change the existing record, cancel or
 correct it through its exception ID under a new request ID; to add a different
 interval, record one that does not overlap.
 
+## Ended shifts and historical suggestions
+
+Every candidate on the wire carries `action_window_end_at`, the instant after
+which every shift it adds or removes has ended, and `actionability`, which the
+service sets to `EXPIRED` once its clock reaches that instant. The console
+shows such a suggestion under a historical label, in site time, with no accept
+or modify control; an ACCEPT or MODIFY sent anyway is refused with HTTP 409
+`staffing_suggestion_expired` and nothing is appended. A suggestion issued for
+a shift that has already ended therefore never becomes a current plan. Reject
+still records the manager's decision, and a new generation for the remaining
+day is the recovery. The candidate text shown to the supervisor is the local
+reading (`rationale_local`) in which provider aliases are replaced by display
+names and shift labels; the raw provider text stays available beside it.
+
 ## Refused provider answers
 
 When a provider answer passes the portable schema but the local decoder

@@ -433,6 +433,38 @@ describe("staffing v1 frozen wire contract", () => {
     for (const value of invalidValues) expect(() => parseStaffingReceipt(value)).toThrow(ManagerApiError);
   });
 
+  it("requires the closed review fields on every candidate without loosening the raw text bounds", () => {
+    const issued = structuredClone(exchange("suggestion-issued").body.data) as StaffingReceipt & {
+      record: SuggestionIssuedRecord;
+    };
+    const baseline = issued.record.candidates[0];
+    expect(baseline.rationale).toMatch(/worker_[0-9a-f]{24}/);
+    expect(baseline.rationale_local).not.toMatch(/worker_|assignment_/);
+    expect(baseline.actionability).toBe("CURRENT");
+    expect(parseStaffingReceipt(issued)).toEqual(issued);
+
+    const mutations: Array<(candidate: Record<string, unknown>) => void> = [
+      (candidate) => { delete candidate.actionability; },
+      (candidate) => { delete candidate.action_window_end_at; },
+      (candidate) => { delete candidate.rationale_local; },
+      (candidate) => { delete candidate.operational_warnings_local; },
+      (candidate) => { candidate.actionability = "HISTORICAL"; },
+      (candidate) => { candidate.actionability = "expired"; },
+      (candidate) => { candidate.action_window_end_at = "2026-10-06T17:00:00+00:00"; },
+      (candidate) => { candidate.action_window_end_at = "2026-10-06T17:00:30Z"; },
+      (candidate) => { candidate.rationale_local = "x".repeat(2001); },
+      (candidate) => { candidate.rationale_local = "line\nbreak"; },
+      (candidate) => { candidate.operational_warnings_local = ["unmatched"]; },
+      (candidate) => { candidate.rationale = "y".repeat(281); },
+      (candidate) => { candidate.review_note = "unknown field"; },
+    ];
+    for (const [index, mutate] of mutations.entries()) {
+      const value = structuredClone(issued);
+      mutate(value.record.candidates[0] as unknown as Record<string, unknown>);
+      expect(() => parseStaffingReceipt(value), `mutation ${index}`).toThrow(ManagerApiError);
+    }
+  });
+
   it("requires every row in a two-attempt provenance sequence to share one input digest", () => {
     const receipt = structuredClone(exchange("suggestion-issued").body.data) as StaffingReceipt & {
       record: SuggestionIssuedRecord;
@@ -768,10 +800,11 @@ describe("staffing same-origin client", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("surfaces all eight trusted staffing error pairs and exact manager body-too-large", async () => {
+  it("surfaces all nine trusted staffing error pairs and exact manager body-too-large", async () => {
     expect(errors.schema).toBe("nxt-staffing-errors/v1");
-    expect(errors.exchanges).toHaveLength(8);
+    expect(errors.exchanges).toHaveLength(9);
     expect(errors.exchanges.map((item) => item.body.error.code)).toContain("staffing_exception_overlap");
+    expect(errors.exchanges.map((item) => item.body.error.code)).toContain("staffing_suggestion_expired");
     for (const item of errors.exchanges) {
       expect(Object.keys(item).sort()).toEqual(["body", "http_status", "method", "name", "route_template"]);
       const client = scripted(item.http_status, item.body).client;

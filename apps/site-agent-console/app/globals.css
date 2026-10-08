@@ -943,3 +943,13 @@ input[type="datetime-local"] { color-scheme: dark; min-width: 0; }
   .staffing-import-preview .btn { grid-column: 1; }
   .staffing-subhead { display: grid; }
 }
+
+/* Historical staffing suggestions and local explanation audit view. */
+.staffing-historical { margin: 6px 0 10px; padding: 8px 10px; border: 1px solid #5d8290; color: var(--text-dim); font-size: 12px; }
+.staffing-candidate-expired { border-top-color: #5d8290; }
+.staffing-candidate-expired .staffing-candidate-heading strong { color: var(--text-dim); }
+.staffing-raw { margin: 4px 0 10px; font-size: 12px; color: var(--text-dim); }
+.staffing-raw summary { cursor: pointer; }
+.staffing-raw p { margin: 4px 0 0; }
+.staffing-candidates-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 0 0 10px; }
+.staffing-candidates-heading h3 { margin: 0; font-size: 15px; }

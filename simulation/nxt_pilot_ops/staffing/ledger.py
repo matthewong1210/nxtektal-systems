@@ -76,6 +76,7 @@ _CONFLICT_CODES = frozenset(
         "STALE_SUGGESTION",
         "INVALID_TRANSITION",
         "OVERLAPPING_EXCEPTION",
+        "EXPIRED_SUGGESTION",
     }
 )
 _INTERNAL_EVENT_TYPES = frozenset(

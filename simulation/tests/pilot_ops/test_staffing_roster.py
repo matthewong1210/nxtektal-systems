@@ -103,7 +103,7 @@ FIELD_SETS = {
     EffectivePlanState: "revision status schedule_digest effective_schedule source_sequence affected_exception_ids",
     AssignmentProjection: "assignment_id staff_id display_name role_code area_code start_at end_at",
     ExceptionProjection: "exception_id service_date staff_id display_name kind unavailable_start unavailable_end note",
-    CandidateProjection: "candidate_index valid rationale operational_warnings rejection_codes coverage_gaps operations materialized_schedule materialized_schedule_digest",
+    CandidateProjection: "candidate_index valid rationale operational_warnings rejection_codes coverage_gaps operations materialized_schedule materialized_schedule_digest rationale_local operational_warnings_local action_window_end",
     CandidateOperationProjection: "operation assignment_id staff_id display_name role_code area_code start_at end_at",
     GenerationProjectionView: "generation_id request_id operation_event_id service_date basis_revisions basis_digest retry_of lifecycle_state failure_code route_region route_readiness primary_provider primary_model_id backup_provider backup_model_id started_attempts finished_attempts candidates",
     ManagerResponseProjection: "generation_id decision reason_code operator note effective_plan_revision schedule_digest effective_schedule",

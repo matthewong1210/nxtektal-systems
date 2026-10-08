@@ -255,6 +255,38 @@ rejection codes and no schedule/digest. Persisted candidates are reconstructed
 and revalidated during replay; recomputing outer hashes alone cannot legitimize
 incoherent candidate evidence.
 
+## Manager review: local explanations and the action window
+
+`nxt_pilot_ops.staffing.review` derives two clock-free readings of every
+stored candidate at projection time; neither is persisted and neither changes
+replay.
+
+The provider sees only aliases, so its `rationale` and `operational_warnings`
+may name `worker_<24 hex>` or `assignment_<24 hex>` tokens. The public
+`CandidateProjection` keeps that raw text and adds `rationale_local` and
+`operational_warnings_local`, in which each token the reservation's alias maps
+bind is replaced by the worker's local display name or by the shift label
+`name (ROLE/AREA HH:MM–HH:MM)` rendered in the site timezone. A token the
+reservation does not know is left as written rather than inventing a person.
+The replacement is a local projection over ledger evidence: no display name,
+staff ID, or assignment ID is added to the provider wire, and the strict
+provider decoder is unchanged.
+
+`action_window_end` is the latest `end_at` of any shift the candidate adds or
+removes (a REMOVE whose alias no longer resolves contributes nothing); a
+candidate with no timed operation stays open until local midnight after its
+service date in the site timezone. The domain reads no clock: the composition
+root compares the window with its audit clock to label the candidate
+`CURRENT` or `EXPIRED` on the wire, and `commit_manager_response` compares the
+window of the operations an ACCEPT (the stored candidate) or MODIFY (the
+edited operations) would persist against the injected `recorded_at`. When that
+instant has reached the window end the response is refused under the append
+lock with the closed `EXPIRED_SUGGESTION` conflict: nothing is appended, the
+suggestion keeps its candidates, and REJECT remains available as a recorded
+decision. Replay never re-applies the rule, so a ledger whose response was
+committed inside its window keeps replaying unchanged. The composition root
+maps the conflict to HTTP 409 `staffing_suggestion_expired`.
+
 ## Events and state machine
 
 The canonical event envelope is exactly `event_type, event_id, sequence,
@@ -314,7 +346,9 @@ cannot later become stale.
 Revision mismatches map to `STALE_REQUEST`; manager basis drift maps to
 `STALE_SUGGESTION`; invalid lifecycle maps to `INVALID_TRANSITION`; an
 exception record or correction that would overlap an active exception maps to
-`OVERLAPPING_EXCEPTION`. No conflict or failed builder mutates the ledger. The narrow generation `probe_request`
+`OVERLAPPING_EXCEPTION`; an ACCEPT or MODIFY whose shifts have all ended at the
+injected audit instant maps to `EXPIRED_SUGGESTION`. No conflict or failed
+builder mutates the ledger. The narrow generation `probe_request`
 supports duplicate-first queue admission, but reservation rechecks under lock
 and the probe creates no TOCTOU authority.
 
@@ -393,3 +427,16 @@ their authoritative flows because the engine fingerprint hashes every `nxt_*` so
 derived identities and digests moved. The `staffing-adjustment/v1` ledger fixture under
 `tests/pilot_ops/fixtures/staffing_v1_ledger/` was written by the unmodified v1 code and must
 keep replaying.
+
+After the manager-review change (local explanations, the candidate action window, and the
+`EXPIRED_SUGGESTION` admission conflict; 2026-10-08, all-extras locked environment), the
+staffing, guard, API, composition, and architecture files (`tests/pilot_ops/test_staffing_*.py`,
+`tests/pilot_ops/test_boundaries.py`, `tests/site_agent/test_staffing_*.py`,
+`tests/site_agent/test_api.py`, `tests/site_agent/test_architecture.py`) passed 1153 tests,
+`scripts/validate_configs.py` reported no errors, `uv lock --check` was current, and the console
+typecheck, lint, 851 vitest tests, static build, loopback smoke, and `npm audit --omit=dev` passed.
+The V3 and V4 witnesses were regenerated through their authoritative flows (22 regenerate-mode
+passes, then 29 read-only passes and the console's two witness consumers) because the engine
+fingerprint hashes every `nxt_*` source file; a structural comparison showed only identity and
+digest leaves moved (80 leaves in the two-task witness, 42 in the normal-loop witness). The v1
+ledger fixture replays unchanged.

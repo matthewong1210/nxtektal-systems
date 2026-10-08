@@ -53,6 +53,7 @@ EXPECTED_ERROR_STATUS = {
     "staffing_conflict": 409,
     "staffing_exception_overlap": 409,
     "staffing_stale_suggestion": 409,
+    "staffing_suggestion_expired": 409,
     "staffing_busy": 429,
     "staffing_unavailable": 503,
 }

@@ -38,7 +38,24 @@ unique. A non-null `retry_of` must name exactly one earlier `RESULT_UNKNOWN`
 generation, and a `RESULT_UNKNOWN` generation can have at most one retry.
 
 Candidate projections restore local staff IDs and display names for manager
-review. A manager modification sends the smaller `ManagerPatchOperation` union;
+review. Each candidate also carries four additive v1 review fields.
+`rationale_local` and `operational_warnings_local` are the provider's
+`rationale` and `operational_warnings` with every reserved `worker_<hex>` or
+`assignment_<hex>` token replaced by the local display name or the
+`name (ROLE/AREA HH:MM–HH:MM)` shift label the reservation bound it to; the raw
+provider text stays beside them unchanged, an alias the reservation does not
+know is left as written, and the replacement happens only in the local
+projection, never on the provider wire. `action_window_end_at` is the UTC-rendered instant
+after which every shift the candidate adds or removes has ended (local midnight
+after the service date when the candidate has no timed operation), and
+`actionability` is `CURRENT` or `EXPIRED` exactly as the snapshot's
+`server_time_utc`, or the receipt's audit instant, compares against that end
+(`EXPIRED` once the instant is reached). An `EXPIRED` candidate is historical:
+a console must not offer ACCEPT or MODIFY for it, and the service refuses such
+a response with `staffing_suggestion_expired` without appending anything.
+REJECT remains allowed as a recorded manager decision.
+
+A manager modification sends the smaller `ManagerPatchOperation` union;
 the server resolves and revalidates it against the current basis. ACCEPT/MODIFY
 retain a non-null `CURRENT` effective advisory plan after refresh; REJECT retains
 a null plan. None of these responses represents a formal schedule or execution
@@ -60,7 +77,10 @@ offset and signed `±HH:MM` for a nonzero offset. They are whole-minute values
 rendered with `:00` seconds; `+00:00` and `-00:00` are never accepted. Candidate
 count is at most two, provider provenance count is at most
 two, candidate and manager patch operations are at most 32, and operational
-warnings are at most five. Identifier, canonical-code, text, token, count, and
+warnings are at most five. A local explanation is at most 2000 characters and a
+local warning at most 1500: the proven ceilings are 1440 and 925 because a
+replacement only grows where a 31- or 35-character alias becomes at most a
+100-character name or a 180-character shift label. Identifier, canonical-code, text, token, count, and
 array bounds are encoded in `schema.json` rather than left to prose.
 
 Each coverage gap requires `required_count >= 1` and
@@ -124,10 +144,11 @@ Across the inventory there are exactly sixteen unique receipt triples.
 | `staffing_conflict` | POST `/api/v1/staffing/roster-imports` | 409 |
 | `staffing_exception_overlap` | POST `/api/v1/staffing/exceptions` | 409 |
 | `staffing_stale_suggestion` | POST `/api/v1/staffing/suggestions/{suggestion_id}/accept` | 409 |
+| `staffing_suggestion_expired` | POST `/api/v1/staffing/suggestions/{suggestion_id}/accept` | 409 |
 | `staffing_busy` | POST `/api/v1/staffing/suggestions` | 429 |
 | `staffing_unavailable` | GET `/api/v1/staffing` | 503 |
 
-These eight codes are the staffing-specific error inventory. Existing Manager API
+These nine codes are the staffing-specific error inventory. Existing Manager API
 transport errors remain outside `errors.json`; a consumer must fail closed on an
 unknown code/status pair rather than silently reclassify it.
 
@@ -139,6 +160,14 @@ replays its original receipt, and recovery is a cancel or correction of the
 existing record (or a non-overlapping interval) under a new request ID. It is
 distinct from `staffing_conflict`, which keeps its idempotency, revision, and
 lifecycle meanings.
+
+`staffing_suggestion_expired` is likewise additive: an ACCEPT or MODIFY whose
+resulting operations have all ended by the service's audit instant (the
+candidate's `action_window_end_at`, or for MODIFY the window of the edited
+operations) is refused before any append. The suggestion keeps its stored
+candidates and may still be rejected; the same request ID with the same body
+replays its original receipt only if it had committed earlier. It is distinct
+from `staffing_stale_suggestion`, which means the basis changed.
 
 ## Domain-to-wire authority
 

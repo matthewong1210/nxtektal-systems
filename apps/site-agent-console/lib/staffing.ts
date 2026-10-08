@@ -281,11 +281,21 @@ type RejectionCode =
 
 type NonCoverageRejectionCode = Exclude<RejectionCode, "COVERAGE_GAP">;
 
+export type CandidateActionability = "CURRENT" | "EXPIRED";
+
 interface CandidateCommon {
   candidate_index: 1 | 2;
   operations: CandidateOperationProjection[];
   rationale: string;
   operational_warnings: string[];
+  /** Provider text with reserved aliases replaced by local labels; the raw
+   * `rationale` and `operational_warnings` stay beside it for audit. */
+  rationale_local: string;
+  operational_warnings_local: string[];
+  /** UTC instant after which every shift this candidate adds or removes has
+   * ended; `actionability` is the service's own reading of its clock. */
+  action_window_end_at: string;
+  actionability: CandidateActionability;
 }
 
 type CandidateValidProjection = CandidateCommon & {
@@ -1187,11 +1197,19 @@ function candidate(value: unknown): CandidateProjection {
   const item = record(value, [
     "candidate_index", "status", "operations", "rationale", "operational_warnings",
     "coverage_gaps", "schedule_digest", "rejection_codes",
+    "rationale_local", "operational_warnings_local", "action_window_end_at", "actionability",
   ]);
   oneOf(item.candidate_index, [1, 2] as const);
   array(item.operations, 0, 32).forEach(candidateOperation);
   safeText(item.rationale, 0, 280);
-  array(item.operational_warnings, 0, 5).forEach((warning) => safeText(warning, 0, 200));
+  const warnings = array(item.operational_warnings, 0, 5);
+  warnings.forEach((warning) => safeText(warning, 0, 200));
+  safeText(item.rationale_local, 0, 2000);
+  const localWarnings = array(item.operational_warnings_local, 0, 5);
+  localWarnings.forEach((warning) => safeText(warning, 0, 1500));
+  ok(localWarnings.length === warnings.length);
+  offsetTimestamp(item.action_window_end_at);
+  oneOf(item.actionability, ["CURRENT", "EXPIRED"] as const);
   if (item.status === "VALID") {
     array(item.coverage_gaps, 0, 0);
     digest(item.schedule_digest);
@@ -1721,6 +1739,7 @@ const TRUSTED_ERRORS = new Map<string, number>([
   ["staffing_conflict", 409],
   ["staffing_exception_overlap", 409],
   ["staffing_stale_suggestion", 409],
+  ["staffing_suggestion_expired", 409],
   ["staffing_busy", 429],
   ["staffing_unavailable", 503],
   ["body_too_large", 413],

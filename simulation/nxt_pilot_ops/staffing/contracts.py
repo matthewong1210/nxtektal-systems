@@ -1037,6 +1037,12 @@ class CandidateProjection(_FrozenContract):
     operations: tuple[CandidateOperationProjection, ...]
     materialized_schedule: tuple[AssignmentProjection, ...] | None
     materialized_schedule_digest: str | None
+    # Local review readings derived at projection time (see ``review.py``):
+    # provider alias tokens replaced by local labels, and the UTC instant
+    # after which every shift this candidate adds or removes has ended.
+    rationale_local: str
+    operational_warnings_local: tuple[str, ...]
+    action_window_end: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -1756,6 +1762,7 @@ class ConflictReceipt(_FrozenContract):
         "STALE_SUGGESTION",
         "INVALID_TRANSITION",
         "OVERLAPPING_EXCEPTION",
+        "EXPIRED_SUGGESTION",
     ]
 
 
@@ -1790,6 +1797,7 @@ class ConflictDecision(_FrozenContract):
         "STALE_SUGGESTION",
         "INVALID_TRANSITION",
         "OVERLAPPING_EXCEPTION",
+        "EXPIRED_SUGGESTION",
     ]
 
 

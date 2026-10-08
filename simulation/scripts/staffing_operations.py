@@ -90,6 +90,13 @@ _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,31}$")
 _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PUBLIC_ITEMS = 4096
+# A local explanation grows only where an alias token is replaced by a label:
+# a 280-character rationale holds at most eight 35-character assignment aliases,
+# each replaced by at most 180 characters, so 1440 is the proven ceiling; the
+# 200-character warning ceiling is 925.  The bounds below leave headroom and
+# still fail closed.
+_MAX_LOCAL_RATIONALE = 2000
+_MAX_LOCAL_WARNING = 1500
 _REJECTION_CODES = frozenset(
     {
         "UNKNOWN_ROLE_AREA",
@@ -1022,9 +1029,18 @@ def candidate_operation_to_wire(
     raise _projection("candidate operation branch is invalid")
 
 
-def candidate_to_wire(item: CandidateProjection) -> dict[str, object]:
+def _review_clock(now: object) -> datetime:
+    if type(now) is not datetime or now.tzinfo is None or now.utcoffset() is None:
+        raise _projection("review clock is not timezone-aware")
+    return now.astimezone(timezone.utc)
+
+
+def candidate_to_wire(
+    item: CandidateProjection, *, now: datetime
+) -> dict[str, object]:
     if type(item) is not CandidateProjection:
         raise _projection("candidate projection has invalid type")
+    review_at = _review_clock(now)
     index = _integer(item.candidate_index, "candidate_index", minimum=1, maximum=2)
     if type(item.valid) is not bool or type(item.operations) is not tuple or len(item.operations) > 32:
         raise _projection("candidate projection shape is invalid")
@@ -1035,6 +1051,24 @@ def candidate_to_wire(item: CandidateProjection) -> dict[str, object]:
         _plain_text(value, "operational_warning", maximum=200)
         for value in item.operational_warnings
     ]
+    rationale_local = _plain_text(
+        item.rationale_local, "rationale_local", maximum=_MAX_LOCAL_RATIONALE
+    )
+    if (
+        type(item.operational_warnings_local) is not tuple
+        or len(item.operational_warnings_local) != len(item.operational_warnings)
+    ):
+        raise _projection("candidate local warning sequence is invalid")
+    warnings_local = [
+        _plain_text(value, "operational_warning_local", maximum=_MAX_LOCAL_WARNING)
+        for value in item.operational_warnings_local
+    ]
+    window_end = offset_time(item.action_window_end)
+    actionability = (
+        "EXPIRED"
+        if review_at >= item.action_window_end.astimezone(timezone.utc)
+        else "CURRENT"
+    )
     if type(item.coverage_gaps) is not tuple or len(item.coverage_gaps) > 4096:
         raise _projection("candidate coverage gap sequence is invalid")
     gaps = [coverage_gap_to_wire(value) for value in item.coverage_gaps]
@@ -1070,6 +1104,10 @@ def candidate_to_wire(item: CandidateProjection) -> dict[str, object]:
         "coverage_gaps": gaps,
         "schedule_digest": schedule_digest,
         "rejection_codes": rejection_codes,
+        "rationale_local": rationale_local,
+        "operational_warnings_local": warnings_local,
+        "action_window_end_at": window_end,
+        "actionability": actionability,
     }
 
 
@@ -1328,6 +1366,7 @@ def _validate_generation_attempt_routes(item: GenerationProjectionView) -> None:
 def generation_to_wire(
     item: GenerationProjectionView,
     *,
+    now: datetime,
     manager_response: dict[str, object] | None = None,
 ) -> dict[str, object]:
     if type(item) is not GenerationProjectionView:
@@ -1346,7 +1385,7 @@ def generation_to_wire(
         _identifier(item.retry_of, "generation.retry_of")
     _validate_generation_route(item)
     _validate_generation_attempt_routes(item)
-    candidates = [candidate_to_wire(value) for value in item.candidates]
+    candidates = [candidate_to_wire(value, now=now) for value in item.candidates]
     if len(candidates) > 2 or [row["candidate_index"] for row in candidates] != list(
         range(1, len(candidates) + 1)
     ):
@@ -1525,12 +1564,14 @@ def manager_response_to_wire(item: ManagerResponseProjection) -> dict[str, objec
 def project_date_to_wire(
     projection: DateProjection,
     *,
+    now: datetime,
     site_id: str,
     deployment_id: str,
     site_timezone: str,
 ) -> dict[str, object]:
     if type(projection) is not DateProjection:
         raise _projection("date projection has invalid type")
+    _review_clock(now)
     if (
         projection.site_id,
         projection.deployment_id,
@@ -1618,6 +1659,7 @@ def project_date_to_wire(
         generations.append(
             generation_to_wire(
                 value,
+                now=now,
                 manager_response=(
                     None if response is None else manager_response_to_wire(response)
                 ),
@@ -1663,6 +1705,7 @@ def with_runtime_context(
     return {
         **project_date_to_wire(
             projection,
+            now=now,
             site_id=site_id,
             deployment_id=deployment_id,
             site_timezone=site_timezone,
@@ -1680,8 +1723,10 @@ def with_runtime_context(
     }
 
 
-def _generation_record(item: GenerationProjectionView) -> dict[str, object]:
-    wire = generation_to_wire(item)
+def _generation_record(
+    item: GenerationProjectionView, *, now: datetime
+) -> dict[str, object]:
+    wire = generation_to_wire(item, now=now)
     common = {
         "suggestion_id": wire["suggestion_id"],
         "service_date": item.service_date.isoformat(),
@@ -1832,10 +1877,11 @@ def _validate_request_generation_evidence(
 
 
 def project_request_to_wire(
-    projection: RequestProjection, *, disposition: str
+    projection: RequestProjection, *, disposition: str, now: datetime
 ) -> dict[str, object]:
     if type(projection) is not RequestProjection:
         raise _projection("request projection has invalid type")
+    _review_clock(now)
     committed = projection.committed_record
     if (
         committed is None
@@ -1954,7 +2000,7 @@ def project_request_to_wire(
             disposition,
             committed.event_id,
             generation.lifecycle_state,
-            _generation_record(generation),
+            _generation_record(generation, now=now),
         )
     if projection.operation_kind == "manager-response" and type(committed) is ManagerCommittedProjection:
         manager = projection.manager_response
@@ -2076,6 +2122,10 @@ _CONFLICT_TO_HTTP_ERROR = {
         "staffing_exception_overlap",
         "an active exception already covers this worker on the service date",
     ),
+    "EXPIRED_SUGGESTION": (
+        "staffing_suggestion_expired",
+        "the suggested shift has already ended",
+    ),
 }
 _INVALID_INPUT_CODES = frozenset(
     {
@@ -2118,7 +2168,7 @@ def public_domain_error(error: StaffingError) -> SiteAgentError:
 
 
 def to_wire_receipt(
-    owner: StaffingOperations, result: ReceiptResult
+    owner: StaffingOperations, result: ReceiptResult, *, now: datetime
 ) -> dict[str, object]:
     if isinstance(result, ConflictReceipt):
         raise staffing_error_for_conflict(result)
@@ -2137,7 +2187,7 @@ def to_wire_receipt(
         or projection.committed_record.event_id != receipt.event_id
     ):
         raise _projection("receipt event does not match replay projection")
-    wire = project_request_to_wire(projection, disposition=disposition)
+    wire = project_request_to_wire(projection, disposition=disposition, now=now)
     if (
         wire["operation_kind"] != receipt.operation_kind
         or wire["request_id"] != receipt.request_id
@@ -2240,6 +2290,7 @@ class StaffingRouteAdapter:
             return project_request_to_wire(
                 projection,
                 disposition="duplicate",
+                now=now,
             )
         if method == "POST" and parts == (
             "api",
@@ -2250,6 +2301,7 @@ class StaffingRouteAdapter:
             return to_wire_receipt(
                 self._owner,
                 self._owner.import_roster(payload, recorded_at=now),
+                now=now,
             )
         if method == "POST" and parts == (
             "api",
@@ -2260,6 +2312,7 @@ class StaffingRouteAdapter:
             return to_wire_receipt(
                 self._owner,
                 self._owner.record_exception(payload, recorded_at=now),
+                now=now,
             )
         if (
             method == "POST"
@@ -2285,7 +2338,7 @@ class StaffingRouteAdapter:
                 else self._owner.correct_exception
             )
             return to_wire_receipt(
-                self._owner, operation(body, recorded_at=now)
+                self._owner, operation(body, recorded_at=now), now=now
             )
         if method == "POST" and parts == (
             "api",
@@ -2320,6 +2373,7 @@ class StaffingRouteAdapter:
                     suggestion_id=_path_identifier(parts[4]),
                     recorded_at=now,
                 ),
+                now=now,
             )
         raise SiteAgentError(
             "staffing_not_found", "staffing resource was not found"
@@ -2435,7 +2489,9 @@ class BoundedGenerationWorker:
                 )
             prior = self._owner.probe_request("suggestion-generate", request)
             if isinstance(prior, DuplicateReceipt):
-                return to_wire_receipt(self._owner, prior)
+                return to_wire_receipt(
+                    self._owner, prior, now=self._audit_clock()
+                )
             if isinstance(prior, ConflictReceipt):
                 raise staffing_error_for_conflict(prior)
             route_evidence = generation_route_evidence(
@@ -2463,7 +2519,9 @@ class BoundedGenerationWorker:
             )
             created = isinstance(result, CommittedReceipt)
             try:
-                receipt = to_wire_receipt(self._owner, result)
+                receipt = to_wire_receipt(
+                    self._owner, result, now=self._audit_clock()
+                )
                 disposition = receipt["disposition"]
                 if disposition == "duplicate":
                     if created:

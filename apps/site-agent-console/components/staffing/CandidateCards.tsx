@@ -10,11 +10,24 @@ import type {
   ManagerResponseSummary,
   RevisionVector,
 } from "../../lib/staffing";
+import {
+  actionabilityLabel,
+  candidateIsActionable,
+  candidateStatusLabel,
+  generationIsHistorical,
+  planStatusLabel,
+  reasonCodeLabel,
+  responseKindLabel,
+} from "../../lib/staffing-labels";
+import { formatSiteRange, formatSiteTime } from "../../lib/site-time";
+import { Badge } from "../ui";
 import { CandidateEditor } from "./CandidateEditor";
 
 export interface CandidateCardsProps {
   generation: GenerationProjection;
   revisions: RevisionVector;
+  /** IANA site timezone from the snapshot context; every time is shown in it. */
+  timeZone: string;
   disabled: boolean;
   onAccept: StaffingActions["acceptSuggestion"];
   onModify: StaffingActions["modifySuggestion"];
@@ -46,7 +59,16 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
 }
 
-function CoverageGaps({ gaps }: { gaps: CoverageGap[] }) {
+/** Site-local interval with the exact contract values kept on the element. */
+function SiteRange({ start, end, timeZone }: { start: string; end: string; timeZone: string }) {
+  return (
+    <span className="staffing-time" title={`${start} – ${end}`}>
+      <time dateTime={start}>{formatSiteRange(start, end, timeZone)}</time>
+    </span>
+  );
+}
+
+function CoverageGaps({ gaps, timeZone }: { gaps: CoverageGap[]; timeZone: string }) {
   if (gaps.length === 0) return null;
   return (
     <section className="staffing-gaps" role="region" aria-label="覆盖缺口">
@@ -56,7 +78,7 @@ function CoverageGaps({ gaps }: { gaps: CoverageGap[] }) {
           <li key={`${gap.role_code}:${gap.area_code}:${gap.start_at}:${index}`}>
             <strong>{gap.role_code}</strong>
             <span>{gap.area_code}</span>
-            <span className="staffing-time">{gap.start_at} 至 {gap.end_at}</span>
+            <SiteRange start={gap.start_at} end={gap.end_at} timeZone={timeZone} />
             <span>需要 {gap.required_count}，已有 {gap.assigned_count}</span>
           </li>
         ))}
@@ -70,13 +92,23 @@ function ManagerResponse({ response }: { response: ManagerResponseSummary }) {
     <section className="staffing-manager-response" aria-label="经理处理结果" role="status" aria-live="polite">
       <h3>经理处理结果</h3>
       <dl>
-        <div><dt>处理</dt><dd>{response.response_kind}</dd></div>
-        <div><dt>原因</dt><dd>{response.reason_code}</dd></div>
+        <div>
+          <dt>处理</dt>
+          <dd>{responseKindLabel(response.response_kind)} <span className="staffing-code">{response.response_kind}</span></dd>
+        </div>
+        <div>
+          <dt>原因</dt>
+          <dd>{reasonCodeLabel(response.reason_code)} <span className="staffing-code">{response.reason_code}</span></dd>
+        </div>
         <div><dt>经理</dt><dd>{response.operator}</dd></div>
         <div><dt>备注</dt><dd>{response.note ?? "无"}</dd></div>
         <div>
           <dt>有效排班</dt>
-          <dd>{response.effective_plan === null ? "未形成" : `版本 ${response.effective_plan.revision}`}</dd>
+          <dd>
+            {response.effective_plan === null
+              ? "未形成"
+              : <>版本 {response.effective_plan.revision} · {planStatusLabel(response.effective_plan.status)} <span className="staffing-code">{response.effective_plan.status}</span></>}
+          </dd>
         </div>
       </dl>
     </section>
@@ -86,12 +118,14 @@ function ManagerResponse({ response }: { response: ManagerResponseSummary }) {
 function CandidateCard({
   candidate,
   generation,
+  timeZone,
   controlsAvailable,
   onAccept,
   onModify,
 }: {
   candidate: CandidateProjection;
   generation: GenerationProjection;
+  timeZone: string;
   controlsAvailable: boolean;
   onAccept: StaffingActions["acceptSuggestion"];
   onModify: StaffingActions["modifySuggestion"];
@@ -105,6 +139,7 @@ function CandidateCard({
   const restoreModifyFocus = useRef(false);
   const noteTooLong = Array.from(note).length > 500;
   const actionDisabled = submitting || noteTooLong;
+  const expired = candidate.actionability === "EXPIRED";
 
   useEffect(() => {
     if (mode === "idle" && restoreModifyFocus.current) {
@@ -134,12 +169,26 @@ function CandidateCard({
   }
 
   return (
-    <article className="staffing-candidate" aria-label={`排班建议 ${candidate.candidate_index}`}>
+    <article
+      className={`staffing-candidate${expired ? " staffing-candidate-expired" : ""}`}
+      aria-label={`排班建议 ${candidate.candidate_index}`}
+      data-status={candidate.status}
+      data-actionability={candidate.actionability}
+    >
       <header className="staffing-candidate-heading">
         <h3>建议 {candidate.candidate_index}</h3>
-        <strong>{candidate.status}</strong>
+        <strong>
+          {candidateStatusLabel(candidate.status)} <span className="staffing-code">{candidate.status}</span>
+        </strong>
       </header>
       <p className="staffing-advisory-label">AI 建议，需经理确认</p>
+      {expired ? (
+        <p className="staffing-historical" role="note">
+          <Badge tone="muted">历史记录</Badge> {actionabilityLabel(candidate.actionability)}：相关班次已于{" "}
+          <time dateTime={candidate.action_window_end_at}>{formatSiteTime(candidate.action_window_end_at, timeZone)}</time>
+          {" "}结束，仅供查阅，不能再采用为当前排班。
+        </p>
+      ) : null}
       <div className="staffing-provenance" aria-label="建议来源">
         {generation.provenance.length === 0 ? (
           <span>暂无可用来源记录</span>
@@ -150,7 +199,13 @@ function CandidateCard({
         ))}
       </div>
 
-      <p className="staffing-rationale">{candidate.rationale}</p>
+      <p className="staffing-rationale">{candidate.rationale_local}</p>
+      {candidate.rationale_local === candidate.rationale ? null : (
+        <details className="staffing-raw">
+          <summary>查看原始建议文本（含服务端别名）</summary>
+          <p className="staffing-code">{candidate.rationale}</p>
+        </details>
+      )}
       {candidate.operations.length === 0 ? (
         <p className="staffing-empty">没有建议调整项。</p>
       ) : (
@@ -161,7 +216,7 @@ function CandidateCard({
               <span>{item.display_name}</span>
               <span className="staffing-code">{item.staff_id}</span>
               <span>{item.role_code} / {item.area_code}</span>
-              <span className="staffing-time">{item.start_at} 至 {item.end_at}</span>
+              <SiteRange start={item.start_at} end={item.end_at} timeZone={timeZone} />
               {item.operation === "REMOVE" ? (
                 <span className="staffing-code">{item.assignment_id}</span>
               ) : null}
@@ -170,17 +225,17 @@ function CandidateCard({
         </ol>
       )}
 
-      {candidate.operational_warnings.length === 0 ? null : (
+      {candidate.operational_warnings_local.length === 0 ? null : (
         <section className="staffing-warnings" role="region" aria-label="运营提示">
           <h4>运营提示</h4>
           <ul>
-            {candidate.operational_warnings.map((warning, index) => (
+            {candidate.operational_warnings_local.map((warning, index) => (
               <li key={`${warning}:${index}`}>{warning}</li>
             ))}
           </ul>
         </section>
       )}
-      <CoverageGaps gaps={candidate.coverage_gaps} />
+      <CoverageGaps gaps={candidate.coverage_gaps} timeZone={timeZone} />
       {candidate.status === "REJECTED" ? (
         <p className="staffing-rejection">
           未通过：{candidate.rejection_codes.join("、")}
@@ -243,7 +298,7 @@ function CandidateCard({
           )}
           {submitError === null ? null : <p className="staffing-error" role="alert">{submitError}</p>}
         </div>
-      ) : candidate.status === "VALID" && generation.manager_response === null ? (
+      ) : candidate.status === "VALID" && !expired && generation.manager_response === null ? (
         <p className="staffing-readonly">当前数据版本已变化，此建议仅供查阅。</p>
       ) : null}
     </article>
@@ -363,6 +418,7 @@ function SuggestionReject({
 export function CandidateCards({
   generation,
   revisions,
+  timeZone,
   disabled,
   onAccept,
   onModify,
@@ -370,15 +426,36 @@ export function CandidateCards({
 }: CandidateCardsProps) {
   const matchingBasis = basisMatches(generation, revisions);
   const response = generation.manager_response;
+  const historical = generationIsHistorical(generation);
+  // Current actions need a fresh basis, no recorded response, and at least one
+  // candidate that is valid and whose shifts have not ended. A historical
+  // generation is shown for the record only.
   const responseAvailable = !disabled
     && matchingBasis
     && response === null
-    && generation.candidates.some((candidate) => candidate.status === "VALID");
+    && !historical
+    && generation.candidates.some(candidateIsActionable);
 
   return (
-    <section className="staffing-candidates" aria-label="排班建议列表">
+    <section
+      className="staffing-candidates"
+      aria-label={historical ? "历史排班建议列表" : "排班建议列表"}
+      data-review={historical ? "HISTORICAL" : "CURRENT"}
+    >
+      {generation.candidates.length === 0 ? null : (
+        <header className="staffing-candidates-heading">
+          {historical ? (
+            <>
+              <Badge tone="muted">历史记录</Badge>
+              <h3>历史建议（班次已结束，仅供查阅）</h3>
+            </>
+          ) : (
+            <h3>当前建议</h3>
+          )}
+        </header>
+      )}
       {response === null ? null : <ManagerResponse response={response} />}
-      <CoverageGaps gaps={generation.coverage_gaps} />
+      <CoverageGaps gaps={generation.coverage_gaps} timeZone={timeZone} />
       {generation.candidates.length === 0 ? null : (
         <div className="staffing-candidate-list">
           {generation.candidates.map((candidate) => (
@@ -386,11 +463,12 @@ export function CandidateCards({
               key={candidate.candidate_index}
               candidate={candidate}
               generation={generation}
+              timeZone={timeZone}
               controlsAvailable={
                 !disabled
                 && matchingBasis
                 && response === null
-                && candidate.status === "VALID"
+                && candidateIsActionable(candidate)
               }
               onAccept={onAccept}
               onModify={onModify}

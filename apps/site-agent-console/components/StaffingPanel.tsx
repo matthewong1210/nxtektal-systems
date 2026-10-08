@@ -12,6 +12,8 @@ import {
   type StaffingDateSnapshot,
 } from "../lib/staffing";
 import { staffingManagerLabelIssue } from "../lib/staffing-guards";
+import { exceptionKindLabel, planStatusLabel } from "../lib/staffing-labels";
+import { formatSiteRange, formatSiteTime } from "../lib/site-time";
 import { CandidateCards } from "./staffing/CandidateCards";
 import { ExceptionForm } from "./staffing/ExceptionForm";
 import { GenerationStatus } from "./staffing/GenerationStatus";
@@ -168,7 +170,7 @@ function ReadNotice({ view, actions }: { view: StaffingViewState; actions: Staff
   return null;
 }
 
-function ActiveExceptions({ view }: { view: StaffingViewState }) {
+function ActiveExceptions({ view, timeZone }: { view: StaffingViewState; timeZone: string }) {
   const rows = view.snapshot?.active_exceptions ?? [];
   return (
     <section className="staffing-exceptions" aria-label="当前人员异常">
@@ -180,8 +182,15 @@ function ActiveExceptions({ view }: { view: StaffingViewState }) {
           {rows.map((entry) => (
             <li key={entry.exception_id}>
               <strong>{entry.display_name}</strong>
-              <span className="mono">{entry.kind}</span>
-              <span>{entry.unavailable_start_at} — {entry.unavailable_end_at}</span>
+              <span>
+                {exceptionKindLabel(entry.kind)} <span className="mono">{entry.kind}</span>
+              </span>
+              <span className="staffing-time" title={`${entry.unavailable_start_at} – ${entry.unavailable_end_at}`}>
+                <time dateTime={entry.unavailable_start_at}>
+                  {formatSiteRange(entry.unavailable_start_at, entry.unavailable_end_at, timeZone)}
+                </time>
+                {" "}（{timeZone}）
+              </span>
               {entry.note ? <span>{entry.note}</span> : null}
             </li>
           ))}
@@ -208,7 +217,8 @@ function EffectivePlanStatus({ snapshot }: { snapshot: StaffingDateSnapshot }) {
       aria-label="有效排班状态"
       role={needsReview ? "alert" : "status"}
     >
-      <Badge tone={needsReview ? "warn" : "ok"}>{plan.status}</Badge>
+      <Badge tone={needsReview ? "warn" : "ok"}>{planStatusLabel(plan.status)}</Badge>{" "}
+      <span className="staffing-code">{plan.status}</span>
       <p>
         排班版本 {plan.revision} · {plan.assignments.length} 个班次。
         {needsReview ? " 人员表或异常已变化，需要经理重新审阅。" : " 当前为经理确认版本。"}
@@ -275,6 +285,14 @@ export function StaffingView({
                 <dt>时区</dt>
                 <dd>{snapshot.context.site_timezone}</dd>
               </div>
+              <div>
+                <dt>服务时间</dt>
+                <dd>
+                  <time dateTime={snapshot.server_time_utc}>
+                    {formatSiteTime(snapshot.server_time_utc, snapshot.context.site_timezone)}
+                  </time>
+                </dd>
+              </div>
               {snapshot.roster === null ? (
                 <div className="staffing-rail-open">
                   <dt>人员表</dt>
@@ -318,7 +336,7 @@ export function StaffingView({
             </div>
             <div className="staffing-status-column">
               <EffectivePlanStatus snapshot={snapshot} />
-              <ActiveExceptions view={view} />
+              <ActiveExceptions view={view} timeZone={snapshot.context.site_timezone} />
               <GenerationStatus
                 capability={snapshot.generation_capability}
                 generation={view.activeGeneration}
@@ -342,6 +360,7 @@ export function StaffingView({
             <CandidateCards
               generation={view.activeGeneration}
               revisions={snapshot.revisions}
+              timeZone={snapshot.context.site_timezone}
               disabled={commonDisabled || !rosterReady || generationIsOngoing(view)}
               onAccept={actions.acceptSuggestion}
               onModify={actions.modifySuggestion}

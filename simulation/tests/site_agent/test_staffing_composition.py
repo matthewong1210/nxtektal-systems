@@ -228,6 +228,9 @@ def candidate(*, valid: bool = True) -> CandidateProjection:
         ),
         materialized_schedule=() if valid else None,
         materialized_schedule_digest="c" * 64 if valid else None,
+        rationale_local="coverage restored" if valid else "coverage remains short",
+        operational_warnings_local=(),
+        action_window_end=datetime(2026, 10, 6, 10, tzinfo=timezone.utc),
     )
 
 
@@ -625,11 +628,11 @@ def test_coverage_gap_rejects_non_integer_and_non_gap_counts(required, actual) -
 
 def test_candidate_and_provenance_projection_obey_complete_wire_matrix() -> None:
     candidate_validator = validator("#/$defs/CandidateProjection")
-    candidate_validator.validate(candidate_to_wire(candidate(valid=True)))
-    candidate_validator.validate(candidate_to_wire(candidate(valid=False)))
+    candidate_validator.validate(candidate_to_wire(candidate(valid=True), now=NOW))
+    candidate_validator.validate(candidate_to_wire(candidate(valid=False), now=NOW))
     malformed = replace(candidate(valid=True), operational_warnings=("x",) * 6)
     with pytest.raises(StaffingProjectionError):
-        candidate_to_wire(malformed)
+        candidate_to_wire(malformed, now=NOW)
 
     rows = provenance_to_wire((started(),), (finished_success(),))
     validator("#/$defs/ProviderProvenanceSequence").validate(rows)
@@ -674,7 +677,7 @@ def test_candidate_and_provenance_projection_obey_complete_wire_matrix() -> None
         ),
     )
     with pytest.raises(StaffingProjectionError, match="display_name"):
-        candidate_to_wire(overlong_display)
+        candidate_to_wire(overlong_display, now=NOW)
 
     with pytest.raises(StaffingProjectionError, match="duplicate"):
         provenance_to_wire((started(), started()), (finished_success(),))
@@ -689,7 +692,7 @@ def test_candidate_and_provenance_projection_obey_complete_wire_matrix() -> None
         ),
     ):
         with pytest.raises(StaffingProjectionError, match="operation"):
-            candidate_to_wire(replace(candidate(valid=True), operations=(operation,)))
+            candidate_to_wire(replace(candidate(valid=True), operations=(operation,)), now=NOW)
 
 
 @pytest.mark.parametrize("reverse_started", (False, True))
@@ -767,7 +770,7 @@ def test_request_projection_emits_every_closed_generation_branch(state: str) -> 
         view = generation(state, attempts=(failed,))
     else:
         view = generation(state)
-    wire = project_request_to_wire(generation_request(view), disposition="duplicate")
+    wire = project_request_to_wire(generation_request(view), disposition="duplicate", now=NOW)
     validator("#/$defs/StaffingReceipt").validate(wire)
     assert wire["state"] == state
     assert wire["operation_id"] == "event-1"
@@ -783,7 +786,7 @@ def test_request_projection_rejects_terminal_digest_and_manager_operator_mismatc
                 projection,
                 result_evidence=replace(projection.result_evidence, input_digest="9" * 64),
             ),
-            disposition="created",
+            disposition="created", now=NOW
         )
 
     manager = ManagerResponseProjection(
@@ -824,7 +827,7 @@ def test_request_projection_rejects_terminal_digest_and_manager_operator_mismatc
         committed_record=committed,
     )
     with pytest.raises(StaffingProjectionError, match="mismatch"):
-        project_request_to_wire(request, disposition="created")
+        project_request_to_wire(request, disposition="created", now=NOW)
 
     with pytest.raises(StaffingProjectionError, match="candidate_count"):
         project_request_to_wire(
@@ -832,13 +835,13 @@ def test_request_projection_rejects_terminal_digest_and_manager_operator_mismatc
                 projection,
                 result_evidence=replace(projection.result_evidence, candidate_count=0),
             ),
-            disposition="created",
+            disposition="created", now=NOW
         )
 
     with pytest.raises(StaffingProjectionError, match="committed event"):
         project_request_to_wire(
             replace(projection, event_ids=("different-event",)),
-            disposition="created",
+            disposition="created", now=NOW
         )
     non_utc_committed = replace(
         projection.committed_record,
@@ -847,7 +850,7 @@ def test_request_projection_rejects_terminal_digest_and_manager_operator_mismatc
     with pytest.raises(StaffingProjectionError, match="UTC"):
         project_request_to_wire(
             replace(projection, committed_record=non_utc_committed),
-            disposition="created",
+            disposition="created", now=NOW
         )
     missing_failure = generation_request(
         replace(generation("UNAVAILABLE"), failure_code=None)
@@ -862,14 +865,14 @@ def test_request_projection_rejects_terminal_digest_and_manager_operator_mismatc
         ),
     )
     with pytest.raises(StaffingProjectionError, match="terminal"):
-        project_request_to_wire(missing_failure, disposition="created")
+        project_request_to_wire(missing_failure, disposition="created", now=NOW)
 
     wrong_record_class = replace(
         request,
         operation_kind="roster-import",
     )
     with pytest.raises(StaffingProjectionError, match="do not match"):
-        project_request_to_wire(wrong_record_class, disposition="created")
+        project_request_to_wire(wrong_record_class, disposition="created", now=NOW)
 
 
 def test_request_projection_rejects_attempts_outside_reserved_route() -> None:
@@ -880,7 +883,7 @@ def test_request_projection_rejects_attempts_outside_reserved_route() -> None:
         generation(starts=(rogue_start,), attempts=(rogue_finish,))
     )
     with pytest.raises(StaffingProjectionError, match="reserved route"):
-        project_request_to_wire(mismatched_model, disposition="created")
+        project_request_to_wire(mismatched_model, disposition="created", now=NOW)
 
     nonterminal_mismatch = generation_request(
         generation(
@@ -891,7 +894,7 @@ def test_request_projection_rejects_attempts_outside_reserved_route() -> None:
         )
     )
     with pytest.raises(StaffingProjectionError, match="reserved route"):
-        project_request_to_wire(nonterminal_mismatch, disposition="created")
+        project_request_to_wire(nonterminal_mismatch, disposition="created", now=NOW)
 
     wrong_request_start = replace(started(), request_id="generation-other")
     wrong_request_finish = replace(finished_success(), request_id="generation-other")
@@ -899,13 +902,13 @@ def test_request_projection_rejects_attempts_outside_reserved_route() -> None:
         generation(starts=(wrong_request_start,), attempts=(wrong_request_finish,))
     )
     with pytest.raises(StaffingProjectionError, match="generation identity"):
-        project_request_to_wire(mismatched_request, disposition="created")
+        project_request_to_wire(mismatched_request, disposition="created", now=NOW)
 
     unavailable_success = generation_request(
         replace(generation(), route_readiness="UNAVAILABLE")
     )
     with pytest.raises(StaffingProjectionError, match="unavailable route"):
-        project_request_to_wire(unavailable_success, disposition="created")
+        project_request_to_wire(unavailable_success, disposition="created", now=NOW)
 
 
 def test_exception_receipt_requires_exact_exception_identity() -> None:
@@ -947,7 +950,7 @@ def test_exception_receipt_requires_exact_exception_identity() -> None:
         committed_record=committed,
     )
     with pytest.raises(StaffingProjectionError, match="identity"):
-        project_request_to_wire(projection, disposition="created")
+        project_request_to_wire(projection, disposition="created", now=NOW)
 
 
 def test_non_generation_receipts_emit_every_frozen_operation_state_record_triple() -> None:
@@ -1074,7 +1077,7 @@ def test_non_generation_receipts_emit_every_frozen_operation_state_record_triple
             generation=None,
             committed_record=committed,
         )
-        wire = project_request_to_wire(projection, disposition="created")
+        wire = project_request_to_wire(projection, disposition="created", now=NOW)
         validator("#/$defs/StaffingReceipt").validate(wire)
         assert (wire["operation_kind"], wire["state"], wire["record"]["record_kind"]) == (
             operation_kind,
@@ -1129,7 +1132,7 @@ def test_request_projection_accepts_local_terminal_after_persisted_primary_attem
         ),
     )
 
-    wire = project_request_to_wire(projection, disposition="created")
+    wire = project_request_to_wire(projection, disposition="created", now=NOW)
 
     validator("#/$defs/StaffingReceipt").validate(wire)
     assert wire["state"] == "UNAVAILABLE"
@@ -1177,7 +1180,7 @@ def test_input_too_large_terminal_provenance_has_one_exact_global_after_primary_
         failure_code="INPUT_TOO_LARGE",
     )
     initial_wire = project_request_to_wire(
-        local_projection(initial_local), disposition="created"
+        local_projection(initial_local), disposition="created", now=NOW
     )
     assert initial_wire["record"]["provenance"] == []
 
@@ -1207,7 +1210,7 @@ def test_input_too_large_terminal_provenance_has_one_exact_global_after_primary_
         **global_route,
     )
     after_primary_wire = project_request_to_wire(
-        local_projection(after_primary), disposition="created"
+        local_projection(after_primary), disposition="created", now=NOW
     )
     validator("#/$defs/StaffingReceipt").validate(after_primary_wire)
     assert after_primary_wire["state"] == "CONFIGURATION_ERROR"
@@ -1250,7 +1253,7 @@ def test_input_too_large_terminal_provenance_has_one_exact_global_after_primary_
     for invalid in (degraded, cn_attempt, nonfallback):
         with pytest.raises(StaffingProjectionError):
             project_request_to_wire(
-                local_projection(invalid), disposition="created"
+                local_projection(invalid), disposition="created", now=NOW
             )
 
 
@@ -1273,7 +1276,7 @@ def test_terminal_provenance_matrix_rejects_unfinished_global_fallback() -> None
         failure_code="CONNECT_TIMEOUT",
     )
     validator("#/$defs/StaffingReceipt").validate(
-        project_request_to_wire(generation_request(cn_view), disposition="created")
+        project_request_to_wire(generation_request(cn_view), disposition="created", now=NOW)
     )
 
     openai_refused = replace(
@@ -1305,7 +1308,7 @@ def test_terminal_provenance_matrix_rejects_unfinished_global_fallback() -> None
     )
     validator("#/$defs/StaffingReceipt").validate(
         project_request_to_wire(
-            generation_request(refused_view), disposition="created"
+            generation_request(refused_view), disposition="created", now=NOW
         )
     )
 
@@ -1334,7 +1337,7 @@ def test_terminal_provenance_matrix_rejects_unfinished_global_fallback() -> None
     )
     validator("#/$defs/StaffingReceipt").validate(
         project_request_to_wire(
-            generation_request(completed_fallback), disposition="created"
+            generation_request(completed_fallback), disposition="created", now=NOW
         )
     )
 
@@ -1349,7 +1352,7 @@ def test_terminal_provenance_matrix_rejects_unfinished_global_fallback() -> None
     )
     with pytest.raises(StaffingProjectionError, match="fallback"):
         project_request_to_wire(
-            generation_request(unfinished_fallback), disposition="created"
+            generation_request(unfinished_fallback), disposition="created", now=NOW
         )
 
     gateway_attempt = AttemptRecord(
@@ -1408,7 +1411,7 @@ def test_terminal_projection_rejects_every_unmatched_attempt_start(
     )
 
     with pytest.raises(StaffingProjectionError, match="attempt"):
-        project_request_to_wire(generation_request(view), disposition="created")
+        project_request_to_wire(generation_request(view), disposition="created", now=NOW)
 
 
 def test_provider_provenance_rejects_domain_only_failure_codes() -> None:
@@ -1458,7 +1461,7 @@ def test_date_projection_joins_one_manager_and_uses_six_digit_server_time() -> N
             empty_date_projection(generations=(view,), responses=(manager, manager)),
             site_id="site-1",
             deployment_id="deployment-1",
-            site_timezone="Asia/Shanghai",
+            site_timezone="Asia/Shanghai", now=NOW
         )
 
     rogue_route = replace(route_evidence(), model_id="rogue-model")
@@ -1471,7 +1474,7 @@ def test_date_projection_joins_one_manager_and_uses_six_digit_server_time() -> N
             empty_date_projection(generations=(rogue_generation,)),
             site_id="site-1",
             deployment_id="deployment-1",
-            site_timezone="Asia/Shanghai",
+            site_timezone="Asia/Shanghai", now=NOW
         )
 
     for mismatched in (
@@ -1484,7 +1487,7 @@ def test_date_projection_joins_one_manager_and_uses_six_digit_server_time() -> N
                 mismatched,
                 site_id="site-1",
                 deployment_id="deployment-1",
-                site_timezone="Asia/Shanghai",
+                site_timezone="Asia/Shanghai", now=NOW
             )
     with pytest.raises(StaffingProjectionError, match="service date"):
         project_date_to_wire(
@@ -1494,14 +1497,14 @@ def test_date_projection_joins_one_manager_and_uses_six_digit_server_time() -> N
             ),
             site_id="site-1",
             deployment_id="deployment-1",
-            site_timezone="Asia/Shanghai",
+            site_timezone="Asia/Shanghai", now=NOW
         )
     with pytest.raises(StaffingProjectionError, match="no generation"):
         project_date_to_wire(
             empty_date_projection(responses=(manager,)),
             site_id="site-1",
             deployment_id="deployment-1",
-            site_timezone="Asia/Shanghai",
+            site_timezone="Asia/Shanghai", now=NOW
         )
 
 
@@ -1522,7 +1525,7 @@ def test_flattened_generation_coverage_gaps_enforce_schema_max_items() -> None:
         generation("NO_VALID_SUGGESTION"), candidates=(first, second)
     )
     boundary_wire = project_request_to_wire(
-        generation_request(boundary), disposition="created"
+        generation_request(boundary), disposition="created", now=NOW
     )
     assert len(boundary_wire["record"]["coverage_gaps"]) == 4096
     validator("#/$defs/StaffingReceipt").validate(boundary_wire)
@@ -1533,7 +1536,7 @@ def test_flattened_generation_coverage_gaps_enforce_schema_max_items() -> None:
     )
     with pytest.raises(StaffingProjectionError, match="coverage gap"):
         project_request_to_wire(
-            generation_request(overflow), disposition="created"
+            generation_request(overflow), disposition="created", now=NOW
         )
 
 
@@ -1572,7 +1575,7 @@ def test_date_projection_collections_enforce_schema_max_items(
         projection(4096),
         site_id="site-1",
         deployment_id="deployment-1",
-        site_timezone="Asia/Shanghai",
+        site_timezone="Asia/Shanghai", now=NOW
     )
     wire_key = "active_exceptions" if collection == "exceptions" else collection
     assert len(boundary_wire[wire_key]) == 4096
@@ -1581,7 +1584,7 @@ def test_date_projection_collections_enforce_schema_max_items(
             projection(4097),
             site_id="site-1",
             deployment_id="deployment-1",
-            site_timezone="Asia/Shanghai",
+            site_timezone="Asia/Shanghai", now=NOW
         )
 
 
@@ -1600,7 +1603,7 @@ def test_effective_plan_assignments_enforce_schema_max_items() -> None:
         projection(4096),
         site_id="site-1",
         deployment_id="deployment-1",
-        site_timezone="Asia/Shanghai",
+        site_timezone="Asia/Shanghai", now=NOW
     )
     assert len(boundary_wire["effective_plan"]["assignments"]) == 4096
     with pytest.raises(StaffingProjectionError, match="maximum"):
@@ -1608,7 +1611,7 @@ def test_effective_plan_assignments_enforce_schema_max_items() -> None:
             projection(4097),
             site_id="site-1",
             deployment_id="deployment-1",
-            site_timezone="Asia/Shanghai",
+            site_timezone="Asia/Shanghai", now=NOW
         )
 
 
@@ -1802,7 +1805,7 @@ def test_route_dispatch_covers_all_eleven_routes_and_keeps_manager_id_out_of_bod
         lambda projection, **_kwargs: {"projection": projection},
     )
     monkeypatch.setattr(
-        composition, "to_wire_receipt", lambda _owner, result: result
+        composition, "to_wire_receipt", lambda _owner, result, **_kwargs: result
     )
     adapter = StaffingRouteAdapter(
         owner=owner,
@@ -1893,6 +1896,7 @@ def test_public_error_mapping_is_closed_and_redacts_internal_details() -> None:
         "INVALID_TRANSITION": "staffing_conflict",
         "STALE_SUGGESTION": "staffing_stale_suggestion",
         "OVERLAPPING_EXCEPTION": "staffing_exception_overlap",
+        "EXPIRED_SUGGESTION": "staffing_suggestion_expired",
     }
     for code, expected in expected_conflicts.items():
         error = staffing_error_for_conflict(
@@ -2118,7 +2122,7 @@ def test_deadline_result_supports_provider_terminal_and_local_gateway_shapes() -
         generation_request(provider_view), result_evidence=provider_evidence
     )
     provider_wire = project_request_to_wire(
-        provider_projection, disposition="created"
+        provider_projection, disposition="created", now=NOW
     )
     assert provider_evidence.selected_provider == "KIMI"
     assert provider_wire["record"]["provenance"][0]["failure_code"] == "DEADLINE_EXHAUSTED"
@@ -2132,7 +2136,7 @@ def test_deadline_result_supports_provider_terminal_and_local_gateway_shapes() -
                     selected_model_id=None,
                 ),
             ),
-            disposition="created",
+            disposition="created", now=NOW
         )
 
     failed_primary = AttemptRecord(
@@ -2186,7 +2190,7 @@ def test_deadline_result_supports_provider_terminal_and_local_gateway_shapes() -
     local_projection = replace(
         generation_request(local_view), result_evidence=local_evidence
     )
-    local_wire = project_request_to_wire(local_projection, disposition="created")
+    local_wire = project_request_to_wire(local_projection, disposition="created", now=NOW)
     assert local_evidence.selected_provider is None
     assert local_wire["record"]["provenance"][0]["failure_code"] == "CONNECT_TIMEOUT"
     with pytest.raises(StaffingProjectionError, match="deadline"):
@@ -2199,7 +2203,7 @@ def test_deadline_result_supports_provider_terminal_and_local_gateway_shapes() -
                     selected_model_id="model-1",
                 ),
             ),
-            disposition="created",
+            disposition="created", now=NOW
         )
 
     zero_attempt = replace(local_result, attempts=())
@@ -3190,6 +3194,9 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
     start_at: str,
     end_at: str,
 ) -> None:
+    # Every instant precedes the earliest parametrized shift end, so the
+    # byte-unchanged MODIFY under test stays inside its action window.
+    clock = datetime(2026, 10, 5, 0, 30, tzinfo=timezone.utc)
     state_root = tmp_path / "stable"
     volatile = tmp_path / "volatile"
     root = resolve_staffing_root(
@@ -3215,7 +3222,7 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
             start=window[0],
             end=window[1],
         ),
-        recorded_at=NOW,
+        recorded_at=clock,
     )
     request = generation_payload("generation-timezone")
     request["service_date"] = service_date
@@ -3228,7 +3235,7 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
         route_evidence=route,
         prompt_template_version=PROMPT_TEMPLATE_VERSION,
         language="zh-CN",
-        recorded_at=NOW,
+        recorded_at=clock,
     )
     generation_id = owner.request_projection(
         "suggestion-generate", "generation-timezone"
@@ -3294,9 +3301,9 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
         1,
         None,
     )
-    owner.record_attempt_started(generation_id, begin, recorded_at=NOW)
-    owner.record_attempt_finished(generation_id, finish, recorded_at=NOW)
-    owner.commit_generation_result(generation_id, result, output, recorded_at=NOW)
+    owner.record_attempt_started(generation_id, begin, recorded_at=clock)
+    owner.record_attempt_finished(generation_id, finish, recorded_at=clock)
+    owner.commit_generation_result(generation_id, result, output, recorded_at=clock)
     ledger.close()
 
     api = build_staffing_operations(
@@ -3306,7 +3313,7 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
         site_timezone=timezone_name,
         volatile_out=volatile,
         settings=settings,
-        audit_clock=lambda: NOW,
+        audit_clock=lambda: clock,
         monotonic=time.monotonic,
         nonce_factory=lambda: b"n" * 32,
     )

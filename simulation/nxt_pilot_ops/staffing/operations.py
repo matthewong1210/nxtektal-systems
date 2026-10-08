@@ -82,6 +82,12 @@ from .exceptions import (
 )
 from .ledger import EventCommit, StaffingLedger
 from .plans import build_staffing_basis, effective_plan_state, roster_revisions
+from .review import (
+    action_window_end,
+    is_expired,
+    local_alias_labels,
+    render_local_text,
+)
 from .projection import (
     GenerationProjection,
     decode_provider_candidates,
@@ -639,6 +645,7 @@ class StaffingOperations:
                     "INVALID_TRANSITION",
                     "STALE_SUGGESTION",
                     "OVERLAPPING_EXCEPTION",
+                    "EXPIRED_SUGGESTION",
                 }:
                     raise
                 if error.code == "STALE_SUGGESTION":
@@ -647,6 +654,8 @@ class StaffingOperations:
                     code = "INVALID_TRANSITION"
                 elif error.code == "OVERLAPPING_EXCEPTION":
                     code = "OVERLAPPING_EXCEPTION"
+                elif error.code == "EXPIRED_SUGGESTION":
+                    code = "EXPIRED_SUGGESTION"
                 else:
                     code = "STALE_REQUEST"
                 return ConflictDecision(kind, request_id, code)
@@ -1322,6 +1331,19 @@ class StaffingOperations:
             else:
                 effective = None
 
+            if request.kind in {"ACCEPT", "MODIFY"}:
+                # An ended shift cannot be accepted into a current plan.  The
+                # injected audit instant is the only clock; replay of an
+                # already committed response never re-applies this rule.
+                window_end = action_window_end(
+                    patch.operations,
+                    assignment_end_by_alias=_assignment_end_by_alias(reservation),
+                    service_date=reservation.service_date,
+                    site_timezone=reservation.basis_snapshot.site_timezone,
+                )
+                if is_expired(window_end, _utc_audit_time(recorded_at)):
+                    raise StaffingError("EXPIRED_SUGGESTION", suggestion_id)
+
             if effective is None:
                 digest = None
                 plan_revision = None
@@ -1601,6 +1623,20 @@ def _exception_views(
     )
 
 
+def _assignment_end_by_alias(
+    reservation: GenerationReservedPayload,
+) -> dict[str, datetime]:
+    ends = {
+        item.assignment_id: item.end_at
+        for item in reservation.basis_snapshot.assignments
+    }
+    return {
+        alias: ends[assignment_id]
+        for alias, assignment_id in reservation.assignment_alias_to_assignment_id
+        if assignment_id in ends
+    }
+
+
 def _candidate_view(
     candidate: StoredCandidate,
     reservation: GenerationReservedPayload,
@@ -1651,6 +1687,15 @@ def _candidate_view(
                     item.end_at,
                 )
             )
+    labels = local_alias_labels(
+        workers=workers,
+        assignments=reservation.basis_snapshot.assignments,
+        worker_alias_to_staff_id=reservation.worker_alias_to_staff_id,
+        assignment_alias_to_assignment_id=(
+            reservation.assignment_alias_to_assignment_id
+        ),
+        site_timezone=reservation.basis_snapshot.site_timezone,
+    )
     return CandidateProjection(
         candidate.candidate_index,
         candidate.materialized_schedule is not None
@@ -1664,6 +1709,17 @@ def _candidate_view(
         if candidate.materialized_schedule is None
         else _assignment_views(candidate.materialized_schedule, workers),
         candidate.materialized_schedule_digest,
+        render_local_text(candidate.rationale, labels),
+        tuple(
+            render_local_text(item, labels)
+            for item in candidate.operational_warnings
+        ),
+        action_window_end(
+            restored.operations,
+            assignment_end_by_alias=_assignment_end_by_alias(reservation),
+            service_date=reservation.service_date,
+            site_timezone=reservation.basis_snapshot.site_timezone,
+        ),
     )
 
 

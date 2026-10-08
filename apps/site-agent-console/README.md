@@ -164,6 +164,18 @@ confirms it. The normalized JSON request is capped at 1 MiB before fetch, and
 the service revalidates the complete request; browser checks are convenience,
 not authority.
 
+Every staffing time (exceptions, adjustments, coverage gaps, the service
+clock) is rendered in the deployment's site timezone from the snapshot context;
+the exact wire instant stays on the element for audit. Candidate text shown to
+the supervisor is the service's local reading (`rationale_local`,
+`operational_warnings_local`) in which provider aliases are already replaced by
+display names and shift labels; the raw provider text stays available in a
+collapsed audit view, and the console never sees alias maps. A candidate whose
+shifts have ended arrives as `actionability: EXPIRED` and is shown under a
+historical label with no accept, modify, or reject control; the service refuses
+such a response with `staffing_suggestion_expired`. Manager result, plan, and
+candidate statuses carry Chinese labels beside their unchanged contract values.
+
 Every write receives a new request ID immediately before submission. If a
 response is lost, the console first recovers the same operation by
 `GET /api/v1/staffing/requests/{operation-kind}/{request-id}`; a busy response

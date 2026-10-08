@@ -191,6 +191,7 @@ describe("compact staffing panel", () => {
     expect([...rail!.querySelectorAll("dt")].map((item) => item.textContent)).toEqual([
       "服务日",
       "时区",
+      "服务时间",
       "员工",
       "常规班次",
       "版本",
@@ -198,6 +199,7 @@ describe("compact staffing panel", () => {
     expect([...rail!.querySelectorAll("dd")].map((item) => item.textContent)).toEqual([
       "2026-10-06",
       "Asia/Shanghai",
+      "2026-10-06 09:35",
       "2",
       "1",
       "1",
@@ -322,6 +324,7 @@ describe("compact staffing panel", () => {
     const valid = {
       ...structuredClone(active.candidates[0]),
       operational_warnings: ["交接窗口需要经理现场确认"],
+      operational_warnings_local: ["交接窗口需要经理现场确认"],
     } as CandidateProjection;
     active.candidates = [valid, { ...structuredClone(rejected), candidate_index: 2 } as CandidateProjection];
     active.coverage_gaps = structuredClone(rejected.coverage_gaps);
@@ -420,5 +423,125 @@ describe("compact staffing panel", () => {
     expect(savedButStale.html).toContain("refresh failed");
     expect(savedButStale.html).not.toMatch(/结果未知|UNKNOWN OUTCOME/);
     expect(button(savedButStale.host, /刷新/)).toBeDefined();
+  });
+});
+
+describe("site time, local explanations, historical suggestions, and Chinese result labels", () => {
+  function shanghaiSnapshot(active: GenerationProjection): StaffingDateSnapshot {
+    const value = readySnapshot(active);
+    value.context = { ...value.context, site_timezone: "Asia/Shanghai" };
+    value.server_time_utc = "2026-10-06T01:35:00.000000Z";
+    value.active_exceptions = [{
+      exception_id: "exception-late-1",
+      staff_id: "staff-001",
+      display_name: "Operator One",
+      kind: "LATE",
+      unavailable_start_at: "2026-10-06T08:00:00Z",
+      unavailable_end_at: "2026-10-06T12:00:00Z",
+      note: null,
+      active: true,
+    }];
+    return value;
+  }
+
+  it("renders exception, adjustment, and service times in the site timezone while keeping the wire instant", () => {
+    const active = generation();
+    const valid = structuredClone(active.candidates[0]) as CandidateProjection;
+    valid.operations = [{
+      operation: "ADD",
+      staff_id: "staff-002",
+      display_name: "Operator Two",
+      role_code: "RANGE_ATTENDANT",
+      area_code: "RANGE_A",
+      start_at: "2026-10-06T08:00:00Z",
+      end_at: "2026-10-06T12:00:00Z",
+    }];
+    active.candidates = [valid];
+    const { host, html } = renderView(state(shanghaiSnapshot(active)));
+
+    const exceptions = host.querySelector<HTMLElement>('[aria-label="当前人员异常"]');
+    expect(exceptions?.textContent).toContain("2026-10-06 16:00–20:00");
+    expect(exceptions?.textContent).toContain("迟到");
+    expect(exceptions?.textContent).toContain("LATE");
+    expect(exceptions?.textContent).toContain("Asia/Shanghai");
+    expect(exceptions?.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-06T08:00:00Z");
+    expect(candidate(host, 1).textContent).toContain("2026-10-06 16:00–20:00");
+    expect(html).not.toMatch(/08:00Z|12:00Z|08:00:00Z\s*—/);
+    expect(host.querySelector('[aria-label="服务日与人员表状态"]')?.textContent).toContain("2026-10-06 09:35");
+  });
+
+  it("shows the local explanation to the supervisor and keeps the raw alias text auditable", () => {
+    const active = generation();
+    const valid = structuredClone(active.candidates[0]) as CandidateProjection;
+    valid.rationale = "由 worker_00112233445566778899aabb 顶替 assignment_ffeeddccbbaa998877665544 班次";
+    valid.rationale_local = "由 Operator Two 顶替 Operator One (RANGE_ATTENDANT/RANGE_A 09:00–17:00) 班次";
+    valid.operational_warnings = ["worker_00112233445566778899aabb 需提前到岗"];
+    valid.operational_warnings_local = ["Operator Two 需提前到岗"];
+    active.candidates = [valid];
+    const { host } = renderView(state(shanghaiSnapshot(active)));
+    const card = candidate(host, 1);
+
+    expect(card.querySelector(".staffing-rationale")?.textContent).toBe(valid.rationale_local);
+    expect(card.querySelector('[aria-label="运营提示"]')?.textContent).toContain("Operator Two 需提前到岗");
+    expect(card.querySelector('[aria-label="运营提示"]')?.textContent).not.toContain("worker_");
+    expect(card.querySelector("details.staffing-raw")?.textContent).toContain(valid.rationale);
+    expect(button(card, /接受.*建议/)).toBeDefined();
+  });
+
+  it("labels an ended shift as historical, separated from current actions, with no accept, modify, or reject control", () => {
+    const active = generation();
+    const expired = structuredClone(active.candidates[0]) as CandidateProjection;
+    expired.action_window_end_at = "2026-10-06T09:00:00Z";
+    expired.actionability = "EXPIRED";
+    active.candidates = [expired];
+    const data = shanghaiSnapshot(active);
+    data.server_time_utc = "2026-10-06T13:00:00.000000Z";
+    const { host, html } = renderView(state(data));
+    const card = candidate(host, 1);
+
+    expect(host.querySelector('[aria-label="历史排班建议列表"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="排班建议列表"]')).toBeNull();
+    expect(html).toContain("历史建议（班次已结束，仅供查阅）");
+    expect(card.getAttribute("data-actionability")).toBe("EXPIRED");
+    expect(card.textContent).toContain("班次已结束（历史记录）");
+    expect(card.textContent).toContain("2026-10-06 17:00");
+    expect(card.textContent).toContain("VALID");
+    expect(button(card, /接受.*建议/)).toBeUndefined();
+    expect(button(card, /修改.*建议/)).toBeUndefined();
+    expect(button(host, /拒绝本次全部建议/)).toBeUndefined();
+    expect(card.textContent).not.toContain("当前数据版本已变化");
+  });
+
+  it("keeps a current candidate actionable beside an expired sibling", () => {
+    const active = generation();
+    const first = structuredClone(active.candidates[0]) as CandidateProjection;
+    first.actionability = "EXPIRED";
+    const second = { ...structuredClone(active.candidates[0]), candidate_index: 2 } as CandidateProjection;
+    active.candidates = [first, second];
+    const { host } = renderView(state(shanghaiSnapshot(active)));
+
+    expect(host.querySelector('[aria-label="排班建议列表"]')).not.toBeNull();
+    expect(button(candidate(host, 1), /接受.*建议/)).toBeUndefined();
+    expect(button(candidate(host, 2), /接受.*建议/)).toBeDefined();
+    expect(button(host, /拒绝本次全部建议/)).toBeDefined();
+  });
+
+  it("shows Chinese manager result and plan labels while preserving the contract values", () => {
+    const data = snapshot("date-after-manager-response");
+    const active = data.generations[0];
+    const { host, html } = renderView(state(data, {
+      activeGenerationRequestId: active.request_id,
+      activeGeneration: active,
+    }));
+    const response = host.querySelector<HTMLElement>('[aria-label="经理处理结果"]');
+
+    expect(response?.textContent).toContain("已接受");
+    expect(response?.textContent).toContain("经理批准");
+    expect(response?.textContent).toContain("当前有效");
+    expect(response?.textContent).toContain("ACCEPT");
+    expect(response?.textContent).toContain("APPROVED");
+    expect(response?.textContent).toContain("CURRENT");
+    expect(host.querySelector('[aria-label="有效排班状态"]')?.textContent).toContain("当前有效");
+    expect(html).toContain("通过校验");
   });
 });

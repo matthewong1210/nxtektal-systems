@@ -94,6 +94,7 @@ const DEFINITE_REJECTIONS = new Set([
   "409:staffing_conflict",
   "409:staffing_exception_overlap",
   "409:staffing_stale_suggestion",
+  "409:staffing_suggestion_expired",
   "413:body_too_large",
 ]);
 

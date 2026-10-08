@@ -194,3 +194,19 @@ export function formatSiteTime(utc: string | null | undefined, timeZone: string)
   const wall = wallClockIn(parsed.wholeSecondMs, timeZone);
   return `${wall.year}-${pad(wall.month)}-${pad(wall.day)} ${pad(wall.hour)}:${pad(wall.minute)}`;
 }
+
+/** Display helper for a half-open interval in the site timezone: one date
+ * when both ends fall on the same site-local day (`YYYY-MM-DD HH:MM–HH:MM`),
+ * both full stamps otherwise. Either end may carry a `Z` or a signed offset;
+ * an unreadable end is echoed verbatim so nothing is silently invented. */
+export function formatSiteRange(start: string, end: string, timeZone: string): string {
+  const left = parseUtc(start);
+  const right = parseUtc(end);
+  if (left === null || right === null) return `${formatSiteTime(start, timeZone)}–${formatSiteTime(end, timeZone)}`;
+  const from = wallClockIn(left.wholeSecondMs, timeZone);
+  const to = wallClockIn(right.wholeSecondMs, timeZone);
+  const sameDay = from.year === to.year && from.month === to.month && from.day === to.day;
+  const fromText = formatSiteTime(start, timeZone);
+  if (sameDay) return `${fromText}–${pad(to.hour)}:${pad(to.minute)}`;
+  return `${fromText} – ${formatSiteTime(end, timeZone)}`;
+}
