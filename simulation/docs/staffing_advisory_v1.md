@@ -438,5 +438,6 @@ typecheck, lint, 851 vitest tests, static build, loopback smoke, and `npm audit 
 The V3 and V4 witnesses were regenerated through their authoritative flows (22 regenerate-mode
 passes, then 29 read-only passes and the console's two witness consumers) because the engine
 fingerprint hashes every `nxt_*` source file; a structural comparison showed only identity and
-digest leaves moved (80 leaves in the two-task witness, 42 in the normal-loop witness). The v1
-ledger fixture replays unchanged.
+digest leaves moved (80 leaves in the two-task witness, 42 in the normal-loop witness). With the
+regenerated witnesses in place the full Python suite reported 5080 passed and 11 skipped (the
+mosquitto-dependent Edge Task integration cases). The v1 ledger fixture replays unchanged.
