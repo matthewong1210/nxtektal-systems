@@ -101,6 +101,44 @@ function parseUtc(utc: string): ParsedUtc | null {
   return { wholeSecondMs, fraction: millis ? String(millis).padStart(3, "0").replace(/0+$/, "") : "" };
 }
 
+/** Every instant (ms) whose site wall clock equals `wall`, ascending: one for
+ * an ordinary time, two across a fall-back repeat, none in a spring-forward gap. */
+function localInstants(wall: WallClock, timeZone: string): number[] {
+  const guess = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second);
+  if (!Number.isFinite(guess)) return [];
+  const offsets = new Set([-24, -12, 0, 12, 24].map((hours) => zoneOffsetMs(guess + hours * 3_600_000, timeZone)));
+  const instants = new Set<number>();
+  for (const offset of offsets) {
+    const instant = guess - offset;
+    const back = wallClockIn(instant, timeZone);
+    if (
+      back.year === wall.year &&
+      back.month === wall.month &&
+      back.day === wall.day &&
+      back.hour === wall.hour &&
+      back.minute === wall.minute &&
+      back.second === wall.second
+    ) {
+      instants.add(instant);
+    }
+  }
+  return [...instants].sort((a, b) => a - b);
+}
+
+/** True when the instant's site wall clock is repeated (a daylight-saving
+ * fall-back), so the clock text alone cannot name the instant. */
+export function wallClockIsAmbiguous(instantMs: number, timeZone: string): boolean {
+  return localInstants(wallClockIn(instantMs, timeZone), timeZone).length > 1;
+}
+
+/** ` UTC±HH:MM` for the zone offset in force at the instant. */
+export function offsetSuffix(instantMs: number, timeZone: string): string {
+  const minutes = Math.trunc(zoneOffsetMs(instantMs, timeZone) / 60_000);
+  const sign = minutes < 0 ? "-" : "+";
+  const magnitude = Math.abs(minutes);
+  return ` UTC${sign}${pad(Math.floor(magnitude / 60))}:${pad(magnitude % 60)}`;
+}
+
 /** Convert a `datetime-local` value entered as site-local wall clock to UTC,
  * at the precision typed. Nonexistent (spring-forward) times are rejected;
  * repeated (fall-back) times raise `SiteTimeAmbiguityError`. */
@@ -110,25 +148,10 @@ export function siteTimeToUtc(value: string, timeZone: string): string {
   const [year, month, day, hour, minute] = match.slice(1, 6).map(Number);
   const second = match[6] === undefined ? 0 : Number(match[6]);
   const fraction = match[7] ?? "";
-  const guess = Date.UTC(year, month - 1, day, hour, minute, second);
-  if (!Number.isFinite(guess)) throw new Error("That site-local date and time is not valid.");
-  const offsets = new Set([-24, -12, 0, 12, 24].map((hours) => zoneOffsetMs(guess + hours * 3_600_000, timeZone)));
-  const instants = new Set<number>();
-  for (const offset of offsets) {
-    const instant = guess - offset;
-    const wall = wallClockIn(instant, timeZone);
-    if (
-      wall.year === year &&
-      wall.month === month &&
-      wall.day === day &&
-      wall.hour === hour &&
-      wall.minute === minute &&
-      wall.second === second
-    ) {
-      instants.add(instant);
-    }
+  if (!Number.isFinite(Date.UTC(year, month - 1, day, hour, minute, second))) {
+    throw new Error("That site-local date and time is not valid.");
   }
-  const candidates = [...instants].sort((a, b) => a - b);
+  const candidates = localInstants({ year, month, day, hour, minute, second }, timeZone);
   if (candidates.length === 0) {
     throw new Error("That site-local time does not exist. Check the date or a daylight-saving change.");
   }
@@ -186,27 +209,51 @@ export function compareUtc(a: string, b: string): number {
   return leftMicros === rightMicros ? 0 : leftMicros < rightMicros ? -1 : 1;
 }
 
-/** Display helper: `YYYY-MM-DD HH:MM` in the site timezone, or an em dash. */
+/** Millisecond instant of an RFC3339 time (UTC `Z` or signed offset), with any
+ * sub-millisecond fraction truncated toward the past, or null when unreadable.
+ * Parsing only: nothing here reads a clock. */
+export function utcMillis(value: string): number | null {
+  const parsed = parseUtc(value);
+  if (parsed === null) return null;
+  return parsed.wholeSecondMs + Math.floor(Number(parsed.fraction.padEnd(6, "0")) / 1000);
+}
+
+const clockText = (wall: WallClock) => `${pad(wall.hour)}:${pad(wall.minute)}`;
+const stampText = (wall: WallClock) => `${wall.year}-${pad(wall.month)}-${pad(wall.day)} ${clockText(wall)}`;
+
+/** Display helper: `YYYY-MM-DD HH:MM` in the site timezone, or an em dash. A
+ * repeated wall time (daylight-saving fall-back) carries its ` UTC±HH:MM`
+ * suffix so the text names exactly one instant. */
 export function formatSiteTime(utc: string | null | undefined, timeZone: string): string {
   if (!utc) return "—";
   const parsed = parseUtc(utc);
   if (parsed === null) return utc;
-  const wall = wallClockIn(parsed.wholeSecondMs, timeZone);
-  return `${wall.year}-${pad(wall.month)}-${pad(wall.day)} ${pad(wall.hour)}:${pad(wall.minute)}`;
+  const ms = parsed.wholeSecondMs;
+  return stampText(wallClockIn(ms, timeZone)) + (wallClockIsAmbiguous(ms, timeZone) ? offsetSuffix(ms, timeZone) : "");
 }
 
 /** Display helper for a half-open interval in the site timezone: one date
  * when both ends fall on the same site-local day (`YYYY-MM-DD HH:MM–HH:MM`),
  * both full stamps otherwise. Either end may carry a `Z` or a signed offset;
- * an unreadable end is echoed verbatim so nothing is silently invented. */
+ * an unreadable end is echoed verbatim so nothing is silently invented. When
+ * the interval crosses a UTC offset change, or either wall time is repeated
+ * in the zone, both ends carry their ` UTC±HH:MM` suffix: the one-hour
+ * fall-back shift reads `01:30 UTC-04:00–01:30 UTC-05:00`, never `01:30–01:30`. */
 export function formatSiteRange(start: string, end: string, timeZone: string): string {
   const left = parseUtc(start);
   const right = parseUtc(end);
   if (left === null || right === null) return `${formatSiteTime(start, timeZone)}–${formatSiteTime(end, timeZone)}`;
-  const from = wallClockIn(left.wholeSecondMs, timeZone);
-  const to = wallClockIn(right.wholeSecondMs, timeZone);
+  const fromMs = left.wholeSecondMs;
+  const toMs = right.wholeSecondMs;
+  const from = wallClockIn(fromMs, timeZone);
+  const to = wallClockIn(toMs, timeZone);
+  const withOffset =
+    zoneOffsetMs(fromMs, timeZone) !== zoneOffsetMs(toMs, timeZone) ||
+    wallClockIsAmbiguous(fromMs, timeZone) ||
+    wallClockIsAmbiguous(toMs, timeZone);
+  const fromSuffix = withOffset ? offsetSuffix(fromMs, timeZone) : "";
+  const toSuffix = withOffset ? offsetSuffix(toMs, timeZone) : "";
   const sameDay = from.year === to.year && from.month === to.month && from.day === to.day;
-  const fromText = formatSiteTime(start, timeZone);
-  if (sameDay) return `${fromText}–${pad(to.hour)}:${pad(to.minute)}`;
-  return `${fromText} – ${formatSiteTime(end, timeZone)}`;
+  if (sameDay) return `${stampText(from)}${fromSuffix}–${clockText(to)}${toSuffix}`;
+  return `${stampText(from)}${fromSuffix} – ${stampText(to)}${toSuffix}`;
 }

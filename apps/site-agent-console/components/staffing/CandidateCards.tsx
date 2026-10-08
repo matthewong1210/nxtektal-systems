@@ -15,7 +15,6 @@ import {
   candidateIsActionable,
   candidateStatusLabel,
   generationIsHistorical,
-  planStatusLabel,
   reasonCodeLabel,
   responseKindLabel,
 } from "../../lib/staffing-labels";
@@ -28,6 +27,10 @@ export interface CandidateCardsProps {
   revisions: RevisionVector;
   /** IANA site timezone from the snapshot context; every time is shown in it. */
   timeZone: string;
+  /** The controller's server-relative timer reached the earliest open action
+   * window: controls close until the service answers again. The service alone
+   * relabels a candidate EXPIRED. */
+  deadlineReached: boolean;
   disabled: boolean;
   onAccept: StaffingActions["acceptSuggestion"];
   onModify: StaffingActions["modifySuggestion"];
@@ -87,7 +90,11 @@ function CoverageGaps({ gaps, timeZone }: { gaps: CoverageGap[]; timeZone: strin
   );
 }
 
+/** The committed receipt. Its nested plan status is the value recorded at
+ * commit time, never the live status: that is derived only from the
+ * snapshot's own `effective_plan`, rendered by the plan status section. */
 function ManagerResponse({ response }: { response: ManagerResponseSummary }) {
+  const plan = response.effective_plan;
   return (
     <section className="staffing-manager-response" aria-label="经理处理结果" role="status" aria-live="polite">
       <h3>经理处理结果</h3>
@@ -103,14 +110,22 @@ function ManagerResponse({ response }: { response: ManagerResponseSummary }) {
         <div><dt>经理</dt><dd>{response.operator}</dd></div>
         <div><dt>备注</dt><dd>{response.note ?? "无"}</dd></div>
         <div>
-          <dt>有效排班</dt>
+          <dt>确认版本</dt>
           <dd>
-            {response.effective_plan === null
-              ? "未形成"
-              : <>版本 {response.effective_plan.revision} · {planStatusLabel(response.effective_plan.status)} <span className="staffing-code">{response.effective_plan.status}</span></>}
+            {plan === null
+              ? "未形成排班版本"
+              : (
+                <>
+                  <span title={`schedule_digest ${plan.schedule_digest}`}>确认时形成的版本 {plan.revision}</span>{" "}
+                  <span className="staffing-code" title="提交时记录的合同值，不表示现在是否有效">{plan.status}</span>
+                </>
+              )}
           </dd>
         </div>
       </dl>
+      {plan === null ? null : (
+        <p className="fineprint staffing-receipt-note">此为经理确认时的记录；现行状态以“有效排班状态”栏为准。</p>
+      )}
     </section>
   );
 }
@@ -120,6 +135,7 @@ function CandidateCard({
   generation,
   timeZone,
   controlsAvailable,
+  deadlineReached,
   onAccept,
   onModify,
 }: {
@@ -127,6 +143,7 @@ function CandidateCard({
   generation: GenerationProjection;
   timeZone: string;
   controlsAvailable: boolean;
+  deadlineReached: boolean;
   onAccept: StaffingActions["acceptSuggestion"];
   onModify: StaffingActions["modifySuggestion"];
 }) {
@@ -184,7 +201,7 @@ function CandidateCard({
       <p className="staffing-advisory-label">AI 建议，需经理确认</p>
       {expired ? (
         <p className="staffing-historical" role="note">
-          <Badge tone="muted">历史记录</Badge> {actionabilityLabel(candidate.actionability)}：相关班次已于{" "}
+          <Badge tone="muted">历史记录</Badge> {actionabilityLabel(candidate.actionability)}：相关班次中最早的一班已于{" "}
           <time dateTime={candidate.action_window_end_at}>{formatSiteTime(candidate.action_window_end_at, timeZone)}</time>
           {" "}结束，仅供查阅，不能再采用为当前排班。
         </p>
@@ -298,7 +315,7 @@ function CandidateCard({
           )}
           {submitError === null ? null : <p className="staffing-error" role="alert">{submitError}</p>}
         </div>
-      ) : candidate.status === "VALID" && !expired && generation.manager_response === null ? (
+      ) : deadlineReached ? null : candidate.status === "VALID" && !expired && generation.manager_response === null ? (
         <p className="staffing-readonly">当前数据版本已变化，此建议仅供查阅。</p>
       ) : null}
     </article>
@@ -419,6 +436,7 @@ export function CandidateCards({
   generation,
   revisions,
   timeZone,
+  deadlineReached,
   disabled,
   onAccept,
   onModify,
@@ -427,13 +445,15 @@ export function CandidateCards({
   const matchingBasis = basisMatches(generation, revisions);
   const response = generation.manager_response;
   const historical = generationIsHistorical(generation);
-  // Current actions need a fresh basis, no recorded response, and at least one
-  // candidate that is valid and whose shifts have not ended. A historical
-  // generation is shown for the record only.
+  // Current actions need a fresh basis, no recorded response, an open action
+  // window on the console's server-relative timer, and at least one candidate
+  // that is valid and whose shifts have not ended. A historical generation is
+  // shown for the record only.
   const responseAvailable = !disabled
     && matchingBasis
     && response === null
     && !historical
+    && !deadlineReached
     && generation.candidates.some(candidateIsActionable);
 
   return (
@@ -454,6 +474,11 @@ export function CandidateCards({
           )}
         </header>
       )}
+      {deadlineReached && response === null && !historical ? (
+        <p className="staffing-notice staffing-deadline" role="status" aria-live="polite">
+          已到服务端截止时间，正在等待服务端的最新结果，暂不可采用。
+        </p>
+      ) : null}
       {response === null ? null : <ManagerResponse response={response} />}
       <CoverageGaps gaps={generation.coverage_gaps} timeZone={timeZone} />
       {generation.candidates.length === 0 ? null : (
@@ -468,8 +493,10 @@ export function CandidateCards({
                 !disabled
                 && matchingBasis
                 && response === null
+                && !deadlineReached
                 && candidateIsActionable(candidate)
               }
+              deadlineReached={deadlineReached}
               onAccept={onAccept}
               onModify={onModify}
             />

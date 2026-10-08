@@ -55,3 +55,25 @@ def test_resolve_local_minute_fails_closed_for_invalid_or_nonunique_minutes(
 def test_resolve_local_minute_requires_an_exact_date(bad):
     with pytest.raises(StaffingError, match="staffing_invalid_roster"):
         resolve_local_minute(bad, "09:30", "Asia/Shanghai")
+
+
+def test_local_wall_instants_enumerates_fall_back_repeats_and_spring_forward_gaps() -> None:
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from nxt_pilot_ops.staffing.time import local_wall_instants
+
+    new_york = ZoneInfo("America/New_York")
+    assert local_wall_instants(datetime(2026, 11, 1, 1, 30), new_york) == (
+        datetime(2026, 11, 1, 5, 30, tzinfo=timezone.utc),
+        datetime(2026, 11, 1, 6, 30, tzinfo=timezone.utc),
+    )
+    assert local_wall_instants(datetime(2026, 11, 1, 0, 30), new_york) == (
+        datetime(2026, 11, 1, 4, 30, tzinfo=timezone.utc),
+    )
+    assert local_wall_instants(datetime(2026, 3, 8, 2, 30), new_york) == ()
+    assert local_wall_instants(datetime(2026, 10, 5, 9, 0), ZoneInfo("Asia/Shanghai")) == (
+        datetime(2026, 10, 5, 1, 0, tzinfo=timezone.utc),
+    )
+    with pytest.raises(StaffingError):
+        local_wall_instants(datetime(2026, 11, 1, 1, 30, tzinfo=timezone.utc), new_york)

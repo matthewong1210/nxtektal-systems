@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
@@ -243,6 +244,79 @@ type FrozenTypeSurface = [
   SuggestionUnavailableRecord,
   ManagerResponseCommittedRecord,
 ];
+
+// Lockstep witness: identical to STAFFING_CONTRACT_FINGERPRINT in
+// simulation/tests/pilot_ops/test_staffing_wire_contract.py. Both pins move in
+// the same commit as the schema or any frozen example; see the contract README,
+// "Versioning and lockstep rollout".
+const STAFFING_CONTRACT_FINGERPRINT = "1a17066b1d296af420b27e46c2f934a183ec1b95eab86f0a27780baf92fd8b5c";
+const CANDIDATE_KEYS = [
+  "action_window_end_at", "actionability", "candidate_index", "coverage_gaps", "operational_warnings",
+  "operational_warnings_local", "operations", "rationale", "rationale_local", "rejection_codes",
+  "schedule_digest", "status",
+];
+
+describe("staffing v1 lockstep guards", () => {
+  const schemaDocument = JSON.parse(readFileSync(join(EXAMPLES_DIR, "..", "schema.json"), "utf-8")) as {
+    $defs: Record<string, { additionalProperties?: boolean; properties?: Record<string, unknown>; required?: string[] }>;
+  };
+
+  it("pins the same contract fingerprint as the Python contract suite", () => {
+    const hash = createHash("sha256");
+    hash.update(readFileSync(join(EXAMPLES_DIR, "..", "schema.json")));
+    for (const name of readdirSync(EXAMPLES_DIR).filter((entry) => entry.endsWith(".json")).sort()) {
+      hash.update(readFileSync(join(EXAMPLES_DIR, name)));
+    }
+    expect(hash.digest("hex")).toBe(STAFFING_CONTRACT_FINGERPRINT);
+  });
+
+  it("binds the decoder's closed candidate key set to every candidate shape in schema.json and every example", () => {
+    for (const name of ["CandidateValidProjection", "CandidateRejectedCoverageProjection", "CandidateRejectedOtherProjection"]) {
+      const definition = schemaDocument.$defs[name];
+      expect(definition.additionalProperties).toBe(false);
+      expect(Object.keys(definition.properties ?? {}).sort()).toEqual(CANDIDATE_KEYS);
+      expect([...(definition.required ?? [])].sort()).toEqual(CANDIDATE_KEYS);
+    }
+    const seen: string[][] = [];
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      if (value && typeof value === "object") {
+        const record = value as Record<string, unknown>;
+        if (Array.isArray(record.candidates)) {
+          for (const candidate of record.candidates) seen.push(Object.keys(candidate as object).sort());
+        }
+        Object.values(record).forEach(visit);
+      }
+    };
+    for (const { document } of successDocuments) visit(document);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const keys of seen) expect(keys).toEqual(CANDIDATE_KEYS);
+
+    const issued = structuredClone(exchange("suggestion-issued").body.data) as StaffingReceipt & { record: SuggestionIssuedRecord };
+    const extra = structuredClone(issued);
+    (extra.record.candidates[0] as unknown as Record<string, unknown>).review_note = "unknown";
+    expect(() => parseStaffingReceipt(extra)).toThrow(expect.objectContaining({ code: "invalid_staffing_response" }));
+    for (const key of CANDIDATE_KEYS) {
+      const missing = structuredClone(issued);
+      delete (missing.record.candidates[0] as unknown as Record<string, unknown>)[key];
+      expect(() => parseStaffingReceipt(missing), key).toThrow(expect.objectContaining({ code: "invalid_staffing_response" }));
+    }
+  });
+
+  it("accepts the frozen error inventory plus the documented body_too_large transport error and nothing beside them", async () => {
+    const inventory = errors.exchanges.map((item) => item.body.error.code).sort();
+    expect(inventory).toEqual((schemaDocument.$defs.ErrorBody.properties?.code as { enum: string[] }).enum.slice().sort());
+    for (const item of errors.exchanges) {
+      await expect(scripted(item.http_status, item.body).client.current()).rejects.toMatchObject({ code: item.body.error.code });
+    }
+    const tooLarge = scripted(413, { ...errors.exchanges[0].body, error: { code: "body_too_large", detail: "request body exceeds limit" } }).client;
+    await expect(tooLarge.current()).rejects.toMatchObject({ status: 413, code: "body_too_large" });
+    for (const [status, code] of [[409, "staffing_unknown_code"], [413, "staffing_invalid_request"], [200, "body_too_large"]] as const) {
+      const foreign = scripted(status, { ...errors.exchanges[0].body, error: { code, detail: "foreign pair" } }).client;
+      await expect(foreign.current(), `${status}:${code}`).rejects.toMatchObject({ status, code: "invalid_staffing_response" });
+    }
+  });
+});
 
 describe("staffing v1 frozen wire contract", () => {
   it("freezes the exact runtime export surface", () => {

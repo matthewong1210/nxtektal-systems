@@ -527,8 +527,8 @@ describe("continuous V4: two executions arrive through polling in service order 
     if (!card) throw new Error(`no card for ${executionId}`);
     return card;
   };
-  const TERMINAL_ID = "5d3e8cc7f527b2c0096c36c7bc1ed6f088910e6f8fce862a8d12e8924d8bd11e";
-  const SECOND_ID = "b02300d6f6e04fe5e0c5eaaa1536de088f171f3611c4b5aae2d780624bff246e";
+  const TERMINAL_ID = "77be62473676a232bf89b4953d89b8ae7b042a88f06fe9978e5f274a94ce6dfc";
+  const SECOND_ID = "de1a3919375ff71cea2ea040353a4f8c9ac98a22027c742011c496007d109be1";
   const routeRequests = (service: ReturnType<typeof scriptedService>) => service.state.requests.filter((r) => r.path.startsWith("/api/v1/collection-executions"));
 
   it("keeps the terminal card's displayed evidence unchanged while the other card moves from PENDING to RUNNING, and the session stays ACTIVE", async () => {

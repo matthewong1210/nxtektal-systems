@@ -57,6 +57,12 @@ EXPECTED_ERROR_STATUS = {
     "staffing_busy": 429,
     "staffing_unavailable": 503,
 }
+# Lockstep witness: the closed contract (schema plus every frozen example) is
+# pinned here and, with the identical value, in the console's contract suite.
+# Editing any frozen file without updating both pins in the same commit fails
+# whichever side was left behind; see the contract README, "Versioning and
+# lockstep rollout".
+STAFFING_CONTRACT_FINGERPRINT = "1a17066b1d296af420b27e46c2f934a183ec1b95eab86f0a27780baf92fd8b5c"
 EXPECTED_SUCCESS_EXCHANGES = {
     "cold-start.json": {"current-empty", "date-empty"},
     "roster-import.json": {"roster-committed"},
@@ -760,3 +766,62 @@ def test_contract_omits_provider_private_material() -> None:
 def test_example_provenance_rows_share_one_input_digest() -> None:
     for _, exchange in all_exchanges():
         assert_shared_provenance_input_digest(exchange)
+
+
+def test_contract_fingerprint_is_pinned_for_lockstep_rollout() -> None:
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update((CONTRACT / "schema.json").read_bytes())
+    for path in sorted((CONTRACT / "examples").glob("*.json")):
+        digest.update(path.read_bytes())
+    assert digest.hexdigest() == STAFFING_CONTRACT_FINGERPRINT
+
+
+def test_error_inventory_is_identical_in_schema_examples_and_status_table() -> None:
+    example_codes = {
+        row["body"]["error"]["code"] for row in load_example("errors.json")["exchanges"]
+    }
+    schema_codes = set(
+        schema_document()["$defs"]["ErrorBody"]["properties"]["code"]["enum"]
+    )
+    assert example_codes == schema_codes == set(EXPECTED_ERROR_STATUS)
+
+
+def test_candidate_review_fields_are_required_members_of_every_closed_candidate_shape() -> None:
+    defs = schema_document()["$defs"]
+    expected = sorted(
+        [
+            "candidate_index", "status", "operations", "rationale", "operational_warnings",
+            "coverage_gaps", "schedule_digest", "rejection_codes", "rationale_local",
+            "operational_warnings_local", "action_window_end_at", "actionability",
+        ]
+    )
+    for name in (
+        "CandidateValidProjection",
+        "CandidateRejectedCoverageProjection",
+        "CandidateRejectedOtherProjection",
+    ):
+        definition = defs[name]
+        assert definition["additionalProperties"] is False
+        assert sorted(definition["properties"]) == expected
+        assert sorted(definition["required"]) == expected
+    for filename, exchange in all_exchanges():
+        if filename == "errors.json":
+            continue
+        for candidate in _candidates_in(exchange["body"]["data"]):
+            assert sorted(candidate) == expected, filename
+
+
+def _candidates_in(value: object) -> list[dict[str, object]]:
+    found: list[dict[str, object]] = []
+    if isinstance(value, dict):
+        candidates = value.get("candidates")
+        if isinstance(candidates, list):
+            found.extend(item for item in candidates if isinstance(item, dict))
+        for child in value.values():
+            found.extend(_candidates_in(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.extend(_candidates_in(child))
+    return found

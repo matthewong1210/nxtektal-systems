@@ -97,6 +97,15 @@ when round-tripping it through that zone identifies exactly one UTC instant.
 Nonexistent spring-forward minutes and ambiguous fall-back minutes therefore
 fail closed for roster materialization and exception normalization.
 
+Local shift labels in `rationale_local` render site-local minutes; when an
+interval crosses a UTC offset change, or an endpoint's wall time is repeated in
+the site zone (a fall-back), each endpoint carries its own ` UTC±HH:MM` suffix
+so two instants never read as one clock time. The suffix is projection text
+only and never enters the ledger or the provider wire. The console applies the
+same rule to its own ranges from the browser's IANA data; where that database
+and the service host's zoneinfo differ for a zone, the service's label text is
+the reference reading.
+
 Materialized assignments and exceptions are timezone-aware instants at whole
 minute precision. Intervals are half-open and require `end > start`. A provider
 ADD must include an explicit offset; its wall time and offset must agree with
@@ -272,20 +281,37 @@ The replacement is a local projection over ledger evidence: no display name,
 staff ID, or assignment ID is added to the provider wire, and the strict
 provider decoder is unchanged.
 
-`action_window_end` is the latest `end_at` of any shift the candidate adds or
-removes (a REMOVE whose alias no longer resolves contributes nothing); a
-candidate with no timed operation stays open until local midnight after its
-service date in the site timezone. The domain reads no clock: the composition
-root compares the window with its audit clock to label the candidate
-`CURRENT` or `EXPIRED` on the wire, and `commit_manager_response` compares the
-window of the operations an ACCEPT (the stored candidate) or MODIFY (the
-edited operations) would persist against the injected `recorded_at`. When that
-instant has reached the window end the response is refused under the append
-lock with the closed `EXPIRED_SUGGESTION` conflict: nothing is appended, the
-suggestion keeps its candidates, and REJECT remains available as a recorded
-decision. Replay never re-applies the rule, so a ledger whose response was
-committed inside its window keeps replaying unchanged. The composition root
-maps the conflict to HTTP 409 `staffing_suggestion_expired`.
+`action_window_end` is the earliest `end_at` of any shift the candidate adds or
+removes (a REMOVE whose alias no longer resolves contributes nothing); past it
+the candidate is no longer a current action, because at least one affected
+shift has ended. A candidate with no timed operation stays open until local
+midnight after its service date in the site timezone. The domain reads no
+clock: the composition root compares the window with its audit clock to label
+the candidate `CURRENT` or `EXPIRED` on the wire, and `commit_manager_response`
+compares the injected `recorded_at` against the stored candidate's window for
+an ACCEPT and, for a MODIFY, first against the stored candidate's window
+(editing cannot revive an expired suggestion) and then against the earliest
+end of the edited operations. When the instant has reached a window end the
+response is refused under the append lock with the closed `EXPIRED_SUGGESTION`
+conflict: nothing is appended, the suggestion keeps its candidates, and REJECT
+remains available as a recorded decision. Replay never re-applies the rule, so
+a ledger whose response was committed inside its window keeps replaying
+unchanged. The composition root maps the conflict to HTTP 409
+`staffing_suggestion_expired`. The console additionally keeps a server-relative
+timer to the earliest open `action_window_end_at` (measured from the snapshot's
+`server_time_utc`, never the browser clock); when it elapses the console closes
+accept, modify, and reject-all and reads the snapshot again, and only the
+service's next `actionability` relabels the candidate.
+
+The four review fields are required members of the closed public
+`CandidateProjection`. Adding them, fixing the window to the earliest affected
+end, and adding the offset suffixes were one lockstep revision of the
+unreleased `nxt-staffing/v1` wire contract, not an additive extension: a
+Console and a service built from different commits fail closed against each
+other. The contract README owns the versioning rule (one-commit lockstep while
+unreleased; `nxt-staffing/v2` after release). The ledger, the `staffing-v1/`
+directory, record `schema_version`, and replay are unaffected by a wire
+revision.
 
 ## Events and state machine
 
@@ -346,9 +372,16 @@ cannot later become stale.
 Revision mismatches map to `STALE_REQUEST`; manager basis drift maps to
 `STALE_SUGGESTION`; invalid lifecycle maps to `INVALID_TRANSITION`; an
 exception record or correction that would overlap an active exception maps to
-`OVERLAPPING_EXCEPTION`; an ACCEPT or MODIFY whose shifts have all ended at the
-injected audit instant maps to `EXPIRED_SUGGESTION`. No conflict or failed
-builder mutates the ledger. The narrow generation `probe_request`
+`OVERLAPPING_EXCEPTION`; an ACCEPT or MODIFY for which any affected shift (of
+the stored candidate, or for MODIFY also of the edited operations) has ended at
+the injected audit instant maps to `EXPIRED_SUGGESTION`. Inside
+`commit_manager_response` the order is lifecycle `INVALID_TRANSITION`, then
+`STALE_SUGGESTION`, then the `STALE_*` revision checks, then a missing stored
+candidate (`INVALID_TRANSITION`), then for MODIFY the stored candidate's window
+(`EXPIRED_SUGGESTION`), then edit resolution and validation
+(`INVALID_TRANSITION`), and finally the window of the operations to persist
+(`EXPIRED_SUGGESTION`); a stale basis therefore wins over expiry. No conflict
+or failed builder mutates the ledger. The narrow generation `probe_request`
 supports duplicate-first queue admission, but reservation rechecks under lock
 and the probe creates no TOCTOU authority.
 
@@ -441,3 +474,18 @@ fingerprint hashes every `nxt_*` source file; a structural comparison showed onl
 digest leaves moved (80 leaves in the two-task witness, 42 in the normal-loop witness). With the
 regenerated witnesses in place the full Python suite reported 5080 passed and 11 skipped (the
 mosquitto-dependent Edge Task integration cases). The v1 ledger fixture replays unchanged.
+
+After the review follow-up (the earliest-affected-end window with the MODIFY pre-check, the
+` UTC±HH:MM` fall-back suffixes, the console's server-relative deadline timer, the receipt
+relabel, and the lockstep versioning rule; 2026-10-08, all-extras locked environment), the
+staffing, guard, API, composition, and architecture files passed 1165 tests, the full Python
+suite reported 5092 passed and 11 skipped (the mosquitto-dependent Edge Task integration
+cases), `scripts/validate_configs.py` reported no errors, `uv lock --check` was current, and the
+console typecheck, lint, 878 vitest tests, static build, loopback smoke, and
+`npm audit --omit=dev` passed. The V3 and V4 witnesses were regenerated again through their
+authoritative flows (22 regenerate-mode passes, then 29 read-only passes and the console's two
+witness consumers) because the engine fingerprint moved from `c520b92f…` to `819f53c4…`; a
+structural comparison showed only identity and digest leaves moved (78 leaves in the two-task
+witness, 42 in the normal-loop witness). The `staffing-v1` schema and examples, the v1 ledger
+fixture, and the local demo are byte-unchanged; both contract fingerprint pins equal the
+recomputed SHA-256.

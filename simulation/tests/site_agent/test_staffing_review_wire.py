@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from nxt_model_gateway import DeploymentRegion, ModelGateway, Provider, ProviderConfig, RoutePolicy
 from nxt_model_gateway.kimi import KimiAdapter
+from nxt_pilot_ops.staffing.contracts import StaffingError
 from nxt_pilot_ops.staffing.ledger import StaffingLedger
 from nxt_pilot_ops.staffing.operations import StaffingOperations
 from nxt_site_agent import SiteAgentError
@@ -121,8 +122,18 @@ def _evening_roster(request_id: str) -> dict[str, object]:
     return payload
 
 
-def _flow(tmp_path: Path, clock: MovableClock):
-    transport = AliasAwareTransport([_aliased_answer])
+def _two_shift_answer(wire: dict[str, object]) -> dict[str, object]:
+    """One VALID candidate that adds the 09:00–17:00 relief and removes the evening shift."""
+
+    answer = _aliased_answer(wire)
+    answer["candidates"][0]["operations"].append(
+        {"operation": "REMOVE", "assignment_alias": wire["assignments"][0]["assignment_alias"]}
+    )
+    return answer
+
+
+def _flow(tmp_path: Path, clock: MovableClock, builders=None):
+    transport = AliasAwareTransport([_aliased_answer] if builders is None else list(builders))
     gateway = ModelGateway(
         kimi=KimiAdapter(config=ProviderConfig(Provider.KIMI, "kimi-model", "secret"), transport=transport),
         monotonic=time.monotonic,
@@ -151,8 +162,8 @@ def _flow(tmp_path: Path, clock: MovableClock):
     return StaffingApiOperations(router=router, worker=worker, ledger=ledger), ledger, transport
 
 
-def _manager(kind: str, request_id: str) -> dict[str, object]:
-    reason = {"ACCEPT": "APPROVED", "REJECT": "MANUAL_HANDLING"}[kind]
+def _manager(kind: str, request_id: str, *, operations: list[dict[str, object]] | None = None) -> dict[str, object]:
+    reason = {"ACCEPT": "APPROVED", "MODIFY": "APPROVED_WITH_CHANGES", "REJECT": "MANUAL_HANDLING"}[kind]
     return {
         "schema": "nxt-staffing-manager-response/v1",
         "request_id": request_id,
@@ -160,10 +171,51 @@ def _manager(kind: str, request_id: str) -> dict[str, object]:
         "kind": kind,
         "expected_revisions": {"roster": 1, "exception_set": 1, "effective_plan": 0},
         "candidate_index": None if kind == "REJECT" else 1,
-        "edited_operations": None,
+        "edited_operations": operations if kind == "MODIFY" else None,
         "reason_code": reason,
         "note": None,
     }
+
+
+def test_synthetic_flow_window_is_the_earliest_affected_end_and_modify_cannot_revive(tmp_path: Path) -> None:
+    clock = MovableClock(MORNING)
+    api, ledger, _ = _flow(tmp_path, clock, builders=[_two_shift_answer])
+    try:
+        api.route("POST", "/api/v1/staffing/roster-imports", _evening_roster("roster-1"))
+        api.route("POST", "/api/v1/staffing/exceptions", flow_leave("leave-1", roster=1, exception_set=0))
+        api.route("POST", "/api/v1/staffing/suggestions", flow_generation("generate-1", roster=1, exception_set=1, effective_plan=0))
+        issued = wait_for_state(api, "generate-1", {"SUCCEEDED"})
+        (row,) = issued["record"]["candidates"]
+        assert [item["operation"] for item in row["operations"]] == ["ADD", "REMOVE"]
+        assert row["action_window_end_at"] == f"{FLOW_SERVICE_DATE}T09:00:00Z", "the 17:00 ADD end, not the 21:00 REMOVE end"
+        assert row["actionability"] == "CURRENT"
+        suggestion_id = issued["record"]["suggestion_id"]
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        (evening,) = [item for item in snapshot["assignments"] if item["staff_id"] == "staff-002"]
+
+        # 17:30 site time: the relief shift has ended while the evening shift is still open.
+        clock.now = datetime(2026, 10, 6, 9, 30, tzinfo=timezone.utc)
+        before = ledger.verify()
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        validator("#/$defs/StaffingDateSnapshot").validate(snapshot)
+        assert snapshot["generations"][-1]["candidates"][0]["actionability"] == "EXPIRED"
+        with pytest.raises(SiteAgentError) as refused_accept:
+            api.route("POST", f"/api/v1/staffing/suggestions/{suggestion_id}/accept", _manager("ACCEPT", "accept-late"))
+        assert refused_accept.value.code == "staffing_suggestion_expired"
+        still_open = [{"operation": "REMOVE", "assignment_id": evening["assignment_id"]}]
+        with pytest.raises(SiteAgentError) as refused_modify:
+            api.route("POST", f"/api/v1/staffing/suggestions/{suggestion_id}/modify", _manager("MODIFY", "modify-late", operations=still_open))
+        assert refused_modify.value.code == "staffing_suggestion_expired"
+        assert ledger.verify() == before
+        for request_id in ("accept-late", "modify-late"):
+            with pytest.raises(SiteAgentError) as missing:
+                api.route("GET", f"/api/v1/staffing/requests/manager-response/{request_id}", {})
+            assert missing.value.code == "staffing_request_not_found"
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        assert snapshot["effective_plan"] is None
+        assert snapshot["generations"][-1]["manager_response"] is None
+    finally:
+        api.close()
 
 
 def test_synthetic_flow_renders_local_explanations_and_refuses_an_ended_shift(tmp_path: Path) -> None:
@@ -244,3 +296,22 @@ def test_synthetic_flow_accepts_the_same_candidate_inside_its_window(tmp_path: P
         assert snapshot["generations"][-1]["manager_response"]["response_kind"] == "ACCEPT"
     finally:
         api.close()
+
+
+def test_public_error_targets_stay_inside_the_frozen_error_inventory() -> None:
+    """Every code the composition root or the API can emit is in errors.json,
+    and the API's status table knows exactly that inventory (lockstep guard)."""
+
+    from nxt_site_agent.api import _STAFFING_ERROR_CODES
+    from scripts.staffing_operations import _CONFLICT_TO_HTTP_ERROR, public_domain_error
+    from tests.pilot_ops.test_staffing_wire_contract import EXPECTED_ERROR_STATUS, load_example
+
+    inventory = {row["body"]["error"]["code"] for row in load_example("errors.json")["exchanges"]}
+    assert inventory == set(EXPECTED_ERROR_STATUS) == set(_STAFFING_ERROR_CODES)
+    conflict_targets = {code for code, _ in _CONFLICT_TO_HTTP_ERROR.values()}
+    assert conflict_targets <= inventory
+    domain_targets = {
+        public_domain_error(StaffingError(code, "private")).code
+        for code in ("REQUEST_NOT_FOUND", "UNKNOWN_GENERATION", "staffing_roster_not_found", "staffing_invalid_request", "INTEGRITY_FAILURE")
+    }
+    assert domain_targets <= inventory

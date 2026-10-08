@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { compareUtc, SiteTimeAmbiguityError, siteTimeToUtc, utcToSiteInput } from "../lib/site-time";
+import {
+  compareUtc,
+  formatSiteTime,
+  offsetSuffix,
+  SiteTimeAmbiguityError,
+  siteTimeToUtc,
+  utcMillis,
+  utcToSiteInput,
+  wallClockIsAmbiguous,
+} from "../lib/site-time";
 
 describe("site time precision", () => {
   it("renders seconds and fractions for the entry widget and keeps whole minutes short", () => {
@@ -60,5 +69,49 @@ describe("compareUtc", () => {
   it("does not lose microseconds to millisecond rounding", () => {
     expect(compareUtc("2026-09-17T08:00:00.123456Z", "2026-09-17T08:00:00.123457Z")).toBeLessThan(0);
     expect(compareUtc("2026-09-17T08:00:00.123999Z", "2026-09-17T08:00:00.124000Z")).toBeLessThan(0);
+  });
+});
+
+describe("daylight-saving disambiguation", () => {
+  const NY = "America/New_York";
+  const ms = (value: string) => Date.parse(value);
+
+  it("detects a repeated wall clock only inside the fall-back hour", () => {
+    expect(wallClockIsAmbiguous(ms("2026-11-01T05:30:00Z"), NY)).toBe(true);
+    expect(wallClockIsAmbiguous(ms("2026-11-01T06:30:00Z"), NY)).toBe(true);
+    expect(wallClockIsAmbiguous(ms("2026-11-01T04:30:00Z"), NY)).toBe(false);
+    expect(wallClockIsAmbiguous(ms("2026-11-01T07:30:00Z"), NY)).toBe(false);
+    expect(wallClockIsAmbiguous(ms("2026-03-08T06:30:00Z"), NY)).toBe(false);
+    expect(wallClockIsAmbiguous(ms("2026-03-08T07:30:00Z"), NY)).toBe(false);
+    expect(wallClockIsAmbiguous(ms("2026-10-08T08:00:00Z"), "Asia/Shanghai")).toBe(false);
+  });
+
+  it("renders the zone offset in force at the instant", () => {
+    expect(offsetSuffix(ms("2026-11-01T05:30:00Z"), NY)).toBe(" UTC-04:00");
+    expect(offsetSuffix(ms("2026-11-01T06:30:00Z"), NY)).toBe(" UTC-05:00");
+    expect(offsetSuffix(ms("2026-10-08T08:00:00Z"), "Asia/Shanghai")).toBe(" UTC+08:00");
+    expect(offsetSuffix(ms("2026-10-08T08:00:00Z"), "Asia/Kolkata")).toBe(" UTC+05:30");
+  });
+
+  it("suffixes a single repeated instant and leaves ordinary instants unchanged", () => {
+    expect(formatSiteTime("2026-11-01T05:30:00Z", NY)).toBe("2026-11-01 01:30 UTC-04:00");
+    expect(formatSiteTime("2026-11-01T06:30:00Z", NY)).toBe("2026-11-01 01:30 UTC-05:00");
+    expect(formatSiteTime("2026-11-01T07:30:00Z", NY)).toBe("2026-11-01 02:30");
+    expect(formatSiteTime("2026-10-08T12:00:00Z", "Asia/Shanghai")).toBe("2026-10-08 20:00");
+    expect(formatSiteTime(null, NY)).toBe("—");
+  });
+
+  it("parses wire instants to milliseconds without reading a clock", () => {
+    expect(utcMillis("2026-10-06T17:00:00+08:00")).toBe(Date.UTC(2026, 9, 6, 9, 0, 0));
+    expect(utcMillis("2026-10-06T08:59:00.000000Z")).toBe(Date.UTC(2026, 9, 6, 8, 59, 0));
+    expect(utcMillis("2026-10-06T17:00:00+08:00")! - utcMillis("2026-10-06T08:59:00.000000Z")!).toBe(60_000);
+    expect(utcMillis("2026-10-06T08:59:59.999999Z")).toBe(Date.UTC(2026, 9, 6, 8, 59, 59, 999));
+    expect(utcMillis("not-a-time")).toBeNull();
+  });
+
+  it("still refuses an ambiguous entered time with both candidate instants", () => {
+    expect(() => siteTimeToUtc("2026-11-01T01:30", NY)).toThrow(SiteTimeAmbiguityError);
+    expect(siteTimeToUtc("2026-11-01T00:30", NY)).toBe("2026-11-01T04:30:00Z");
+    expect(utcToSiteInput("2026-11-01T05:30:00Z", NY)).toBe("2026-11-01T01:30");
   });
 });

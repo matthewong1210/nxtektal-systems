@@ -526,7 +526,7 @@ describe("site time, local explanations, historical suggestions, and Chinese res
     expect(button(host, /拒绝本次全部建议/)).toBeDefined();
   });
 
-  it("shows Chinese manager result and plan labels while preserving the contract values", () => {
+  it("labels the receipt as the version confirmed at that time and the plan section as current", () => {
     const data = snapshot("date-after-manager-response");
     const active = data.generations[0];
     const { host, html } = renderView(state(data, {
@@ -537,11 +537,116 @@ describe("site time, local explanations, historical suggestions, and Chinese res
 
     expect(response?.textContent).toContain("已接受");
     expect(response?.textContent).toContain("经理批准");
-    expect(response?.textContent).toContain("当前有效");
+    expect(response?.textContent).not.toContain("当前有效");
+    expect(response?.textContent).toContain("确认时");
+    expect(response?.textContent).toContain("版本 1");
     expect(response?.textContent).toContain("ACCEPT");
     expect(response?.textContent).toContain("APPROVED");
     expect(response?.textContent).toContain("CURRENT");
     expect(host.querySelector('[aria-label="有效排班状态"]')?.textContent).toContain("当前有效");
     expect(html).toContain("通过校验");
+  });
+});
+
+describe("historical receipts, the server-relative deadline, and a daylight-saving fall-back", () => {
+  it("labels a historical manager receipt as the version confirmed at that time once the latest plan needs review", () => {
+    const data = snapshot("date-after-manager-response");
+    if (data.effective_plan === null) throw new Error("fixture must contain an effective plan");
+    data.effective_plan = { ...data.effective_plan, status: "REVIEW_REQUIRED" };
+    const active = data.generations[0];
+    const { host, html } = renderView(state(data, {
+      activeGenerationRequestId: active.request_id,
+      activeGeneration: active,
+    }));
+
+    const response = host.querySelector<HTMLElement>('[aria-label="经理处理结果"]');
+    expect(response).not.toBeNull();
+    expect(response?.textContent).not.toContain("当前有效");
+    expect(response?.textContent).toContain("确认时形成的版本 1");
+    expect(response?.textContent).toContain("现行状态以“有效排班状态”栏为准");
+    expect(response?.textContent).toContain("ACCEPT");
+    expect(response?.textContent).toContain("CURRENT");
+
+    const plan = host.querySelector<HTMLElement>('[role="alert"][aria-label="有效排班状态"]');
+    expect(plan).not.toBeNull();
+    expect(plan?.textContent).toContain("需重新审阅");
+    expect(plan?.textContent).toContain("REVIEW_REQUIRED");
+    expect(plan?.textContent).toContain("排班版本 1");
+    expect(html).not.toContain("当前有效");
+    expect(button(host, /接受.*建议/)).toBeUndefined();
+    expect(button(host, /拒绝.*建议/)).toBeUndefined();
+  });
+
+  it("labels a rejected receipt without any plan version", () => {
+    const data = snapshot("date-after-manager-response");
+    const active = structuredClone(data.generations[0]);
+    if (active.state !== "SUCCEEDED") throw new Error("fixture must succeed");
+    active.manager_response = { response_kind: "REJECT", reason_code: "MANUAL_HANDLING", operator: "manager-1", note: null, effective_plan: null };
+    data.generations = [active];
+    data.effective_plan = null;
+    data.revisions = { ...data.revisions, effective_plan: 0 };
+    const { host } = renderView(state(data, { activeGenerationRequestId: active.request_id, activeGeneration: active }));
+    const response = host.querySelector<HTMLElement>('[aria-label="经理处理结果"]');
+    expect(response?.textContent).toContain("已拒绝");
+    expect(response?.textContent).toContain("REJECT");
+    expect(response?.textContent).toContain("未形成排班版本");
+    expect(response?.textContent).not.toContain("版本 1");
+    expect(response?.textContent).not.toContain("CURRENT");
+    expect(host.querySelector('[aria-label="有效排班状态"]')?.textContent).toContain("尚无有效排班");
+  });
+
+  it("closes every response control once the controller's server-relative deadline is reached, without relabelling", () => {
+    const active = generation();
+    const reached = renderView(state(readySnapshot(active), {
+      actionDeadline: { endAt: "2026-10-06T17:00:00+08:00", reached: true },
+    }));
+    const card = candidate(reached.host, 1);
+    expect(button(card, /接受.*建议/)).toBeUndefined();
+    expect(button(card, /修改.*建议/)).toBeUndefined();
+    expect(button(reached.host, /拒绝本次全部建议/)).toBeUndefined();
+    expect(reached.html).toContain("已到服务端截止时间");
+    expect(reached.host.querySelector('.staffing-candidates [role="status"][aria-live="polite"]')).not.toBeNull();
+    expect(card.getAttribute("data-actionability")).toBe("CURRENT");
+    expect(reached.host.querySelector('[aria-label="排班建议列表"]')).not.toBeNull();
+    expect(reached.host.querySelector('[aria-label="历史排班建议列表"]')).toBeNull();
+    expect(card.textContent).not.toContain("当前数据版本已变化");
+    expect(card.textContent).not.toContain("班次已结束（历史记录）");
+    expect(button(reached.host, /记录.*异常/)?.disabled).toBe(false);
+
+    const open = renderView(state(readySnapshot(active), {
+      actionDeadline: { endAt: "2026-10-06T17:00:00+08:00", reached: false },
+    }));
+    expect(button(candidate(open.host, 1), /接受.*建议/)).toBeDefined();
+    expect(button(candidate(open.host, 1), /修改.*建议/)).toBeDefined();
+    expect(button(open.host, /拒绝本次全部建议/)).toBeDefined();
+    expect(open.html).not.toContain("已到服务端截止时间");
+  });
+
+  it("disambiguates a New York fall-back shift and keeps the raw instants on the elements", () => {
+    const active = generation();
+    const valid = structuredClone(active.candidates[0]) as CandidateProjection;
+    valid.operations = [{
+      operation: "ADD",
+      staff_id: "staff-002",
+      display_name: "Operator Two",
+      role_code: "RANGE_ATTENDANT",
+      area_code: "RANGE_A",
+      start_at: "2026-11-01T05:30:00Z",
+      end_at: "2026-11-01T06:30:00Z",
+    }];
+    valid.action_window_end_at = "2026-11-01T06:30:00Z";
+    valid.actionability = "EXPIRED";
+    active.candidates = [valid];
+    const data = readySnapshot(active);
+    data.context = { ...data.context, site_timezone: "America/New_York" };
+    data.server_time_utc = "2026-11-01T07:00:00.000000Z";
+    const { host, html } = renderView(state(data));
+    const card = candidate(host, 1);
+    expect(card.textContent).toContain("2026-11-01 01:30 UTC-04:00–01:30 UTC-05:00");
+    expect(card.textContent).toContain("2026-11-01 01:30 UTC-05:00");
+    expect(html).not.toContain("01:30–01:30");
+    const time = card.querySelector<HTMLElement>(".staffing-adjustments time");
+    expect(time?.getAttribute("datetime")).toBe("2026-11-01T05:30:00Z");
+    expect(time?.parentElement?.getAttribute("title")).toBe("2026-11-01T05:30:00Z – 2026-11-01T06:30:00Z");
   });
 });

@@ -20,6 +20,25 @@ def utc_text(value: datetime) -> str:
     )
 
 
+def local_wall_instants(naive: datetime, zone: ZoneInfo) -> tuple[datetime, ...]:
+    """Return the sorted unique UTC instants that render as ``naive`` in ``zone``.
+
+    One instant for an ordinary wall time, two across a fall-back repeat, none
+    for a spring-forward gap.  Both folds are tried and kept only when the
+    round trip reproduces the naive value exactly.
+    """
+
+    if type(naive) is not datetime or naive.tzinfo is not None:
+        raise StaffingError("staffing_invalid_roster", "naive wall time")
+    candidates: set[datetime] = set()
+    for fold in (0, 1):
+        aware = naive.replace(tzinfo=zone, fold=fold)
+        utc = aware.astimezone(timezone.utc)
+        if utc.astimezone(zone).replace(tzinfo=None) == naive:
+            candidates.add(utc)
+    return tuple(sorted(candidates))
+
+
 def resolve_local_minute(service_date: date, text: str, timezone_name: str) -> datetime:
     """Resolve one local wall-clock minute only when it names one UTC instant."""
 
@@ -38,15 +57,9 @@ def resolve_local_minute(service_date: date, text: str, timezone_name: str) -> d
 
     hour, minute = (int(item) for item in text.split(":"))
     local = datetime.combine(service_date, time(hour, minute))
-    candidates: list[datetime] = []
-    for fold in (0, 1):
-        aware = local.replace(tzinfo=zone, fold=fold)
-        utc = aware.astimezone(timezone.utc)
-        if utc.astimezone(zone).replace(tzinfo=None) == local:
-            candidates.append(utc)
-    unique = set(candidates)
+    unique = local_wall_instants(local, zone)
     if len(unique) != 1:
         raise StaffingError(
             "staffing_invalid_roster", "ambiguous or nonexistent local minute"
         )
-    return next(iter(unique))
+    return unique[0]

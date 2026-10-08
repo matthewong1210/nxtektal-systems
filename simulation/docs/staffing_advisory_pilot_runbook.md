@@ -164,17 +164,34 @@ interval, record one that does not overlap.
 
 ## Ended shifts and historical suggestions
 
-Every candidate on the wire carries `action_window_end_at`, the instant after
-which every shift it adds or removes has ended, and `actionability`, which the
-service sets to `EXPIRED` once its clock reaches that instant. The console
-shows such a suggestion under a historical label, in site time, with no accept
-or modify control; an ACCEPT or MODIFY sent anyway is refused with HTTP 409
-`staffing_suggestion_expired` and nothing is appended. A suggestion issued for
-a shift that has already ended therefore never becomes a current plan. Reject
-still records the manager's decision, and a new generation for the remaining
-day is the recovery. The candidate text shown to the supervisor is the local
-reading (`rationale_local`) in which provider aliases are replaced by display
-names and shift labels; the raw provider text stays available beside it.
+Every candidate on the wire carries `action_window_end_at`, the earliest end
+of any shift it adds or removes (past it the candidate is no longer a current
+action, because at least one affected shift has ended), and `actionability`,
+which the service sets to `EXPIRED` once its clock reaches that instant. The
+console shows such a suggestion under a historical label, in site time, with no
+accept or modify control; an ACCEPT or MODIFY sent anyway is refused with HTTP
+409 `staffing_suggestion_expired` and nothing is appended. Editing cannot
+revive an expired suggestion: a MODIFY is checked first against the stored
+candidate's window and then against the earliest end of its edited shifts. A
+candidate any of whose shifts has already ended therefore never becomes a
+current plan; a sibling candidate of the same suggestion whose shifts are all
+still open remains actionable. Reject still records the manager's decision, and a new generation
+for the remaining day is the recovery. The console also keeps a server-relative
+timer to the earliest open window (measured from the snapshot's
+`server_time_utc`, never the browser clock): when it elapses the console closes
+accept, modify, and reject-all, shows that it is waiting for the service's
+next result, and reads again; only the service relabels the candidate. A
+modify editor open at that instant is closed and its unsent draft discarded,
+and an accept already in flight either commits, if the service admitted it
+before the window end on its own clock, or resolves to the 409 above. The candidate text
+shown to the supervisor is the local reading (`rationale_local`) in which
+provider aliases are replaced by display names and shift labels; the raw
+provider text stays available beside it. Across a daylight-saving fall-back,
+shift labels and console ranges carry ` UTC±HH:MM` on each endpoint so a
+one-hour shift never reads as `01:30–01:30`. The manager receipt names the
+version confirmed at that time; the current status of the plan is only the
+`有效排班状态` section, which turns to `需重新审阅` after a later exception
+change.
 
 ## Refused provider answers
 
@@ -206,6 +223,29 @@ stable root, start the new build, and read the current projection before new
 writes. Any v1 reservation that had not reached a terminal is recovered as
 `RESULT_UNKNOWN` and is never resent; retry it with a new request ID and
 `retry_of`, which reserves under v2. Nothing in the ledger is rewritten.
+
+## Upgrading the service and console together
+
+The Console is a static export that the service serves from one checkout, and
+the staffing wire contract is closed on both sides with no runtime negotiation.
+Upgrade both as one unit: stop the service, check out the new commit, run
+`npm ci && npm run build` in `apps/site-agent-console`, then start the service
+from the same checkout with its default console path (or an explicit path to
+that checkout's `out/`). Never serve an export built from another commit, and
+reload every open Console tab after the restart; a tab from the previous build
+keeps its old decoder.
+
+A mismatched pair is not detected at launch: the empty cold-start snapshot
+decodes on both sides, and the failure appears only once a generation carries
+candidates, as the `不可用` or `旧数据` notice with
+`invalid_staffing_response: staffing response is invalid` and every staffing
+control disabled, or as a `结果未知` write that recovery cannot resolve. After
+launch and before the first generation, confirm the export was built from the
+running checkout (`git rev-parse HEAD` recorded with the launch, `out/` newer
+than that checkout). On the notice, stop, rebuild the export from the running
+checkout, restart, and reload; do not retry writes and do not edit the ledger.
+The stable staffing root is unchanged by a wire revision: `staffing-v1/` is the
+ledger layout, not the wire version.
 
 ## Shutdown and restart
 

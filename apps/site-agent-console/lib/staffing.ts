@@ -292,8 +292,9 @@ interface CandidateCommon {
    * `rationale` and `operational_warnings` stay beside it for audit. */
   rationale_local: string;
   operational_warnings_local: string[];
-  /** UTC instant after which every shift this candidate adds or removes has
-   * ended; `actionability` is the service's own reading of its clock. */
+  /** UTC earliest end of any shift this candidate adds or removes; past it
+   * the candidate is no longer a current action. `actionability` is the
+   * service's own reading of its clock. */
   action_window_end_at: string;
   actionability: CandidateActionability;
 }

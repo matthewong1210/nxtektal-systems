@@ -1038,8 +1038,9 @@ class CandidateProjection(_FrozenContract):
     materialized_schedule: tuple[AssignmentProjection, ...] | None
     materialized_schedule_digest: str | None
     # Local review readings derived at projection time (see ``review.py``):
-    # provider alias tokens replaced by local labels, and the UTC instant
-    # after which every shift this candidate adds or removes has ended.
+    # provider alias tokens replaced by local labels, and the UTC earliest
+    # end of any shift this candidate adds or removes; past it the candidate
+    # is no longer a current action.
     rationale_local: str
     operational_warnings_local: tuple[str, ...]
     action_window_end: datetime

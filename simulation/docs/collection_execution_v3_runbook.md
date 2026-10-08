@@ -230,21 +230,21 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
 | `round_id` | `collection-execution-round-v3` |
 | `request_id` | `collection-demo-execution-request-001` |
 | `task_id` | `task_b32398701c03d4a1fb2a0106` |
-| `engine_digest` | `c520b92fb573ad6c1d93cb01d4371f7afd7dce220e9d6519c68e21e823116fdc` |
+| `engine_digest` | `819f53c47f2cc67d76f6f9392b28ba4c22b8e18cac95d5c217c0cac2854621e5` |
 | `plan_id` | `plan-ada810c8a8f069f7fddbcb7d` |
-| `binding_id` | `081a29629c280b31ce035b4c17c53f66f57fc7d63c9715700939686f5eef74b1` |
-| `execution_id` | `e68b7920ae701af51074162aede866e128afaf9ee540a03bd7b8501fcd630d23` |
-| `attempt_id` | `attempt-e68b7920ae701af51074162aede866e128afaf9ee540a03bd7b8501fcd630d23` |
-| `assignment_id` | `assignment-10fa66795ba742474c717d8737e1275154e941c657899dd3792eadefc56549a6` |
-| request digest | `8bcb9a855908f73ba840801c27900f39ee4d21be62da25db318b0087a1129c19` |
-| request high-water digest | `fd22ea8b856c197f9c09eb0bc33ada4e7bc36be0ac80381cec103ef37a750e90` |
+| `binding_id` | `d0a59fb152c5b1561140a029e10741cbe3d5410cb45be89ddd225d835cb10b0d` |
+| `execution_id` | `4becd2cd4b3815ec11ff4c8b6d52a855079566186f69f3dd15d5e1b0ef4e955f` |
+| `attempt_id` | `attempt-4becd2cd4b3815ec11ff4c8b6d52a855079566186f69f3dd15d5e1b0ef4e955f` |
+| `assignment_id` | `assignment-96394cc02066f1a1e68112f72e0ad71660d90c3fd7147d9521b6a6005d6cc17d` |
+| request digest | `b34b6005f35bd1722c28f8e66d92893c4720dfdf45c1b96bccec25d98912fd31` |
+| request high-water digest | `39ac8f4fd30bd9cd9d5e586f57d70f668f6bb11b8c7800d4908e48d8f3bb3acc` |
 | `policy_id` | `JointDispatchPolicy-v1` |
 | `arbiter_version` | `WAIT_ONLY_NON_PREEMPTIVE_V1` |
 | final `state` / `reason` | `SUCCEEDED / UNLOADED_ALL_COLLECTED_BALLS` |
 | `raw_quantity.balls` | `600 to runtime robot R1` |
 | `unload_quantity.balls` | `600 to bound station H1` |
-| final assignment `event_digest` | `a1d457c40789ee7f9ced9b920314d79c83939bc9ced4989704f351fbf3154791` |
-| final `replay_digest` | `a6df60ae17efd8a1cdd13092287543e451463112b3463c936ba62315597b1196` |
+| final assignment `event_digest` | `99b4d0c72700a037dc07683c738dc75cdc600fbf741c919d81c71e27a54dec10` |
+| final `replay_digest` | `fa7ff8faa4988405c9b9a423ada06bc612ee4569db7cdd58ec38ebc020ef895d` |
 <!-- END GENERATED NORMAL LOOP WITNESS -->
 
 The contract has no `run_id`, `state_id` or `strategy_id` fields.  Do not

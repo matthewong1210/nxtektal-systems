@@ -164,17 +164,41 @@ confirms it. The normalized JSON request is capped at 1 MiB before fetch, and
 the service revalidates the complete request; browser checks are convenience,
 not authority.
 
-Every staffing time (exceptions, adjustments, coverage gaps, the service
-clock) is rendered in the deployment's site timezone from the snapshot context;
-the exact wire instant stays on the element for audit. Candidate text shown to
-the supervisor is the service's local reading (`rationale_local`,
+Every staffing time (exceptions, adjustments, coverage gaps, the service clock)
+is rendered in the deployment's site timezone from the snapshot context; the
+exact wire instant stays on the element for audit. When an interval crosses a
+UTC offset change, or a wall time is repeated in the zone (a daylight-saving
+fall-back), the shared `formatSiteTime`/`formatSiteRange` helpers append `
+UTC±HH:MM` to each endpoint, so a one-hour New York fall-back shift reads
+`01:30 UTC-04:00–01:30 UTC-05:00`; the planning panel shares those helpers and
+gains the same suffix for repeated instants. Console suffixes come from the
+browser's IANA data through `Intl`; the service renders its own shift labels
+from the host's zoneinfo, and when the two databases differ for a zone the
+service's label text in `rationale_local` is the reference reading. Candidate
+text shown to the supervisor is the service's local reading (`rationale_local`,
 `operational_warnings_local`) in which provider aliases are already replaced by
 display names and shift labels; the raw provider text stays available in a
-collapsed audit view, and the console never sees alias maps. A candidate whose
-shifts have ended arrives as `actionability: EXPIRED` and is shown under a
+collapsed audit view, and the console never sees alias maps. A candidate any of
+whose shifts has ended arrives as `actionability: EXPIRED` (the service's
+`action_window_end_at` is the earliest affected end) and is shown under a
 historical label with no accept, modify, or reject control; the service refuses
-such a response with `staffing_suggestion_expired`. Manager result, plan, and
-candidate statuses carry Chinese labels beside their unchanged contract values.
+such a response with `staffing_suggestion_expired`. The controller also keeps a
+server-relative timer to the earliest open `action_window_end_at` among the
+candidates it still offers controls for, computed from the snapshot's
+`server_time_utc` and never the browser clock; when it elapses the console
+closes accept, modify, and reject-all, says it is waiting for the service's
+next result, and reads the snapshot again. Once reached, the same window stays
+closed even if a snapshot stamped before the end arrives afterwards; only the
+service's next `actionability`, or a different window, changes the state, and
+only the service relabels a candidate. The manager receipt names the version
+confirmed at that time; the current plan status comes only from the snapshot's
+`effective_plan`. Manager result, plan, and candidate statuses carry Chinese
+labels beside their unchanged contract values.
+
+The decoder and the service are both closed: the export and the service must be
+built from one checkout, and a mixed pair fails closed as
+`invalid_staffing_response` once a candidate is present (contract README,
+"Versioning and lockstep rollout").
 
 Every write receives a new request ID immediately before submission. If a
 response is lost, the console first recovers the same operation by

@@ -1271,6 +1271,16 @@ class StaffingOperations:
                     "STALE_EFFECTIVE_PLAN_REVISION", "expected_revisions"
                 )
 
+            audit_at = _utc_audit_time(recorded_at)
+
+            def window_of(operations) -> datetime:
+                return action_window_end(
+                    operations,
+                    assignment_end_by_alias=_assignment_end_by_alias(reservation),
+                    service_date=reservation.service_date,
+                    site_timezone=reservation.basis_snapshot.site_timezone,
+                )
+
             effective: tuple[Assignment, ...] | None
             if request.kind == "ACCEPT":
                 candidate = stored_candidate(
@@ -1306,13 +1316,21 @@ class StaffingOperations:
                     )
                 effective = validation.materialized_schedule
             elif request.kind == "MODIFY":
-                if (
-                    stored_candidate(history, suggestion_id, request.candidate_index)
-                    is None
-                ):
+                stored = stored_candidate(
+                    history, suggestion_id, request.candidate_index
+                )
+                if stored is None:
                     raise StaffingError(
                         "INVALID_TRANSITION", "MODIFY requires a stored candidate"
                     )
+                # Editing cannot revive an expired suggestion: the stored
+                # candidate's own window is checked before the edits are
+                # resolved or validated.
+                if is_expired(
+                    window_of(candidate_patch_for_revalidation(stored).operations),
+                    audit_at,
+                ):
+                    raise StaffingError("EXPIRED_SUGGESTION", suggestion_id)
                 patch = local_operations_to_candidate(request, reservation)
                 validation = validate_candidate(
                     reservation.basis_snapshot,
@@ -1332,16 +1350,12 @@ class StaffingOperations:
                 effective = None
 
             if request.kind in {"ACCEPT", "MODIFY"}:
-                # An ended shift cannot be accepted into a current plan.  The
-                # injected audit instant is the only clock; replay of an
-                # already committed response never re-applies this rule.
-                window_end = action_window_end(
-                    patch.operations,
-                    assignment_end_by_alias=_assignment_end_by_alias(reservation),
-                    service_date=reservation.service_date,
-                    site_timezone=reservation.basis_snapshot.site_timezone,
-                )
-                if is_expired(window_end, _utc_audit_time(recorded_at)):
+                # A candidate is a current action only while every shift it
+                # adds or removes is still open: the window closes at the
+                # earliest affected end.  The injected audit instant is the
+                # only clock; replay of an already committed response never
+                # re-applies this rule.
+                if is_expired(window_of(patch.operations), audit_at):
                     raise StaffingError("EXPIRED_SUGGESTION", suggestion_id)
 
             if effective is None:

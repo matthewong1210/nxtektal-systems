@@ -1011,6 +1011,7 @@ describe("staffing closed actions", () => {
       read: { status: "ready", stale: false, detail: null },
       write: null,
       activeGenerationRequestId: null,
+      actionDeadline: null,
       activeGeneration: null,
       ...patch,
     };
@@ -1361,5 +1362,249 @@ describe("staffing closed actions", () => {
     expect(h.controller.acknowledgeWrite).toHaveBeenCalledOnce();
     expect(h.requestIdFactory).not.toHaveBeenCalled();
     expect(h.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("action deadline (server-relative, service stays authoritative)", () => {
+  // The frozen suggestion-issued candidate ends at 2026-10-06T17:00:00+08:00
+  // (09:00:00Z); a snapshot clock of 08:59:00Z leaves exactly 60 s.
+  const END_AT = "2026-10-06T17:00:00+08:00";
+
+  function openSnapshot(serverTime = "2026-10-06T08:59:00.000000Z"): StaffingDateSnapshot {
+    const value = snapshot();
+    value.server_time_utc = serverTime;
+    value.generations = [projectionFrom(receipt("suggestion-issued"))];
+    return value;
+  }
+
+  function expiredSnapshot(): StaffingDateSnapshot {
+    const value = openSnapshot("2026-10-06T09:00:00.000000Z");
+    const generation = value.generations[0];
+    if (generation.state !== "SUCCEEDED") throw new Error("fixture must succeed");
+    generation.candidates[0] = { ...generation.candidates[0], actionability: "EXPIRED" };
+    return value;
+  }
+
+  it("closes controls at exactly the server-relative deadline and requests one fresh read", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(openSnapshot());
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: false });
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: false });
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    expect(h.last().read.status).toBe("loading");
+    const active = h.last().activeGeneration;
+    if (active?.state !== "SUCCEEDED") throw new Error("active generation must be the issued one");
+    expect(active.candidates[0].actionability).toBe("CURRENT");
+    const closed = h.published.find((view) => view.actionDeadline?.reached === true);
+    expect(closed?.read.status).toBe("ready");
+
+    h.reads[1].resolve(expiredSnapshot());
+    await flush();
+    expect(h.last().actionDeadline).toBeNull();
+    const refreshed = h.last().activeGeneration;
+    if (refreshed?.state !== "SUCCEEDED") throw new Error("refreshed generation must be the issued one");
+    expect(refreshed.candidates[0].actionability).toBe("EXPIRED");
+    expect(h.last().read).toEqual({ status: "ready", stale: false, detail: null });
+    await vi.advanceTimersByTimeAsync(STAFFING_SNAPSHOT_POLL_MS * 10);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    h.controller.stop();
+  });
+
+  it("clears the deadline on stop and re-arms from the next committed snapshot after restart", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(openSnapshot());
+    h.controller.stop();
+    expect(h.last().actionDeadline).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+
+    h.controller.start();
+    h.reads[1].resolve(openSnapshot());
+    await flush();
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: false });
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.client.current).toHaveBeenCalledTimes(3);
+    expect(h.last().actionDeadline?.reached).toBe(true);
+    h.controller.stop();
+  });
+
+  it("reschedules the single timer from a later snapshot and never fires the stale instant", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(openSnapshot());
+    await vi.advanceTimersByTimeAsync(30_000);
+    const refresh = h.controller.refresh();
+    await flush();
+    const later = openSnapshot("2026-10-06T08:59:30.000000Z");
+    const generation = later.generations[0];
+    if (generation.state !== "SUCCEEDED") throw new Error("fixture must succeed");
+    generation.candidates[0] = { ...generation.candidates[0], action_window_end_at: "2026-10-06T17:10:00+08:00" };
+    h.reads[1].resolve(later);
+    await refresh;
+    expect(h.last().actionDeadline).toEqual({ endAt: "2026-10-06T17:10:00+08:00", reached: false });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    expect(h.last().actionDeadline?.reached).toBe(false);
+    await vi.advanceTimersByTimeAsync(600_000 - 1);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.client.current).toHaveBeenCalledTimes(3);
+    expect(h.last().actionDeadline?.reached).toBe(true);
+    h.controller.stop();
+  });
+
+  it.each([
+    ["an answered generation", () => snapshot("date-after-manager-response")],
+    ["an already expired candidate", () => expiredSnapshot()],
+    ["only rejected candidates", () => {
+      const value = snapshot();
+      value.generations = [projectionFrom(receipt("no-valid-suggestion"))];
+      return value;
+    }],
+    ["no generation at all", () => snapshot()],
+  ])("arms no timer for %s", async (_label, build) => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(build());
+    expect(h.last().actionDeadline).toBeNull();
+    await vi.advanceTimersByTimeAsync(10 * 24 * 3_600_000);
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+    h.controller.stop();
+  });
+
+  it("marks a non-positive delay as reached without starting a read loop", async () => {
+    vi.useFakeTimers();
+    const h = harness({ snapshotPollMs: STAFFING_SNAPSHOT_POLL_MS });
+    await h.ready(openSnapshot("2026-10-06T09:00:00.000000Z"));
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(STAFFING_SNAPSHOT_POLL_MS - 1);
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    h.controller.stop();
+  });
+
+  it("defers the deadline read to an in-flight write's required refresh", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(openSnapshot());
+    const pending = h.controller.submit(mutation("exception-recorded"));
+    await flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.last().actionDeadline?.reached).toBe(true);
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+    expect(h.last().write?.status).toBe("in_flight");
+
+    h.submits[0].resolve(receipt("exception-recorded"));
+    await flush();
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    h.reads[1].resolve(expiredSnapshot());
+    await expect(pending).resolves.toEqual(receipt("exception-recorded"));
+    expect(h.last().actionDeadline).toBeNull();
+    expect(h.last().write).toMatchObject({ status: "committed", savedButStale: false });
+    h.controller.stop();
+  });
+
+  it("keeps the window closed when a snapshot stamped before the end arrives after the timer elapsed", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(openSnapshot());
+    await vi.advanceTimersByTimeAsync(59_000);
+    const refresh = h.controller.refresh();
+    await flush();
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+
+    // The in-flight read was stamped 100 ms before the end and still says CURRENT.
+    h.reads[1].resolve(openSnapshot("2026-10-06T08:59:59.900000Z"));
+    await refresh;
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+
+    const later = h.controller.refresh();
+    await flush();
+    h.reads[2].resolve(expiredSnapshot());
+    await later;
+    expect(h.last().actionDeadline).toBeNull();
+    h.controller.stop();
+  });
+
+  it("does not loop reads against a frozen service clock", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const frozen = () => openSnapshot("2026-10-06T08:59:59.000000Z");
+    await h.ready(frozen());
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    h.reads[1].resolve(frozen());
+    await flush();
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    h.controller.stop();
+  });
+
+  it("re-arms for a sibling candidate that stays open after the service expires the earliest one", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    const twoOpen = openSnapshot();
+    const generation = twoOpen.generations[0];
+    if (generation.state !== "SUCCEEDED") throw new Error("fixture must succeed");
+    const later = { ...structuredClone(generation.candidates[0]), candidate_index: 2 as const, action_window_end_at: "2026-10-06T21:00:00+08:00" };
+    generation.candidates = [generation.candidates[0], later];
+    await h.ready(twoOpen);
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: false });
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.last().actionDeadline).toEqual({ endAt: END_AT, reached: true });
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+
+    // The service expires the first candidate only; the sibling's later window re-arms the timer.
+    const relabelled = structuredClone(twoOpen);
+    relabelled.server_time_utc = "2026-10-06T09:00:00.000000Z";
+    const refreshed = relabelled.generations[0];
+    if (refreshed.state !== "SUCCEEDED") throw new Error("fixture must succeed");
+    refreshed.candidates[0] = { ...refreshed.candidates[0], actionability: "EXPIRED" };
+    h.reads[1].resolve(relabelled);
+    await flush();
+    expect(h.last().actionDeadline).toEqual({ endAt: "2026-10-06T21:00:00+08:00", reached: false });
+    await vi.advanceTimersByTimeAsync(4 * 3_600_000 - 1);
+    expect(h.client.current).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(h.last().actionDeadline).toEqual({ endAt: "2026-10-06T21:00:00+08:00", reached: true });
+    expect(h.client.current).toHaveBeenCalledTimes(3);
+    h.controller.stop();
+  });
+
+  it("drops the deadline when a generation receipt replaces the active generation", async () => {
+    vi.useFakeTimers();
+    const h = harness();
+    await h.ready(openSnapshot());
+    const pending = h.controller.submit(mutation("generation-reserved"));
+    await flush();
+    h.submits[0].resolve(receipt("generation-reserved"));
+    await expect(pending).resolves.toEqual(receipt("generation-reserved"));
+    expect(h.last().actionDeadline).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.client.current).toHaveBeenCalledTimes(1);
+    h.controller.stop();
   });
 });

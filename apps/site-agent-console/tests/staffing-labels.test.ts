@@ -97,3 +97,20 @@ describe("Chinese labels keep the contract value available", () => {
     expect(copy).not.toContain("staff-002");
   });
 });
+
+describe("daylight-saving fall-back ranges", () => {
+  const NY = "America/New_York";
+
+  it("marks both ends with their offsets when the interval crosses the fall-back or a wall time repeats", () => {
+    expect(formatSiteRange("2026-11-01T05:30:00Z", "2026-11-01T06:30:00Z", NY)).toBe("2026-11-01 01:30 UTC-04:00–01:30 UTC-05:00");
+    expect(formatSiteRange("2026-11-01T04:30:00Z", "2026-11-01T05:30:00Z", NY)).toBe("2026-11-01 00:30 UTC-04:00–01:30 UTC-04:00");
+    expect(formatSiteRange("2026-11-01T06:30:00Z", "2026-11-01T07:30:00Z", NY)).toBe("2026-11-01 01:30 UTC-05:00–02:30 UTC-05:00");
+    expect(formatSiteRange("2026-11-01T02:00:00Z", "2026-11-01T07:00:00Z", NY)).toBe("2026-10-31 22:00 UTC-04:00 – 2026-11-01 02:00 UTC-05:00");
+  });
+
+  it("marks a spring-forward interval whose offsets differ and leaves ordinary intervals unchanged", () => {
+    expect(formatSiteRange("2026-03-08T06:30:00Z", "2026-03-08T07:30:00Z", NY)).toBe("2026-03-08 01:30 UTC-05:00–03:30 UTC-04:00");
+    expect(formatSiteRange("2026-11-01T07:30:00Z", "2026-11-01T12:30:00Z", NY)).toBe("2026-11-01 02:30–07:30");
+    expect(formatSiteRange("2026-10-08T08:00:00Z", "2026-10-08T12:00:00Z", "Asia/Shanghai")).toBe("2026-10-08 16:00–20:00");
+  });
+});

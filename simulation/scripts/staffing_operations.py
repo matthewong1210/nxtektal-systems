@@ -92,8 +92,10 @@ _DIGEST = re.compile(r"^[0-9a-f]{64}$")
 _MAX_PUBLIC_ITEMS = 4096
 # A local explanation grows only where an alias token is replaced by a label:
 # a 280-character rationale holds at most eight 35-character assignment aliases,
-# each replaced by at most 180 characters, so 1440 is the proven ceiling; the
-# 200-character warning ceiling is 925.  The bounds below leave headroom and
+# each replaced by at most 222 characters (100-character name, " (", 32-character
+# role, "/", 32-character area, a space, a 53-character window with two dates
+# and two " UTC±HH:MM" suffixes, ")"), so 1776 is the proven ceiling; the
+# 200-character warning ceiling is 1135.  The bounds below leave headroom and
 # still fail closed.
 _MAX_LOCAL_RATIONALE = 2000
 _MAX_LOCAL_WARNING = 1500

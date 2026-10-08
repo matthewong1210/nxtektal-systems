@@ -8,16 +8,25 @@ Two deterministic, clock-free readings of one stored candidate:
   reservation's alias maps bind them to.  The raw provider text is kept
   beside it; nothing here rewrites ledger evidence or sends a name,
   staff ID, or assignment ID to a provider; and
-* the candidate's action window: the instant after which every shift the
-  candidate adds or removes has ended.  A candidate without any timed
-  operation keeps the whole service date open and closes at local midnight
-  of the next day in the site timezone.
+* the candidate's action window: the earliest end of any shift the
+  candidate adds or removes.  Past it the candidate is no longer a current
+  action, because at least one affected shift has ended.  A candidate
+  without any timed operation keeps the whole service date open and closes
+  at local midnight of the next day in the site timezone.
 
 The composition root compares the window against its own audit clock to
 label a candidate ``EXPIRED`` on the public wire, and the manager-response
 admission compares it against the injected ``recorded_at`` before an
-ACCEPT or MODIFY may append.  Replay of an already committed response does
-not re-apply the rule; the ledger remains the record of what was accepted.
+ACCEPT or MODIFY may append.  For a MODIFY the stored candidate's window is
+checked first, so editing cannot revive an expired suggestion; the edited
+operations are then held to the same rule.  Replay of an already committed
+response does not re-apply the rule; the ledger remains the record of what
+was accepted.
+
+Shift labels render site-local minutes.  When an interval crosses a UTC
+offset change, or an endpoint's wall time is repeated in the site zone (a
+daylight-saving fall-back), each endpoint carries its own ``UTC±HH:MM``
+suffix so two different instants never read as the same clock time.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from .contracts import (
     StaffingError,
     Worker,
 )
+from .time import local_wall_instants
 
 ALIAS_TOKEN_PATTERN = re.compile(r"(?<![0-9A-Za-z_])(?:worker|assignment)_[0-9a-f]{24}(?![0-9A-Za-z_])")
 
@@ -47,25 +57,58 @@ def _zone(site_timezone: object) -> ZoneInfo:
         raise StaffingError("staffing_invalid_evidence", "site_timezone") from None
 
 
-def _local_minute(value: datetime, zone: ZoneInfo) -> str:
-    local = value.astimezone(zone)
-    return f"{local.hour:02d}:{local.minute:02d}"
+def _is_repeated_wall_time(local: datetime) -> bool:
+    """True when the site-local wall minute names two instants (fall-back)."""
+
+    zone = local.tzinfo
+    if not isinstance(zone, ZoneInfo):
+        raise StaffingError("staffing_invalid_evidence", "site zone")
+    return len(local_wall_instants(local.replace(tzinfo=None), zone)) > 1
+
+
+def _offset_suffix(local: datetime) -> str:
+    offset = local.utcoffset()
+    if offset is None:
+        raise StaffingError("staffing_invalid_evidence", "site offset")
+    total = int(offset.total_seconds())
+    if total % 60:
+        raise StaffingError("staffing_invalid_evidence", "site offset")
+    sign = "-" if total < 0 else "+"
+    minutes = abs(total) // 60
+    return f" UTC{sign}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _local_clock(local: datetime, *, with_offset: bool) -> str:
+    text = f"{local.hour:02d}:{local.minute:02d}"
+    return text + (_offset_suffix(local) if with_offset else "")
 
 
 def assignment_label(
     assignment: Assignment, display_name: str, site_timezone: str
 ) -> str:
-    """Render one shift as ``name (ROLE/AREA HH:MM–HH:MM)`` in site time."""
+    """Render one shift as ``name (ROLE/AREA HH:MM–HH:MM)`` in site time.
+
+    Each endpoint carries a ``UTC±HH:MM`` suffix when the interval crosses a
+    UTC offset change or when either wall time is repeated in the site zone,
+    so a fall-back hour never reads as ``01:30–01:30``.
+    """
 
     zone = _zone(site_timezone)
     start = assignment.start_at.astimezone(zone)
     end = assignment.end_at.astimezone(zone)
+    with_offset = (
+        start.utcoffset() != end.utcoffset()
+        or _is_repeated_wall_time(start)
+        or _is_repeated_wall_time(end)
+    )
+    start_text = _local_clock(start, with_offset=with_offset)
+    end_text = _local_clock(end, with_offset=with_offset)
     if start.date() == end.date():
-        window = f"{_local_minute(start, zone)}–{_local_minute(end, zone)}"
+        window = f"{start_text}–{end_text}"
     else:
         window = (
-            f"{start.date().isoformat()} {_local_minute(start, zone)}–"
-            f"{end.date().isoformat()} {_local_minute(end, zone)}"
+            f"{start.date().isoformat()} {start_text}–"
+            f"{end.date().isoformat()} {end_text}"
         )
     return (
         f"{display_name} ({assignment.role_code}/{assignment.area_code} {window})"
@@ -128,10 +171,12 @@ def action_window_end(
     service_date: date,
     site_timezone: str,
 ) -> datetime:
-    """Latest end of any shift the candidate adds or removes, in UTC.
+    """Earliest end of any shift the candidate adds or removes, in UTC.
 
-    A REMOVE whose alias no longer resolves contributes nothing; a candidate
-    with no timed operation stays open until the end of its service date.
+    Past this instant the candidate is no longer a current action, because
+    at least one affected shift has ended.  A REMOVE whose alias no longer
+    resolves contributes nothing; a candidate with no timed operation stays
+    open until the end of its service date.
     """
 
     ends: list[datetime] = []
@@ -148,7 +193,7 @@ def action_window_end(
         if type(value) is not datetime or value.tzinfo is None or value.utcoffset() is None:
             raise StaffingError("staffing_invalid_evidence", "operation end")
     if ends:
-        return max(value.astimezone(timezone.utc) for value in ends)
+        return min(value.astimezone(timezone.utc) for value in ends)
     return end_of_service_day(service_date, site_timezone)
 
 

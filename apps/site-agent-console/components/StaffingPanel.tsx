@@ -361,6 +361,7 @@ export function StaffingView({
               generation={view.activeGeneration}
               revisions={snapshot.revisions}
               timeZone={snapshot.context.site_timezone}
+              deadlineReached={view.actionDeadline?.reached === true}
               disabled={commonDisabled || !rosterReady || generationIsOngoing(view)}
               onAccept={actions.acceptSuggestion}
               onModify={actions.modifySuggestion}

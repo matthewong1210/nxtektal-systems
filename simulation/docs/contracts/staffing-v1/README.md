@@ -38,22 +38,38 @@ unique. A non-null `retry_of` must name exactly one earlier `RESULT_UNKNOWN`
 generation, and a `RESULT_UNKNOWN` generation can have at most one retry.
 
 Candidate projections restore local staff IDs and display names for manager
-review. Each candidate also carries four additive v1 review fields.
+review. Each candidate also carries four required review fields,
+`rationale_local`, `operational_warnings_local`, `action_window_end_at`, and
+`actionability`, which the 2026-10-08 revision of this contract added to the
+closed `CandidateProjection` objects. They are not optional and the revision is
+not backward-compatible: a Console built before it rejects every snapshot or
+receipt that contains a candidate, and a Console built with it rejects every
+candidate that lacks them (see Versioning and lockstep rollout).
 `rationale_local` and `operational_warnings_local` are the provider's
 `rationale` and `operational_warnings` with every reserved `worker_<hex>` or
 `assignment_<hex>` token replaced by the local display name or the
-`name (ROLE/AREA HH:MM–HH:MM)` shift label the reservation bound it to; the raw
-provider text stays beside them unchanged, an alias the reservation does not
-know is left as written, and the replacement happens only in the local
-projection, never on the provider wire. `action_window_end_at` is the UTC-rendered instant
-after which every shift the candidate adds or removes has ended (local midnight
-after the service date when the candidate has no timed operation), and
-`actionability` is `CURRENT` or `EXPIRED` exactly as the snapshot's
-`server_time_utc`, or the receipt's audit instant, compares against that end
-(`EXPIRED` once the instant is reached). An `EXPIRED` candidate is historical:
-a console must not offer ACCEPT or MODIFY for it, and the service refuses such
-a response with `staffing_suggestion_expired` without appending anything.
-REJECT remains allowed as a recorded manager decision.
+`name (ROLE/AREA HH:MM–HH:MM)` shift label the reservation bound it to; when
+the shift crosses a UTC offset change, or either wall time is repeated in the
+site zone (a daylight-saving fall-back), each endpoint carries its own
+` UTC±HH:MM` suffix, so the one-hour New York fall-back shift reads
+`01:30 UTC-04:00–01:30 UTC-05:00`. The raw provider text stays beside them
+unchanged, an alias the reservation does not know is left as written, and the
+replacement happens only in the local projection, never on the provider wire.
+`action_window_end_at` is an `OffsetTimestamp` naming the earliest end of any
+shift the candidate adds or removes (local midnight after the service date when
+the candidate has no timed operation); the service renders it in UTC, and the
+frozen examples carry the equivalent site-offset form. Past it the candidate is
+no longer a current action, because at least one affected shift has ended. `actionability` is
+`CURRENT` or `EXPIRED` exactly as the snapshot's `server_time_utc`, or the
+receipt's audit instant, compares against that end (`EXPIRED` once the instant
+is reached). An `EXPIRED` candidate is historical: a console must not offer
+ACCEPT or MODIFY for it, and the service refuses such a response with
+`staffing_suggestion_expired` without appending anything. REJECT remains
+allowed as a recorded manager decision. A console may additionally keep a
+server-relative timer to the earliest open `action_window_end_at` (measured
+from `server_time_utc`, never from the browser clock), close its controls when
+it elapses, and read again; only the service's next `actionability` relabels
+the candidate.
 
 A manager modification sends the smaller `ManagerPatchOperation` union;
 the server resolves and revalidates it against the current basis. ACCEPT/MODIFY
@@ -78,9 +94,11 @@ rendered with `:00` seconds; `+00:00` and `-00:00` are never accepted. Candidate
 count is at most two, provider provenance count is at most
 two, candidate and manager patch operations are at most 32, and operational
 warnings are at most five. A local explanation is at most 2000 characters and a
-local warning at most 1500: the proven ceilings are 1440 and 925 because a
+local warning at most 1500: the proven ceilings are 1776 and 1135 because a
 replacement only grows where a 31- or 35-character alias becomes at most a
-100-character name or a 180-character shift label. Identifier, canonical-code, text, token, count, and
+100-character name or a 222-character shift label (a 100-character name, the
+role and area codes, and a window carrying two dates and two ` UTC±HH:MM`
+suffixes). Identifier, canonical-code, text, token, count, and
 array bounds are encoded in `schema.json` rather than left to prose.
 
 Each coverage gap requires `required_count >= 1` and
@@ -152,7 +170,8 @@ These nine codes are the staffing-specific error inventory. Existing Manager API
 transport errors remain outside `errors.json`; a consumer must fail closed on an
 unknown code/status pair rather than silently reclassify it.
 
-`staffing_exception_overlap` is an additive v1 code: a new exception record,
+`staffing_exception_overlap` was added to the closed v1 error inventory in
+lockstep with its service rule: a new exception record,
 or a correction, whose half-open interval would intersect an active exception
 of the same worker on the same service date is refused before any append. The
 original record is untouched, the same request ID with the same body still
@@ -161,13 +180,68 @@ existing record (or a non-overlapping interval) under a new request ID. It is
 distinct from `staffing_conflict`, which keeps its idempotency, revision, and
 lifecycle meanings.
 
-`staffing_suggestion_expired` is likewise additive: an ACCEPT or MODIFY whose
-resulting operations have all ended by the service's audit instant (the
-candidate's `action_window_end_at`, or for MODIFY the window of the edited
-operations) is refused before any append. The suggestion keeps its stored
+`staffing_suggestion_expired` was added the same way: an ACCEPT or MODIFY is
+refused before any append once the service's audit instant has reached the
+earliest end of any affected shift. For ACCEPT that is the stored candidate's
+`action_window_end_at`; for MODIFY the stored candidate's `action_window_end_at`
+is checked first (editing cannot revive an expired suggestion) and then the
+earliest end of the edited operations. The suggestion keeps its stored
 candidates and may still be rejected; the same request ID with the same body
 replays its original receipt only if it had committed earlier. It is distinct
-from `staffing_stale_suggestion`, which means the basis changed.
+from `staffing_stale_suggestion`, which means the basis changed. Neither code
+is additive for an older Console: it validates every error against its own
+code/status table and reports an unknown pair as `invalid_staffing_response`,
+which its controller treats as an unknown write outcome rather than a
+rejection.
+
+## Versioning and lockstep rollout
+
+`nxt-staffing/v1` names a closed contract: every object has
+`additionalProperties: false`, every field is required, and both the Python
+emitter and the Console decoder reject an unknown or a missing key. Changing a
+closed object's key set, a `const` or enum value, the meaning of an existing
+field, or the error code/status inventory changes what every existing consumer
+accepts or shows, whether or not the literal changes. Such a change is never
+additive and never backward-compatible, and this README must not describe one
+as either.
+
+The 2026-10-08 revision is one such change and ships only in lockstep. It added
+the four required candidate review fields and `staffing_suggestion_expired`,
+and it then fixed the meaning of `action_window_end_at` to the earliest
+affected end and added the ` UTC±HH:MM` suffixes to local label text; the
+frozen examples did not change value under those two fixes.
+
+While this contract is unreleased (absent from `main`), a closed-shape or
+semantic change ships only in lockstep: `schema.json`, every example, this
+README, `scripts/staffing_operations.py`, `apps/site-agent-console/lib/staffing.ts`,
+and both test suites change in one commit, and the Console export and the
+service are built from that one checkout. The service serves the sibling
+`apps/site-agent-console/out` of its own checkout for this reason. Mixed
+versions are unsupported and fail closed: the Console reports
+`invalid_staffing_response` once a candidate is present and disables every
+staffing control; the service never accepts an unknown field. No mixed pair is
+a supported state, and nothing negotiates a version at runtime; the cold-start
+snapshot decodes on both sides, so the mismatch shows only once a generation
+carries candidates.
+
+The in-repo guard is executable: the Python contract suite validates every
+example and every live emission against `schema.json` and checks that the
+error inventory in the schema, the examples, and the API status table is one
+set; the Console suite decodes every example, binds its closed candidate key
+set to the schema's `required` lists, and accepts the frozen error inventory
+plus the documented Manager API transport error `body_too_large` and nothing
+beside them; and both suites pin the same contract fingerprint (SHA-256 over
+`schema.json` followed by every example in name order), so a change to any
+frozen file fails whichever side was not updated in the same commit.
+
+Once `nxt-staffing/v1` is released, its bytes, examples, and this directory are
+frozen. A later closed-shape or semantic change requires a new literal and
+directory (`nxt-staffing/v2`, `staffing-v2/`), with the Console decoding the
+versions it supports as an explicit union and rejecting all others. The durable
+ledger directory `staffing-v1/`, record `schema_version: 1`, the anchor schema,
+and the request literals are ledger and request versions, not this wire
+version; a wire revision never renames or rewrites them, and replay is
+unaffected.
 
 ## Domain-to-wire authority
 

@@ -10,6 +10,8 @@ import {
   type SuggestionGenerateRequest,
 } from "./staffing";
 import { requireStaffingManagerLabel } from "./staffing-guards";
+import { candidateIsActionable } from "./staffing-labels";
+import { compareUtc, utcMillis } from "./site-time";
 
 export const STAFFING_SNAPSHOT_POLL_MS = 5_000;
 export const STAFFING_REQUEST_POLL_MS = 1_000;
@@ -41,6 +43,16 @@ export type StaffingWriteState =
       detail: string;
     };
 
+/** The controller's server-relative timer to the earliest action window it
+ * still offers controls for. `reached` closes the controls; only the service's
+ * next `actionability` relabels a candidate. */
+export interface StaffingActionDeadline {
+  /** Earliest `action_window_end_at` among candidates the manager may still act on, as sent. */
+  endAt: string;
+  /** True once the timer, measured from the snapshot's `server_time_utc`, reached `endAt`. */
+  reached: boolean;
+}
+
 export interface StaffingView {
   snapshot: StaffingDateSnapshot | null;
   read: {
@@ -51,6 +63,7 @@ export interface StaffingView {
   write: StaffingWriteState | null;
   activeGenerationRequestId: string | null;
   activeGeneration: GenerationProjection | null;
+  actionDeadline: StaffingActionDeadline | null;
 }
 
 interface ExceptionDraftCommon {
@@ -85,6 +98,9 @@ export interface StaffingControllerOptions {
 
 type Activity = "idle" | "snapshot-read" | "write" | "request-poll";
 type Timer = ReturnType<typeof setTimeout>;
+
+/** Largest delay a browser timer honours; a later deadline is re-armed by a later snapshot. */
+const MAX_TIMER_MS = 2_147_483_647;
 
 const ONGOING_STATES = new Set<GenerationProjection["state"]>(["RESERVED", "IN_PROGRESS"]);
 
@@ -200,6 +216,7 @@ export function initialStaffingView(): StaffingView {
     write: null,
     activeGenerationRequestId: null,
     activeGeneration: null,
+    actionDeadline: null,
   };
 }
 
@@ -216,6 +233,8 @@ export function createStaffingController(
   let controllerEpoch = 0;
   let activity: Activity = "idle";
   let timer: Timer | undefined;
+  let deadlineTimer: Timer | undefined;
+  let actionDeadline: StaffingActionDeadline | null = null;
   let requiredRefreshReceipt: StaffingReceipt | null = null;
   let snapshotValue: StaffingDateSnapshot | null = null;
   let readState: StaffingView["read"] = { status: "idle", stale: false, detail: null };
@@ -232,6 +251,7 @@ export function createStaffingController(
       write: writeState,
       activeGenerationRequestId,
       activeGeneration,
+      actionDeadline,
     };
   };
 
@@ -248,6 +268,70 @@ export function createStaffingController(
   const clearTimer = () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
+  };
+
+  const clearDeadlineTimer = () => {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    deadlineTimer = undefined;
+  };
+
+  const clearActionDeadline = () => {
+    clearDeadlineTimer();
+    actionDeadline = null;
+  };
+
+  const onActionDeadline = () => {
+    deadlineTimer = undefined;
+    if (!active || actionDeadline === null || actionDeadline.reached) return;
+    actionDeadline = { endAt: actionDeadline.endAt, reached: true };
+    // Controls close before any network call; the service's next answer is
+    // the only thing that relabels the candidate.
+    publish();
+    if (active && activity === "idle") void runSnapshotRead(false);
+  };
+
+  /** Arm one server-relative timer from the committed snapshot: the delay is
+   * the earliest open action window minus the snapshot's server time, so the
+   * browser clock never enters the comparison. */
+  const armActionDeadline = () => {
+    clearDeadlineTimer();
+    const previous = actionDeadline;
+    const generation = activeGeneration;
+    const current = snapshotValue;
+    if (generation === null || current === null || generation.manager_response !== null) {
+      actionDeadline = null;
+      return;
+    }
+    const ends = generation.candidates.filter(candidateIsActionable).map((item) => item.action_window_end_at);
+    if (ends.length === 0) {
+      actionDeadline = null;
+      return;
+    }
+    const endAt = ends.reduce((earliest, value) => (compareUtc(value, earliest) < 0 ? value : earliest));
+    if (previous !== null && previous.reached && previous.endAt === endAt) {
+      // The local timer already elapsed for this window. A snapshot stamped
+      // before the end that arrives afterwards cannot re-open it; only the
+      // service's next label, or a different window, changes the state. This
+      // also keeps a frozen service clock from re-arming a read loop.
+      actionDeadline = previous;
+      return;
+    }
+    const endMs = utcMillis(endAt);
+    const serverMs = utcMillis(current.server_time_utc);
+    if (endMs === null || serverMs === null) {
+      actionDeadline = null;
+      return;
+    }
+    const delay = endMs - serverMs;
+    if (delay <= 0) {
+      // The service answered CURRENT at or past the window: close the controls
+      // now and let the ordinary poll fetch its next reading (no read loop).
+      actionDeadline = { endAt, reached: true };
+      return;
+    }
+    actionDeadline = { endAt, reached: false };
+    if (delay > MAX_TIMER_MS) return;
+    deadlineTimer = setTimeout(onActionDeadline, delay);
   };
 
   const current = (epoch: number): boolean => active && controllerEpoch === epoch;
@@ -318,6 +402,7 @@ export function createStaffingController(
     if (writeState?.status === "committed" && writeState.savedButStale) {
       writeState = { ...writeState, savedButStale: false };
     }
+    armActionDeadline();
   };
 
   async function runSnapshotRead(throwOnFailure: boolean): Promise<void> {
@@ -434,6 +519,8 @@ export function createStaffingController(
       const projection = generationFromReceipt(receipt);
       activeGenerationRequestId = receipt.request_id;
       activeGeneration = projection;
+      // A receipt carries no server time; the required refresh re-arms.
+      clearActionDeadline();
     }
 
     if (attempt !== null) {
@@ -535,6 +622,7 @@ export function createStaffingController(
       const interruptedRequiredRefresh = requiredRefreshReceipt;
       active = false;
       clearTimer();
+      clearActionDeadline();
       controllerEpoch += 1;
       if (writeState?.status === "in_flight") {
         writeState = {

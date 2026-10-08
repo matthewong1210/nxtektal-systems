@@ -56,7 +56,7 @@ function generationCopy(generation: GenerationProjection): string {
     case "SUCCEEDED":
       return generation.manager_response === null
         ? "建议已生成，需经理确认后才会形成有效排班。"
-        : "经理处理结果已保存；请以当前有效排班状态为准。";
+        : "经理处理结果已保存；现行状态以“有效排班状态”栏为准。";
     case "NO_VALID_SUGGESTION":
       return "没有通过校验的建议，请由经理手工处理。";
     case "UNAVAILABLE":
