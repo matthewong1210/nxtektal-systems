@@ -141,6 +141,13 @@ nxt_pilot_ops.staffing (private durable evidence + domain rules)
         -> same-origin apps/site-agent-console staffing panel
 ```
 
+The wire's lockstep `contract_revision` pin lives in
+`simulation/scripts/staffing_contract_revision.py` (imported only by the
+composition root) and `apps/site-agent-console/lib/staffing-revision.ts`; both
+are regenerated from the source set in
+`simulation/docs/contracts/staffing-v1/lockstep.json`, and the domain package
+never sees the field.
+
 The integrated continuous-collection service enables this optional path only
 with `--staffing-state-root`. Its stable ledger root is exactly
 `<state-root>/<site_id>/<deployment_id>/staffing-v1/`, must be durable and

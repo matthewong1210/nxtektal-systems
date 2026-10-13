@@ -84,6 +84,7 @@ from nxt_pilot_ops.staffing.projection import (
     diagnose_provider_output,
 )
 from nxt_site_agent import SiteAgentError
+from scripts.staffing_contract_revision import STAFFING_CONTRACT_REVISION
 
 
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -1713,6 +1714,7 @@ def with_runtime_context(
             site_timezone=site_timezone,
         ),
         "schema": "nxt-staffing/v1",
+        "contract_revision": STAFFING_CONTRACT_REVISION,
         "environment": "SIMULATION",
         "mode": "STAFFING_ADVISORY_ONLY",
         "server_time_utc": utc_time(now.astimezone(timezone.utc)),
@@ -1787,6 +1789,7 @@ def _receipt(
         raise _projection("receipt disposition is invalid")
     return {
         "schema": "nxt-staffing/v1",
+        "contract_revision": STAFFING_CONTRACT_REVISION,
         "disposition": disposition,
         "operation_kind": projection.operation_kind,
         "request_id": _identifier(projection.request_id, "request_id"),
@@ -2103,6 +2106,38 @@ def with_matching_path_id(
     return detached
 
 
+def admit_contract_revision(payload: dict[str, Any]) -> dict[str, Any]:
+    """Admit a write only from a console built with this checkout's revision.
+
+    Every request body carries ``contract_revision``. A body without it, or
+    with a value that is not a digest, is simply not a valid body under this
+    revision (HTTP 400 ``staffing_invalid_request``). A well-formed body that
+    names another revision is refused as ``staffing_contract_mismatch`` (HTTP
+    409) before any domain call: nothing is appended, and the same body is
+    refused identically every time. The admitted body is returned without the
+    field, because the revision is a wire fact and never a domain or ledger
+    fact.
+    """
+
+    if type(payload) is not dict or "contract_revision" not in payload:
+        raise SiteAgentError(
+            "staffing_invalid_request", "request body is invalid"
+        )
+    value = payload["contract_revision"]
+    if type(value) is not str or _DIGEST.fullmatch(value) is None:
+        raise SiteAgentError(
+            "staffing_invalid_request", "request body is invalid"
+        )
+    if value != STAFFING_CONTRACT_REVISION:
+        raise SiteAgentError(
+            "staffing_contract_mismatch",
+            "console and service contract revisions differ",
+        )
+    admitted = dict(payload)
+    del admitted["contract_revision"]
+    return admitted
+
+
 _CONFLICT_TO_HTTP_ERROR = {
     "IDEMPOTENCY_CONFLICT": (
         "staffing_conflict",
@@ -2236,6 +2271,8 @@ class StaffingRouteAdapter:
         now = self._audit_clock()
         if type(now) is not datetime or now.tzinfo is None or now.utcoffset() is None:
             raise _projection("audit clock is not timezone-aware")
+        if method == "POST":
+            payload = admit_contract_revision(payload)
         if method == "GET" and parts == ("api", "v1", "staffing"):
             service_date = now.astimezone(self._zone).date()
             projection = self._owner.date_projection(service_date)

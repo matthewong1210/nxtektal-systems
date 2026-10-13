@@ -18,7 +18,7 @@ import { CandidateCards } from "./staffing/CandidateCards";
 import { ExceptionForm } from "./staffing/ExceptionForm";
 import { GenerationStatus } from "./staffing/GenerationStatus";
 import { RosterImport } from "./staffing/RosterImport";
-import { staffingRejectionCopy } from "./staffing/rejections";
+import { staffingReadFailureCopy, staffingRejectionCopy } from "./staffing/rejections";
 import { Badge, Section } from "./ui";
 
 interface StaffingViewProps {
@@ -156,6 +156,11 @@ function ReadNotice({ view, actions }: { view: StaffingViewState; actions: Staff
         <Badge tone={view.snapshot === null ? "bad" : "warn"}>
           {view.snapshot === null ? "不可用" : "旧数据"}
         </Badge>{" "}
+        {staffingReadFailureCopy(view.read.detail) === null ? null : (
+          <>
+            {staffingReadFailureCopy(view.read.detail)}{" "}
+          </>
+        )}
         {view.read.detail ?? "人员记录刷新失败。"}{" "}
         <button
           type="button"

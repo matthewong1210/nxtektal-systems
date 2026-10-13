@@ -3,7 +3,7 @@ import type { RosterImportRequest } from "./staffing";
 
 export type RosterImportDraft = Omit<
   RosterImportRequest,
-  "request_id" | "operator" | "expected_roster_revision" | "site_id" | "deployment_id"
+  "contract_revision" | "request_id" | "operator" | "expected_roster_revision" | "site_id" | "deployment_id"
 >;
 
 const HEADER = [

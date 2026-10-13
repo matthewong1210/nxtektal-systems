@@ -26,6 +26,7 @@ from nxt_pilot_ops.staffing.ledger import StaffingLedger
 from nxt_pilot_ops.staffing.operations import StaffingOperations
 from nxt_range_ops.core.sim import RangeSimulation
 from nxt_site_agent import SiteAgentApiServer, SiteAgentError
+from scripts.staffing_contract_revision import STAFFING_CONTRACT_REVISION
 from scripts import course_collection_execution as execution_api
 from scripts import course_collection_execution_v4_service as v4_service
 from scripts import course_session_v3
@@ -3093,6 +3094,7 @@ def test_cli_exposes_continuous_flags_and_uses_required_lifecycle_order(
                     "/api/v1/staffing/suggestions",
                     {
                         "schema": "nxt-staffing-suggestion-generate/v1",
+                        "contract_revision": STAFFING_CONTRACT_REVISION,
                         "request_id": request_id,
                         "operator": "course-manager",
                         "service_date": "2026-10-06",

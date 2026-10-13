@@ -66,6 +66,7 @@ from nxt_pilot_ops.staffing.ledger import StaffingLedger
 from nxt_pilot_ops.staffing.operations import StaffingOperations
 from nxt_pilot_ops.staffing.prompt import PROMPT_TEMPLATE_VERSION
 from nxt_site_agent import SiteAgentApiServer, SiteAgentError
+from scripts.staffing_contract_revision import STAFFING_CONTRACT_REVISION
 from scripts.staffing_operations import (
     BoundedGenerationWorker,
     ConfiguredGateway,
@@ -1686,7 +1687,7 @@ def test_route_dispatch_decodes_once_and_keeps_path_ids_out_of_closed_bodies() -
         adapter.dispatch(
             "POST",
             "/api/v1/staffing/exceptions/exception%2D1/cancel",
-            {"request_id": "request-1", "exception_id": "exception-1"},
+            {"contract_revision": STAFFING_CONTRACT_REVISION, "request_id": "request-1", "exception_id": "exception-1"},
         )
     assert error.value.code == "staffing_invalid_request"
     before_double_decode = tuple(owner.calls)
@@ -1694,7 +1695,7 @@ def test_route_dispatch_decodes_once_and_keeps_path_ids_out_of_closed_bodies() -
         adapter.dispatch(
             "POST",
             "/api/v1/staffing/exceptions/exception%252D1/cancel",
-            {"request_id": "request-1"},
+            {"contract_revision": STAFFING_CONTRACT_REVISION, "request_id": "request-1"},
         )
     assert conflict.value.code == "staffing_invalid_request"
     assert tuple(owner.calls) == before_double_decode
@@ -1712,7 +1713,7 @@ def test_route_dispatch_decodes_once_and_keeps_path_ids_out_of_closed_bodies() -
         adapter.dispatch(
             "POST",
             "/api/v1/staffing/exceptions/not%20an%20id/cancel",
-            {"request_id": "request-2"},
+            {"contract_revision": STAFFING_CONTRACT_REVISION, "request_id": "request-2"},
         )
     assert invalid_id.value.code == "staffing_invalid_request"
     assert tuple(owner.calls) == before
@@ -1822,8 +1823,8 @@ def test_route_dispatch_covers_all_eleven_routes_and_keeps_manager_id_out_of_bod
     adapter.dispatch(
         "GET", "/api/v1/staffing/requests/roster-import/request%2D1", {}
     )
-    adapter.dispatch("POST", "/api/v1/staffing/roster-imports", {"route": 1})
-    adapter.dispatch("POST", "/api/v1/staffing/exceptions", {"route": 2})
+    adapter.dispatch("POST", "/api/v1/staffing/roster-imports", {"route": 1, "contract_revision": STAFFING_CONTRACT_REVISION})
+    adapter.dispatch("POST", "/api/v1/staffing/exceptions", {"route": 2, "contract_revision": STAFFING_CONTRACT_REVISION})
     cancel_body = exchange_request(
         "exception-correction.json", "exception-cancelled"
     )
@@ -1840,12 +1841,12 @@ def test_route_dispatch_covers_all_eleven_routes_and_keeps_manager_id_out_of_bod
         "/api/v1/staffing/exceptions/exception%2D1/correct",
         correct_body,
     )
-    adapter.dispatch("POST", "/api/v1/staffing/suggestions", {"route": 5})
+    adapter.dispatch("POST", "/api/v1/staffing/suggestions", {"route": 5, "contract_revision": STAFFING_CONTRACT_REVISION})
     for suffix, kind in (("accept", "ACCEPT"), ("modify", "MODIFY"), ("reject", "REJECT")):
         adapter.dispatch(
             "POST",
             f"/api/v1/staffing/suggestions/generation%2D1/{suffix}",
-            {"kind": kind, "request_id": f"manager-{suffix}"},
+            {"kind": kind, "request_id": f"manager-{suffix}", "contract_revision": STAFFING_CONTRACT_REVISION},
         )
 
     assert owner.calls[:3] == [
@@ -2319,6 +2320,14 @@ def roster_request() -> dict[str, object]:
     return exchange_request("roster-import.json", "roster-committed")
 
 
+def domain_body(payload: dict[str, object]) -> dict[str, object]:
+    """A wire body as the domain receives it: the route strips the lockstep
+    ``contract_revision`` before any owner call, and the domain's closed key
+    sets never include it."""
+
+    return {key: value for key, value in payload.items() if key != "contract_revision"}
+
+
 def timezone_roster(
     *, timezone_name: str, service_date: str, weekday: int, start: str, end: str
 ) -> dict[str, object]:
@@ -2357,6 +2366,7 @@ def timezone_roster(
 def generation_payload(request_id: str) -> dict[str, object]:
     return {
         "schema": "nxt-staffing-suggestion-generate/v1",
+        "contract_revision": STAFFING_CONTRACT_REVISION,
         "request_id": request_id,
         "operator": "manager-1",
         "service_date": "2026-10-06",
@@ -2462,7 +2472,7 @@ def test_post_reservation_projection_failure_fail_closes_without_orphan_queueing
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    owner.import_roster(roster_request(), recorded_at=NOW)
+    owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     configured = configured_for(cn_settings(key=None))
     worker = BoundedGenerationWorker(
         owner=owner,
@@ -2478,7 +2488,7 @@ def test_post_reservation_projection_failure_fail_closes_without_orphan_queueing
     monkeypatch.setattr(composition, "to_wire_receipt", projection_failure)
     try:
         with pytest.raises(RuntimeError, match="private receipt projection failure"):
-            worker.submit(generation_payload("request-orphan"))
+            worker.submit(domain_body(generation_payload("request-orphan")))
         projection = owner.request_projection(
             "suggestion-generate", "request-orphan"
         )
@@ -2488,7 +2498,7 @@ def test_post_reservation_projection_failure_fail_closes_without_orphan_queueing
             assert tuple(worker._waiting) == ()
             assert worker._failed_closed is True
         with pytest.raises(SiteAgentError) as unavailable:
-            worker.submit(generation_payload("request-after-orphan"))
+            worker.submit(domain_body(generation_payload("request-after-orphan")))
         assert unavailable.value.code == "staffing_unavailable"
     finally:
         worker.close()
@@ -2504,7 +2514,7 @@ def real_blocking_api(tmp_path: Path, *, join_timeout: float | None = None):
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    owner.import_roster(roster_request(), recorded_at=NOW)
+    owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     entered = threading.Event()
     release = threading.Event()
     transport = ScriptedTransport(valid_kimi_envelope(), entered=entered, release=release)
@@ -2946,7 +2956,7 @@ def test_blocked_observer_or_terminal_commit_requires_explicit_close_retry(
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    real_owner.import_roster(roster_request(), recorded_at=NOW)
+    real_owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     entered = threading.Event()
     release = threading.Event()
 
@@ -3044,12 +3054,12 @@ def test_startup_recovery_never_resends_and_only_explicit_retry_calls_provider(
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    owner.import_roster(roster_request(), recorded_at=NOW)
+    owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     configured = configured_for(cn_settings())
     evidence = generation_route_evidence(configured, cn_settings())
     assert evidence is not None
     owner.reserve_generation(
-        generation_payload("request-recover"),
+        domain_body(generation_payload("request-recover")),
         alias_nonce=b"r" * 32,
         route_evidence=evidence,
         prompt_template_version=PROMPT_TEMPLATE_VERSION,
@@ -3215,16 +3225,16 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
         site_timezone=timezone_name,
     )
     owner.import_roster(
-        timezone_roster(
+        domain_body(timezone_roster(
             timezone_name=timezone_name,
             service_date=service_date,
             weekday=weekday,
             start=window[0],
             end=window[1],
-        ),
+        )),
         recorded_at=clock,
     )
-    request = generation_payload("generation-timezone")
+    request = domain_body(generation_payload("generation-timezone"))
     request["service_date"] = service_date
     settings = cn_settings()
     route = generation_route_evidence(configured_for(settings), settings)
@@ -3379,6 +3389,7 @@ def test_restart_api_preserves_offsets_and_accepts_byte_unchanged_modify(
         }
         manager_body = {
             "schema": "nxt-staffing-manager-response/v1",
+            "contract_revision": STAFFING_CONTRACT_REVISION,
             "request_id": f"manager-{weekday}-{stable_digest(start_at)[:8]}",
             "operator": "manager-1",
             "kind": "MODIFY",
@@ -3623,7 +3634,7 @@ def test_real_gateway_observer_rejects_null_success_finish_and_durably_interrupt
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    owner.import_roster(roster_request(), recorded_at=NOW)
+    owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     baseline = len(ledger.read().events)
     worker = BoundedGenerationWorker(
         owner=owner,
@@ -3860,7 +3871,7 @@ def test_schema_valid_oversized_provider_tree_is_domain_invalid_and_queue_stays_
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    owner.import_roster(roster_request(), recorded_at=NOW)
+    owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     configured = ConfiguredGateway(gateway, route, gateway.readiness(route))
     nonces = iter((b"a" * 32, b"b" * 32))
     worker = BoundedGenerationWorker(
@@ -3947,7 +3958,7 @@ def test_real_gateway_and_ledger_reject_unknown_provider_aliases(
         deployment_id="deployment-1",
         site_timezone="Asia/Shanghai",
     )
-    owner.import_roster(roster_request(), recorded_at=NOW)
+    owner.import_roster(domain_body(roster_request()), recorded_at=NOW)
     worker = BoundedGenerationWorker(
         owner=owner,
         configured=configured,
@@ -4932,6 +4943,7 @@ def flow_roster(request_id: str, expected_revision: int) -> dict[str, object]:
 def flow_leave(request_id: str, *, roster: int, exception_set: int, staff_id="staff-001", note="synthetic leave"):
     return {
         "schema": "nxt-staffing-exception/v1",
+        "contract_revision": STAFFING_CONTRACT_REVISION,
         "request_id": request_id,
         "expected_roster_revision": roster,
         "expected_exception_set_revision": exception_set,
@@ -4947,6 +4959,7 @@ def flow_leave(request_id: str, *, roster: int, exception_set: int, staff_id="st
 def flow_generation(request_id: str, *, roster: int, exception_set: int, effective_plan: int):
     return {
         "schema": "nxt-staffing-suggestion-generate/v1",
+        "contract_revision": STAFFING_CONTRACT_REVISION,
         "request_id": request_id,
         "operator": "manager-1",
         "service_date": FLOW_SERVICE_DATE,
@@ -5113,6 +5126,7 @@ def test_synthetic_flow_refuses_duplicate_leave_explicitly_and_reaches_an_effect
             f"/api/v1/staffing/suggestions/{suggestion_id}/accept",
             {
                 "schema": "nxt-staffing-manager-response/v1",
+                "contract_revision": STAFFING_CONTRACT_REVISION,
                 "request_id": "accept-1",
                 "operator": "manager-1",
                 "kind": "ACCEPT",

@@ -5,6 +5,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { API_SCHEMA, DISCLAIMER, ManagerApiError, type FetchLike } from "../lib/api";
 import * as staffingRuntime from "../lib/staffing";
+import { STAFFING_CONTRACT_REVISION } from "../lib/staffing-revision";
 import {
   STAFFING_SCHEMA,
   createStaffingClient,
@@ -249,17 +250,170 @@ type FrozenTypeSurface = [
 // simulation/tests/pilot_ops/test_staffing_wire_contract.py. Both pins move in
 // the same commit as the schema or any frozen example; see the contract README,
 // "Versioning and lockstep rollout".
-const STAFFING_CONTRACT_FINGERPRINT = "1a17066b1d296af420b27e46c2f934a183ec1b95eab86f0a27780baf92fd8b5c";
+const REPOSITORY_ROOT = join(EXAMPLES_DIR, "..", "..", "..", "..", "..");
+const LOCKSTEP_MANIFEST = join(REPOSITORY_ROOT, "simulation", "docs", "contracts", "staffing-v1", "lockstep.json");
+const PYTHON_REVISION_MODULE = join(REPOSITORY_ROOT, "simulation", "scripts", "staffing_contract_revision.py");
+const STAFFING_CONTRACT_FINGERPRINT = "f63299dd80c90ca132eb63e257906d474a59fc6c2c04fdd5cdf61bba88964152";
 const CANDIDATE_KEYS = [
   "action_window_end_at", "actionability", "candidate_index", "coverage_gaps", "operational_warnings",
   "operational_warnings_local", "operations", "rationale", "rationale_local", "rejection_codes",
   "schedule_digest", "status",
 ];
 
+/** The same manifest-and-digest rule as `compute_contract_revision()` in
+ * `simulation/scripts/staffing_contract_revision.py`: directories are walked
+ * recursively (dotfiles and `__pycache__` skipped, regular files with a listed
+ * suffix only), CRLF is folded to LF, and the revision is the SHA-256 over one
+ * `<path> <sha256>` line per source in path order. */
+function sourceBytes(relative: string): Buffer {
+  const raw = readFileSync(join(REPOSITORY_ROOT, relative));
+  return Buffer.from(raw.toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+}
+
+function walkSources(relativeDir: string, suffixes: string[], found: Set<string>): void {
+  for (const entry of readdirSync(join(REPOSITORY_ROOT, relativeDir), { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || entry.name === "__pycache__") continue;
+    const relative = `${relativeDir}/${entry.name}`;
+    if (entry.isDirectory()) walkSources(relative, suffixes, found);
+    else if (entry.isFile() && suffixes.some((suffix) => entry.name.endsWith(suffix))) found.add(relative);
+  }
+}
+
+function computeContractRevision(): { revision: string; sources: string[] } {
+  const manifest = JSON.parse(readFileSync(LOCKSTEP_MANIFEST, "utf-8")) as {
+    schema: string;
+    contract_revision: string;
+    sources: { files: string[]; directories: Array<{ path: string; suffixes: string[] }> };
+  };
+  expect(manifest.schema).toBe("nxt-staffing-lockstep/v1");
+  const found = new Set<string>(manifest.sources.files);
+  for (const entry of manifest.sources.directories) walkSources(entry.path, entry.suffixes, found);
+  const sources = [...found].sort();
+  const lines = sources.map((relative) => `${relative} ${createHash("sha256").update(sourceBytes(relative)).digest("hex")}\n`);
+  return { revision: createHash("sha256").update(lines.join("")).digest("hex"), sources };
+}
+
+function withContractRevision<T>(value: T, revision: string | undefined): T {
+  const copy = structuredClone(value) as unknown as Record<string, unknown>;
+  if (revision === undefined) delete copy["contract_revision"];
+  else copy["contract_revision"] = revision;
+  return copy as unknown as T;
+}
+
+const FOREIGN_REVISION = "f".repeat(64);
+
 describe("staffing v1 lockstep guards", () => {
   const schemaDocument = JSON.parse(readFileSync(join(EXAMPLES_DIR, "..", "schema.json"), "utf-8")) as {
     $defs: Record<string, { additionalProperties?: boolean; properties?: Record<string, unknown>; required?: string[] }>;
   };
+
+  it("pins the contract revision recomputed over the lockstep source set, identically to the service", () => {
+    const { revision, sources } = computeContractRevision();
+    expect(STAFFING_CONTRACT_REVISION).toMatch(/^[0-9a-f]{64}$/);
+    expect(STAFFING_CONTRACT_REVISION).toBe(revision);
+    const manifest = JSON.parse(readFileSync(LOCKSTEP_MANIFEST, "utf-8")) as { contract_revision: string };
+    expect(manifest.contract_revision).toBe(revision);
+    const pythonPin = /^STAFFING_CONTRACT_REVISION = "([0-9a-f]{64})"$/m.exec(readFileSync(PYTHON_REVISION_MODULE, "utf-8"));
+    expect(pythonPin?.[1]).toBe(revision);
+    // The decoder, controller, actions, labels, time helpers, and components
+    // are inside the set; the pin module and every test are outside it.
+    for (const required of [
+      "apps/site-agent-console/lib/staffing.ts",
+      "apps/site-agent-console/lib/staffing-state.ts",
+      "apps/site-agent-console/lib/staffing-actions.ts",
+      "apps/site-agent-console/lib/staffing-labels.ts",
+      "apps/site-agent-console/lib/site-time.ts",
+      "apps/site-agent-console/components/StaffingPanel.tsx",
+      "apps/site-agent-console/components/staffing/CandidateCards.tsx",
+      "simulation/scripts/staffing_operations.py",
+      "simulation/nxt_site_agent/api.py",
+      "simulation/nxt_pilot_ops/staffing/operations.py",
+      "simulation/docs/contracts/staffing-v1/schema.json",
+    ]) expect(sources, required).toContain(required);
+    for (const excluded of sources) {
+      expect(excluded).not.toBe("apps/site-agent-console/lib/staffing-revision.ts");
+      expect(excluded).not.toBe("simulation/scripts/staffing_contract_revision.py");
+      expect(excluded.includes("/tests/")).toBe(false);
+      expect(excluded.includes("/examples/")).toBe(false);
+    }
+  });
+
+  it("carries the pinned revision in every frozen request, snapshot, and receipt", () => {
+    const seen: string[] = [];
+    const visit = (value: unknown): void => {
+      if (Array.isArray(value)) { value.forEach(visit); return; }
+      if (value && typeof value === "object") {
+        const item = value as Record<string, unknown>;
+        if (typeof item.contract_revision === "string") seen.push(item.contract_revision);
+        Object.values(item).forEach(visit);
+      }
+    };
+    for (const { document } of successDocuments) {
+      for (const item of document.exchanges) {
+        visit(item.body.data);
+        if (item.method === "POST") visit(item.request);
+        expect((item.body.data as Record<string, unknown>).contract_revision).toBe(STAFFING_CONTRACT_REVISION);
+        if (item.method === "POST") expect((item.request as Record<string, unknown>).contract_revision).toBe(STAFFING_CONTRACT_REVISION);
+      }
+    }
+    expect(seen.length).toBe(38);
+    expect(new Set(seen)).toEqual(new Set([STAFFING_CONTRACT_REVISION]));
+    for (const name of ["StaffingDateSnapshot", "RosterImportRequest", "ExceptionRecordWholeShift", "ExceptionRecordPoint",
+      "ExceptionCancelRequest", "ExceptionCorrectRequest", "SuggestionGenerateRequest", "ManagerAcceptRequest",
+      "ManagerModifyRequest", "ManagerRejectRequest", "ReceiptRoster", "ReceiptExceptionRecord", "ReceiptExceptionCancel",
+      "ReceiptExceptionCorrect", "ReceiptGenerationReserved", "ReceiptGenerationInProgress", "ReceiptGenerationInterrupted",
+      "ReceiptSuggestionIssued", "ReceiptSuggestionUnavailable", "ReceiptManagerResponse"]) {
+      const definition = schemaDocument.$defs[name];
+      expect(definition.properties?.contract_revision, name).toEqual({ $ref: "#/$defs/Digest" });
+      expect(definition.required, name).toContain("contract_revision");
+    }
+  });
+
+  it("rejects a snapshot or receipt from a service at another revision, or at none, as staffing_contract_mismatch", async () => {
+    const snapshot = exchange("date-after-manager-response").body.data as StaffingDateSnapshot;
+    const receipt = exchange("suggestion-issued").body.data as StaffingReceipt;
+    for (const revision of [undefined, FOREIGN_REVISION, "", 42] as const) {
+      const label = `revision ${String(revision)}`;
+      expect(() => parseStaffingSnapshot(withContractRevision(snapshot, revision as string | undefined)), label)
+        .toThrow(expect.objectContaining({ code: "staffing_contract_mismatch", status: 200 }));
+      expect(() => parseStaffingReceipt(withContractRevision(receipt, revision as string | undefined)), label)
+        .toThrow(expect.objectContaining({ code: "staffing_contract_mismatch", status: 200 }));
+    }
+    // An older service (built before the field existed) answers the cold-start
+    // snapshot without it: the console refuses at the first read, before any write.
+    const older = scripted(200, { schema: API_SCHEMA, disclaimer: DISCLAIMER, data: withContractRevision(exchange("current-empty").body.data, undefined) });
+    await expect(older.client.current()).rejects.toMatchObject({ status: 200, code: "staffing_contract_mismatch" });
+    const foreign = scripted(202, { schema: API_SCHEMA, disclaimer: DISCLAIMER, data: withContractRevision(receipt, FOREIGN_REVISION) });
+    await expect(foreign.client.submit(mutationFor(exchange("suggestion-issued")))).rejects.toMatchObject({ status: 202, code: "staffing_contract_mismatch" });
+    // Only the revision is special: any other unknown or missing key stays generic invalid data,
+    // which is also how an older console treats this checkout's documents.
+    const extra = { ...structuredClone(snapshot), review_note: "unknown" } as unknown;
+    expect(() => parseStaffingSnapshot(extra)).toThrow(expect.objectContaining({ code: "invalid_staffing_response" }));
+    const missingOther = structuredClone(snapshot) as unknown as Record<string, unknown>;
+    delete missingOther["server_time_utc"];
+    expect(() => parseStaffingSnapshot(missingOther)).toThrow(expect.objectContaining({ code: "invalid_staffing_response" }));
+    // The service's own refusal of a write from another checkout is a trusted, definite rejection.
+    const refused = scripted(409, { schema: API_SCHEMA, disclaimer: DISCLAIMER, error: { code: "staffing_contract_mismatch", detail: "console and service contract revisions differ" } });
+    await expect(refused.client.submit(mutationFor(exchange("roster-committed")))).rejects.toMatchObject({ status: 409, code: "staffing_contract_mismatch" });
+  });
+
+  it("sends the pinned revision on every request and never a body at another revision", async () => {
+    for (const { document } of successDocuments) {
+      for (const item of document.exchanges) {
+        if (item.method !== "POST") continue;
+        const mutation = mutationFor(item);
+        expect((mutation.body as unknown as Record<string, unknown>)["contract_revision"]).toBe(STAFFING_CONTRACT_REVISION);
+        expect(parseStaffingRequestBody(mutation.body)).toEqual(mutation.body);
+        for (const revision of [undefined, FOREIGN_REVISION]) {
+          const altered = { ...mutation, body: withContractRevision(mutation.body, revision) } as StaffingMutation;
+          expect(() => parseStaffingRequestBody(altered.body), item.name).toThrow(expect.objectContaining({ code: "staffing_invalid_request" }));
+          const { calls, client } = scripted(item.http_status, item.body);
+          await expect(client.submit(altered), item.name).rejects.toMatchObject({ status: 400, code: "staffing_invalid_request" });
+          expect(calls).toHaveLength(0);
+        }
+      }
+    }
+  });
 
   it("pins the same contract fingerprint as the Python contract suite", () => {
     const hash = createHash("sha256");
@@ -305,6 +459,8 @@ describe("staffing v1 lockstep guards", () => {
 
   it("accepts the frozen error inventory plus the documented body_too_large transport error and nothing beside them", async () => {
     const inventory = errors.exchanges.map((item) => item.body.error.code).sort();
+    expect(inventory).toHaveLength(10);
+    expect(inventory).toContain("staffing_contract_mismatch");
     expect(inventory).toEqual((schemaDocument.$defs.ErrorBody.properties?.code as { enum: string[] }).enum.slice().sort());
     for (const item of errors.exchanges) {
       await expect(scripted(item.http_status, item.body).client.current()).rejects.toMatchObject({ code: item.body.error.code });
@@ -874,11 +1030,12 @@ describe("staffing same-origin client", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("surfaces all nine trusted staffing error pairs and exact manager body-too-large", async () => {
+  it("surfaces all ten trusted staffing error pairs and exact manager body-too-large", async () => {
     expect(errors.schema).toBe("nxt-staffing-errors/v1");
-    expect(errors.exchanges).toHaveLength(9);
+    expect(errors.exchanges).toHaveLength(10);
     expect(errors.exchanges.map((item) => item.body.error.code)).toContain("staffing_exception_overlap");
     expect(errors.exchanges.map((item) => item.body.error.code)).toContain("staffing_suggestion_expired");
+    expect(errors.exchanges.map((item) => item.body.error.code)).toContain("staffing_contract_mismatch");
     for (const item of errors.exchanges) {
       expect(Object.keys(item).sort()).toEqual(["body", "http_status", "method", "name", "route_template"]);
       const client = scripted(item.http_status, item.body).client;
@@ -971,7 +1128,7 @@ describe("staffing same-origin client", () => {
   });
 
   it("allows and sends the exact serialized 1 MiB boundary", async () => {
-    const body = largeRoster(3895, 2);
+    const body = largeRoster(3894, 184);
     const serialized = JSON.stringify(body);
     expect(new TextEncoder().encode(serialized).byteLength).toBe(1024 * 1024);
     const source = exchange("roster-committed");

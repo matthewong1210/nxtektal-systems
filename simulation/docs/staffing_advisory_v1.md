@@ -297,21 +297,29 @@ conflict: nothing is appended, the suggestion keeps its candidates, and REJECT
 remains available as a recorded decision. Replay never re-applies the rule, so
 a ledger whose response was committed inside its window keeps replaying
 unchanged. The composition root maps the conflict to HTTP 409
-`staffing_suggestion_expired`. The console additionally keeps a server-relative
-timer to the earliest open `action_window_end_at` (measured from the snapshot's
-`server_time_utc`, never the browser clock); when it elapses the console closes
-accept, modify, and reject-all and reads the snapshot again, and only the
-service's next `actionability` relabels the candidate.
+`staffing_suggestion_expired`. The console additionally keeps a deadline to the
+earliest open `action_window_end_at`: the instant, on the browser's monotonic
+clock, at which the snapshot read began plus the remainder the service measured,
+so a repeated or older server stamp, or a slower response, never moves it later;
+when it is reached the console closes accept, modify, and reject-all and reads
+the snapshot again, and only the service's next `actionability` relabels the
+candidate.
 
 The four review fields are required members of the closed public
 `CandidateProjection`. Adding them, fixing the window to the earliest affected
-end, and adding the offset suffixes were one lockstep revision of the
-unreleased `nxt-staffing/v1` wire contract, not an additive extension: a
-Console and a service built from different commits fail closed against each
-other. The contract README owns the versioning rule (one-commit lockstep while
-unreleased; `nxt-staffing/v2` after release). The ledger, the `staffing-v1/`
-directory, record `schema_version`, and replay are unaffected by a wire
-revision.
+end, adding the offset suffixes, and adding `contract_revision` with
+`staffing_contract_mismatch` were lockstep revisions of the unreleased
+`nxt-staffing/v1` wire contract, not additive extensions. Lockstep is enforced
+mechanically: `contract_revision`, the digest of the staffing implementation
+sources listed in `docs/contracts/staffing-v1/lockstep.json`, is required on
+every request, snapshot, and receipt; the composition root refuses a write at
+another revision before any domain call and strips the field before the
+domain, and the Console refuses a snapshot or receipt at another revision at
+its first read. The contract README owns the versioning rule, the source set,
+and the regeneration command (`scripts/staffing_contract_revision.py
+--write`); the domain package neither reads nor stores the revision. The
+ledger, the `staffing-v1/` directory, record `schema_version`, and replay are
+unaffected by a wire revision.
 
 ## Events and state machine
 
@@ -489,3 +497,20 @@ structural comparison showed only identity and digest leaves moved (78 leaves in
 witness, 42 in the normal-loop witness). The `staffing-v1` schema and examples, the v1 ledger
 fixture, and the local demo are byte-unchanged; both contract fingerprint pins equal the
 recomputed SHA-256.
+
+After the lockstep follow-up (the console's monotonic action deadline and the mechanical
+`contract_revision` with `staffing_contract_mismatch`; 2026-10-13, all-extras locked
+environment), the staffing, guard, API, composition, contract-revision, and architecture files
+(`tests/pilot_ops/test_staffing_wire_contract.py`, `tests/site_agent/test_staffing_*.py`,
+`tests/site_agent/test_api.py`, `tests/site_agent/test_architecture.py`) passed 366 tests,
+`scripts/staffing_contract_revision.py --check` reported no problems, the full Python suite
+reported 5102 passed and 11 skipped (the mosquitto-dependent Edge Task integration cases), `scripts/validate_configs.py` reported no errors, `uv lock --check`
+was current, and the console typecheck, lint, 895 vitest tests, static build, loopback smoke, and
+`npm audit --omit=dev` passed. The V3 and V4 witnesses were regenerated again through their
+authoritative flows (22 regenerate-mode passes, then 29 read-only passes and the console's two
+witness consumers, whose frozen identities and array order follow the regenerated witness)
+because `nxt_site_agent/api.py` registers the new error code and the engine fingerprint hashes
+every `nxt_*` source file; the engine digest moved from `819f53c4…` to `637da890…`. No file under
+`nxt_pilot_ops/staffing` changed, the v1 ledger fixture replays unchanged, and the local demo and
+persistent ledger were not touched; the frozen examples carry the regenerated revision, so both
+contract fingerprint pins moved with it and equal the recomputed SHA-256.

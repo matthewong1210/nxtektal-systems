@@ -1,11 +1,13 @@
 # Staffing advisory Manager API contract v1
 
-This directory freezes the cross-language wire contract for the planned staffing
-advisory Manager API. It is an executable design contract, not a claim that the
-routes or Console already exist in this checkout. The existing staffing domain
-remains a local advisory library: it does not write HR/payroll/attendance data,
-notify staff, issue robot commands, or turn an accepted suggestion into physical
-execution.
+This directory freezes the cross-language wire contract for the staffing
+advisory Manager API that the SIMULATION composition root
+(`scripts/staffing_operations.py`) serves through the injected
+`/api/v1/staffing` Site Agent callback and the Manager Console consumes. It is
+an executable contract: the Python and Console suites validate every example
+and every live emission against it. The staffing domain remains a local
+advisory library: it does not write HR/payroll/attendance data, notify staff,
+issue robot commands, or turn an accepted suggestion into physical execution.
 
 All objects are closed. Unknown fields fail validation. Success responses use the
 existing `nxt-site-agent/api/v0` `schema`/`disclaimer`/`data` envelope; errors use
@@ -20,11 +22,18 @@ time, service date, deployment context, provider readiness, all three revisions,
 and explicit nullable roster/effective-plan values. The root route resolves the
 current date in the deployment's IANA timezone; the dated route uses the path date.
 
+Every `StaffingDateSnapshot`, every `StaffingReceipt`, and every request body
+also carries `contract_revision`, a 64-hex digest of the staffing
+implementation sources of the checkout that built the sender (see Versioning
+and lockstep rollout). It is a wire fact only: the service admits a write only
+at its own value and strips the field before the domain, the Console decodes a
+snapshot or receipt only at its own value, and the ledger never records it.
+
 The six mutation request families are `RosterImportRequest`,
 `ExceptionRecordRequest`, `ExceptionCancelRequest`, `ExceptionCorrectRequest`,
 `SuggestionGenerateRequest`, and `ManagerResponseRequest`. Every request includes
-a caller-provided `request_id` and attribution-only `operator`. That operator is
-not an authenticated identity. Correction inherits staff and service date from
+the lockstep `contract_revision`, a caller-provided `request_id`, and an
+attribution-only `operator`. That operator is not an authenticated identity. Correction inherits staff and service date from
 the path-addressed exception; the wire request cannot move an exception to another
 employee or day.
 
@@ -66,10 +75,16 @@ is reached). An `EXPIRED` candidate is historical: a console must not offer
 ACCEPT or MODIFY for it, and the service refuses such a response with
 `staffing_suggestion_expired` without appending anything. REJECT remains
 allowed as a recorded manager decision. A console may additionally keep a
-server-relative timer to the earliest open `action_window_end_at` (measured
-from `server_time_utc`, never from the browser clock), close its controls when
-it elapses, and read again; only the service's next `actionability` relabels
-the candidate.
+deadline to the earliest open `action_window_end_at`: the instant, on the
+browser's monotonic clock, at which the read that fetched the snapshot began
+plus the remainder the service measured (`action_window_end_at` minus
+`server_time_utc`). The read began no later than the service stamped the
+snapshot, so a slow response can only place the end earlier than the truth;
+for a window already known the earliest end stands, so a repeated or older
+server stamp never moves it later. When the deadline is reached the console
+closes its controls and reads again, and the window stays closed until the
+service's next `actionability` relabels the candidate or a different window
+becomes the earliest open one; only the service relabels a candidate.
 
 A manager modification sends the smaller `ManagerPatchOperation` union;
 the server resolves and revalidates it against the current basis. ACCEPT/MODIFY
@@ -163,10 +178,11 @@ Across the inventory there are exactly sixteen unique receipt triples.
 | `staffing_exception_overlap` | POST `/api/v1/staffing/exceptions` | 409 |
 | `staffing_stale_suggestion` | POST `/api/v1/staffing/suggestions/{suggestion_id}/accept` | 409 |
 | `staffing_suggestion_expired` | POST `/api/v1/staffing/suggestions/{suggestion_id}/accept` | 409 |
+| `staffing_contract_mismatch` | POST `/api/v1/staffing/roster-imports` | 409 |
 | `staffing_busy` | POST `/api/v1/staffing/suggestions` | 429 |
 | `staffing_unavailable` | GET `/api/v1/staffing` | 503 |
 
-These nine codes are the staffing-specific error inventory. Existing Manager API
+These ten codes are the staffing-specific error inventory. Existing Manager API
 transport errors remain outside `errors.json`; a consumer must fail closed on an
 unknown code/status pair rather than silently reclassify it.
 
@@ -194,6 +210,15 @@ code/status table and reports an unknown pair as `invalid_staffing_response`,
 which its controller treats as an unknown write outcome rather than a
 rejection.
 
+`staffing_contract_mismatch` was added on 2026-10-13 with the lockstep
+`contract_revision` field: a write whose well-formed `contract_revision` names
+another checkout is refused before any domain call, nothing is appended, and
+the same body is refused identically every time. A missing or malformed field
+is `staffing_invalid_request`. The Console reports a snapshot at another
+revision under the same code before it sends any request, and a receipt at
+another revision as a write whose outcome is unknown, because the service may
+have saved it.
+
 ## Versioning and lockstep rollout
 
 `nxt-staffing/v1` names a closed contract: every object has
@@ -203,45 +228,95 @@ closed object's key set, a `const` or enum value, the meaning of an existing
 field, or the error code/status inventory changes what every existing consumer
 accepts or shows, whether or not the literal changes. Such a change is never
 additive and never backward-compatible, and this README must not describe one
-as either.
-
-The 2026-10-08 revision is one such change and ships only in lockstep. It added
-the four required candidate review fields and `staffing_suggestion_expired`,
-and it then fixed the meaning of `action_window_end_at` to the earliest
-affected end and added the ` UTC±HH:MM` suffixes to local label text; the
-frozen examples did not change value under those two fixes.
+as either. The 2026-10-08 revision added the four required candidate review
+fields and `staffing_suggestion_expired`; the 2026-10-13 revision added
+`contract_revision` and `staffing_contract_mismatch`.
 
 While this contract is unreleased (absent from `main`), a closed-shape or
-semantic change ships only in lockstep: `schema.json`, every example, this
-README, `scripts/staffing_operations.py`, `apps/site-agent-console/lib/staffing.ts`,
-and both test suites change in one commit, and the Console export and the
-service are built from that one checkout. The service serves the sibling
-`apps/site-agent-console/out` of its own checkout for this reason. Mixed
-versions are unsupported and fail closed: the Console reports
-`invalid_staffing_response` once a candidate is present and disables every
-staffing control; the service never accepts an unknown field. No mixed pair is
-a supported state, and nothing negotiates a version at runtime; the cold-start
-snapshot decodes on both sides, so the mismatch shows only once a generation
-carries candidates.
+semantic change ships only in lockstep: the Console export and the service are
+built from one checkout, and the service serves the sibling
+`apps/site-agent-console/out` of its own checkout for this reason. Mixed pairs
+are unsupported, and nothing negotiates a version at runtime.
 
-The in-repo guard is executable: the Python contract suite validates every
-example and every live emission against `schema.json` and checks that the
-error inventory in the schema, the examples, and the API status table is one
-set; the Console suite decodes every example, binds its closed candidate key
-set to the schema's `required` lists, and accepts the frozen error inventory
-plus the documented Manager API transport error `body_too_large` and nothing
-beside them; and both suites pin the same contract fingerprint (SHA-256 over
-`schema.json` followed by every example in name order), so a change to any
-frozen file fails whichever side was not updated in the same commit.
+### What is mechanically enforced
+
+A pin over the frozen files is not enough: commits `9e5b87b` and `02e1d7d`
+carried identical `schema.json`, examples, and contract fingerprint while the
+meaning of `action_window_end_at` (latest versus earliest affected end) and
+the MODIFY admission rule differed. Lockstep is therefore enforced by a
+contract revision derived from the implementation, not from the schema:
+
+- `contract_revision` is a required 64-hex field of every request body, every
+  `StaffingDateSnapshot`, and every `StaffingReceipt`. Its value is the SHA-256
+  of a manifest (`<path> <sha256>` per file, in path order) over the source set
+  listed in [`lockstep.json`](lockstep.json): the `nxt_pilot_ops/staffing`
+  package, `scripts/staffing_operations.py`, `nxt_site_agent/api.py`, this
+  `schema.json`, and the Console's `lib/staffing*.ts`, `lib/site-time.ts`,
+  `components/StaffingPanel.tsx`, and `components/staffing/*`. Any byte change
+  in any of them changes the value.
+- The service admits a POST only when the body carries exactly its own pin: a
+  missing or malformed field is `staffing_invalid_request` (400); a well-formed
+  different value is `staffing_contract_mismatch` (409), raised before any
+  domain call, so nothing is appended and the same body is refused identically
+  every time. The field is stripped before the domain and never enters the
+  ledger.
+- The Console decodes a snapshot or receipt only when it carries exactly the
+  Console's own pin: a missing field (a service built before this revision) or
+  a different value is reported as `staffing_contract_mismatch` at the first
+  read, before any write, and every request the Console sends carries its pin.
+- The pins are `STAFFING_CONTRACT_REVISION` in
+  `scripts/staffing_contract_revision.py` and
+  `apps/site-agent-console/lib/staffing-revision.ts`, the `contract_revision`
+  of `lockstep.json`, and the values in every frozen example. Those files and
+  every test are outside the source set, so rewriting a pin never changes the
+  value it pins. They are regenerated, never edited by hand, with
+  `uv run --no-sync python -B scripts/staffing_contract_revision.py --write`
+  from `simulation/`; `--check` lists every pin that disagrees.
+- Both suites recompute the digest from the manifest and compare it with every
+  pin (`tests/site_agent/test_staffing_contract_revision.py` and
+  `tests/staffing-contract.test.ts`), decode every example, and test both mixed
+  directions: the new service against an old write (no field) and a foreign
+  write (other value), the unchanged domain's closed key rule that an old
+  service applies to a new write, and the new Console against an old and a
+  foreign snapshot and receipt. A staffing source change without a regeneration
+  fails both suites.
+- The contract fingerprint (SHA-256 over `schema.json` followed by every example
+  in name order, pinned identically in both suites) remains the drift guard for
+  the frozen files themselves; because the examples carry the revision, it now
+  moves with every revision as well.
+
+The set is deliberately over-inclusive: a change to `nxt_site_agent/api.py` for
+another route also moves the revision and costs one regeneration, whereas
+omitting a file would reopen the gap above. Files outside the set are not
+expected to carry staffing semantics (`lib/api.ts` is the shared transport; the
+other `nxt_site_agent` modules serve files and fixtures), and the digest cannot
+prove that: a change that gives one of them staffing meaning must add it to
+`lockstep.json` in the same commit, and a review that finds staffing meaning
+outside the set treats the omission as a defect.
+
+### What a mixed pair looks like
+
+A Console built before this revision against a newer service refuses every
+snapshot as `invalid_staffing_response` (unknown key) and never writes. A
+Console of this revision against an older service refuses the first snapshot
+as `staffing_contract_mismatch` (missing field), and that older service refuses
+a new write through the domain's closed key rule (`staffing_invalid_request`).
+Two builds of this revision line from different checkouts refuse each other as
+`staffing_contract_mismatch` on the first read and on every write. In every
+case the Console shows the `不可用` notice with the code, disables every
+staffing control, and the recovery is to rebuild the export from the running
+checkout, restart, and reload (pilot runbook, "Upgrading the service and
+console together").
 
 Once `nxt-staffing/v1` is released, its bytes, examples, and this directory are
 frozen. A later closed-shape or semantic change requires a new literal and
 directory (`nxt-staffing/v2`, `staffing-v2/`), with the Console decoding the
-versions it supports as an explicit union and rejecting all others. The durable
-ledger directory `staffing-v1/`, record `schema_version: 1`, the anchor schema,
-and the request literals are ledger and request versions, not this wire
-version; a wire revision never renames or rewrites them, and replay is
-unaffected.
+versions it supports as an explicit union and rejecting all others; the
+contract revision continues to distinguish builds within a released version.
+The durable ledger directory `staffing-v1/`, record `schema_version: 1`, the
+anchor schema, and the request literals are ledger and request versions, not
+this wire version; a wire revision never renames or rewrites them, and replay
+is unaffected.
 
 ## Domain-to-wire authority
 
@@ -258,8 +333,8 @@ unaffected.
 | `suggestion_unavailable` | `suggestion-generate` | unavailable terminal | `SUGGESTION_UNAVAILABLE` |
 | `manager_response_committed` | `manager-response` | `COMMITTED` | `MANAGER_RESPONSE_COMMITTED` |
 
-The future composition-owned `project_request_to_wire()` is the sole adapter for
-this table. It copies only declared fields, maps domain gap `required`/`actual` to
+The composition-owned `project_request_to_wire()` in
+`scripts/staffing_operations.py` is the sole adapter for this table. It copies only declared fields, maps domain gap `required`/`actual` to
 `required_count`/`assigned_count`, adds the literal `COVERAGE_GAP`, and rejects an
 impossible tuple instead of manufacturing a fallback record. The domain does not
 import HTTP fields or construct Manager API envelopes.

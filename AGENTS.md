@@ -403,7 +403,11 @@ This checkout composes the domain library through the SIMULATION-only
 `/api/v1/staffing` Site Agent callback, and the same-origin Manager Console
 staffing panel; the public wire is the closed `nxt-staffing/v1` contract under
 `simulation/docs/contracts/staffing-v1/`, shipped in lockstep between the
-console export and the service of one checkout. No venue deployment, HR write,
+console export and the service of one checkout and enforced by the
+`contract_revision` digest that every request, snapshot, and receipt carries
+(after any staffing source change regenerate the pins with
+`scripts/staffing_contract_revision.py --write`; the domain never sees the
+field). No venue deployment, HR write,
 notification, formal schedule, or robot action exists. Roster/exception input
 is evidence rather than
 HR/payroll/attendance/access-control truth; `operator` is attribution rather

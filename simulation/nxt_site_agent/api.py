@@ -75,6 +75,9 @@ _STAFFING_ERROR_DETAILS = {
     ),
     "staffing_stale_suggestion": "staffing basis has changed",
     "staffing_suggestion_expired": "the suggested shift has already ended",
+    "staffing_contract_mismatch": (
+        "console and service contract revisions differ"
+    ),
     "staffing_busy": "generation capacity is full",
     "staffing_unavailable": "staffing evidence is unavailable",
 }
@@ -104,6 +107,7 @@ _STATUS_BY_CODE = {
     "staffing_exception_overlap": 409,
     "staffing_stale_suggestion": 409,
     "staffing_suggestion_expired": 409,
+    "staffing_contract_mismatch": 409,
     "staffing_busy": 429,
     "staffing_unavailable": 503,
     "unknown_recommendation": 404,

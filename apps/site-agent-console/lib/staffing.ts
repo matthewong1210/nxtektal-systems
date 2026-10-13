@@ -4,6 +4,7 @@ import {
   ManagerApiError,
   type FetchLike,
 } from "./api";
+import { STAFFING_CONTRACT_REVISION } from "./staffing-revision";
 
 export const STAFFING_SCHEMA = "nxt-staffing/v1" as const;
 
@@ -87,6 +88,7 @@ interface CoverageInput {
 
 export interface RosterImportRequest {
   schema: "nxt-staffing-roster-import/v1";
+  contract_revision: string;
   request_id: string;
   operator: string;
   expected_roster_revision: number;
@@ -107,6 +109,7 @@ type ExceptionKind = "LEAVE" | "LATE" | "EARLY_DEPARTURE" | "UNAVAILABLE";
 
 interface ExceptionRecordCommon {
   schema: "nxt-staffing-exception/v1";
+  contract_revision: string;
   request_id: string;
   operator: string;
   service_date: string;
@@ -122,6 +125,7 @@ export type ExceptionRecordRequest =
 
 export interface ExceptionCancelRequest {
   schema: "nxt-staffing-exception-cancel/v1";
+  contract_revision: string;
   request_id: string;
   operator: string;
   expected_exception_set_revision: number;
@@ -134,6 +138,7 @@ export type ExceptionReplacementInput =
 
 export interface ExceptionCorrectRequest {
   schema: "nxt-staffing-exception-correct/v1";
+  contract_revision: string;
   request_id: string;
   operator: string;
   expected_exception_set_revision: number;
@@ -142,6 +147,7 @@ export interface ExceptionCorrectRequest {
 
 export interface SuggestionGenerateRequest {
   schema: "nxt-staffing-suggestion-generate/v1";
+  contract_revision: string;
   request_id: string;
   operator: string;
   service_date: string;
@@ -162,6 +168,7 @@ export type ManagerPatchOperation = ManagerPatchRemove | ManagerPatchAdd;
 
 interface ManagerResponseCommon {
   schema: "nxt-staffing-manager-response/v1";
+  contract_revision: string;
   request_id: string;
   operator: string;
   expected_revisions: RevisionVector;
@@ -562,6 +569,8 @@ interface StaffingContext {
 
 export interface StaffingDateSnapshot {
   schema: typeof STAFFING_SCHEMA;
+  /** Lockstep revision of the service; must equal the console's own pin. */
+  contract_revision: string;
   environment: "SIMULATION";
   mode: "STAFFING_ADVISORY_ONLY";
   server_time_utc: string;
@@ -706,6 +715,7 @@ type StaffingRecord =
 
 interface ReceiptCommon {
   schema: typeof STAFFING_SCHEMA;
+  contract_revision: string;
   disposition: "created" | "duplicate";
   request_id: string;
   operation_id: string;
@@ -740,8 +750,13 @@ export interface StaffingClient {
 
 class ValidationFailure extends Error {}
 
+/** The document names another checkout's revision, or none: a service built
+ * apart from this console. Reported as `staffing_contract_mismatch`, never
+ * decoded, never reclassified. */
+class ContractRevisionMismatch extends Error {}
+
 const SNAPSHOT_KEYS = [
-  "schema", "environment", "mode", "server_time_utc", "service_date", "context",
+  "schema", "contract_revision", "environment", "mode", "server_time_utc", "service_date", "context",
   "generation_capability", "revisions", "roster", "assignments", "active_exceptions",
   "effective_plan", "generations",
 ] as const;
@@ -757,6 +772,17 @@ const PROVENANCE_KEYS = [
 
 function ok(condition: unknown): asserts condition {
   if (!condition) throw new ValidationFailure();
+}
+
+/** Checked before the closed key set so that a service without the field (an
+ * older build) and a service with another value are both reported as a
+ * revision mismatch rather than as generic invalid data. */
+function sameContractRevision(value: unknown): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return;
+  const descriptor = Object.getOwnPropertyDescriptor(value, "contract_revision");
+  if (descriptor === undefined || !("value" in descriptor) || descriptor.value !== STAFFING_CONTRACT_REVISION) {
+    throw new ContractRevisionMismatch();
+  }
 }
 
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {
@@ -988,12 +1014,13 @@ function coverageInput(value: unknown): CoverageInput {
 
 function validateRosterRequest(value: unknown): RosterImportRequest {
   const keys = [
-    "schema", "request_id", "operator", "expected_roster_revision", "site_id", "deployment_id",
+    "schema", "contract_revision", "request_id", "operator", "expected_roster_revision", "site_id", "deployment_id",
     "site_timezone", "effective_from_local_date", "effective_until_local_date", "source_ref",
     "workers", "availability", "assignment_rules", "regular_assignments", "coverage",
   ];
   const item = record(value, keys);
   literal(item.schema, "nxt-staffing-roster-import/v1");
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   identifier(item.request_id);
   spreadsheetSafeText(item.operator, 1, 128);
   integer(item.expected_roster_revision, 0);
@@ -1013,10 +1040,11 @@ function validateRosterRequest(value: unknown): RosterImportRequest {
 
 function validateExceptionRecordRequest(value: unknown): ExceptionRecordRequest {
   const item = record(value, [
-    "schema", "request_id", "operator", "service_date", "expected_roster_revision",
+    "schema", "contract_revision", "request_id", "operator", "service_date", "expected_roster_revision",
     "expected_exception_set_revision", "staff_id", "kind", "time_local", "note",
   ]);
   literal(item.schema, "nxt-staffing-exception/v1");
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   identifier(item.request_id);
   spreadsheetSafeText(item.operator, 1, 128);
   localDate(item.service_date);
@@ -1031,8 +1059,9 @@ function validateExceptionRecordRequest(value: unknown): ExceptionRecordRequest 
 }
 
 function validateExceptionCancelRequest(value: unknown): ExceptionCancelRequest {
-  const item = record(value, ["schema", "request_id", "operator", "expected_exception_set_revision", "note"]);
+  const item = record(value, ["schema", "contract_revision", "request_id", "operator", "expected_exception_set_revision", "note"]);
   literal(item.schema, "nxt-staffing-exception-cancel/v1");
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   identifier(item.request_id);
   spreadsheetSafeText(item.operator, 1, 128);
   integer(item.expected_exception_set_revision, 0);
@@ -1050,8 +1079,9 @@ function exceptionReplacement(value: unknown): ExceptionReplacementInput {
 }
 
 function validateExceptionCorrectRequest(value: unknown): ExceptionCorrectRequest {
-  const item = record(value, ["schema", "request_id", "operator", "expected_exception_set_revision", "replacement"]);
+  const item = record(value, ["schema", "contract_revision", "request_id", "operator", "expected_exception_set_revision", "replacement"]);
   literal(item.schema, "nxt-staffing-exception-correct/v1");
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   identifier(item.request_id);
   spreadsheetSafeText(item.operator, 1, 128);
   integer(item.expected_exception_set_revision, 0);
@@ -1060,8 +1090,9 @@ function validateExceptionCorrectRequest(value: unknown): ExceptionCorrectReques
 }
 
 function validateSuggestionRequest(value: unknown): SuggestionGenerateRequest {
-  const item = record(value, ["schema", "request_id", "operator", "service_date", "expected_revisions", "retry_of"]);
+  const item = record(value, ["schema", "contract_revision", "request_id", "operator", "service_date", "expected_revisions", "retry_of"]);
   literal(item.schema, "nxt-staffing-suggestion-generate/v1");
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   identifier(item.request_id);
   spreadsheetSafeText(item.operator, 1, 128);
   localDate(item.service_date);
@@ -1089,10 +1120,11 @@ function managerPatch(value: unknown): ManagerPatchOperation {
 
 function validateManagerRequest(value: unknown): ManagerResponseRequest {
   const item = record(value, [
-    "schema", "request_id", "operator", "kind", "expected_revisions", "candidate_index",
+    "schema", "contract_revision", "request_id", "operator", "kind", "expected_revisions", "candidate_index",
     "edited_operations", "reason_code", "note",
   ]);
   literal(item.schema, "nxt-staffing-manager-response/v1");
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   identifier(item.request_id);
   spreadsheetSafeText(item.operator, 1, 128);
   revisionVector(item.expected_revisions);
@@ -1497,8 +1529,10 @@ function rosterProjection(value: unknown): RosterProjection {
 }
 
 function validateSnapshot(value: unknown): StaffingDateSnapshot {
+  sameContractRevision(value);
   const item = record(value, SNAPSHOT_KEYS);
   literal(item.schema, STAFFING_SCHEMA);
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   literal(item.environment, "SIMULATION");
   literal(item.mode, "STAFFING_ADVISORY_ONLY");
   auditTimestamp(item.server_time_utc);
@@ -1659,8 +1693,10 @@ function receiptRecord(value: unknown): StaffingRecord {
 }
 
 function validateReceipt(value: unknown): StaffingReceipt {
-  const item = record(value, ["schema", "disposition", "operation_kind", "request_id", "operation_id", "state", "record"]);
+  sameContractRevision(value);
+  const item = record(value, ["schema", "contract_revision", "disposition", "operation_kind", "request_id", "operation_id", "state", "record"]);
   literal(item.schema, STAFFING_SCHEMA);
+  literal(item.contract_revision, STAFFING_CONTRACT_REVISION);
   oneOf(item.disposition, ["created", "duplicate"] as const);
   const operationKind = oneOf(item.operation_kind, [
     "roster-import", "exception-record", "exception-cancel", "exception-correct", "suggestion-generate", "manager-response",
@@ -1705,11 +1741,19 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function contractMismatch(status: number): ManagerApiError {
+  return new ManagerApiError(status, {
+    code: "staffing_contract_mismatch",
+    detail: "console and service contract revisions differ",
+  });
+}
+
 function parsed<T>(value: unknown, validator: (candidate: unknown) => T, status: number, codeValue: string): T {
   try {
     const detached = clone(value);
     return validator(detached);
-  } catch {
+  } catch (cause) {
+    if (cause instanceof ContractRevisionMismatch) throw contractMismatch(status);
     throw new ManagerApiError(status, { code: codeValue, detail: "staffing data is invalid" });
   }
 }
@@ -1741,6 +1785,7 @@ const TRUSTED_ERRORS = new Map<string, number>([
   ["staffing_exception_overlap", 409],
   ["staffing_stale_suggestion", 409],
   ["staffing_suggestion_expired", 409],
+  ["staffing_contract_mismatch", 409],
   ["staffing_busy", 429],
   ["staffing_unavailable", 503],
   ["body_too_large", 413],
@@ -1878,7 +1923,8 @@ async function decodeEnvelope<T>(responseValue: Response, successStatus: number,
     literal(envelope.disclaimer, DISCLAIMER);
     validator(envelope.data);
     return clone(envelope.data as T);
-  } catch {
+  } catch (cause) {
+    if (cause instanceof ContractRevisionMismatch) throw contractMismatch(responseValue.status);
     throw invalidResponse(responseValue.status);
   }
 }

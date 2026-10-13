@@ -12,7 +12,7 @@ import {
   reasonCodeLabel,
   responseKindLabel,
 } from "../lib/staffing-labels";
-import { describeStaffingFailure } from "../components/staffing/rejections";
+import { describeStaffingFailure, staffingReadFailureCopy } from "../components/staffing/rejections";
 import { ManagerApiError } from "../lib/api";
 
 function candidate(patch: Partial<CandidateProjection>): CandidateProjection {
@@ -88,6 +88,31 @@ describe("Chinese labels keep the contract value available", () => {
     expect(generationIsHistorical(historical)).toBe(true);
     expect(generationIsHistorical(mixed)).toBe(false);
     expect(generationIsHistorical(empty)).toBe(false);
+  });
+
+  it("explains a contract-revision mismatch by code as a same-checkout rebuild, without echoing server detail", () => {
+    const copy = describeStaffingFailure(new ManagerApiError(409, { code: "staffing_contract_mismatch", detail: "revision deadbeef" }));
+    expect(copy).toContain("不同的代码版本");
+    expect(copy).toContain("未保存任何变更");
+    expect(copy).toContain("同一代码版本重新构建");
+    expect(copy).not.toContain("deadbeef");
+  });
+
+  it("never claims nothing was saved for a 2xx receipt the console refused as another checkout's", () => {
+    for (const status of [200, 202]) {
+      const copy = describeStaffingFailure(new ManagerApiError(status, { code: "staffing_contract_mismatch", detail: "revision deadbeef" }));
+      expect(copy).toContain("是否已保存未知");
+      expect(copy).toContain("不要重复提交");
+      expect(copy).not.toContain("未保存任何变更");
+      expect(copy).not.toContain("deadbeef");
+    }
+  });
+
+  it("adds rebuild guidance to a read failure that names the revision mismatch and to nothing else", () => {
+    expect(staffingReadFailureCopy("staffing_contract_mismatch: console and service contract revisions differ")).toContain("同一代码版本重新构建");
+    expect(staffingReadFailureCopy("invalid_staffing_response: staffing data is invalid")).toBeNull();
+    expect(staffingReadFailureCopy("staffing_contract_mismatch_other: x")).toBeNull();
+    expect(staffingReadFailureCopy(null)).toBeNull();
   });
 
   it("explains an expired-suggestion refusal by code without echoing server detail", () => {

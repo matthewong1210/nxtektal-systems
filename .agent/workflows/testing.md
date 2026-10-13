@@ -38,8 +38,24 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/pilot_ops/test_staffing_wire_contract.py \
   tests/site_agent/test_staffing_api.py \
   tests/site_agent/test_api.py \
-  tests/site_agent/test_staffing_composition.py
+  tests/site_agent/test_staffing_composition.py \
+  tests/site_agent/test_staffing_review_wire.py \
+  tests/site_agent/test_staffing_contract_revision.py
 ```
+
+After changing any file in the lockstep source set
+(`docs/contracts/staffing-v1/lockstep.json`: the staffing domain package, the
+composition root, `nxt_site_agent/api.py`, the contract schema, and the
+Console's staffing modules), regenerate every `contract_revision` pin through
+its owning script before running the suites, then verify it:
+
+```bash
+uv run --no-sync python -B scripts/staffing_contract_revision.py --write
+uv run --no-sync python -B scripts/staffing_contract_revision.py --check
+```
+
+Both the Python and the Console contract suites recompute the digest and fail
+on a stale pin. Normal tests and CI must never pass `--write`.
 
 `tests/edge_task/test_integration_mosquitto.py` needs a local `mosquitto`
 binary; it skips with an explicit reason otherwise, and a skip is not delivery

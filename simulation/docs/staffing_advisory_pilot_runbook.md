@@ -176,11 +176,14 @@ candidate's window and then against the earliest end of its edited shifts. A
 candidate any of whose shifts has already ended therefore never becomes a
 current plan; a sibling candidate of the same suggestion whose shifts are all
 still open remains actionable. Reject still records the manager's decision, and a new generation
-for the remaining day is the recovery. The console also keeps a server-relative
-timer to the earliest open window (measured from the snapshot's
-`server_time_utc`, never the browser clock): when it elapses the console closes
-accept, modify, and reject-all, shows that it is waiting for the service's
-next result, and reads again; only the service relabels the candidate. A
+for the remaining day is the recovery. The console also keeps a deadline to
+the earliest open window: the instant, on the browser's monotonic clock, at
+which the snapshot read began plus the remainder the service measured, so
+polling against a service whose clock repeats a pre-deadline stamp, an older
+stamp, or a slower response never moves it later. When it is reached the
+console closes accept, modify, and reject-all, shows that it is waiting for
+the service's next result, and reads again; only the service relabels the
+candidate. A
 modify editor open at that instant is closed and its unsent draft discarded,
 and an accept already in flight either commits, if the service admitted it
 before the window end on its own clock, or resolves to the 409 above. The candidate text
@@ -235,17 +238,30 @@ that checkout's `out/`). Never serve an export built from another commit, and
 reload every open Console tab after the restart; a tab from the previous build
 keeps its old decoder.
 
-A mismatched pair is not detected at launch: the empty cold-start snapshot
-decodes on both sides, and the failure appears only once a generation carries
-candidates, as the `不可用` or `旧数据` notice with
-`invalid_staffing_response: staffing response is invalid` and every staffing
-control disabled, or as a `结果未知` write that recovery cannot resolve. After
-launch and before the first generation, confirm the export was built from the
-running checkout (`git rev-parse HEAD` recorded with the launch, `out/` newer
-than that checkout). On the notice, stop, rebuild the export from the running
-checkout, restart, and reload; do not retry writes and do not edit the ledger.
-The stable staffing root is unchanged by a wire revision: `staffing-v1/` is the
-ledger layout, not the wire version.
+A mismatched pair is detected at the first read: every snapshot, receipt, and
+request carries `contract_revision`, the digest of the staffing sources of the
+checkout that built it (contract README, "Versioning and lockstep rollout").
+A Console whose pin differs from the service's refuses the first snapshot and
+shows the `不可用` notice with
+`staffing_contract_mismatch: console and service contract revisions differ`
+and every staffing control disabled; a write that reaches a service at another
+revision is refused with HTTP 409 `staffing_contract_mismatch`, shown as a
+definite rejection ("控制台与服务来自不同的代码版本……"), and nothing is
+appended. A Console built before the field existed refuses the newer snapshot
+as `invalid_staffing_response` instead, and a service built before it refuses
+a newer write as `staffing_invalid_request`. On any of these notices, stop,
+rebuild the export from the running checkout, restart, and reload; do not
+retry writes and do not edit the ledger. After launch, confirm the export was
+built from the running checkout (`git rev-parse HEAD` recorded with the
+launch, `out/` newer than that checkout). The stable staffing root is
+unchanged by a wire revision: `staffing-v1/` is the ledger layout, not the
+wire version.
+
+A developer who changes any staffing source regenerates the pins before
+building: from `simulation/`,
+`uv run --no-sync python -B scripts/staffing_contract_revision.py --write`,
+then both test suites. A build whose pins were not regenerated fails those
+suites rather than serving a wrong revision.
 
 ## Shutdown and restart
 

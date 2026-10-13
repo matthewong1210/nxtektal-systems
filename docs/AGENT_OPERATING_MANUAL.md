@@ -439,11 +439,16 @@ access control, and no physical deployment is implemented.
 ## Staffing advisory v1 handoff (local unmerged checkout)
 
 Start with the sole normative
-[staffing advisory contract](../simulation/docs/staffing_advisory_v1.md). The
-current unmerged checkout contains a domain library only: no staffing
-composition script, staffing Site Agent route, staffing Console/UI, staffing
-provider call, venue deployment, HR write, notification, formal schedule, or
-robot action exists yet.
+[staffing advisory contract](../simulation/docs/staffing_advisory_v1.md). This
+checkout contains the domain library and its SIMULATION-only composition: the
+`simulation/scripts/staffing_operations.py` composition root (the only place a
+provider is called), the optional injected `/api/v1/staffing` Site Agent route
+enabled by `--staffing-state-root`, and the same-origin Manager Console
+staffing panel, bound by the closed `nxt-staffing/v1` wire contract and its
+lockstep `contract_revision` (regenerate the pins with
+`scripts/staffing_contract_revision.py --write` after any staffing source
+change). No venue deployment, HR write, notification, formal schedule, or
+robot action exists.
 
 Treat operator-supplied roster and exception values as evidence, not
 HR/payroll/attendance/access-control truth. Treat `operator` as attribution, not

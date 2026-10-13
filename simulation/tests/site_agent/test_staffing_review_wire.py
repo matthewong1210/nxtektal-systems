@@ -18,6 +18,7 @@ from nxt_pilot_ops.staffing.ledger import StaffingLedger
 from nxt_pilot_ops.staffing.operations import StaffingOperations
 from nxt_site_agent import SiteAgentError
 
+from scripts.staffing_contract_revision import STAFFING_CONTRACT_REVISION
 from scripts.staffing_operations import (
     BoundedGenerationWorker,
     ConfiguredGateway,
@@ -166,6 +167,7 @@ def _manager(kind: str, request_id: str, *, operations: list[dict[str, object]] 
     reason = {"ACCEPT": "APPROVED", "MODIFY": "APPROVED_WITH_CHANGES", "REJECT": "MANUAL_HANDLING"}[kind]
     return {
         "schema": "nxt-staffing-manager-response/v1",
+        "contract_revision": STAFFING_CONTRACT_REVISION,
         "request_id": request_id,
         "operator": "manager-1",
         "kind": kind,

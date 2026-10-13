@@ -183,21 +183,36 @@ whose shifts has ended arrives as `actionability: EXPIRED` (the service's
 `action_window_end_at` is the earliest affected end) and is shown under a
 historical label with no accept, modify, or reject control; the service refuses
 such a response with `staffing_suggestion_expired`. The controller also keeps a
-server-relative timer to the earliest open `action_window_end_at` among the
-candidates it still offers controls for, computed from the snapshot's
-`server_time_utc` and never the browser clock; when it elapses the console
-closes accept, modify, and reject-all, says it is waiting for the service's
-next result, and reads the snapshot again. Once reached, the same window stays
-closed even if a snapshot stamped before the end arrives afterwards; only the
-service's next `actionability`, or a different window, changes the state, and
-only the service relabels a candidate. The manager receipt names the version
+deadline to the earliest open `action_window_end_at` among the candidates it
+still offers controls for. The deadline is an instant on the browser's
+monotonic clock: the moment the snapshot read began plus the remainder the
+service measured (`action_window_end_at` minus `server_time_utc`); the wall
+clock never enters. Because the read began no later than the service stamped
+the snapshot, a slow response can only place the end earlier than the truth,
+and for a window already known the earliest end stands, so five-second polling
+against a service whose clock repeats a pre-deadline stamp, an older stamp, or
+a slower response never moves the deadline later. When it is reached the
+console closes accept, modify, and reject-all, says it is waiting for the
+service's next result, and reads the snapshot again; the window stays closed
+until the service's next `actionability` relabels the candidate or a different
+window becomes the earliest open one, and only the service relabels a
+candidate. The manager receipt names the version
 confirmed at that time; the current plan status comes only from the snapshot's
 `effective_plan`. Manager result, plan, and candidate statuses carry Chinese
 labels beside their unchanged contract values.
 
-The decoder and the service are both closed: the export and the service must be
-built from one checkout, and a mixed pair fails closed as
-`invalid_staffing_response` once a candidate is present (contract README,
+The decoder and the service are both closed and built from one checkout. Every
+request the console sends, and every snapshot or receipt it accepts, carries
+`contract_revision`, the digest of the staffing sources listed in
+`simulation/docs/contracts/staffing-v1/lockstep.json`; the console's pin is
+`lib/staffing-revision.ts`, regenerated with
+`scripts/staffing_contract_revision.py --write` and never edited. A service at
+another revision, or one built before the field existed, is refused at the
+first read as `staffing_contract_mismatch` with every staffing control
+disabled; a write such a service refuses arrives under the same code and is
+shown as a definite rejection. `tests/staffing-contract.test.ts` recomputes the
+digest over the lockstep sources, this console's staffing modules included, so
+a console-side change without a regeneration fails the suite (contract README,
 "Versioning and lockstep rollout").
 
 Every write receives a new request ID immediately before submission. If a

@@ -11,6 +11,7 @@
         "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
         "data": {
           "schema": "nxt-staffing/v1",
+          "contract_revision": "0e951f1e3a6f91976a7d41735bd7e5bef398fd4f73f2b552761ee5713682bded",
           "environment": "SIMULATION",
           "mode": "STAFFING_ADVISORY_ONLY",
           "server_time_utc": "2026-10-06T01:00:00.000000Z",
@@ -36,6 +37,7 @@
         "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
         "data": {
           "schema": "nxt-staffing/v1",
+          "contract_revision": "0e951f1e3a6f91976a7d41735bd7e5bef398fd4f73f2b552761ee5713682bded",
           "environment": "SIMULATION",
           "mode": "STAFFING_ADVISORY_ONLY",
           "server_time_utc": "2026-10-06T01:00:00.000000Z",

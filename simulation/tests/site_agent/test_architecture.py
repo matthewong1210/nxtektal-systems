@@ -647,6 +647,12 @@ def _staffing_composition_violations(source: str) -> list[str]:
             allowed = module in STAFFING_ALLOWED_DOMAIN_TARGETS
         elif module == "nxt_site_agent.SiteAgentError":
             allowed = True
+        elif module == "scripts.staffing_contract_revision.STAFFING_CONTRACT_REVISION":
+            # The pinned lockstep revision lives in a sibling script module that
+            # is outside the lockstep source set, so rewriting the pin never
+            # changes the value it pins (contract README, "Versioning and
+            # lockstep rollout").
+            allowed = True
         if module.endswith(".*") or any(
             part.startswith("_") for part in parts[1:]
         ):

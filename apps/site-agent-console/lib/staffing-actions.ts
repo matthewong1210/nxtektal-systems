@@ -9,13 +9,14 @@ import {
   type StaffingDateSnapshot,
   type StaffingReceipt,
 } from "./staffing";
+import { STAFFING_CONTRACT_REVISION } from "./staffing-revision";
 import type { RosterImportDraft } from "./staffing-csv";
 import { requireStaffingManagerLabel } from "./staffing-guards";
 import type { ExceptionDraft, StaffingController } from "./staffing-state";
 
 type ManagerResponseDraft<T extends ManagerResponseRequest = ManagerResponseRequest> =
   T extends ManagerResponseRequest
-    ? Omit<T, "schema" | "request_id" | "operator" | "expected_revisions">
+    ? Omit<T, "schema" | "contract_revision" | "request_id" | "operator" | "expected_revisions">
     : never;
 
 export interface StaffingActions {
@@ -79,6 +80,7 @@ export function createStaffingActions(
     const requestId = requestIdFactory("manager-response");
     const common = {
       schema: "nxt-staffing-manager-response/v1" as const,
+      contract_revision: STAFFING_CONTRACT_REVISION,
       request_id: requestId,
       operator: manager,
       expected_revisions: structuredClone(snapshot.revisions),
@@ -111,6 +113,7 @@ export function createStaffingActions(
         operationKind: "roster-import",
         body: {
           schema: "nxt-staffing-roster-import/v1",
+          contract_revision: STAFFING_CONTRACT_REVISION,
           request_id: requestId,
           operator: manager,
           expected_roster_revision: snapshot.revisions.roster,
@@ -132,6 +135,7 @@ export function createStaffingActions(
       const { snapshot, manager } = context(true);
       const common = {
         schema: "nxt-staffing-exception/v1" as const,
+        contract_revision: STAFFING_CONTRACT_REVISION,
         operator: manager,
         service_date: snapshot.service_date,
         expected_roster_revision: snapshot.revisions.roster,
@@ -171,6 +175,7 @@ export function createStaffingActions(
         targetId: exceptionId,
         body: {
           schema: "nxt-staffing-exception-cancel/v1",
+          contract_revision: STAFFING_CONTRACT_REVISION,
           request_id: requestId,
           operator: manager,
           expected_exception_set_revision: snapshot.revisions.exception_set,
@@ -183,6 +188,7 @@ export function createStaffingActions(
       const requestId = requestIdFactory("exception-correct");
       const body: ExceptionCorrectRequest = {
         schema: "nxt-staffing-exception-correct/v1",
+        contract_revision: STAFFING_CONTRACT_REVISION,
         request_id: requestId,
         operator: manager,
         expected_exception_set_revision: snapshot.revisions.exception_set,
@@ -204,6 +210,7 @@ export function createStaffingActions(
         operationKind: "suggestion-generate",
         body: {
           schema: "nxt-staffing-suggestion-generate/v1",
+          contract_revision: STAFFING_CONTRACT_REVISION,
           request_id: requestId,
           operator: manager,
           service_date: snapshot.service_date,

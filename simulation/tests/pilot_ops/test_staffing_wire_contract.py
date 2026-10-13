@@ -54,6 +54,7 @@ EXPECTED_ERROR_STATUS = {
     "staffing_exception_overlap": 409,
     "staffing_stale_suggestion": 409,
     "staffing_suggestion_expired": 409,
+    "staffing_contract_mismatch": 409,
     "staffing_busy": 429,
     "staffing_unavailable": 503,
 }
@@ -62,7 +63,7 @@ EXPECTED_ERROR_STATUS = {
 # Editing any frozen file without updating both pins in the same commit fails
 # whichever side was left behind; see the contract README, "Versioning and
 # lockstep rollout".
-STAFFING_CONTRACT_FINGERPRINT = "1a17066b1d296af420b27e46c2f934a183ec1b95eab86f0a27780baf92fd8b5c"
+STAFFING_CONTRACT_FINGERPRINT = "f63299dd80c90ca132eb63e257906d474a59fc6c2c04fdd5cdf61bba88964152"
 EXPECTED_SUCCESS_EXCHANGES = {
     "cold-start.json": {"current-empty", "date-empty"},
     "roster-import.json": {"roster-committed"},

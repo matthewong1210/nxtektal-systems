@@ -10,6 +10,7 @@ import {
   type SuggestionGenerateRequest,
 } from "./staffing";
 import { requireStaffingManagerLabel } from "./staffing-guards";
+import { STAFFING_CONTRACT_REVISION } from "./staffing-revision";
 import { candidateIsActionable } from "./staffing-labels";
 import { compareUtc, utcMillis } from "./site-time";
 
@@ -49,7 +50,20 @@ export type StaffingWriteState =
 export interface StaffingActionDeadline {
   /** Earliest `action_window_end_at` among candidates the manager may still act on, as sent. */
   endAt: string;
-  /** True once the timer, measured from the snapshot's `server_time_utc`, reached `endAt`. */
+  /** True once the deadline, measured from the server stamp of a snapshot read, was reached. */
+  reached: boolean;
+}
+
+/** The armed deadline: one window of one generation, ending at a fixed instant
+ * of the browser's monotonic clock. The instant is the read's start plus the
+ * remainder the service measured, and it only ever moves earlier. */
+interface ArmedDeadline {
+  generationRequestId: string;
+  endAt: string;
+  /** The window end as a UTC instant; two renderings of one instant are one window. */
+  endMs: number;
+  /** `performance.now()` value at which the window ends. */
+  fireAt: number;
   reached: boolean;
 }
 
@@ -111,6 +125,7 @@ const DEFINITE_REJECTIONS = new Set([
   "409:staffing_exception_overlap",
   "409:staffing_stale_suggestion",
   "409:staffing_suggestion_expired",
+  "409:staffing_contract_mismatch",
   "413:body_too_large",
 ]);
 
@@ -234,7 +249,13 @@ export function createStaffingController(
   let activity: Activity = "idle";
   let timer: Timer | undefined;
   let deadlineTimer: Timer | undefined;
-  let actionDeadline: StaffingActionDeadline | null = null;
+  let armed: ArmedDeadline | null = null;
+  /** Earliest known end, in monotonic time, of every window (by UTC instant)
+   * seen for the active generation; a repeated, older, or slower snapshot can
+   * never move one later, and the memory outlives stop/start so that a restart
+   * against a frozen service clock cannot re-open a window either. */
+  const windowEnds = new Map<number, number>();
+  let windowGeneration: string | null = null;
   let requiredRefreshReceipt: StaffingReceipt | null = null;
   let snapshotValue: StaffingDateSnapshot | null = null;
   let readState: StaffingView["read"] = { status: "idle", stale: false, detail: null };
@@ -251,7 +272,7 @@ export function createStaffingController(
       write: writeState,
       activeGenerationRequestId,
       activeGeneration,
-      actionDeadline,
+      actionDeadline: armed === null ? null : { endAt: armed.endAt, reached: armed.reached },
     };
   };
 
@@ -277,61 +298,80 @@ export function createStaffingController(
 
   const clearActionDeadline = () => {
     clearDeadlineTimer();
-    actionDeadline = null;
+    armed = null;
+  };
+
+  const forgetWindows = () => {
+    windowEnds.clear();
+    windowGeneration = null;
   };
 
   const onActionDeadline = () => {
     deadlineTimer = undefined;
-    if (!active || actionDeadline === null || actionDeadline.reached) return;
-    actionDeadline = { endAt: actionDeadline.endAt, reached: true };
+    if (!active || armed === null || armed.reached) return;
+    armed = { ...armed, reached: true };
     // Controls close before any network call; the service's next answer is
     // the only thing that relabels the candidate.
     publish();
     if (active && activity === "idle") void runSnapshotRead(false);
   };
 
-  /** Arm one server-relative timer from the committed snapshot: the delay is
-   * the earliest open action window minus the snapshot's server time, so the
-   * browser clock never enters the comparison. */
-  const armActionDeadline = () => {
-    clearDeadlineTimer();
-    const previous = actionDeadline;
+  const scheduleDeadline = (fireAt: number) => {
+    const delay = fireAt - performance.now();
+    // A later deadline than a browser timer honours is re-armed by a later snapshot.
+    if (delay > MAX_TIMER_MS) return;
+    deadlineTimer = setTimeout(onActionDeadline, Math.max(0, delay));
+  };
+
+  /** Arm the deadline from the committed snapshot. The window ends, on the
+   * browser's monotonic clock, at the instant the read began plus the time the
+   * service measured as remaining; the read began no later than the service
+   * stamped the snapshot, so a slow response can only place the end earlier
+   * than the truth, never later. For a window already known the earliest end
+   * stands: a repeated or older server stamp, or a slower response, re-arms
+   * nothing, and a window once reached stays closed until the service relabels
+   * the candidate or a different window becomes the earliest open one. */
+  const armActionDeadline = (requestStartedAt: number) => {
     const generation = activeGeneration;
     const current = snapshotValue;
     if (generation === null || current === null || generation.manager_response !== null) {
-      actionDeadline = null;
+      clearActionDeadline();
       return;
+    }
+    if (windowGeneration !== generation.request_id) {
+      forgetWindows();
+      windowGeneration = generation.request_id;
     }
     const ends = generation.candidates.filter(candidateIsActionable).map((item) => item.action_window_end_at);
     if (ends.length === 0) {
-      actionDeadline = null;
+      clearActionDeadline();
       return;
     }
     const endAt = ends.reduce((earliest, value) => (compareUtc(value, earliest) < 0 ? value : earliest));
-    if (previous !== null && previous.reached && previous.endAt === endAt) {
-      // The local timer already elapsed for this window. A snapshot stamped
-      // before the end that arrives afterwards cannot re-open it; only the
-      // service's next label, or a different window, changes the state. This
-      // also keeps a frozen service clock from re-arming a read loop.
-      actionDeadline = previous;
-      return;
-    }
     const endMs = utcMillis(endAt);
     const serverMs = utcMillis(current.server_time_utc);
     if (endMs === null || serverMs === null) {
-      actionDeadline = null;
+      clearActionDeadline();
       return;
     }
-    const delay = endMs - serverMs;
-    if (delay <= 0) {
-      // The service answered CURRENT at or past the window: close the controls
-      // now and let the ordinary poll fetch its next reading (no read loop).
-      actionDeadline = { endAt, reached: true };
+    const measured = requestStartedAt + (endMs - serverMs);
+    const known = windowEnds.get(endMs);
+    const fireAt = known === undefined ? measured : Math.min(known, measured);
+    windowEnds.set(endMs, fireAt);
+    if (armed !== null && armed.generationRequestId === generation.request_id && armed.endMs === endMs && armed.fireAt === fireAt) {
+      // Nothing moved: the running timer, or the reached state, stands.
+      if (!armed.reached && deadlineTimer === undefined) scheduleDeadline(fireAt);
       return;
     }
-    actionDeadline = { endAt, reached: false };
-    if (delay > MAX_TIMER_MS) return;
-    deadlineTimer = setTimeout(onActionDeadline, delay);
+    clearDeadlineTimer();
+    if (fireAt - performance.now() <= 0) {
+      // The window has already ended: close the controls now and let the
+      // ordinary poll fetch the service's next reading (no read loop).
+      armed = { generationRequestId: generation.request_id, endAt, endMs, fireAt, reached: true };
+      return;
+    }
+    armed = { generationRequestId: generation.request_id, endAt, endMs, fireAt, reached: false };
+    scheduleDeadline(fireAt);
   };
 
   const current = (epoch: number): boolean => active && controllerEpoch === epoch;
@@ -393,6 +433,7 @@ export function createStaffingController(
   const commitSnapshot = (
     candidate: StaffingDateSnapshot,
     requestIdAtStart: string | null,
+    requestStartedAt: number,
   ) => {
     const selected = selectSnapshot(candidate, requestIdAtStart);
     snapshotValue = candidate;
@@ -402,7 +443,7 @@ export function createStaffingController(
     if (writeState?.status === "committed" && writeState.savedButStale) {
       writeState = { ...writeState, savedButStale: false };
     }
-    armActionDeadline();
+    armActionDeadline(requestStartedAt);
   };
 
   async function runSnapshotRead(throwOnFailure: boolean): Promise<void> {
@@ -427,12 +468,13 @@ export function createStaffingController(
       return;
     }
     try {
+      const requestStartedAt = performance.now();
       const candidate = await client.current();
       if (!current(epoch)) {
         if (throwOnFailure) throw stoppedOrSuperseded();
         return;
       }
-      commitSnapshot(candidate, requestIdAtStart);
+      commitSnapshot(candidate, requestIdAtStart, requestStartedAt);
       setIdle();
       publish();
       scheduleNext();
@@ -489,9 +531,10 @@ export function createStaffingController(
     if (!current(epoch) || requiredRefreshReceipt !== receipt) return;
     const requestIdAtStart = activeGenerationRequestId;
     try {
+      const requestStartedAt = performance.now();
       const candidate = await client.current();
       if (!current(epoch)) return;
-      commitSnapshot(candidate, requestIdAtStart);
+      commitSnapshot(candidate, requestIdAtStart, requestStartedAt);
     } catch (cause) {
       if (!current(epoch)) return;
       readState = {
@@ -764,6 +807,7 @@ export function createStaffingController(
       const manager = requireStaffingManagerLabel(getManagerLabel());
       const body: SuggestionGenerateRequest = {
         schema: "nxt-staffing-suggestion-generate/v1",
+        contract_revision: STAFFING_CONTRACT_REVISION,
         request_id: requestIdFactory("suggestion-generate"),
         operator: manager,
         service_date: currentSnapshot.service_date,

@@ -1,0 +1,23 @@
+{
+  "schema": "nxt-staffing-lockstep/v1",
+  "contract_revision": "0e951f1e3a6f91976a7d41735bd7e5bef398fd4f73f2b552761ee5713682bded",
+  "sources": {
+    "files": [
+      "apps/site-agent-console/components/StaffingPanel.tsx",
+      "apps/site-agent-console/lib/site-time.ts",
+      "apps/site-agent-console/lib/staffing-actions.ts",
+      "apps/site-agent-console/lib/staffing-csv.ts",
+      "apps/site-agent-console/lib/staffing-guards.ts",
+      "apps/site-agent-console/lib/staffing-labels.ts",
+      "apps/site-agent-console/lib/staffing-state.ts",
+      "apps/site-agent-console/lib/staffing.ts",
+      "simulation/docs/contracts/staffing-v1/schema.json",
+      "simulation/nxt_site_agent/api.py",
+      "simulation/scripts/staffing_operations.py"
+    ],
+    "directories": [
+      {"path": "apps/site-agent-console/components/staffing", "suffixes": [".ts", ".tsx"]},
+      {"path": "simulation/nxt_pilot_ops/staffing", "suffixes": [".py"]}
+    ]
+  }
+}
