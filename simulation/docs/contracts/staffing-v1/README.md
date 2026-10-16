@@ -248,12 +248,40 @@ contract revision derived from the implementation, not from the schema:
 
 - `contract_revision` is a required 64-hex field of every request body, every
   `StaffingDateSnapshot`, and every `StaffingReceipt`. Its value is the SHA-256
-  of a manifest (`<path> <sha256>` per file, in path order) over the source set
-  listed in [`lockstep.json`](lockstep.json): the `nxt_pilot_ops/staffing`
+  of a manifest (`<path> <sha256>` per file, in path order, CRLF folded to LF)
+  over the covered set listed in [`lockstep.json`](lockstep.json). The
+  `sources` are the staffing implementation: the `nxt_pilot_ops/staffing`
   package, `scripts/staffing_operations.py`, `nxt_site_agent/api.py`, this
   `schema.json`, and the Console's `lib/staffing*.ts`, `lib/site-time.ts`,
-  `components/StaffingPanel.tsx`, and `components/staffing/*`. Any byte change
-  in any of them changes the value.
+  `components/StaffingPanel.tsx`, and `components/staffing/*`. The
+  `dependencies` are the first-party modules those sources import and that
+  carry staffing-facing semantics, and they enter the digest too:
+  `nxt_pilot_ops/serialization.py` (canonical JSON and `stable_digest` behind
+  every ledger record and request digest), every `nxt_model_gateway` module
+  the composition root reaches, `nxt_site_agent/contracts.py` (the error type
+  and envelope constants), and the Console's `lib/api.ts` and
+  `components/ui.tsx`. Any byte change in any covered file changes the value.
+- The dependency guard makes that list complete rather than hand-maintained:
+  `--check` and both suites walk every first-party import of the covered set
+  and fail on a reached module that the manifest does not classify, on a
+  listed dependency or boundary that nothing reaches, on a module listed
+  twice, and on a dynamic import (`importlib`, `__import__`, `require`),
+  which cannot be analysed. On the service side the walk follows absolute
+  `nxt_*` and `scripts` imports together with every package `__init__`
+  executed on the dotted path, relative imports, and `from pkg import name`
+  where `name` is a submodule or subpackage; on the Console side it follows
+  relative specifiers and the tsconfig `@/*` path alias in `import` and
+  `export ... from` statements (any number per line), side-effect imports,
+  and `import()`. The `boundaries` are the imports the digest deliberately
+  stops at, each with a recorded reason and the exact names it may export:
+  the two pin modules (`STAFFING_CONTRACT_REVISION`), the Site Agent package
+  root (`SiteAgentError`) and service (`SiteAgentService`) behind the HTTP
+  boundary, the runtime (`AgentRuntime`) and readiness (`RangeOpsLaunchPlan`)
+  types that `nxt_site_agent/contracts.py` names, and the Shadow Ops package
+  root executed on the staffing subpackage's dotted path (no names). A name
+  taken through a boundary that its entry does not declare, and a new import
+  anywhere in the covered set, is therefore a failing check until it is
+  covered or declared.
 - The service admits a POST only when the body carries exactly its own pin: a
   missing or malformed field is `staffing_invalid_request` (400); a well-formed
   different value is `staffing_contract_mismatch` (409), raised before any
@@ -268,10 +296,14 @@ contract revision derived from the implementation, not from the schema:
   `scripts/staffing_contract_revision.py` and
   `apps/site-agent-console/lib/staffing-revision.ts`, the `contract_revision`
   of `lockstep.json`, and the values in every frozen example. Those files and
-  every test are outside the source set, so rewriting a pin never changes the
+  every test are outside the covered set, so rewriting a pin never changes the
   value it pins. They are regenerated, never edited by hand, with
   `uv run --no-sync python -B scripts/staffing_contract_revision.py --write`
-  from `simulation/`; `--check` lists every pin that disagrees.
+  from `simulation/`; `--check` lists every pin that disagrees and checks
+  every example individually: each exchange's response `data` and each POST
+  exchange's `request` must carry exactly the pin, and `errors.json` must
+  carry none. A value found in one example never vouches for another, and
+  `--write` never adds a missing place; it only rewrites existing ones.
 - Both suites recompute the digest from the manifest and compare it with every
   pin (`tests/site_agent/test_staffing_contract_revision.py` and
   `tests/staffing-contract.test.ts`), decode every example, and test both mixed
@@ -281,18 +313,24 @@ contract revision derived from the implementation, not from the schema:
   foreign snapshot and receipt. A staffing source change without a regeneration
   fails both suites.
 - The contract fingerprint (SHA-256 over `schema.json` followed by every example
-  in name order, pinned identically in both suites) remains the drift guard for
-  the frozen files themselves; because the examples carry the revision, it now
-  moves with every revision as well.
+  in name order, CRLF folded to LF, pinned identically in both suites) remains
+  the drift guard for the frozen files themselves; because the examples carry
+  the revision, it now moves with every revision as well. An otherwise
+  identical checkout with CRLF line endings computes the same revision and the
+  same fingerprint, and `--write` leaves its line endings as found; any other
+  byte of a frozen file moves the fingerprint, and any other byte of a covered
+  file moves the revision.
 
 The set is deliberately over-inclusive: a change to `nxt_site_agent/api.py` for
-another route also moves the revision and costs one regeneration, whereas
-omitting a file would reopen the gap above. Files outside the set are not
-expected to carry staffing semantics (`lib/api.ts` is the shared transport; the
-other `nxt_site_agent` modules serve files and fixtures), and the digest cannot
-prove that: a change that gives one of them staffing meaning must add it to
-`lockstep.json` in the same commit, and a review that finds staffing meaning
-outside the set treats the omission as a defect.
+another route, or to a gateway adapter, also moves the revision and costs one
+regeneration, whereas omitting a file would reopen the gap above. What the
+digest does not cover is exactly the declared boundaries, and only an import
+edge into them: a change behind a boundary that alters staffing behaviour
+without changing any covered file is possible only through those modules
+(the Site Agent service and package root, the Shadow Ops package root, the
+runtime and readiness types, and the two pin modules), so a review that finds
+staffing meaning there moves the module from `boundaries` to `dependencies`
+in the same commit.
 
 ### What a mixed pair looks like
 

@@ -107,7 +107,9 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/pilot_ops/test_staffing_wire_contract.py \
   tests/site_agent/test_staffing_api.py \
   tests/site_agent/test_api.py \
-  tests/site_agent/test_staffing_composition.py
+  tests/site_agent/test_staffing_composition.py \
+  tests/site_agent/test_staffing_review_wire.py \
+  tests/site_agent/test_staffing_contract_revision.py
 uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/test_architecture.py \
   tests/range_ops/test_eval_and_architecture.py \

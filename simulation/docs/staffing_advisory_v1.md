@@ -514,3 +514,15 @@ every `nxt_*` source file; the engine digest moved from `819f53c4…` to `637da8
 `nxt_pilot_ops/staffing` changed, the v1 ledger fixture replays unchanged, and the local demo and
 persistent ledger were not touched; the frozen examples carry the regenerated revision, so both
 contract fingerprint pins moved with it and equal the recomputed SHA-256.
+
+After the revision-check follow-up (the digest-covered staffing-facing dependencies with the
+import-walking dependency guard, CRLF folding in the contract fingerprint, and the per-example
+`contract_revision` check; 2026-10-16, all-extras locked environment), the staffing, guard, API,
+composition, contract-revision, and architecture files passed 532 tests,
+`scripts/staffing_contract_revision.py --check` reported no problems, the full Python suite
+reported 5109 passed and 11 skipped (the mosquitto-dependent Edge Task integration cases), `scripts/validate_configs.py` reported no errors, `uv lock --check`
+was current, and the console typecheck, lint, 898 vitest tests, static build,
+loopback smoke, and `npm audit --omit=dev` passed. No `nxt_*` source changed, so the engine
+fingerprint and the V3/V4 witnesses are unchanged; the local demo and persistent ledger were not
+touched. The examples carry the regenerated revision and both contract fingerprint pins moved with
+it.

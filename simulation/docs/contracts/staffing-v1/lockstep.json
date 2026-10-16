@@ -1,6 +1,6 @@
 {
   "schema": "nxt-staffing-lockstep/v1",
-  "contract_revision": "0e951f1e3a6f91976a7d41735bd7e5bef398fd4f73f2b552761ee5713682bded",
+  "contract_revision": "0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f",
   "sources": {
     "files": [
       "apps/site-agent-console/components/StaffingPanel.tsx",
@@ -19,5 +19,71 @@
       {"path": "apps/site-agent-console/components/staffing", "suffixes": [".ts", ".tsx"]},
       {"path": "simulation/nxt_pilot_ops/staffing", "suffixes": [".py"]}
     ]
-  }
+  },
+  "dependencies": {
+    "files": [
+      "apps/site-agent-console/components/ui.tsx",
+      "apps/site-agent-console/lib/api.ts",
+      "simulation/nxt_model_gateway/__init__.py",
+      "simulation/nxt_model_gateway/adapters.py",
+      "simulation/nxt_model_gateway/anthropic.py",
+      "simulation/nxt_model_gateway/contracts.py",
+      "simulation/nxt_model_gateway/kimi.py",
+      "simulation/nxt_model_gateway/openai.py",
+      "simulation/nxt_model_gateway/routing.py",
+      "simulation/nxt_model_gateway/serialization.py",
+      "simulation/nxt_model_gateway/transport.py",
+      "simulation/nxt_pilot_ops/serialization.py",
+      "simulation/nxt_site_agent/contracts.py"
+    ]
+  },
+  "boundaries": [
+    {
+      "path": "apps/site-agent-console/lib/staffing-revision.ts",
+      "reason": "the console pin; outside the digest by construction so rewriting it never moves the value it pins",
+      "names": [
+        "STAFFING_CONTRACT_REVISION"
+      ]
+    },
+    {
+      "path": "simulation/nxt_agent_runtime/__init__.py",
+      "reason": "AgentRuntime type named by nxt_site_agent/contracts.py; the runtime composition carries no staffing semantics",
+      "names": [
+        "AgentRuntime"
+      ]
+    },
+    {
+      "path": "simulation/nxt_pilot_ops/__init__.py",
+      "reason": "Shadow Ops package root, executed when the staffing subpackage is imported by its dotted path; nothing is taken from it and its guardian and workflow modules carry no staffing semantics",
+      "names": []
+    },
+    {
+      "path": "simulation/nxt_site_agent/__init__.py",
+      "reason": "package root re-exporting the whole Site Agent application; the composition root takes only SiteAgentError from it, which is covered through nxt_site_agent/contracts.py",
+      "names": [
+        "SiteAgentError"
+      ]
+    },
+    {
+      "path": "simulation/nxt_site_agent/service.py",
+      "reason": "the Site Agent application behind the HTTP boundary; the staffing route in api.py only forwards to the injected callback, and the service carries no staffing semantics",
+      "names": [
+        "SiteAgentService"
+      ]
+    },
+    {
+      "path": "simulation/nxt_workflow_enablement/__init__.py",
+      "reason": "RangeOpsLaunchPlan type named by nxt_site_agent/contracts.py; readiness evaluation carries no staffing semantics",
+      "names": [
+        "RangeOpsLaunchPlan"
+      ]
+    },
+    {
+      "path": "simulation/scripts/staffing_contract_revision.py",
+      "reason": "the service pin; outside the digest by construction so rewriting it never moves the value it pins",
+      "names": [
+        "STAFFING_CONTRACT_REVISION"
+      ]
+    }
+  ]
 }

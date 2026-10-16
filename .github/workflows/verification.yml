@@ -169,7 +169,9 @@ jobs:
             tests/pilot_ops/test_staffing_wire_contract.py \
             tests/site_agent/test_staffing_api.py \
             tests/site_agent/test_api.py \
-            tests/site_agent/test_staffing_composition.py
+            tests/site_agent/test_staffing_composition.py \
+            tests/site_agent/test_staffing_review_wire.py \
+            tests/site_agent/test_staffing_contract_revision.py
       - name: Test architecture, imports, and safety
         working-directory: simulation
         run: |

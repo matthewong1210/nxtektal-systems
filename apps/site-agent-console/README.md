@@ -206,14 +206,19 @@ request the console sends, and every snapshot or receipt it accepts, carries
 `contract_revision`, the digest of the staffing sources listed in
 `simulation/docs/contracts/staffing-v1/lockstep.json`; the console's pin is
 `lib/staffing-revision.ts`, regenerated with
-`scripts/staffing_contract_revision.py --write` and never edited. A service at
+`scripts/staffing_contract_revision.py --write` and never edited; the shared
+`lib/api.ts` transport and `components/ui.tsx` primitives are covered as
+dependencies, and `lib/staffing-revision.ts` is the one declared boundary on
+this side. A service at
 another revision, or one built before the field existed, is refused at the
 first read as `staffing_contract_mismatch` with every staffing control
 disabled; a write such a service refuses arrives under the same code and is
 shown as a definite rejection. `tests/staffing-contract.test.ts` recomputes the
 digest over the lockstep sources, this console's staffing modules included, so
-a console-side change without a regeneration fails the suite (contract README,
-"Versioning and lockstep rollout").
+a console-side change without a regeneration fails the suite, and it walks the
+relative imports of the covered modules so a new import is a failing test until
+`lockstep.json` classifies it (contract README, "Versioning and lockstep
+rollout").
 
 Every write receives a new request ID immediately before submission. If a
 response is lost, the console first recovers the same operation by

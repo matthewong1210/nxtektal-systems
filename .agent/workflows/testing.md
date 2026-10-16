@@ -43,11 +43,15 @@ uv run --no-sync python -B -m pytest -o addopts='' -q -p no:cacheprovider \
   tests/site_agent/test_staffing_contract_revision.py
 ```
 
-After changing any file in the lockstep source set
+After changing any file in the lockstep covered set
 (`docs/contracts/staffing-v1/lockstep.json`: the staffing domain package, the
-composition root, `nxt_site_agent/api.py`, the contract schema, and the
-Console's staffing modules), regenerate every `contract_revision` pin through
-its owning script before running the suites, then verify it:
+composition root, `nxt_site_agent/api.py`, the contract schema, the Console's
+staffing modules, and the listed dependencies such as
+`nxt_pilot_ops/serialization.py`, the `nxt_model_gateway` modules,
+`nxt_site_agent/contracts.py`, and the Console's `lib/api.ts`), regenerate
+every `contract_revision` pin through its owning script before running the
+suites, then verify it. A new first-party import in a covered file fails the
+check until the manifest lists the module as a dependency or a boundary:
 
 ```bash
 uv run --no-sync python -B scripts/staffing_contract_revision.py --write

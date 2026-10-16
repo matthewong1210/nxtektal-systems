@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { API_SCHEMA, DISCLAIMER, ManagerApiError, type FetchLike } from "../lib/api";
@@ -253,7 +254,7 @@ type FrozenTypeSurface = [
 const REPOSITORY_ROOT = join(EXAMPLES_DIR, "..", "..", "..", "..", "..");
 const LOCKSTEP_MANIFEST = join(REPOSITORY_ROOT, "simulation", "docs", "contracts", "staffing-v1", "lockstep.json");
 const PYTHON_REVISION_MODULE = join(REPOSITORY_ROOT, "simulation", "scripts", "staffing_contract_revision.py");
-const STAFFING_CONTRACT_FINGERPRINT = "f63299dd80c90ca132eb63e257906d474a59fc6c2c04fdd5cdf61bba88964152";
+const STAFFING_CONTRACT_FINGERPRINT = "979c879acf34061f909002d4cf3022fc1bf08fe5a5e51da93cb3984d6f9d0583";
 const CANDIDATE_KEYS = [
   "action_window_end_at", "actionability", "candidate_index", "coverage_gaps", "operational_warnings",
   "operational_warnings_local", "operations", "rationale", "rationale_local", "rejection_codes",
@@ -263,34 +264,139 @@ const CANDIDATE_KEYS = [
 /** The same manifest-and-digest rule as `compute_contract_revision()` in
  * `simulation/scripts/staffing_contract_revision.py`: directories are walked
  * recursively (dotfiles and `__pycache__` skipped, regular files with a listed
- * suffix only), CRLF is folded to LF, and the revision is the SHA-256 over one
- * `<path> <sha256>` line per source in path order. */
-function sourceBytes(relative: string): Buffer {
-  const raw = readFileSync(join(REPOSITORY_ROOT, relative));
+ * suffix only), the listed dependencies join the sources, CRLF is folded to LF,
+ * and the revision is the SHA-256 over one `<path> <sha256>` line per covered
+ * file in path order. */
+function foldCrlf(raw: Buffer): Buffer {
   return Buffer.from(raw.toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+}
+
+function sourceBytes(relativePath: string): Buffer {
+  return foldCrlf(readFileSync(join(REPOSITORY_ROOT, relativePath)));
+}
+
+type LockstepManifest = {
+  schema: string;
+  contract_revision: string;
+  sources: { files: string[]; directories: Array<{ path: string; suffixes: string[] }> };
+  dependencies: { files: string[] };
+  boundaries: Array<{ path: string; reason: string; names: string[] }>;
+};
+
+function lockstepManifest(): LockstepManifest {
+  const manifest = JSON.parse(readFileSync(LOCKSTEP_MANIFEST, "utf-8")) as LockstepManifest;
+  expect(manifest.schema).toBe("nxt-staffing-lockstep/v1");
+  expect(Object.keys(manifest).sort()).toEqual(["boundaries", "contract_revision", "dependencies", "schema", "sources"]);
+  return manifest;
+}
+
+/** SHA-256 over schema.json then every example in name order, CRLF folded. */
+function contractFingerprint(contractDir: string): string {
+  const hash = createHash("sha256");
+  hash.update(foldCrlf(readFileSync(join(contractDir, "schema.json"))));
+  for (const name of readdirSync(join(contractDir, "examples")).filter((entry) => entry.endsWith(".json")).sort()) {
+    hash.update(foldCrlf(readFileSync(join(contractDir, "examples", name))));
+  }
+  return hash.digest("hex");
+}
+
+const CONSOLE_PREFIX = "apps/site-agent-console/";
+const CONSOLE_DIR = join(REPOSITORY_ROOT, "apps", "site-agent-console");
+const CONSOLE_STATEMENT = /\b(?:import|export)\b([^;"'`]*?)\bfrom\s+["']([^"']+)["']/g;
+const CONSOLE_SIDE_EFFECT = /(?:^|[;\s])import\s+["']([^"']+)["']/g;
+const CONSOLE_DYNAMIC = /\b(import|require)\(\s*["']([^"']+)["']\s*\)/g;
+
+type ConsoleEdge = { target: string; names: Set<string> };
+
+/** `compilerOptions.paths` of the console tsconfig as (prefix, directory) pairs. */
+function consoleAliases(): Array<[string, string]> {
+  const document = JSON.parse(readFileSync(join(CONSOLE_DIR, "tsconfig.json"), "utf-8")) as { compilerOptions?: { paths?: Record<string, string[]> } };
+  return Object.entries(document.compilerOptions?.paths ?? {}).map(([pattern, targets]) => {
+    expect(pattern.endsWith("/*") && targets.length === 1 && targets[0].endsWith("/*"), pattern).toBe(true);
+    return [pattern.slice(0, -1), resolve(CONSOLE_DIR, targets[0].slice(0, -2))];
+  });
+}
+
+/** The names an import or export clause takes: `{ a, b as c, type D }` gives
+ * a, b, D; a default import gives "default"; `* as ns` or `*` gives "*". */
+function clauseNames(rawClause: string): Set<string> {
+  let clause = rawClause.trim().replace(/^type\s+/, "");
+  const names = new Set<string>();
+  const braces = /\{([^}]*)\}/.exec(clause);
+  if (braces) {
+    for (const item of braces[1].split(",")) {
+      const trimmed = item.trim().replace(/^type\s+/, "");
+      if (trimmed) names.add(trimmed.split(/\s+as\s+/)[0].trim());
+    }
+    clause = clause.slice(0, braces.index) + clause.slice(braces.index + braces[0].length);
+  }
+  for (const item of clause.split(",")) {
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+    names.add(trimmed.startsWith("*") ? "*" : "default");
+  }
+  return names;
+}
+
+/** Edges of a console source: relative specifiers and tsconfig aliases from
+ * import/export-from statements (any number per line), side-effect imports and
+ * dynamic `import()`; `require` is refused (the console side of
+ * `dependency_problems()` in the Python module). */
+function consoleEdges(relativePath: string): ConsoleEdge[] {
+  const text = readFileSync(join(REPOSITORY_ROOT, relativePath), "utf-8");
+  const aliases = consoleAliases();
+  const resolveSpecifier = (specifier: string): string | null => {
+    let base: string | null = null;
+    if (specifier.startsWith(".")) base = resolve(dirname(join(REPOSITORY_ROOT, relativePath)), specifier);
+    else {
+      const alias = aliases.find(([prefix]) => specifier.startsWith(prefix));
+      if (alias) base = resolve(alias[1], specifier.slice(alias[0].length));
+    }
+    if (base === null) return null;
+    const candidates = [`${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
+    const resolved = candidates.find((candidate) => { try { return statSync(candidate).isFile(); } catch { return false; } });
+    if (resolved === undefined) throw new Error(`unresolved first-party import ${specifier} in ${relativePath}`);
+    return relative(REPOSITORY_ROOT, resolved).split("\\").join("/");
+  };
+  const edges: ConsoleEdge[] = [];
+  for (const match of text.matchAll(CONSOLE_STATEMENT)) {
+    const target = resolveSpecifier(match[2]);
+    if (target !== null) edges.push({ target, names: clauseNames(match[1]) });
+  }
+  for (const match of text.matchAll(CONSOLE_SIDE_EFFECT)) {
+    const target = resolveSpecifier(match[1]);
+    if (target !== null) edges.push({ target, names: new Set() });
+  }
+  for (const match of text.matchAll(CONSOLE_DYNAMIC)) {
+    if (match[1] === "require") throw new Error(`dynamic import in ${relativePath}: require cannot be analysed`);
+    const target = resolveSpecifier(match[2]);
+    if (target !== null) edges.push({ target, names: new Set(["*"]) });
+  }
+  return edges;
 }
 
 function walkSources(relativeDir: string, suffixes: string[], found: Set<string>): void {
   for (const entry of readdirSync(join(REPOSITORY_ROOT, relativeDir), { withFileTypes: true })) {
     if (entry.name.startsWith(".") || entry.name === "__pycache__") continue;
     const relative = `${relativeDir}/${entry.name}`;
+    if (entry.isSymbolicLink()) throw new Error(`symbolic link inside a covered directory: ${relative}`);
     if (entry.isDirectory()) walkSources(relative, suffixes, found);
     else if (entry.isFile() && suffixes.some((suffix) => entry.name.endsWith(suffix))) found.add(relative);
   }
 }
 
-function computeContractRevision(): { revision: string; sources: string[] } {
-  const manifest = JSON.parse(readFileSync(LOCKSTEP_MANIFEST, "utf-8")) as {
-    schema: string;
-    contract_revision: string;
-    sources: { files: string[]; directories: Array<{ path: string; suffixes: string[] }> };
-  };
-  expect(manifest.schema).toBe("nxt-staffing-lockstep/v1");
+function manifestSources(manifest: LockstepManifest): string[] {
   const found = new Set<string>(manifest.sources.files);
   for (const entry of manifest.sources.directories) walkSources(entry.path, entry.suffixes, found);
-  const sources = [...found].sort();
-  const lines = sources.map((relative) => `${relative} ${createHash("sha256").update(sourceBytes(relative)).digest("hex")}\n`);
-  return { revision: createHash("sha256").update(lines.join("")).digest("hex"), sources };
+  return [...found].sort();
+}
+
+function computeContractRevision(): { revision: string; sources: string[]; covered: string[] } {
+  const manifest = lockstepManifest();
+  const sources = manifestSources(manifest);
+  const covered = [...new Set([...sources, ...manifest.dependencies.files])].sort();
+  const lines = covered.map((relativePath) => `${relativePath} ${createHash("sha256").update(sourceBytes(relativePath)).digest("hex")}\n`);
+  return { revision: createHash("sha256").update(lines.join("")).digest("hex"), sources, covered };
 }
 
 function withContractRevision<T>(value: T, revision: string | undefined): T {
@@ -308,7 +414,7 @@ describe("staffing v1 lockstep guards", () => {
   };
 
   it("pins the contract revision recomputed over the lockstep source set, identically to the service", () => {
-    const { revision, sources } = computeContractRevision();
+    const { revision, sources, covered } = computeContractRevision();
     expect(STAFFING_CONTRACT_REVISION).toMatch(/^[0-9a-f]{64}$/);
     expect(STAFFING_CONTRACT_REVISION).toBe(revision);
     const manifest = JSON.parse(readFileSync(LOCKSTEP_MANIFEST, "utf-8")) as { contract_revision: string };
@@ -330,11 +436,100 @@ describe("staffing v1 lockstep guards", () => {
       "simulation/nxt_pilot_ops/staffing/operations.py",
       "simulation/docs/contracts/staffing-v1/schema.json",
     ]) expect(sources, required).toContain(required);
-    for (const excluded of sources) {
+    // Staffing-facing dependencies enter the digest as well: the shared
+    // transport and UI primitives here, canonical serialization, the provider
+    // gateway, and the Manager API constants on the service side.
+    for (const required of [
+      "apps/site-agent-console/lib/api.ts",
+      "apps/site-agent-console/components/ui.tsx",
+      "simulation/nxt_pilot_ops/serialization.py",
+      "simulation/nxt_model_gateway/serialization.py",
+      "simulation/nxt_model_gateway/routing.py",
+      "simulation/nxt_site_agent/contracts.py",
+    ]) {
+      expect(covered, required).toContain(required);
+      expect(sources, required).not.toContain(required);
+    }
+    for (const excluded of covered) {
       expect(excluded).not.toBe("apps/site-agent-console/lib/staffing-revision.ts");
       expect(excluded).not.toBe("simulation/scripts/staffing_contract_revision.py");
       expect(excluded.includes("/tests/")).toBe(false);
       expect(excluded.includes("/examples/")).toBe(false);
+    }
+  });
+
+  it("classifies every first-party import the console's covered staffing modules reach and every name taken through a boundary (the console side of the dependency guard)", () => {
+    const manifest = lockstepManifest();
+    const sources = manifestSources(manifest).filter((item) => item.startsWith(CONSOLE_PREFIX));
+    const dependencies = manifest.dependencies.files.filter((item) => item.startsWith(CONSOLE_PREFIX));
+    const boundaries = manifest.boundaries.filter((item) => item.path.startsWith(CONSOLE_PREFIX));
+    const classified = new Map<string, string>();
+    for (const [category, items] of [["source", sources], ["dependency", dependencies], ["boundary", boundaries.map((item) => item.path)]] as const) {
+      for (const item of items) {
+        expect(classified.has(item), `${item} listed twice`).toBe(false);
+        classified.set(item, category);
+      }
+    }
+    const declared = new Map(boundaries.map((item) => [item.path, new Set(item.names)]));
+    const reached = new Set<string>();
+    const taken = new Map<string, Set<string>>();
+    const seen = new Set<string>();
+    const stack = [...sources];
+    while (stack.length > 0) {
+      const current = stack.pop() as string;
+      if (seen.has(current)) continue;
+      seen.add(current);
+      for (const edge of consoleEdges(current)) {
+        const category = classified.get(edge.target);
+        expect(category, `${edge.target} imported by ${current} is not classified in lockstep.json`).toBeDefined();
+        reached.add(edge.target);
+        if (category === "boundary") {
+          const allowed = declared.get(edge.target) ?? new Set<string>();
+          const names = taken.get(edge.target) ?? new Set<string>();
+          for (const name of edge.names) {
+            names.add(name);
+            expect(allowed.has("*") || allowed.has(name), `${current} takes undeclared name ${name} from boundary ${edge.target}`).toBe(true);
+          }
+          taken.set(edge.target, names);
+        } else if (!seen.has(edge.target)) stack.push(edge.target);
+      }
+    }
+    for (const item of [...dependencies, ...boundaries.map((entry) => entry.path)]) expect(reached.has(item), `${item} is listed but nothing covered imports it`).toBe(true);
+    expect(reached.has("apps/site-agent-console/lib/api.ts")).toBe(true);
+    expect(reached.has("apps/site-agent-console/components/ui.tsx")).toBe(true);
+    expect(classified.get("apps/site-agent-console/lib/staffing-revision.ts")).toBe("boundary");
+    expect(taken.get("apps/site-agent-console/lib/staffing-revision.ts")).toEqual(new Set(["STAFFING_CONTRACT_REVISION"]));
+    expect(consoleAliases().map(([prefix]) => prefix)).toEqual(["@/"]);
+  });
+
+  it("parses import clauses the way the service-side walker does", () => {
+    expect(clauseNames("{ a, b as c, type D }")).toEqual(new Set(["a", "b", "D"]));
+    expect(clauseNames("type { X }")).toEqual(new Set(["X"]));
+    expect(clauseNames("Default, { a }")).toEqual(new Set(["default", "a"]));
+    expect(clauseNames("* as ns")).toEqual(new Set(["*"]));
+    expect(clauseNames("*")).toEqual(new Set(["*"]));
+    const statements = [...'import { a } from "./x"; import { b } from "./y";\nexport * from "./z";'.matchAll(CONSOLE_STATEMENT)].map((match) => match[2]);
+    expect(statements).toEqual(["./x", "./y", "./z"]);
+  });
+
+  it("fingerprints the frozen files with CRLF folded to LF and nothing else forgiven", () => {
+    const contractDir = join(EXAMPLES_DIR, "..");
+    expect(contractFingerprint(contractDir)).toBe(STAFFING_CONTRACT_FINGERPRINT);
+    const scratch = mkdtempSync(join(tmpdir(), "staffing-contract-crlf-"));
+    try {
+      cpSync(contractDir, scratch, { recursive: true });
+      const files = ["schema.json", ...readdirSync(join(scratch, "examples")).filter((name) => name.endsWith(".json")).map((name) => join("examples", name))];
+      for (const name of files) {
+        const path = join(scratch, name);
+        writeFileSync(path, Buffer.from(readFileSync(path).toString("latin1").replace(/\r\n/g, "\n").replace(/\n/g, "\r\n"), "latin1"));
+        expect(readFileSync(path).includes("\r\n")).toBe(true);
+      }
+      expect(contractFingerprint(scratch)).toBe(STAFFING_CONTRACT_FINGERPRINT);
+      const coldStart = join(scratch, "examples", "cold-start.json");
+      writeFileSync(coldStart, readFileSync(coldStart, "utf-8").replace("SIMULATION", "SIMULATED"));
+      expect(contractFingerprint(scratch)).not.toBe(STAFFING_CONTRACT_FINGERPRINT);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
     }
   });
 
@@ -358,6 +553,7 @@ describe("staffing v1 lockstep guards", () => {
     }
     expect(seen.length).toBe(38);
     expect(new Set(seen)).toEqual(new Set([STAFFING_CONTRACT_REVISION]));
+    expect(readFileSync(join(EXAMPLES_DIR, "errors.json"), "utf-8").includes("contract_revision")).toBe(false);
     for (const name of ["StaffingDateSnapshot", "RosterImportRequest", "ExceptionRecordWholeShift", "ExceptionRecordPoint",
       "ExceptionCancelRequest", "ExceptionCorrectRequest", "SuggestionGenerateRequest", "ManagerAcceptRequest",
       "ManagerModifyRequest", "ManagerRejectRequest", "ReceiptRoster", "ReceiptExceptionRecord", "ReceiptExceptionCancel",
@@ -416,12 +612,7 @@ describe("staffing v1 lockstep guards", () => {
   });
 
   it("pins the same contract fingerprint as the Python contract suite", () => {
-    const hash = createHash("sha256");
-    hash.update(readFileSync(join(EXAMPLES_DIR, "..", "schema.json")));
-    for (const name of readdirSync(EXAMPLES_DIR).filter((entry) => entry.endsWith(".json")).sort()) {
-      hash.update(readFileSync(join(EXAMPLES_DIR, name)));
-    }
-    expect(hash.digest("hex")).toBe(STAFFING_CONTRACT_FINGERPRINT);
+    expect(contractFingerprint(join(EXAMPLES_DIR, ".."))).toBe(STAFFING_CONTRACT_FINGERPRINT);
   });
 
   it("binds the decoder's closed candidate key set to every candidate shape in schema.json and every example", () => {

@@ -63,7 +63,7 @@ EXPECTED_ERROR_STATUS = {
 # Editing any frozen file without updating both pins in the same commit fails
 # whichever side was left behind; see the contract README, "Versioning and
 # lockstep rollout".
-STAFFING_CONTRACT_FINGERPRINT = "f63299dd80c90ca132eb63e257906d474a59fc6c2c04fdd5cdf61bba88964152"
+STAFFING_CONTRACT_FINGERPRINT = "979c879acf34061f909002d4cf3022fc1bf08fe5a5e51da93cb3984d6f9d0583"
 EXPECTED_SUCCESS_EXCHANGES = {
     "cold-start.json": {"current-empty", "date-empty"},
     "roster-import.json": {"roster-committed"},
@@ -769,14 +769,37 @@ def test_example_provenance_rows_share_one_input_digest() -> None:
         assert_shared_provenance_input_digest(exchange)
 
 
-def test_contract_fingerprint_is_pinned_for_lockstep_rollout() -> None:
+def _fingerprint(contract: Path) -> str:
+    """SHA-256 over schema.json then every example in name order, CRLF folded
+    to LF so a checkout's line-ending setting cannot move the pin (identical to
+    `contract_fingerprint()` in `scripts/staffing_contract_revision.py` and to
+    the console suite's replica)."""
     import hashlib
 
     digest = hashlib.sha256()
-    digest.update((CONTRACT / "schema.json").read_bytes())
-    for path in sorted((CONTRACT / "examples").glob("*.json")):
-        digest.update(path.read_bytes())
-    assert digest.hexdigest() == STAFFING_CONTRACT_FINGERPRINT
+    digest.update((contract / "schema.json").read_bytes().replace(b"\r\n", b"\n"))
+    for path in sorted((contract / "examples").glob("*.json")):
+        digest.update(path.read_bytes().replace(b"\r\n", b"\n"))
+    return digest.hexdigest()
+
+
+def test_contract_fingerprint_is_pinned_for_lockstep_rollout() -> None:
+    assert _fingerprint(CONTRACT) == STAFFING_CONTRACT_FINGERPRINT
+
+
+def test_contract_fingerprint_ignores_line_endings_but_not_bytes(tmp_path: Path) -> None:
+    import shutil
+
+    crlf = tmp_path / "crlf"
+    shutil.copytree(CONTRACT, crlf)
+    for path in [crlf / "schema.json", *sorted((crlf / "examples").glob("*.json"))]:
+        path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        assert b"\r\n" in path.read_bytes()
+    assert _fingerprint(crlf) == STAFFING_CONTRACT_FINGERPRINT
+    (crlf / "examples" / "cold-start.json").write_bytes(
+        (crlf / "examples" / "cold-start.json").read_bytes().replace(b"SIMULATION", b"SIMULATED", 1)
+    )
+    assert _fingerprint(crlf) != STAFFING_CONTRACT_FINGERPRINT
 
 
 def test_error_inventory_is_identical_in_schema_examples_and_status_table() -> None:
