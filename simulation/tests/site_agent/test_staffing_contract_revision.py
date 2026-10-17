@@ -635,6 +635,10 @@ def test_dependency_guard_follows_aliases_subpackages_package_roots_and_declared
     a.write_bytes(original + b"from nxt_fake.sub.mod import X\n")
     top.write_bytes(top_original + b'const lazy = require("../shared/api");\n')
     assert any("dynamic import in" in line and "require" in line for line in revision_module.check(root))
+    top.write_bytes(top_original + b'const later = (name: string) => import(name);\n')
+    assert any("dynamic import in" in line and "not a string literal" in line for line in revision_module.check(root))
+    top.write_bytes(top_original + b'const json = () => import("../shared/api", { with: { type: "json" } });\n')
+    assert not any("dynamic import" in line or "unlisted" in line for line in revision_module.check(root))
     top.write_bytes(top_original + b'export const later = () => import("../shared/api");\n')
     problems = revision_module.check(root)
     assert not any("dynamic import" in line or "unlisted" in line for line in problems), (
@@ -642,6 +646,91 @@ def test_dependency_guard_follows_aliases_subpackages_package_roots_and_declared
         problems,
     )
     assert all("contract revision pin" in line or "contract_revision" in line for line in problems), problems
+    top.write_bytes(top_original)
+    assert revision_module.check(root) == []
+
+    # Comments, import-like strings, and a semicolon-less previous statement
+    # never yield an edge or a spurious name; only code positions count.
+    top.write_bytes(
+        b'// import { gone } from "./missing";\n'
+        b'/* import { alsoGone } from "../missing";\n   import { other } from "@/shared/other"; */\n'
+        b'const sample = "import x from \'./missing\'";\n'
+        b'const block = `import y from "./missing"\n${"not an import"}`;\n'
+        b'export const a = 1\n'
+        b'import { api } from "@/shared/api";import { PIN } from "../pin"\n'
+        b'export const top = api(PIN) + sample + block + a;\n'
+    )
+    assert revision_module.check(root) == [] or all(
+        "contract revision pin" in line or "contract_revision" in line for line in revision_module.check(root)
+    ), revision_module.check(root)
+    edges = {edge.target.relative_to(root).as_posix(): edge.names for edge in revision_module.import_edges(top, root)}
+    assert edges == {"src/shared/api.ts": {"api"}, "src/pin.ts": {"PIN"}}, edges
+    top.write_bytes(b"/* never closed\n" + top_original)
+    assert any("unterminated block comment" in line and "top.ts" in line for line in revision_module.check(root))
+    top.write_bytes(top_original)
+    assert revision_module.check(root) == []
+
+    # A leading byte-order mark, regular-expression literals (which may hold
+    # a quote, a backtick or `/*`) and divisions are code, not noise: the
+    # statements after them are still found, and the walk never enters a
+    # comment or a template from inside a regular expression.
+    top.write_bytes(b"\xef\xbb\xbf" + top_original)
+    edges = {edge.target.relative_to(root).as_posix(): edge.names for edge in revision_module.import_edges(top, root)}
+    assert edges == {"src/shared/api.ts": {"api"}, "src/pin.ts": {"PIN"}}, edges
+    top.write_bytes(
+        b'const trailing = (value: string) => value.replace(/\\/*$/, "");\n'
+        b'const tick = /\\x60/; const quote = /"\'/; const url = /^https?:\\/\\//;\n'
+        b'function half(value: number) { return /x\\/y/.test(String(value)) ? value / 2 : (value + 1) / 2 }\n'
+        b'import { api } from "@/shared/api"; const ratio = half(4) / half(2);\n'
+        b'const template = `${trailing("a/")}`; /* note */\n'
+        b'import { PIN } from "../pin";\n'
+        b'export const top = api(PIN) + String([tick, quote, url, ratio, template]);\n'
+    )
+    edges = {edge.target.relative_to(root).as_posix(): edge.names for edge in revision_module.import_edges(top, root)}
+    assert edges == {"src/shared/api.ts": {"api"}, "src/pin.ts": {"PIN"}}, edges
+    assert not any("unterminated" in line or "unlisted" in line or "dynamic" in line for line in revision_module.check(root))
+    # A lone backtick outside a template (JSX text, say) fails loud rather
+    # than silently blanking every later statement.
+    top.write_bytes(b"export const P = () => <p>Use `code</p>;\n" + top_original)
+    assert any("unterminated template literal" in line and "top.ts" in line for line in revision_module.check(root))
+    # JSX never opens a regular expression: a self-closing `/>`, a slash in JSX
+    # text (even after an English word that is also a keyword), a member named
+    # like a keyword, a postfix `++` and a non-null `!` all divide, while a
+    # logical `!` after `return`, a keyword first on its line (even after a
+    # comment glued to the previous line) and a `!` opening the file still open
+    # one, so a template path, a string or a comment later on the line is
+    # lexed as itself and the statements after them are found.
+    top.write_bytes(
+        b'!/\\x60/.test("x"); import { api } from "@/shared/api";\n'
+        b'export function isClean(v: string) {\n  return !/\\/*$/.test(v);\n}\n'
+        b'export const Copy = () => <p>Check in / check out {`${start}/${end}`}</p>;\n'
+        b'function clean(v: string) {\n  const ok = true// default\n  return /x\\/*"/.test(v) && ok\n}\n'
+        b'export const Row = () => <><Icon name={n} /> <Link href={`/x/${id}`}>x</Link></>;\n'
+        b'export const Ratio = () => <span>{done}/{total} {`${pct}/${max}`} {/* don`t count */}</span>;\n'
+        b'export const Pair = () => <p><strong>{item.provider}</strong> / <code>{`${item.model_id}/${item.version}`}</code></p>;\n'
+        b'const r = obj.return / 2; const s = "`"; const half = i++ / 2; const w = el.width! / 2; const path = `/a/${half}`;\n'
+        b'import { PIN } from "../pin";\n'
+        b'export const top = api(PIN) + r + s + w + path;\n'
+    )
+    edges = {edge.target.relative_to(root).as_posix(): edge.names for edge in revision_module.import_edges(top, root)}
+    assert edges == {"src/shared/api.ts": {"api"}, "src/pin.ts": {"PIN"}}, edges
+    assert not any("unterminated" in line or "unlisted" in line or "dynamic" in line for line in revision_module.check(root))
+    # A CRLF checkout lexes exactly like an LF one, a continued string included.
+    top.write_bytes(
+        b'const s = "a\\\r\n`b"; const t = `\r\nimport { gone } from "./missing"\r\n`;\r\n' + top_original.replace(b"\n", b"\r\n")
+    )
+    edges = {edge.target.relative_to(root).as_posix(): edge.names for edge in revision_module.import_edges(top, root)}
+    assert edges == {"src/shared/api.ts": {"api"}, "src/pin.ts": {"PIN"}}, edges
+    # Whitespace around `as` and after `type` does not change the names taken.
+    top.write_bytes(
+        top_original.replace(
+            b'import { PIN } from "../pin";',
+            b'import {\n  PIN as\n    pinned,\n  type  PinType,\n} from "../pin";\nconst PIN: PinType = pinned;',
+        )
+    )
+    edges = {edge.target.relative_to(root).as_posix(): edge.names for edge in revision_module.import_edges(top, root)}
+    assert edges["src/pin.ts"] == {"PIN", "PinType"}, edges
+    assert any("boundary src/pin.ts: src/dir/top.ts takes undeclared name(s) PinType" in line for line in revision_module.check(root))
     top.write_bytes(top_original)
     assert revision_module.check(root) == []
 
@@ -796,3 +885,36 @@ def test_snapshot_and_receipts_carry_the_pinned_revision_and_the_domain_never_se
         assert STAFFING_CONTRACT_REVISION not in text
     finally:
         api.close()
+
+
+CONSOLE_LEXER_CORPUS = REPOSITORY_ROOT / "simulation/tests/site_agent/fixtures/console_lexer_corpus.json"
+
+
+def test_console_lexer_corpus_is_lexed_to_the_pinned_statements() -> None:
+    """Every rule of the console walk is pinned by a source shape whose
+    blanked text, statements or failure change without it; the console suite
+    runs the same corpus through its mirror of the lexer, so both sides are
+    held to byte-identical answers."""
+
+    corpus = json.loads(CONSOLE_LEXER_CORPUS.read_text(encoding="utf-8"))
+    assert corpus["schema"] == "nxt-staffing-console-lexer-corpus/v1"
+    assert len(corpus["cases"]) >= 100
+    for name, entry in corpus["cases"].items():
+        try:
+            blanked = revision_module._blank_console_noise(entry["source"])
+        except revision_module.LockstepError as error:
+            assert "error" in entry, (name, str(error))
+            assert entry["error"] in str(error), (name, str(error))
+            continue
+        assert "error" not in entry, (name, entry["error"])
+        assert blanked == entry["blanked"], name
+        found: list[list[object]] = []
+        for match in revision_module._CONSOLE_STATEMENT.finditer(blanked):
+            found.append(["stmt", match.group("specifier"), sorted(revision_module._clause_names(match.group("clause")))])
+        for match in revision_module._CONSOLE_SIDE_EFFECT.finditer(blanked):
+            found.append(["side", match.group("specifier"), []])
+        for match in revision_module._CONSOLE_DYNAMIC.finditer(blanked):
+            found.append(["dyn", match.group("specifier"), ["require" if match.group(0).startswith("require") else "*"]])
+        for _match in revision_module._CONSOLE_DYNAMIC_UNANALYSABLE.finditer(blanked):
+            found.append(["dyn", "", ["unanalysable"]])
+        assert found == entry["statements"], name

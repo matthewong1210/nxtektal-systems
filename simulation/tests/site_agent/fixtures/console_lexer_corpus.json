@@ -1,0 +1,2744 @@
+{
+ "schema": "nxt-staffing-console-lexer-corpus/v1",
+ "note": "Source shapes lexed by scripts/staffing_contract_revision.py and by the console suite's mirror of it. `blanked` and `statements` are what the Python lexer produces; regenerate them with the lexer after a deliberate change, and keep every case that fails without one of its rules.",
+ "cases": {
+  "amp_regex": {
+   "source": "const ok = a && /x\\/*y/.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const ok = a &&        .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "arrow_not_regex": {
+   "source": "const f = (v: string) => !/x\\/*y/.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const f = (v: string) => !       .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "arrow_regex_api_path": {
+   "source": "const ok = (v: string) => /^\\/api\\//.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const ok = (v: string) =>           .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "arrow_regex_with_quote_and_backtick": {
+   "source": "const f = (v: string) => /\\/*\"/.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const f = (v: string) =>       .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "as_with_tab_and_newline": {
+   "source": "import { a\tas b, c as\n  d, e  as  f } from \"./x\";\n",
+   "blanked": "import { a\tas b, c as\n  d, e  as  f } from \"./x\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "a",
+      "c",
+      "e"
+     ]
+    ]
+   ]
+  },
+  "await_regex_after_paren": {
+   "source": "const m = f(await /x\\/*\"/[Symbol.replace](s, \"\")); import { a } from \"../lib/a\";\n",
+   "blanked": "const m = f(await        [Symbol.replace](s, \"\")); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "block_comment_multiline_import": {
+   "source": "/* import { alsoGone } from \"../missing\";\n   import { other } from \"@/shared/other\"; */\nimport { a } from \"../lib/a\";\n",
+   "blanked": "                                         \n                                             \nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "block_comment_then_return_regex": {
+   "source": "let ok = true /* note\n */ return /x\\/*\"/.test(ok)\nimport { a } from \"../lib/a\";\n",
+   "blanked": "let ok = true        \n    return        .test(ok)\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "block_then_regex_at_line_start": {
+   "source": "function f() {}\n/re/.test(x); import { a } from \"../lib/a\";\n",
+   "blanked": "function f() {}\n/re/.test(x); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "bom_first_import": {
+   "source": "﻿import { a } from \"../lib/a\";\nexport const B = a;\n",
+   "blanked": " import { a } from \"../lib/a\";\nexport const B = a;\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "bom_first_token_not_regex": {
+   "source": "﻿!/x\\/*/.test(a); import { a } from \"../lib/a\";\n",
+   "blanked": " !      .test(a); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "bom_two_imports": {
+   "source": "﻿import { a } from \"../lib/a\";\nimport { b } from \"../lib/b\";\n",
+   "blanked": " import { a } from \"../lib/a\";\nimport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "brace_import_after_block": {
+   "source": "if (x) { y() }import { a } from \"../lib/a\";\n",
+   "blanked": "if (x) { y() }import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "brace_regex": {
+   "source": "const g = () => { /x\\/*y/.test(v) }; import { a } from \"../lib/a\";\n",
+   "blanked": "const g = () => {        .test(v) }; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "bracket_regex": {
+   "source": "const l = [/x\\/*y/]; import { a } from \"../lib/a\";\n",
+   "blanked": "const l = [       ]; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "call_nonnull_division": {
+   "source": "const h = f()! / 2; const s = `/x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const h = f()! / 2; const s =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "call_nonnull_two_divisions": {
+   "source": "const h = f()! / 2 / 3; import { a } from \"../lib/a\";\n",
+   "blanked": "const h = f()! / 2 / 3; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "caret_regex": {
+   "source": "const n = 1 ^ /x/.source.length; import { a } from \"../lib/a\";\n",
+   "blanked": "const n = 1 ^ /x/.source.length; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "case_first_on_line_regex": {
+   "source": "switch (k) {\n  case /x\\/*\"/.source: break;\n}\nimport { a } from \"../lib/a\";\n",
+   "blanked": "switch (k) {\n  case        .source: break;\n}\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "case_regex": {
+   "source": "switch (k) { case 1: return /x\\/*/.test(v); default: return false }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "switch (k) { case 1: return       .test(v); default: return false }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "cjk_before_import_paren_parity": {
+   "source": "export const P = () => <p>请点击import(导入)按钮</p>;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>请点击import(导入)按钮</p>;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "",
+     [
+      "unanalysable"
+     ]
+    ]
+   ]
+  },
+  "colon_regex": {
+   "source": "const o = { p: /x\\/*y/ }; import { a } from \"../lib/a\";\n",
+   "blanked": "const o = { p:         }; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "comma_regex": {
+   "source": "const r = f(a, /x\\/*y/); import { a } from \"../lib/a\";\n",
+   "blanked": "const r = f(a,        ); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "comment_glued_then_return_regex": {
+   "source": "let ok = true// default\nreturn /x\\/*\"/.test(ok)\nimport { a } from \"../lib/a\";\n",
+   "blanked": "let ok = true          \nreturn        .test(ok)\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "crlf": {
+   "source": "import { a } from \"../lib/a\";\r\nexport { b } from \"../lib/b\";\r\n",
+   "blanked": "import { a } from \"../lib/a\";\r\nexport { b } from \"../lib/b\";\r\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "crlf_return_regex": {
+   "source": "let ok = true\r\nreturn /x\\/*\"/.test(ok)\r\nimport { a } from \"../lib/a\";\r\n",
+   "blanked": "let ok = true\r\nreturn        .test(ok)\r\nimport { a } from \"../lib/a\";\r\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "division_at_line_start_after_paren": {
+   "source": "foo()\n/re/.test(x); import { a } from \"../lib/a\";\n",
+   "blanked": "foo()\n/re/.test(x); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "division_brackets": {
+   "source": "const r = arr[0] / 2; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = arr[0] / 2; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "division_identifiers": {
+   "source": "const r = a / b / c; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = a / b / c; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "division_parens": {
+   "source": "const r = (a + b) / 2; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = (a + b) / 2; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "division_string": {
+   "source": "const r = \"4\" / 2; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = \"4\" / 2; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "division_then_comment_import": {
+   "source": "const r = a / b; // import { gone } from \"./missing\";\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const r = a / b;                                     \nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_literal_concat": {
+   "source": "const m = import(\"./x\" + ext); import { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(\"./x\" + ext); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "",
+     [
+      "unanalysable"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_multiline_literal": {
+   "source": "const m = import(\n  \"./m\"\n);\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(\n  \"./m\"\n);\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "./m",
+     [
+      "*"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_template_specifier": {
+   "source": "const m = import(`./m`);\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(     );\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "",
+     [
+      "unanalysable"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_trailing_comma": {
+   "source": "const m = import(\n  \"./m\",\n);\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(\n  \"./m\",\n);\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "./m",
+     [
+      "*"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_variable_specifier": {
+   "source": "const m = import(name);\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(name);\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "",
+     [
+      "unanalysable"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_with_attributes": {
+   "source": "const m = import(\"./m\", { with: { type: \"json\" } }); import { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(\"./m\", { with: { type: \"json\" } }); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "./m",
+     [
+      "*"
+     ]
+    ]
+   ]
+  },
+  "dynamic_import_with_comment": {
+   "source": "const m = import(/* chunk */ \"./m\");\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const m = import(            \"./m\");\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "./m",
+     [
+      "*"
+     ]
+    ]
+   ]
+  },
+  "dynamic_word_boundary": {
+   "source": "const r = reimport(\"./missing\"); import { a } from \"../lib/a\";\n",
+   "blanked": "const r = reimport(\"./missing\"); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "else_first_on_line_regex": {
+   "source": "if (a) b()\nelse /x\\/*y/.test(c) && d()\nimport { a } from \"../lib/a\";\n",
+   "blanked": "if (a) b()\nelse        .test(c) && d()\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "else_return_regex": {
+   "source": "if (a) b(); else return /x\\/*\"/.test(c);\nimport { a } from \"../lib/a\";\n",
+   "blanked": "if (a) b(); else return        .test(c);\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "empty": {
+   "source": "",
+   "blanked": "",
+   "statements": []
+  },
+  "entity_two_char_name_slash_then_template": {
+   "source": "export const P = () => <p>{a}&lt;/&gt;{b} {`${pct}%`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{a}&lt;/&gt;{b} {   pct   }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "equals_regex": {
+   "source": "const r = /x\\/*y/; import { a } from \"../lib/a\";\n",
+   "blanked": "const r =        ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "export_default_function": {
+   "source": "export default function from() {}\nimport { a } from \"../lib/a\";\n",
+   "blanked": "export default function from() {}\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "file_start_regex": {
+   "source": "/x\\/*y/.test(a); import { a } from \"../lib/a\";\n",
+   "blanked": "       .test(a); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "first_token_not_regex": {
+   "source": "!/x\\/*/.test(a); import { a } from \"../lib/a\";\n",
+   "blanked": "!      .test(a); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "from_glued_to_specifier": {
+   "source": "import {a} from'./a';\nimport b from\"./b\";\nexport * from\"./c\";\n",
+   "blanked": "import {a} from'./a';\nimport b from\"./b\";\nexport * from\"./c\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "./b",
+     [
+      "default"
+     ]
+    ],
+    [
+     "stmt",
+     "./c",
+     [
+      "*"
+     ]
+    ]
+   ]
+  },
+  "generic_and_object_keys": {
+   "source": "const m: Map<string, from> = new Map(); const o = { import: 1, export: 2, type: 3, from: 4 }; import { a } from \"../lib/a\";\n",
+   "blanked": "const m: Map<string, from> = new Map(); const o = { import: 1, export: 2, type: 3, from: 4 }; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "glued_bitwise_and_then_regex": {
+   "source": "const m = y&z; /x\\/*y/.test(w); import { a } from \"../lib/a\";\n",
+   "blanked": "const m = y&z;        .test(w); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "glued_intersection_type_then_regex": {
+   "source": "type T = A&B; /x\\/*y/.test(w); import { a } from \"../lib/a\";\n",
+   "blanked": "type T = A&B;        .test(w); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "gte_then_regex": {
+   "source": "const r = x >= /y/.source.length; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = x >=    .source.length; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "import_attributes": {
+   "source": "import data from \"./data.json\" with { type: \"json\" };\n",
+   "blanked": "import data from \"./data.json\" with { type: \"json\" };\n",
+   "statements": [
+    [
+     "stmt",
+     "./data.json",
+     [
+      "default"
+     ]
+    ]
+   ]
+  },
+  "in_after_identifier_division": {
+   "source": "const d = x in y / 2 ? 1 : 2; const s = '`'; import { a } from \"../lib/a\";\n",
+   "blanked": "const d = x in y / 2 ? 1 : 2; const s = '`'; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "index_nonnull_division": {
+   "source": "const h = arr[0]! / 2; const s = `/x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const h = arr[0]! / 2; const s =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "index_nonnull_two_divisions": {
+   "source": "const h = arr[0]! / 2 / 3; import { a } from \"../lib/a\";\n",
+   "blanked": "const h = arr[0]! / 2 / 3; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_apostrophe": {
+   "source": "export const P = () => <p>Don't</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Don't</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_apostrophe_multiline_template_then_comment_backtick": {
+   "source": "export const R = () => <p>Don't use {`\n  ${x}\n`} here</p>;\nexport { x } from \"./x\";\nconst z = 1; // can`t\nexport { y } from \"./y\";\n",
+   "blanked": "export const R = () => <p>Don't use { \n    x \n } here</p>;\nexport { x } from \"./x\";\nconst z = 1;         \nexport { y } from \"./y\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "x"
+     ]
+    ],
+    [
+     "stmt",
+     "./y",
+     [
+      "y"
+     ]
+    ]
+   ]
+  },
+  "jsx_apostrophe_then_multiline_template": {
+   "source": "export const R = () => <p>Don't use {`\n  ${x}\n`} here</p>;\nexport { x } from \"./x\";\nconst z = `a` + `b`;\n",
+   "blanked": "export const R = () => <p>Don't use { \n    x \n } here</p>;\nexport { x } from \"./x\";\nconst z =     +    ;\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "x"
+     ]
+    ]
+   ]
+  },
+  "jsx_apostrophe_then_string_with_apostrophe": {
+   "source": "export const P = () => <p>Don't {t(\"it's /* note\")}</p>;\nimport { a } from \"../lib/a\";\nconst z = 1; /* c */\nimport { b } from \"../lib/b\";\n",
+   "blanked": "export const P = () => <p>Don't {t(\"it's /* note\")}</p>;\nimport { a } from \"../lib/a\";\nconst z = 1;        \nimport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "jsx_apostrophe_then_template_same_line": {
+   "source": "export const P = () => <p>Don't {`${x}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Don't {   x  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_backtick_even": {
+   "source": "export const P = () => <p>Use `code` here</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Use        here</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_backtick_odd_then_reexport": {
+   "source": "export const P = () => <p>Use `code</p>;\nexport { a } from \"../lib/a\";\n",
+   "error": "unterminated template literal"
+  },
+  "jsx_brace_apostrophe_then_template": {
+   "source": "export const P = () => <p>{name}'s {`a/${b}`} isn't</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{name}'s {     b  } isn't</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_brace_bang_slash": {
+   "source": "export const P = () => <p>{n}! / 2 / 3</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{n}! / 2 / 3</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_brace_bang_then_template": {
+   "source": "export const P = () => <p>{count}! / {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{count}! / {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_closing_tag_with_trailing_comment": {
+   "source": "export const P = () => <p>Hi</p>; // see x; import { gone } from \"./missing\"\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Hi</p>;                                           \nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_closing_tags_one_line": {
+   "source": "export const P = () => <p>Hi</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Hi</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_comment": {
+   "source": "export const P = () => <div>{/* import { gone } from \"./missing\"; */}</div>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <div>{                                       }</div>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_entity_slash_then_template": {
+   "source": "export const R = () => <span>{done}&nbsp;/&nbsp;{total} {`${pct}%`}</span>;\nexport { x } from \"./x\";\n",
+   "blanked": "export const R = () => <span>{done}&nbsp;/&nbsp;{total} {   pct   }</span>;\nexport { x } from \"./x\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "x"
+     ]
+    ]
+   ]
+  },
+  "jsx_fragment_close": {
+   "source": "export const F = () => <><b>x</b></>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const F = () => <><b>x</b></>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_href_url": {
+   "source": "export const P = () => <a href=\"https://x/y\">x</a>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <a href=\"https://x/y\">x</a>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_multiline_attribute_string": {
+   "source": "export const D = () => <div className=\"a\n  b\">{`\nx`}</div>;\nexport { x } from \"./x\";\n",
+   "blanked": "export const D = () => <div className=\"a\n  b\">{ \n  }</div>;\nexport { x } from \"./x\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "x"
+     ]
+    ]
+   ]
+  },
+  "jsx_nested_tags": {
+   "source": "export const P = () => <div><p>Hi</p><span>{a / b}</span></div>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <div><p>Hi</p><span>{a / b}</span></div>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_numeric_entity_slash_then_template": {
+   "source": "export const R = () => <span>{done}&#160;/&#160;{total} {`${pct}%`}</span>;\nexport { x } from \"./x\";\n",
+   "blanked": "export const R = () => <span>{done}&#160;/&#160;{total} {   pct   }</span>;\nexport { x } from \"./x\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "x"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_brace_keyword_slashes": {
+   "source": "export const P = () => <p>{n} return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{n} return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_case_after_hyphen": {
+   "source": "export const P = () => <p>Upper-case / lower-case {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Upper-case / lower-case {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_close_tag_bang_slash": {
+   "source": "export const P = () => <p><b>Done</b>! / 2 / 3</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p><b>Done</b>! / 2 / 3</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_close_tag_bang_then_template": {
+   "source": "export const P = () => <p><b>Done</b>! / {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p><b>Done</b>! / {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_close_tag_expression_keyword": {
+   "source": "export const P = () => <p><b>Total</b> new / returning {`${a}/${b}`}</p>;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p><b>Total</b> new / returning {   a    b  }</p>;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_close_tag_keyword_slashes": {
+   "source": "export const P = () => <p><b>Total</b> return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p><b>Total</b> return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_close_tag_slash": {
+   "source": "export const P = () => <p><b>x</b> / y / z</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p><b>x</b> / y / z</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_colon_keyword_then_template": {
+   "source": "export const P = () => <p>Status: in / out {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Status: in / out {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_comma_else_case_slashes": {
+   "source": "export const P = () => <p>Yes, else / otherwise, case / point / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Yes, else / otherwise, case / point / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_comma_keyword_slashes": {
+   "source": "export const P = () => <p>Yes, in / out / more</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Yes, in / out / more</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_comma_keyword_then_template": {
+   "source": "export const P = () => <p>Yes, in / out {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Yes, in / out {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_comma_return_then_template_fails_loud": {
+   "source": "export const P = () => <p>Yes, return / go {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "error": "a `/` before a backtick on the same line"
+  },
+  "jsx_prose_comma_slash_then_template_next_line": {
+   "source": "export const P = () => (\n  <p>\n    Yes, / no\n    {`${a}/${b}`}\n  </p>\n);\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => (\n  <p>\n    Yes, / no\n    {   a    b  }\n  </p>\n);\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_else_return_slashes": {
+   "source": "export const P = () => <p>Or else return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Or else return        x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_hyphen_expression_keyword": {
+   "source": "export const P = () => <p>Auto-return / manual {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Auto-return / manual {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_hyphen_keyword_slashes": {
+   "source": "export const P = () => <p>Auto-return / manual / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Auto-return / manual / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_hyphen_keyword_then_comment_import": {
+   "source": "export const P = () => <p>Opt-in / opt-out {/* TODO\nimport { zzz } from \"../lib/zzz\";\n*/}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Opt-in / opt-out {       \n                                 \n  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_hyphen_keyword_then_template": {
+   "source": "export const P = () => <p>Check-in / check-out {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Check-in / check-out {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_keyword_slash_then_line_comment_with_backtick": {
+   "source": "export const P = () => <p>Total: return / go // don`t</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Total: return / go              \nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_new_void_delete_throw_slashes": {
+   "source": "export const P = () => <p>Mark as: void / keep, new / old, delete / restore, throw / catch</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Mark as: void / keep, new / old, delete / restore, throw / catch</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_of_new_slashes": {
+   "source": "export const P = () => <p>Count of new / returning / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Count of new / returning / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_of_new_then_template": {
+   "source": "export const P = () => <p>Count of new / returning {`${a}/${b}`}</p>;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Count of new / returning {   a    b  }</p>;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_of_new_then_template_and_comment_backtick": {
+   "source": "export const P = () => <p>Count of new / returning {`${a}/${b}`}</p>;\nimport { a } from \"../lib/a\";\nexport const H = () => <p>{noteLength}/500 {/* don`t count spaces */}</p>;\nimport { b } from \"../lib/b\";\n",
+   "blanked": "export const P = () => <p>Count of new / returning {   a    b  }</p>;\nimport { a } from \"../lib/a\";\nexport const H = () => <p>{noteLength}/500 {                        }</p>;\nimport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_of_return_slashes": {
+   "source": "export const P = () => <p>Think of return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Think of return / go / x</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_paren_keyword_then_template": {
+   "source": "export const P = () => <p>Shift (in / out) {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Shift (in / out) {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_paren_new_then_template": {
+   "source": "export const P = () => <p>Shift (new / old) {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Shift (new / old) {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_slash_then_comment_with_backtick": {
+   "source": "export const P = () => <p>Check in / out {/* c`omment */}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Check in / out {              }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_slash_then_slash_next_line": {
+   "source": "export const P = () => (\n  <p>\n    Yes, / no\n    / more\n  </p>\n);\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => (\n  <p>\n    Yes, / no\n    / more\n  </p>\n);\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_two_keywords": {
+   "source": "export const P = () => <p>Do in / out {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Do in / out {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_word_then_return_keyword": {
+   "source": "export const P = () => <p>Please return / go {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Please return / go {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_prose_word_then_return_slashes": {
+   "source": "export const P = () => <p>Please return / go / now</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Please return / go / now</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_quote_then_multiline_template": {
+   "source": "export const R = () => <p>Say \"hi {`\n  ${x}\n`} here</p>;\nexport { x } from \"./x\";\n",
+   "blanked": "export const R = () => <p>Say \"hi { \n    x \n } here</p>;\nexport { x } from \"./x\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "x"
+     ]
+    ]
+   ]
+  },
+  "jsx_quoted_prose_then_template": {
+   "source": "export const P = () => <p>'quoted' / \"double\" {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>'quoted' / \"double\" {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_ratio_then_comment_backtick": {
+   "source": "export const H = () => <p className=\"staffing-hint\">{noteLength}/500 {/* don`t count spaces */}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const H = () => <p className=\"staffing-hint\">{noteLength}/500 {                        }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_ratio_then_multiline_comment_import": {
+   "source": "export const H = () => <p>{a}/{b} {/* TODO\nimport { zzz } from \"../lib/zzz\";\n*/}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const H = () => <p>{a}/{b} {       \n                                 \n  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_ratio_then_template": {
+   "source": "export const P = () => <span>{done}/{total} {`${pct}/${max}`}</span>;\nimport { a } from \"../lib/a\";\nexport const Q = `x`;\nimport { b } from \"../lib/b\";\n",
+   "blanked": "export const P = () => <span>{done}/{total} {   pct    max  }</span>;\nimport { a } from \"../lib/a\";\nexport const Q =    ;\nimport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "jsx_selfclose_multiline": {
+   "source": "export const F = () => <Foo\n  bar={x}\n/>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const F = () => <Foo\n  bar={x}\n/>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_selfclose_then_string_backtick": {
+   "source": "export const R = () => <Icon name={n} />; const q = \"`\";\nimport { a } from \"../lib/a\";\n",
+   "blanked": "export const R = () => <Icon name={n} />; const q = \"`\";\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_selfclose_then_template_path": {
+   "source": "export const Row = () => <><Icon name={n} /> <Link href={`/x/${id}`}>x</Link></>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const Row = () => <><Icon name={n} /> <Link href={      id  }>x</Link></>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_bang_then_template": {
+   "source": "export const P = () => <p>Go! / {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Go! / {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_keyword_after_brace": {
+   "source": "export const P = () => <p>{n} new / old {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{n} new / old {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_keyword_after_tag": {
+   "source": "export const P = () => <p>in / out {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>in / out {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_keyword_then_template": {
+   "source": "export const P = () => <p>Check in / check out {`${start}/${end}`}</p>;\nimport { api } from \"@/shared/api\";\n",
+   "blanked": "export const P = () => <p>Check in / check out {   start    end  }</p>;\nimport { api } from \"@/shared/api\";\n",
+   "statements": [
+    [
+     "stmt",
+     "@/shared/api",
+     [
+      "api"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_pct_harmless": {
+   "source": "export const P = () => <p>{pct}% / 100%</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{pct}% / 100%</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_slash_then_template": {
+   "source": "export const C = () => <p><strong>{item.provider}</strong> / <code>{`${item.model_id}/${item.version}`}</code></p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const C = () => <p><strong>{item.provider}</strong> / <code>{   item.model_id    item.version  }</code></p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_text_with_division_like": {
+   "source": "export const P = () => <p>Price: $5/unit; see /docs/ `now`</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>Price: $5/unit; see /docs/      </p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "jsx_two_desyncs": {
+   "source": "export const Row = () => <><Icon name={n} /> <Link href={`/x/${id}`}>x</Link></>;\nimport { a } from \"../lib/a\";\nexport const P = () => <span>{done}/{total} {`${pct}/${max}`}</span>;\nimport { api } from \"@/shared/api\";\nexport { b } from \"../lib/b\";\n",
+   "blanked": "export const Row = () => <><Icon name={n} /> <Link href={      id  }>x</Link></>;\nimport { a } from \"../lib/a\";\nexport const P = () => <span>{done}/{total} {   pct    max  }</span>;\nimport { api } from \"@/shared/api\";\nexport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "@/shared/api",
+     [
+      "api"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "keyword_regex_forms": {
+   "source": "function g(v) { return typeof /x\\/*/ === \"object\" ? /y\"/.test(v) : !/z\\/*/.test(v) }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function g(v) { return typeof        === \"object\" ?     .test(v) : !      .test(v) }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "line_comment_import": {
+   "source": "// import { gone } from \"./missing\";\nimport { a } from \"../lib/a\";\n",
+   "blanked": "                                    \nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "member_bang_division": {
+   "source": "const w = obj.return! / 2; const s = `/x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const w = obj.return! / 2; const s =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "member_call_import_not_dynamic": {
+   "source": "client.import(rows); await client?.import(rows); import { a } from \"../lib/a\";\n",
+   "blanked": "client.import(rows); await client?.import(rows); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "member_call_import_with_literal_not_dynamic": {
+   "source": "client.import(\"./rows.csv\"); import { a } from \"../lib/a\";\n",
+   "blanked": "client.import(\"./rows.csv\"); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "member_keyword_division": {
+   "source": "const r = obj.return / 2; const s = 'q'; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = obj.return / 2; const s = 'q'; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "minus_before_return_keyword_never": {
+   "source": "const q = a -\n  b; function g() { return /x\\/*\"/.test(q) }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const q = a -\n  b; function g() { return        .test(q) }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "multiline_braces_trailing_comma": {
+   "source": "import {\n  a,\n  b,\n} from \"./x\";\n",
+   "blanked": "import {\n  a,\n  b,\n} from \"./x\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./x",
+     [
+      "a",
+      "b"
+     ]
+    ]
+   ]
+  },
+  "nested_template": {
+   "source": "const t = `a ${`b ${c} d`} e`; import { a } from \"../lib/a\";\n",
+   "blanked": "const t =           c        ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "nonnull_in_jsx_then_template": {
+   "source": "export const W = () => <p>{ref.current!.width! / 2} {`/a/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const W = () => <p>{ref.current!.width! / 2} {      b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "nonnull_then_division": {
+   "source": "const w = el.width! / 2; const s = `/x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const w = el.width! / 2; const s =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "nonnull_then_two_divisions": {
+   "source": "const w = el.width! / 2 / 3; import { a } from \"../lib/a\";\n",
+   "blanked": "const w = el.width! / 2 / 3; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "not_equal_division": {
+   "source": "const r = a != b / 2; const s = '`'; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = a != b / 2; const s = '`'; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "not_prefix_regex": {
+   "source": "const ok = !/x\\/*/.test(v) && !!/y\"/.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const ok = !      .test(v) && !!    .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "only_bom": {
+   "source": "﻿",
+   "blanked": " ",
+   "statements": []
+  },
+  "optional_member_keyword_division": {
+   "source": "const r = node?.in / 2; const s = \"q\"; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = node?.in / 2; const s = \"q\"; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "paren_not_regex_after_return": {
+   "source": "function f(v) { return (!/x\\/*/.test(v)) }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function f(v) { return (!      .test(v)) }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "percent_before_regex": {
+   "source": "const r = 5 % /x/.source.length; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = 5 % /x/.source.length; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "percent_regex": {
+   "source": "export const P = () => <p>{pct}% / {`${a}/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{pct}% / {   a    b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "pipe_regex": {
+   "source": "const ok = a || /x\\/*y/.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const ok = a ||        .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "plus_before_regex": {
+   "source": "const s = \"a\" + /x\\/*\"/.source; import { a } from \"../lib/a\";\n",
+   "blanked": "const s = \"a\" +        .source; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "postfix_decrement_division": {
+   "source": "const h = i-- / 2; const s = 'q'; import { a } from \"../lib/a\";\n",
+   "blanked": "const h = i-- / 2; const s = 'q'; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "postfix_increment_division": {
+   "source": "let i = 0; const half = i++ / 2; const path = `/a/${half}`;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "let i = 0; const half = i++ / 2; const path =       half  ;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "question_regex": {
+   "source": "const r = a ? /x\\/*y/ : null; import { a } from \"../lib/a\";\n",
+   "blanked": "const r = a ?         : null; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_after_arrow": {
+   "source": "const f = (v) => /\\/*$/.test(v);\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const f = (v) =>       .test(v);\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_after_return": {
+   "source": "function f() { return /x\\/y/.test(v) }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function f() { return       .test(v) }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_backtick_import_template_import": {
+   "source": "const r = /`/;\nimport { a } from \"../lib/a\";\nconst t = `x`;\nimport { b } from \"../lib/b\";\n",
+   "error": "a `/` before a backtick on the same line"
+  },
+  "regex_backtick_then_import": {
+   "source": "const r = /`/;\nimport { a } from \"../lib/a\";\n",
+   "error": "a `/` before a backtick on the same line"
+  },
+  "regex_class_with_slash": {
+   "source": "const c = /[/]x/; import { a } from \"../lib/a\";\n",
+   "blanked": "const c =       ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_class_with_slash_and_backtick": {
+   "source": "const c = /[/]\\/*x/; const t = `x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const c =          ; const t =    ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_eof_no_newline": {
+   "source": "const r = /x/",
+   "blanked": "const r =    ",
+   "statements": []
+  },
+  "regex_in_template_expr": {
+   "source": "const s = `${v.replace(/\\/*$/, \"\")}`;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const s =    v.replace(      , \"\")  ;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_matching_gt": {
+   "source": "const s = v.replace(/>/g, \"&gt;\"); import { a } from \"../lib/a\";\n",
+   "blanked": "const s = v.replace(   g, \"&gt;\"); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_slash_star_then_star_slash": {
+   "source": "const r = /a\\/*b/;\nimport { a } from \"../lib/a\";\nconst s = 1; /* c */\nimport { b } from \"../lib/b\";\n",
+   "blanked": "const r =        ;\nimport { a } from \"../lib/a\";\nconst s = 1;        \nimport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "regex_then_flags_then_division": {
+   "source": "const n = /x/gi.source.length / 2; import { a } from \"../lib/a\";\n",
+   "blanked": "const n =    gi.source.length / 2; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_trailing_slash_idiom": {
+   "source": "const u = x.replace(/\\/*$/, \"\");\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const u = x.replace(      , \"\");\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_url": {
+   "source": "const isUrl = /^https?:\\/\\//.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "const isUrl =               .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_with_backtick_fails_loud": {
+   "source": "const r = /`/; const t = `x`; import { a } from \"../lib/a\";\n",
+   "error": "a `/` before a backtick on the same line"
+  },
+  "regex_with_escaped_backtick": {
+   "source": "const r = /\\x60/; const t = `x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const r =       ; const t =    ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "regex_with_quotes": {
+   "source": "const q = /\"'/; import { a } from \"../lib/a\";\n",
+   "blanked": "const q =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "require_refused": {
+   "source": "const m = require(\"./x\");\n",
+   "blanked": "const m = require(\"./x\");\n",
+   "statements": [
+    [
+     "dyn",
+     "./x",
+     [
+      "require"
+     ]
+    ]
+   ]
+  },
+  "require_with_second_argument": {
+   "source": "const r = require(\"./x\", y); import { a } from \"../lib/a\";\n",
+   "blanked": "const r = require(\"./x\", y); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "dyn",
+     "./x",
+     [
+      "require"
+     ]
+    ]
+   ]
+  },
+  "return_not_not_regex": {
+   "source": "function f(v) { return !!/x\\/*/.test(v) }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function f(v) { return !!      .test(v) }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "return_not_regex_backtick_body": {
+   "source": "function f(s) { return !/x\\/*y/.test(s) }\nimport { a } from \"../lib/a\";\nconst t = `x`;\nimport { b } from \"../lib/b\";\n",
+   "blanked": "function f(s) { return !       .test(s) }\nimport { a } from \"../lib/a\";\nconst t =    ;\nimport { b } from \"../lib/b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "stmt",
+     "../lib/b",
+     [
+      "b"
+     ]
+    ]
+   ]
+  },
+  "return_not_regex_block_comment_body": {
+   "source": "export function isClean(v: string) {\n  return !/\\/*$/.test(v);\n}\nimport { api } from \"@/shared/api\";\nexport const P = () => <p>{/* note */}x</p>;\nimport { PIN } from \"../pin\";\n",
+   "blanked": "export function isClean(v: string) {\n  return !      .test(v);\n}\nimport { api } from \"@/shared/api\";\nexport const P = () => <p>{          }x</p>;\nimport { PIN } from \"../pin\";\n",
+   "statements": [
+    [
+     "stmt",
+     "@/shared/api",
+     [
+      "api"
+     ]
+    ],
+    [
+     "stmt",
+     "../pin",
+     [
+      "PIN"
+     ]
+    ]
+   ]
+  },
+  "return_not_regex_no_close": {
+   "source": "function f(v: string) {\n  return !/\\/*$/.test(v);\n}\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function f(v: string) {\n  return !      .test(v);\n}\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "semicolon_after_word_or_double_amp_still_opens": {
+   "source": "const n = 1; /x\\/*y/.test(v); const b = a&&b; /x\\/*y/.test(b); import { a } from \"../lib/a\";\n",
+   "blanked": "const n = 1;        .test(v); const b = a&&b;        .test(b); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "semicolon_regex": {
+   "source": "a(); /x\\/*y/.test(v); import { a } from \"../lib/a\";\n",
+   "blanked": "a();        .test(v); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "semicolonless_prev": {
+   "source": "export const a = 1\nimport { api } from \"@/shared/api\";import { PIN } from \"../pin\"\n",
+   "blanked": "export const a = 1\nimport { api } from \"@/shared/api\";import { PIN } from \"../pin\"\n",
+   "statements": [
+    [
+     "stmt",
+     "@/shared/api",
+     [
+      "api"
+     ]
+    ],
+    [
+     "stmt",
+     "../pin",
+     [
+      "PIN"
+     ]
+    ]
+   ]
+  },
+  "semicolonless_return_regex": {
+   "source": "let ok = true\nreturn /x\\/*\"/.test(ok)\nimport { a } from \"../lib/a\";\n",
+   "blanked": "let ok = true\nreturn        .test(ok)\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "side_effect_anchor_in_string": {
+   "source": "const s = \"x import './missing'\"; import \"./side\";\n",
+   "blanked": "const s = \"x import './missing'\"; import \"./side\";\n",
+   "statements": [
+    [
+     "side",
+     "./side",
+     []
+    ]
+   ]
+  },
+  "side_effect_and_dynamic": {
+   "source": "import \"./side\";\nconst m = await import(\"./dyn\");\n",
+   "blanked": "import \"./side\";\nconst m = await import(\"./dyn\");\n",
+   "statements": [
+    [
+     "side",
+     "./side",
+     []
+    ],
+    [
+     "dyn",
+     "./dyn",
+     [
+      "*"
+     ]
+    ]
+   ]
+  },
+  "side_effect_import_glued": {
+   "source": "import\"./side\";\nimport { a } from \"../lib/a\";\n",
+   "blanked": "import\"./side\";\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ],
+    [
+     "side",
+     "./side",
+     []
+    ]
+   ]
+  },
+  "star_regex": {
+   "source": "const n = 2 * /x/.source.length; import { a } from \"../lib/a\";\n",
+   "blanked": "const n = 2 * /x/.source.length; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "string_after_paren_is_prose": {
+   "source": "export const P = () => <p>{f(x)}'s turn {`a/${b}`}</p>;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const P = () => <p>{f(x)}'s turn {     b  }</p>;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "string_closing_on_line_keeps_backtick": {
+   "source": "const q = \"`\"; const t = `/x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const q = \"`\"; const t =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "string_escaped_quote_then_backtick": {
+   "source": "const s = \"a\\\"`\"; const t = `x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const s = \"a\\\"`\"; const t =    ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "string_import_like": {
+   "source": "const sample = \"import x from './missing'\";\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const sample = \"import x from './missing'\";\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "string_line_continuation": {
+   "source": "const s = \"a\\\nb\"; const t = `/x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const s = \"a\\\nb\"; const t =     ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "string_with_escaped_quote": {
+   "source": "const s = \"a\\\"b\"; import { a } from \"../lib/a\";\n",
+   "blanked": "const s = \"a\\\"b\"; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "template_escaped_backtick": {
+   "source": "const t = `a\\`b`; import { a } from \"../lib/a\";\n",
+   "blanked": "const t =       ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "template_expr_string_backtick_multiline": {
+   "source": "const t = `${\"`\"}\nimport { gone } from \"./missing\"\n`;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const t =    \"`\" \n                                \n ;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "template_import_like_multiline": {
+   "source": "const block = `\nimport y from \"./missing\"\n${\"not an import\"}`;\nimport { a } from \"../lib/a\";\n",
+   "blanked": "const block =  \n                         \n  \"not an import\"  ;\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "template_with_brace_string": {
+   "source": "const t = `${\"}\"} x`; import { a } from \"../lib/a\";\n",
+   "blanked": "const t =    \"}\"    ; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "ternary_regex_in_jsx_attr": {
+   "source": "export const T = () => <Foo bar={() => /x\\/*/.test(y)} baz={a ? /b\"/ : /c/} />;\nexport { a } from \"../lib/a\";\n",
+   "blanked": "export const T = () => <Foo bar={() =>       .test(y)} baz={a ?      :    } />;\nexport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "throw_regex_after_colon": {
+   "source": "const t = x ? 1 : (() => { throw new Error(/e\\/*\"/.source) })(); import { a } from \"../lib/a\";\n",
+   "blanked": "const t = x ? 1 : (() => { throw new Error(       .source) })(); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "tilde_regex": {
+   "source": "const n = ~/x/.source.length; import { a } from \"../lib/a\";\n",
+   "blanked": "const n = ~/x/.source.length; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "type_only_forms": {
+   "source": "import type { A } from \"./a\";\nimport type B from \"./b\";\nexport type { C } from \"./c\";\nimport D, { type E, F as G } from \"./d\";\nimport * as NS from \"./ns\";\nexport * from \"./all\";\nexport * as Q from \"./q\";\nexport { default as H, default } from \"./h\";\nimport I, * as J from \"./i\";\n",
+   "blanked": "import type { A } from \"./a\";\nimport type B from \"./b\";\nexport type { C } from \"./c\";\nimport D, { type E, F as G } from \"./d\";\nimport * as NS from \"./ns\";\nexport * from \"./all\";\nexport * as Q from \"./q\";\nexport { default as H, default } from \"./h\";\nimport I, * as J from \"./i\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./a",
+     [
+      "A"
+     ]
+    ],
+    [
+     "stmt",
+     "./b",
+     [
+      "default"
+     ]
+    ],
+    [
+     "stmt",
+     "./c",
+     [
+      "C"
+     ]
+    ],
+    [
+     "stmt",
+     "./d",
+     [
+      "E",
+      "F",
+      "default"
+     ]
+    ],
+    [
+     "stmt",
+     "./ns",
+     [
+      "*"
+     ]
+    ],
+    [
+     "stmt",
+     "./all",
+     [
+      "*"
+     ]
+    ],
+    [
+     "stmt",
+     "./q",
+     [
+      "*"
+     ]
+    ],
+    [
+     "stmt",
+     "./h",
+     [
+      "default"
+     ]
+    ],
+    [
+     "stmt",
+     "./i",
+     [
+      "*",
+      "default"
+     ]
+    ]
+   ]
+  },
+  "type_prefix_two_spaces": {
+   "source": "import type  { A } from \"./a\";\nimport { type  B } from \"./b\";\n",
+   "blanked": "import type  { A } from \"./a\";\nimport { type  B } from \"./b\";\n",
+   "statements": [
+    [
+     "stmt",
+     "./a",
+     [
+      "A"
+     ]
+    ],
+    [
+     "stmt",
+     "./b",
+     [
+      "B"
+     ]
+    ]
+   ]
+  },
+  "typeof_after_arrow_division": {
+   "source": "const t = () => typeof x / 2; const s = '`'; import { a } from \"../lib/a\";\n",
+   "blanked": "const t = () => typeof x / 2; const s = '`'; import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "typeof_after_comma_regex": {
+   "source": "const n = f(a, typeof /r\\/*\"/.test(b)); import { a } from \"../lib/a\";\n",
+   "blanked": "const n = f(a, typeof        .test(b)); import { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "unicode_default_import_ascii_only": {
+   "source": "import café from \"../lib/a\";\nimport { ö } from \"../lib/c\";\n",
+   "blanked": "import café from \"../lib/a\";\nimport { ö } from \"../lib/c\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/c",
+     [
+      "ö"
+     ]
+    ]
+   ]
+  },
+  "unterminated_block": {
+   "source": "/* never closed\nimport { x } from \"./x\";\n",
+   "error": "unterminated block comment"
+  },
+  "unterminated_template": {
+   "source": "const t = `never closed;\nimport { x } from \"./x\";\n",
+   "error": "unterminated template literal"
+  },
+  "void_in_ternary_regex": {
+   "source": "function* g() { const v = x ? yield /r\\/*\"/ : y; return v }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function* g() { const v = x ? yield         : y; return v }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  },
+  "yield_not_regex": {
+   "source": "function* g(v) { yield !/x\\/*\"/.test(v) }\nimport { a } from \"../lib/a\";\n",
+   "blanked": "function* g(v) { yield !       .test(v) }\nimport { a } from \"../lib/a\";\n",
+   "statements": [
+    [
+     "stmt",
+     "../lib/a",
+     [
+      "a"
+     ]
+    ]
+   ]
+  }
+ }
+}

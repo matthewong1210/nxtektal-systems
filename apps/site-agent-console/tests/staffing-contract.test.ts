@@ -302,9 +302,167 @@ function contractFingerprint(contractDir: string): string {
 
 const CONSOLE_PREFIX = "apps/site-agent-console/";
 const CONSOLE_DIR = join(REPOSITORY_ROOT, "apps", "site-agent-console");
-const CONSOLE_STATEMENT = /\b(?:import|export)\b([^;"'`]*?)\bfrom\s+["']([^"']+)["']/g;
-const CONSOLE_SIDE_EFFECT = /(?:^|[;\s])import\s+["']([^"']+)["']/g;
-const CONSOLE_DYNAMIC = /\b(import|require)\(\s*["']([^"']+)["']\s*\)/g;
+// Statements match only at a statement start in text whose comments and
+// template literals are blanked (see `_blank_console_noise` in the Python module).
+// A clause is one of the forms the language allows (`*`, `* as ns`, `{ names }`,
+// `Default`, `Default, { names }`, `Default, * as ns`, each optionally after `type`,
+// with ASCII identifiers), so a statement never swallows the code of a
+// semicolon-less statement before it.
+const CONSOLE_CLAUSE = String.raw`(?:type\s+)?(?:\*\s*(?:as\s+[A-Za-z0-9_$]+)?|\{[^}]*\}|[A-Za-z0-9_$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[A-Za-z0-9_$]+))?)`;
+const CONSOLE_STATEMENT = new RegExp(String.raw`(?:^|[;{}])[ \t]*(?:import|export)\s+(${CONSOLE_CLAUSE})\s*from\s*["']([^"']+)["']`, "gm");
+const CONSOLE_SIDE_EFFECT = /(?:^|[;{}])[ \t]*import\s*["']([^"']+)["']/gm;
+/** A dynamic import or require whose first argument is a string literal (an ASCII
+ * boundary rather than `\b`, so a member such as `client.import(` never counts);
+ * any other `import(`/`require(` call cannot be analysed and is refused. */
+const CONSOLE_DYNAMIC = /(?<![A-Za-z0-9_$.])(import|require)\(\s*["']([^"']+)["']\s*[,)]/g;
+const CONSOLE_DYNAMIC_UNANALYSABLE = /(?<![A-Za-z0-9_$.])(?:import|require)\((?!\s*["'][^"']+["']\s*[,)])/g;
+const ENTITY_NAME = /^(?:#(?:[0-9]+|[xX][0-9a-fA-F]+)|[A-Za-z][A-Za-z0-9]+)$/;
+
+const REGEX_AFTER_CHARS = new Set("(,=:[&|?{;");
+const EXPRESSION_KEYWORDS = new Set(["return", "typeof", "yield", "await"]);
+const REGEX_AFTER_WORDS = new Set([...EXPRESSION_KEYWORDS, "case", "else"]);
+const isWordChar = (char: string): boolean => /^[A-Za-z0-9_$]$/.test(char);
+const isOperand = (char: string): boolean => isWordChar(char) || char === ")" || char === "]" || char === "}";
+/** Whether `word` is a keyword after which a `/` opens a regular expression: one
+ * of the listed keywords, not a member name, and in code rather than JSX prose
+ * (first on its line or, for a keyword that opens an expression, after another
+ * keyword or after something other than a word, `>`, `}` or a hyphen); see
+ * `_keyword_opens` in the Python module. */
+const keywordOpens = (word: string, wordPrefix: string, wordFirst: boolean, prevWord: string): boolean => {
+  if (!REGEX_AFTER_WORDS.has(word) || wordPrefix === ".") return false;
+  if (wordFirst) return true;
+  if (!EXPRESSION_KEYWORDS.has(word)) return false;
+  return REGEX_AFTER_WORDS.has(prevWord) || !(isWordChar(wordPrefix) || wordPrefix === ">" || wordPrefix === "}" || wordPrefix === "-");
+};
+
+/** Index of the quote closing the string literal opened at `start`, or null
+ * when the line ends first: a quote without a close on its line is prose (see
+ * `_string_end` in the Python module). */
+function stringEnd(text: string, start: number): number | null {
+  const quote = text[start];
+  let j = start + 1;
+  while (j < text.length) {
+    const char = text[j];
+    if (char === "\\") { j += 2; continue; }
+    if (char === "\n") return null;
+    if (char === quote) return j;
+    j += 1;
+  }
+  return null;
+}
+
+/** Whether the `;` at `index` closes an HTML entity such as `&nbsp;` (JSX prose). */
+function entityBefore(text: string, index: number): boolean {
+  let j = index - 1;
+  while (j >= 0 && (isWordChar(text[j]) || text[j] === "#")) j -= 1;
+  if (j < 0 || text[j] !== "&" || (j > 0 && text[j - 1] === "&")) return false;
+  return ENTITY_NAME.test(text.slice(j + 1, index));
+}
+
+/** Index of the `/` closing the regular-expression literal opened at `start`,
+ * or null when the `/` divides instead because the line ends first or the
+ * closing `/` would begin a comment; a backtick before the close throws (see
+ * `_regex_end` in the Python module). */
+function regexEnd(text: string, start: number): number | null {
+  let j = start + 1;
+  let inClass = false;
+  while (j < text.length) {
+    const char = text[j];
+    if (char === "\\") { j += 2; continue; }
+    if (char === "\n") return null;
+    if (char === "`") throw new Error("a `/` before a backtick on the same line in a Console source: escape a backtick in a regular expression as \\x60 or move the template literal to its own line");
+    if (inClass) { if (char === "]") inClass = false; }
+    else if (char === "[") inClass = true;
+    else if (char === "/") return text[j + 1] === "*" || text[j + 1] === "/" ? null : j;
+    j += 1;
+  }
+  return null;
+}
+
+/** Comments, template literals and regular-expression literals replaced by
+ * spaces of the same length (newlines kept) and a leading byte-order mark by a
+ * space; ordinary strings, which must close on their line and not be glued to a
+ * word or closing bracket, kept; `${...}` expressions kept as code. A `/` opens a
+ * regular expression after an operator or opening bracket, a keyword such as
+ * `return` in code rather than JSX prose, a logical `!`, the `>` of an arrow or
+ * the start of the file, and divides after an operand (a JSX `/>` or prose
+ * slash, a member named like a keyword, a postfix `++` or a non-null `!` never
+ * opens one) or when the candidate closes on a comment opener; a candidate
+ * meeting a backtick first throws. An unterminated block comment or template
+ * literal throws too (see `_blank_console_noise`). */
+function blankNoise(input: string): string {
+  const text = input.startsWith("\uFEFF") ? " " + input.slice(1) : input;
+  const out: string[] = [];
+  const mode: string[] = ["code"];
+  const braceDepth: number[] = [];
+  let prev = "";
+  let prev2 = "";
+  let word = "";
+  let wordPrefix = "";
+  let wordFirst = true;
+  let prevWord = "";
+  let joined = false;
+  let lineFirst = true;
+  let arrow = false;
+  let bangOpens = false;
+  let i = 0;
+  while (i < text.length) {
+    const char = text[i];
+    const next = text[i + 1] ?? "";
+    const state = mode[mode.length - 1];
+    if (state === "code") {
+      if (char === "/" && next === "/") { mode.push("line"); out.push("  "); i += 2; joined = false; continue; }
+      if (char === "/" && next === "*") { mode.push("block"); out.push("  "); i += 2; joined = false; continue; }
+      if (char === "/") {
+        const opensRegex = word ? keywordOpens(word, wordPrefix, wordFirst, prevWord)
+          : prev === "" ? true
+          : prev === ">" ? arrow
+          : prev === "+" || prev === "-" ? prev2 !== prev
+          : prev === "!" ? bangOpens
+          : REGEX_AFTER_CHARS.has(prev);
+        const end = opensRegex ? regexEnd(text, i) : null;
+        if (end !== null) { out.push(" ".repeat(end - i + 1)); i = end + 1; prev2 = prev; prev = ")"; word = ""; joined = false; lineFirst = false; arrow = false; continue; }
+      }
+      if ((char === '"' || char === "'") && !(i > 0 && (isWordChar(text[i - 1]) || text[i - 1] === ")" || text[i - 1] === "]" || text[i - 1] === "}"))) {
+        const end = stringEnd(text, i);
+        if (end !== null) { out.push(text.slice(i, end + 1)); i = end + 1; prev2 = prev; prev = ")"; word = ""; joined = false; lineFirst = false; arrow = false; continue; }
+      }
+      if (char === "`") { mode.push("template"); out.push(" "); i += 1; prev2 = prev; prev = ")"; word = ""; joined = false; lineFirst = false; arrow = false; continue; }
+      if (char === "}" && braceDepth.length > 0 && braceDepth[braceDepth.length - 1] === 0 && mode[mode.length - 2] === "template") {
+        mode.pop(); braceDepth.pop(); out.push(" "); i += 1; prev2 = prev; prev = ")"; word = ""; joined = false; arrow = false; continue;
+      }
+      if (braceDepth.length > 0) {
+        if (char === "{") braceDepth[braceDepth.length - 1] += 1;
+        else if (char === "}") braceDepth[braceDepth.length - 1] -= 1;
+      }
+      out.push(char); i += 1;
+      if (isWordChar(char)) {
+        if (!joined) { prevWord = word; wordPrefix = prev; wordFirst = lineFirst; }
+        word = joined ? word + char : char; prev2 = prev; prev = char; joined = true; lineFirst = false; arrow = false;
+      } else if (/\s/.test(char)) {
+        joined = false; if (char === "\n") lineFirst = true;
+      } else {
+        if (char === "!") bangOpens = (word !== "" && keywordOpens(word, wordPrefix, wordFirst, prevWord)) || !(isOperand(prev) || (prev === ">" && !arrow));
+        arrow = char === ">" && prev === "=";
+        const significant = char === ";" && entityBefore(text, i - 1) ? ")" : char;
+        prev2 = prev; prev = significant; word = ""; joined = false; lineFirst = false;
+      }
+      continue;
+    }
+    if (state === "line") { if (char === "\n") { mode.pop(); out.push(char); lineFirst = true; } else out.push(" "); i += 1; continue; }
+    if (state === "block") {
+      if (char === "*" && next === "/") { mode.pop(); out.push("  "); i += 2; } else { out.push(char === "\n" ? char : " "); if (char === "\n") lineFirst = true; i += 1; }
+      continue;
+    }
+    if (char === "\\" && next) { out.push("  "); i += 2; continue; }
+    if (char === "`") { mode.pop(); out.push(" "); i += 1; prev2 = prev; prev = ")"; word = ""; joined = false; arrow = false; continue; }
+    if (char === "$" && next === "{") { mode.push("code"); braceDepth.push(0); out.push("  "); i += 2; prev2 = prev; prev = "("; word = ""; joined = false; arrow = false; continue; }
+    out.push(char === "\n" ? char : " "); i += 1;
+  }
+  if (mode.includes("block")) throw new Error("unterminated block comment in a Console source");
+  if (mode.includes("template")) throw new Error("unterminated template literal in a Console source");
+  return out.join("");
+}
 
 type ConsoleEdge = { target: string; names: Set<string> };
 
@@ -343,7 +501,12 @@ function clauseNames(rawClause: string): Set<string> {
  * dynamic `import()`; `require` is refused (the console side of
  * `dependency_problems()` in the Python module). */
 function consoleEdges(relativePath: string): ConsoleEdge[] {
-  const text = readFileSync(join(REPOSITORY_ROOT, relativePath), "utf-8");
+  let text: string;
+  try {
+    text = blankNoise(readFileSync(join(REPOSITORY_ROOT, relativePath), "utf-8").replace(/\r\n/g, "\n"));
+  } catch (error) {
+    throw new Error(`${(error as Error).message}: ${relativePath}`);
+  }
   const aliases = consoleAliases();
   const resolveSpecifier = (specifier: string): string | null => {
     let base: string | null = null;
@@ -372,6 +535,7 @@ function consoleEdges(relativePath: string): ConsoleEdge[] {
     const target = resolveSpecifier(match[2]);
     if (target !== null) edges.push({ target, names: new Set(["*"]) });
   }
+  if ([...text.matchAll(CONSOLE_DYNAMIC_UNANALYSABLE)].length > 0) throw new Error(`dynamic import in ${relativePath}: a specifier that is not a string literal cannot be analysed`);
   return edges;
 }
 
@@ -510,6 +674,87 @@ describe("staffing v1 lockstep guards", () => {
     expect(clauseNames("*")).toEqual(new Set(["*"]));
     const statements = [...'import { a } from "./x"; import { b } from "./y";\nexport * from "./z";'.matchAll(CONSOLE_STATEMENT)].map((match) => match[2]);
     expect(statements).toEqual(["./x", "./y", "./z"]);
+    // Comments, import-like strings, and a semicolon-less previous statement are not statements.
+    const noisy = blankNoise([
+      '// import { gone } from "./missing";',
+      '/* import { alsoGone } from "../missing";',
+      '   import { other } from "@/shared/other"; */',
+      'const sample = "import x from \'./missing\'";',
+      'const block = `import y from "./missing"\n${"not an import"}`;',
+      "export const a = 1",
+      'import { api } from "@/shared/api";import { PIN } from "../pin"',
+      "export const top = api(PIN) + sample + block + a;",
+    ].join("\n"));
+    const found = [...noisy.matchAll(CONSOLE_STATEMENT)].map((match) => [match[2], [...clauseNames(match[1])].sort().join(",")]);
+    expect(found).toEqual([["@/shared/api", "api"], ["../pin", "PIN"]]);
+    expect(() => blankNoise("/* never closed\nimport { x } from \"./x\";")).toThrow(/unterminated block/);
+    // A leading byte-order mark, regular-expression literals holding a quote, a
+    // backtick or `/*`, and divisions are code: the statements after them are found,
+    // and whitespace around `as` or after `type` does not change the names taken.
+    const literal = blankNoise([
+      '\uFEFFimport { first } from "./first";',
+      'const trailing = (value: string) => value.replace(/\\/*$/, "");',
+      'const tick = /\\x60/; const quote = /"\'/; const url = /^https?:\\/\\//;',
+      "function half(value: number) { return /x\\/y/.test(String(value)) ? value / 2 : (value + 1) / 2 }",
+      'import { api } from "@/shared/api"; const ratio = half(4) / half(2);',
+      'const template = `${trailing("a/")}`; /* note */',
+      'import {\n  PIN as\n    pinned,\n  type  PinType,\n} from "../pin";',
+    ].join("\n"));
+    const literalFound = [...literal.matchAll(CONSOLE_STATEMENT)].map((match) => [match[2], [...clauseNames(match[1])].sort().join(",")]);
+    expect(literalFound).toEqual([["./first", "first"], ["@/shared/api", "api"], ["../pin", "PIN,PinType"]]);
+    // A lone backtick outside a template (JSX text, say) fails loud rather than
+    // silently blanking every later statement.
+    expect(() => blankNoise("export const P = () => <p>Use `code</p>;\nimport { x } from \"./x\";")).toThrow(/unterminated template/);
+    // JSX never opens a regular expression: a self-closing `/>`, a slash in JSX
+    // text (even after an English word that is also a keyword), a member named
+    // like a keyword, a postfix `++` and a non-null `!` all divide, while a
+    // logical `!` after `return`, a keyword first on its line (even after a
+    // comment glued to the previous line) and a `!` opening the file still open
+    // one, so a template path, a string or a comment later on the line is lexed
+    // as itself and the statements after them are found.
+    const jsx = blankNoise([
+      '!/\\x60/.test("x"); import { api } from "@/shared/api";',
+      'export function isClean(v: string) {\n  return !/\\/*$/.test(v);\n}',
+      'export const Copy = () => <p>Check in / check out {`${start}/${end}`}</p>;',
+      'function clean(v: string) {\n  const ok = true// default\n  return /x\\/*"/.test(v) && ok\n}',
+      'export const Row = () => <><Icon name={n} /> <Link href={`/x/${id}`}>x</Link></>;',
+      'export const Ratio = () => <span>{done}/{total} {`${pct}/${max}`} {/* don`t count */}</span>;',
+      'export const Pair = () => <p><strong>{item.provider}</strong> / <code>{`${item.model_id}/${item.version}`}</code></p>;',
+      'const r = obj.return / 2; const s = "`"; const half = i++ / 2; const w = el.width! / 2; const path = `/a/${half}`;',
+      'import { PIN } from "../pin";',
+    ].join("\n"));
+    const jsxFound = [...jsx.matchAll(CONSOLE_STATEMENT)].map((match) => [match[2], [...clauseNames(match[1])].sort().join(",")]);
+    expect(jsxFound).toEqual([["@/shared/api", "api"], ["../pin", "PIN"]]);
+  });
+
+  it("lexes the shared corpus to the statements the service-side walker pins", () => {
+    // Every rule of the walk is pinned by a source shape whose blanked text,
+    // statements or failure change without it; the service suite runs the same
+    // corpus, so both sides are held to byte-identical answers.
+    const corpus = JSON.parse(readFileSync(join(REPOSITORY_ROOT, "simulation/tests/site_agent/fixtures/console_lexer_corpus.json"), "utf-8")) as {
+      schema: string;
+      cases: Record<string, { source: string; blanked?: string; statements?: Array<[string, string, string[]]>; error?: string }>;
+    };
+    expect(corpus.schema).toBe("nxt-staffing-console-lexer-corpus/v1");
+    expect(Object.keys(corpus.cases).length).toBeGreaterThanOrEqual(100);
+    for (const [name, entry] of Object.entries(corpus.cases)) {
+      let blanked: string;
+      try {
+        blanked = blankNoise(entry.source);
+      } catch (error) {
+        expect(entry.error, `${name}: unexpected ${(error as Error).message}`).toBeDefined();
+        expect((error as Error).message, name).toContain(entry.error as string);
+        continue;
+      }
+      expect(entry.error, `${name}: expected ${entry.error}`).toBeUndefined();
+      expect(blanked, name).toBe(entry.blanked);
+      const found: Array<[string, string, string[]]> = [];
+      for (const match of blanked.matchAll(CONSOLE_STATEMENT)) found.push(["stmt", match[2], [...clauseNames(match[1])].sort()]);
+      for (const match of blanked.matchAll(CONSOLE_SIDE_EFFECT)) found.push(["side", match[1], []]);
+      for (const match of blanked.matchAll(CONSOLE_DYNAMIC)) found.push(["dyn", match[2], [match[1] === "require" ? "require" : "*"]]);
+      found.push(...Array.from(blanked.matchAll(CONSOLE_DYNAMIC_UNANALYSABLE), (): [string, string, string[]] => ["dyn", "", ["unanalysable"]]));
+      expect(found, name).toEqual(entry.statements);
+    }
   });
 
   it("fingerprints the frozen files with CRLF folded to LF and nothing else forgiven", () => {

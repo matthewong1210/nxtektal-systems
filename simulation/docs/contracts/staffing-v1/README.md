@@ -265,14 +265,35 @@ contract revision derived from the implementation, not from the schema:
   `--check` and both suites walk every first-party import of the covered set
   and fail on a reached module that the manifest does not classify, on a
   listed dependency or boundary that nothing reaches, on a module listed
-  twice, and on a dynamic import (`importlib`, `__import__`, `require`),
-  which cannot be analysed. On the service side the walk follows absolute
+  twice, and on a dynamic import (`importlib`, `__import__`, `require`, or
+  an `import()` whose first argument is not a string literal), which cannot
+  be analysed. On the service side the walk follows absolute
   `nxt_*` and `scripts` imports together with every package `__init__`
   executed on the dotted path, relative imports, and `from pkg import name`
   where `name` is a submodule or subpackage; on the Console side it follows
   relative specifiers and the tsconfig `@/*` path alias in `import` and
-  `export ... from` statements (any number per line), side-effect imports,
-  and `import()`. The `boundaries` are the imports the digest deliberately
+  `export ... from` statements (any number per line; comments, template
+  literals and regular-expression literals are blanked before matching, so
+  a commented-out import or one inside a template is never an edge, while
+  an ordinary string, which must close on its line and not be glued to a
+  word or closing bracket, is kept because an import specifier is one and
+  only the statement-start anchor keeps a string's contents from matching;
+  a
+  `/` opens a regular expression after an operator or opening bracket, a
+  keyword such as `return` in code rather than JSX prose, a logical `!`,
+  an arrow or the start of the file, and divides after an operand such as
+  an identifier, a closing bracket or a JSX `}` or `>`, or when it would
+  close on a comment opener, and a `/` that meets a backtick before it
+  closes fails the check naming the file, so a regular expression that
+  matches a backtick is written `\x60` and a template literal never sits
+  after a misread slash; default and namespace binding names are ASCII
+  identifiers; a
+  leading byte-order mark is tolerated; an unterminated block comment or
+  template literal, such as a lone backtick in JSX text, fails the check
+  naming the file rather than silently hiding the statements after it;
+  and both suites lex one shared corpus of source shapes to byte-identical
+  blanked text and statements), side-effect imports, and `import()`. The
+  `boundaries` are the imports the digest deliberately
   stops at, each with a recorded reason and the exact names it may export:
   the two pin modules (`STAFFING_CONTRACT_REVISION`), the Site Agent package
   root (`SiteAgentError`) and service (`SiteAgentService`) behind the HTTP

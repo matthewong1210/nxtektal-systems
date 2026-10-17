@@ -394,29 +394,321 @@ def _console_module_file(base: Path) -> Path | None:
     return None
 
 
-_CONSOLE_STATEMENT = re.compile(
-    r'\b(import|export)\b(?P<clause>[^;"\'`]*?)\bfrom\s+["\'](?P<specifier>[^"\']+)["\']'
+# Statements are matched only at a statement start (a line start or after
+# `;`, `{` or `}`) in text whose comments, template literals and
+# regular-expression literals have been blanked, so a commented-out import,
+# an import-like string, or a clause spanning a semicolon-less previous
+# statement never yields an edge.
+# A clause is one of the import/export forms the language allows (`*`,
+# `* as ns`, `{ names }`, `Default`, `Default, { names }`, `Default, * as ns`,
+# each optionally after `type`, with ASCII identifiers), so a statement never
+# swallows the code of a semicolon-less statement before it.
+_CONSOLE_CLAUSE = (
+    r"(?:type\s+)?(?:\*\s*(?:as\s+[A-Za-z0-9_$]+)?|\{[^}]*\}"
+    r"|[A-Za-z0-9_$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[A-Za-z0-9_$]+))?)"
 )
-_CONSOLE_SIDE_EFFECT = re.compile(r'(?:^|[;\s])import\s+["\'](?P<specifier>[^"\']+)["\']')
-_CONSOLE_DYNAMIC = re.compile(r'\b(?:import|require)\(\s*["\'](?P<specifier>[^"\']+)["\']\s*\)')
+_CONSOLE_STATEMENT = re.compile(
+    r'(?:^|[;{}])[ \t]*(?:import|export)\s+(?P<clause>' + _CONSOLE_CLAUSE + r')\s*from\s*["\'](?P<specifier>[^"\']+)["\']',
+    re.MULTILINE,
+)
+_CONSOLE_SIDE_EFFECT = re.compile(
+    r'(?:^|[;{}])[ \t]*import\s*["\'](?P<specifier>[^"\']+)["\']', re.MULTILINE
+)
+# A dynamic import or require whose first argument is a string literal (an
+# ASCII boundary rather than `\b`, so a member such as `client.import(` and a
+# word glued in prose never count); any other `import(`/`require(` call
+# (a variable, a template, an expression) cannot be analysed and is refused.
+_CONSOLE_DYNAMIC = re.compile(r'(?<![A-Za-z0-9_$.])(?:import|require)\(\s*["\'](?P<specifier>[^"\']+)["\']\s*[,)]')
+_CONSOLE_DYNAMIC_UNANALYSABLE = re.compile(r'(?<![A-Za-z0-9_$.])(?:import|require)\((?!\s*["\'][^"\']+["\']\s*[,)])')
+_ENTITY_NAME = re.compile(r"#(?:[0-9]+|[xX][0-9a-fA-F]+)|[A-Za-z][A-Za-z0-9]+")
+
+
+# A `/` in code opens a regular-expression literal rather than dividing when
+# it follows one of these characters, one of these keywords in code (not a
+# member name or JSX prose), a logical `!`, the `>` of an arrow, or the start
+# of the file; after an operand (an identifier, a literal, a closing bracket,
+# a JSX `}` or `>`, a postfix `++`/`--` or a non-null `!`) it divides. A
+# candidate that would close on a comment opener divides too, and one that
+# meets a backtick first fails loud, so a misread never swallows a comment or
+# a template's backtick.
+_REGEX_AFTER_CHARS = frozenset("(,=:[&|?{;")
+# The keywords a regular expression may follow in the middle of a line, and
+# the two it may follow only at the start of a line; the other keywords never
+# precede a regular-expression literal in practice but do occur as prose.
+_EXPRESSION_KEYWORDS = frozenset(("return", "typeof", "yield", "await"))
+_REGEX_AFTER_WORDS = _EXPRESSION_KEYWORDS | frozenset(("case", "else"))
+
+
+def _is_word_char(char: str) -> bool:
+    return char.isascii() and (char.isalnum() or char in ("_", "$"))
+
+
+def _is_operand(char: str) -> bool:
+    return _is_word_char(char) or char in (")", "]", "}")
+
+
+def _keyword_opens(word: str, word_prefix: str, word_first: bool, prev_word: str) -> bool:
+    """Whether the identifier ``word`` is a keyword after which a `/` opens a
+    regular expression: one of the listed keywords, not a member name, and in
+    code rather than JSX text, which it is when first on its line, after
+    another keyword, or after something other than a word, `>` or `}`."""
+
+    if word not in _REGEX_AFTER_WORDS or word_prefix == ".":
+        return False
+    if word_first:
+        return True
+    if word not in _EXPRESSION_KEYWORDS:
+        return False
+    return prev_word in _REGEX_AFTER_WORDS or not (_is_word_char(word_prefix) or word_prefix in (">", "}", "-"))
+
+
+def _string_end(text: str, start: int) -> int | None:
+    """Index of the quote closing the string literal opened at ``start``, or
+    None when the line ends first: a string cannot span lines (unless a
+    backslash continues it), so a quote without a close on its line is prose,
+    such as an apostrophe in JSX text."""
+
+    quote = text[start]
+    j = start + 1
+    length = len(text)
+    while j < length:
+        char = text[j]
+        if char == "\\":
+            j += 2
+            continue
+        if char == "\n":
+            return None
+        if char == quote:
+            return j
+        j += 1
+    return None
+
+
+def _entity_before(text: str, index: int) -> bool:
+    """Whether the `;` at ``index`` closes an HTML entity such as `&nbsp;` or
+    `&#160;`, which is JSX prose rather than a statement end."""
+
+    j = index - 1
+    while j >= 0 and (_is_word_char(text[j]) or text[j] == "#"):
+        j -= 1
+    if j < 0 or text[j] != "&" or (j > 0 and text[j - 1] == "&"):
+        return False
+    return _ENTITY_NAME.fullmatch(text[j + 1 : index]) is not None
+
+
+def _regex_end(text: str, start: int) -> int | None:
+    """Index of the `/` closing the regular-expression literal opened at
+    ``start``, or None when the `/` divides instead because the line ends
+    first or the closing `/` would begin a comment. A backtick before the
+    close fails loud: whether the `/` is a regular expression matching a
+    backtick or a misread division before a template literal, reading on
+    would swallow the template's opening backtick and silently hide every
+    statement up to the next one."""
+
+    j = start + 1
+    in_class = False
+    length = len(text)
+    while j < length:
+        char = text[j]
+        if char == "\\":
+            j += 2
+            continue
+        if char == "\n":
+            return None
+        if char == "`":
+            raise LockstepError(
+                "a `/` before a backtick on the same line in a Console source: escape a backtick"
+                " in a regular expression as \\x60 or move the template literal to its own line"
+            )
+        if in_class:
+            if char == "]":
+                in_class = False
+        elif char == "[":
+            in_class = True
+        elif char == "/":
+            return None if (text[j + 1] if j + 1 < length else "") in ("*", "/") else j
+        j += 1
+    return None
+
+
+def _blank_console_noise(text: str) -> str:
+    """The source with every comment, template literal and regular-expression
+    literal replaced by spaces of the same length (newlines kept) and a leading
+    byte-order mark replaced by a space, so that only code positions can match
+    an import statement. Ordinary string literals, which must close on their
+    line, are kept because an import specifier is one (a quote without a close
+    on its line, or glued to a word or a closing bracket as in `Don't` or
+    `{n}'s`, is prose); `${...}` expressions inside a template are kept as
+    code.
+    A `/` opens a regular expression after an operator or opening bracket, a
+    keyword such as `return` in code rather than JSX prose, a logical `!`, the
+    `>` of an arrow or the start of the file, and divides after an operand, so
+    a JSX `/>` or prose slash, a member named like a keyword, a postfix `++` or
+    a non-null `!` never opens one; a candidate closing on a comment opener
+    divides too, and one meeting a backtick first fails loud. An unterminated
+    block comment or template literal fails loud rather than silently blanking
+    the rest of the file."""
+
+    if text.startswith("\ufeff"):
+        text = " " + text[1:]
+    out: list[str] = []
+    i = 0
+    length = len(text)
+    mode: list[str] = ["code"]
+    brace_depth: list[int] = []
+    prev = ""  # last significant code character; "" at the start, ")" after a literal
+    prev2 = ""  # the significant code character before prev
+    word = ""  # the identifier or keyword that ends at prev, else ""
+    word_prefix = ""  # the significant code character before `word`
+    word_first = True  # whether `word` is the first significant thing on its line
+    prev_word = ""  # the identifier just before `word`, when only whitespace separates them
+    joined = False  # whether the previous code character continues `word`
+    line_first = True  # whether nothing significant has appeared on the current line
+    arrow = False  # whether prev is the `>` of an arrow
+    bang_opens = False  # whether the `!` at prev is a logical not, after which a `/` opens a regex
+    while i < length:
+        char = text[i]
+        nxt = text[i + 1] if i + 1 < length else ""
+        state = mode[-1]
+        if state == "code":
+            if char == "/" and nxt == "/":
+                mode.append("line")
+                out.append("  ")
+                i += 2
+                joined = False
+                continue
+            if char == "/" and nxt == "*":
+                mode.append("block")
+                out.append("  ")
+                i += 2
+                joined = False
+                continue
+            if char == "/":
+                if word:
+                    opens_regex = _keyword_opens(word, word_prefix, word_first, prev_word)
+                elif prev == "":
+                    opens_regex = True
+                elif prev == ">":
+                    opens_regex = arrow  # an arrow body; a JSX `/>` or prose slash never opens one
+                elif prev in ("+", "-"):
+                    opens_regex = prev2 != prev  # a postfix `++`/`--` is an operand
+                elif prev == "!":
+                    opens_regex = bang_opens
+                else:
+                    opens_regex = prev in _REGEX_AFTER_CHARS
+                end = _regex_end(text, i) if opens_regex else None
+                if end is not None:
+                    out.append(" " * (end - i + 1))
+                    i = end + 1
+                    prev2, prev, word, joined, line_first, arrow = prev, ")", "", False, False, False
+                    continue
+            if char in ('"', "'") and not (i > 0 and (_is_word_char(text[i - 1]) or text[i - 1] in (")", "]", "}"))):
+                end = _string_end(text, i)
+                if end is not None:
+                    out.append(text[i : end + 1])
+                    i = end + 1
+                    prev2, prev, word, joined, line_first, arrow = prev, ")", "", False, False, False
+                    continue
+            if char == "`":
+                mode.append("template")
+                out.append(" ")
+                i += 1
+                prev2, prev, word, joined, line_first, arrow = prev, ")", "", False, False, False
+                continue
+            if char == "}" and brace_depth and brace_depth[-1] == 0 and len(mode) > 1 and mode[-2] == "template":
+                mode.pop()
+                brace_depth.pop()
+                out.append(" ")
+                i += 1
+                prev2, prev, word, joined, arrow = prev, ")", "", False, False
+                continue
+            if brace_depth:
+                if char == "{":
+                    brace_depth[-1] += 1
+                elif char == "}":
+                    brace_depth[-1] -= 1
+            out.append(char)
+            i += 1
+            if _is_word_char(char):
+                if not joined:
+                    prev_word, word_prefix, word_first = word, prev, line_first
+                word = word + char if joined else char
+                prev2, prev, joined, line_first, arrow = prev, char, True, False, False
+            elif char.isspace():
+                joined = False
+                if char == "\n":
+                    line_first = True
+            else:
+                if char == "!":
+                    # a logical not, unless the `!` asserts non-null after an operand
+                    # (an identifier, a literal, a closing bracket, a JSX `}` or `>`)
+                    bang_opens = (bool(word) and _keyword_opens(word, word_prefix, word_first, prev_word)) or not (
+                        _is_operand(prev) or (prev == ">" and not arrow)
+                    )
+                arrow = char == ">" and prev == "="
+                # the `;` of an HTML entity in JSX prose is an operand, not a statement end
+                significant = ")" if char == ";" and _entity_before(text, i - 1) else char
+                prev2, prev, word, joined, line_first = prev, significant, "", False, False
+            continue
+        if state == "line":
+            if char == "\n":
+                mode.pop()
+                out.append(char)
+                line_first = True
+            else:
+                out.append(" ")
+            i += 1
+            continue
+        if state == "block":
+            if char == "*" and nxt == "/":
+                mode.pop()
+                out.append("  ")
+                i += 2
+            else:
+                out.append(char if char == "\n" else " ")
+                if char == "\n":
+                    line_first = True
+                i += 1
+            continue
+        # template literal: blank everything except `${...}` expressions, which are code
+        if char == "\\" and nxt:
+            out.append("  ")
+            i += 2
+            continue
+        if char == "`":
+            mode.pop()
+            out.append(" ")
+            i += 1
+            prev2, prev, word, joined, arrow = prev, ")", "", False, False
+            continue
+        if char == "$" and nxt == "{":
+            mode.append("code")
+            brace_depth.append(0)
+            out.append("  ")
+            i += 2
+            prev2, prev, word, joined, arrow = prev, "(", "", False, False
+            continue
+        out.append(char if char == "\n" else " ")
+        i += 1
+    if "block" in mode:
+        raise LockstepError("unterminated block comment in a Console source")
+    if "template" in mode:
+        raise LockstepError("unterminated template literal in a Console source")
+    return "".join(out)
 
 
 def _clause_names(clause: str) -> set[str]:
     """The names an import or export clause takes from its module."""
 
-    clause = clause.strip()
-    if clause.startswith("type "):
-        clause = clause[5:].strip()
+    clause = re.sub(r"^type\s+", "", clause.strip())
     names: set[str] = set()
     braces = re.search(r"\{(?P<inner>[^}]*)\}", clause)
     if braces:
         for item in braces.group("inner").split(","):
-            item = item.strip()
+            item = re.sub(r"^type\s+", "", item.strip())
             if not item:
                 continue
-            if item.startswith("type "):
-                item = item[5:].strip()
-            names.add(item.split(" as ")[0].strip())
+            names.add(re.split(r"\s+as\s+", item)[0].strip())
         clause = clause[: braces.start()] + clause[braces.end():]
     for item in clause.split(","):
         item = item.strip()
@@ -432,10 +724,14 @@ def _clause_names(clause: str) -> set[str]:
 def _console_edges(path: Path, root: Path) -> list[ImportEdge]:
     """Edges of a Console source: relative specifiers and tsconfig path
     aliases, from ``import``/``export ... from`` statements (any number per
-    line), side-effect imports, and dynamic ``import()``; ``require`` is
+    line; comments, template literals and regular-expression literals are
+    ignored), side-effect imports, and dynamic ``import()``; ``require`` is
     refused because it cannot be analysed."""
 
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = _blank_console_noise(path.read_bytes().decode("utf-8").replace("\r\n", "\n"))
+    except LockstepError as error:
+        raise LockstepError(f"{error}: {path}") from None
     aliases = _console_aliases(path, root)
     edges: list[ImportEdge] = []
 
@@ -468,6 +764,8 @@ def _console_edges(path: Path, root: Path) -> list[ImportEdge]:
         target = resolve(match.group("specifier"))
         if target is not None:
             edges.append(ImportEdge(target, {ANY_NAME}))
+    if _CONSOLE_DYNAMIC_UNANALYSABLE.search(text):
+        raise LockstepError(f"dynamic import in {path}: a specifier that is not a string literal cannot be analysed")
     return edges
 
 
