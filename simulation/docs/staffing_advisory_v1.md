@@ -529,3 +529,18 @@ loopback smoke, and `npm audit --omit=dev` passed. No `nxt_*` source changed, so
 fingerprint and the V3/V4 witnesses are unchanged; the local demo and persistent ledger were not
 touched. The examples carry the regenerated revision and both contract fingerprint pins moved with
 it.
+
+After the retired-plan projection fix (a `NO_PLAN` plan keeps its revision counter after a
+roster replacement and the date snapshot projects it as `effective_plan: null`; 2026-10-18,
+all-extras locked environment), the staffing contract-revision, wire-contract, composition, API,
+review-wire, and plan files (`tests/site_agent/test_staffing_contract_revision.py`,
+`tests/pilot_ops/test_staffing_wire_contract.py`, `tests/site_agent/test_staffing_composition.py`,
+`tests/site_agent/test_staffing_api.py`, `tests/site_agent/test_staffing_review_wire.py`,
+`tests/pilot_ops/test_staffing_plans.py`) passed 309 tests,
+`scripts/staffing_contract_revision.py --check` reported no problems, the full Python suite
+reported 5112 passed and 11 skipped (the mosquitto-dependent Edge Task integration cases),
+`scripts/validate_configs.py` reported no errors, `uv lock --check` was current, and the console
+typecheck, lint, 899 vitest tests, static build, loopback smoke, and `npm audit --omit=dev`
+passed. No `nxt_*` source changed, so the engine fingerprint and the V3/V4 witnesses are
+unchanged; the local demo and persistent ledger were not touched. The examples carry the
+regenerated revision and both contract fingerprint pins moved with it.

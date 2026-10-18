@@ -82,6 +82,7 @@ from scripts.staffing_operations import (
     candidate_to_wire,
     configured_gateway,
     coverage_gap_to_wire,
+    _effective_plan_to_wire,
     finished_evidence,
     generation_capability,
     generation_route_evidence,
@@ -462,24 +463,24 @@ def test_date_wire_projects_a_replaced_roster_plan_as_no_plan_with_its_counter()
     assert wire["effective_plan"] is None
     assert wire["revisions"] == {"roster": 2, "exception_set": 0, "effective_plan": 1}
 
-    # A NO_PLAN projection that still carries a schedule, or a negative
-    # counter, is still refused rather than published.
-    for broken in (
-        replace(projection, effective_plan_schedule=(bounded_assignment_projection(),)),
-        replace(
-            projection,
-            effective_plan=EffectivePlanState(-1, "NO_PLAN", stable_digest(()), None, 0, ()),
-        ),
-    ):
+    # A NO_PLAN projection that still carries a schedule is refused rather
+    # than published.
+    with pytest.raises(StaffingProjectionError):
+        with_runtime_context(
+            replace(projection, effective_plan_schedule=(bounded_assignment_projection(),)),
+            configured_for(cn_settings()),
+            now=NOW,
+            site_id="site-1",
+            deployment_id="deployment-1",
+            site_timezone="Asia/Shanghai",
+        )
+    # The guard itself (not the later revisions-vector check) refuses a
+    # negative or non-integer counter, and accepts the retained counter.
+    assert _effective_plan_to_wire(1, "NO_PLAN", stable_digest(()), None) is None
+    assert _effective_plan_to_wire(None, "NO_PLAN", None, None) is None
+    for counter in (-1, True, 1.0):
         with pytest.raises(StaffingProjectionError):
-            with_runtime_context(
-                broken,
-                configured_for(cn_settings()),
-                now=NOW,
-                site_id="site-1",
-                deployment_id="deployment-1",
-                site_timezone="Asia/Shanghai",
-            )
+            _effective_plan_to_wire(counter, "NO_PLAN", stable_digest(()), None)
 
 
 def test_resolve_staffing_root_is_exact_stable_and_symlink_safe(tmp_path: Path) -> None:
@@ -5019,6 +5020,9 @@ def flow_generation(request_id: str, *, roster: int, exception_set: int, effecti
 
 
 def flow_roster_with_reserve(request_id: str, expected_revision: int) -> dict[str, object]:
+    # A third worker: once the accepted plan assigns the second worker, a
+    # later VALID suggestion needs someone who is neither on leave nor
+    # already assigned (an overlapping ADD is rejected by the validator).
     payload = flow_roster(request_id, expected_revision)
     payload["workers"].append(
         {
@@ -5333,7 +5337,12 @@ def test_roster_replacement_after_an_accepted_plan_keeps_reads_open_and_refuses_
         # The console's accept guard compares this basis with the snapshot
         # revisions; the roster revision no longer matches.
         assert listed[pending_id]["basis"]["roster"] == 1
-        api.route("GET", "/api/v1/staffing", {})
+        # The summary serves the audit clock's site-local date, which is
+        # FLOW_SERVICE_DATE for NOW in Asia/Shanghai.
+        summary = api.route("GET", "/api/v1/staffing", {})
+        assert summary["service_date"] == FLOW_SERVICE_DATE
+        assert summary["revisions"] == snapshot["revisions"]
+        assert summary["effective_plan"] is None
 
         # The old suggestion is no longer acceptable: an explicit 409 whether
         # the manager cites the old basis or the current one, and the ledger
