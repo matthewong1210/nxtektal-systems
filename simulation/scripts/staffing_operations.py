@@ -1506,7 +1506,13 @@ def _effective_plan_to_wire(
     schedule: Sequence[AssignmentProjection] | None,
 ) -> dict[str, object] | None:
     if status == "NO_PLAN":
-        if revision not in {None, 0} or schedule is not None:
+        # The domain keeps the plan revision counter when a roster replacement
+        # retires an accepted plan (``EffectivePlanState(n, "NO_PLAN", ...)``).
+        # The counter still travels through ``revisions.effective_plan`` as the
+        # next accept basis, so only the schedule must be absent here.
+        if schedule is not None or (
+            revision is not None and (type(revision) is not int or revision < 0)
+        ):
             raise _projection("NO_PLAN projection is inconsistent")
         return None
     if status not in {"CURRENT", "REVIEW_REQUIRED"}:

@@ -63,7 +63,7 @@ EXPECTED_ERROR_STATUS = {
 # Editing any frozen file without updating both pins in the same commit fails
 # whichever side was left behind; see the contract README, "Versioning and
 # lockstep rollout".
-STAFFING_CONTRACT_FINGERPRINT = "979c879acf34061f909002d4cf3022fc1bf08fe5a5e51da93cb3984d6f9d0583"
+STAFFING_CONTRACT_FINGERPRINT = "aa1e80f7396418b0012e0017b3cafefb366b9876c40264db1c029d9c9153fde0"
 EXPECTED_SUCCESS_EXCHANGES = {
     "cold-start.json": {"current-empty", "date-empty"},
     "roster-import.json": {"roster-committed"},

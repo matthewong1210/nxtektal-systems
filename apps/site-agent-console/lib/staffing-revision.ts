@@ -11,4 +11,4 @@
  * from `simulation/`; this module is outside the manifest so rewriting the pin
  * does not change the value it pins.
  */
-export const STAFFING_CONTRACT_REVISION = "0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f";
+export const STAFFING_CONTRACT_REVISION = "c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f";

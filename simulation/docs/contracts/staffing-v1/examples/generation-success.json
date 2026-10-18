@@ -3,28 +3,28 @@
   "exchanges": [
     {
       "name":"generation-reserved","method":"POST","route_template":"/api/v1/staffing/suggestions",
-      "request":{"schema":"nxt-staffing-suggestion-generate/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","request_id":"request-generate-reserved","operator":"manager-1","service_date":"2026-10-06","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"retry_of":null},
+      "request":{"schema":"nxt-staffing-suggestion-generate/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","request_id":"request-generate-reserved","operator":"manager-1","service_date":"2026-10-06","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"retry_of":null},
       "http_status":202,
       "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
-        "schema":"nxt-staffing/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","disposition":"created","operation_kind":"suggestion-generate","request_id":"request-generate-reserved","operation_id":"staffing-event-generation-reserved","state":"RESERVED",
+        "schema":"nxt-staffing/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","disposition":"created","operation_kind":"suggestion-generate","request_id":"request-generate-reserved","operation_id":"staffing-event-generation-reserved","state":"RESERVED",
         "record":{"record_kind":"GENERATION_RESERVED","suggestion_id":"generation-reserved-1","service_date":"2026-10-06","basis":{"roster":1,"exception_set":3,"effective_plan":0,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"retry_of":null,"provenance":[]}
       }}
     },
     {
       "name":"generation-in-progress","method":"POST","route_template":"/api/v1/staffing/suggestions",
-      "request":{"schema":"nxt-staffing-suggestion-generate/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","request_id":"request-generate-progress","operator":"manager-1","service_date":"2026-10-06","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"retry_of":null},
+      "request":{"schema":"nxt-staffing-suggestion-generate/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","request_id":"request-generate-progress","operator":"manager-1","service_date":"2026-10-06","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"retry_of":null},
       "http_status":202,
       "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
-        "schema":"nxt-staffing/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","disposition":"created","operation_kind":"suggestion-generate","request_id":"request-generate-progress","operation_id":"staffing-event-generation-progress","state":"IN_PROGRESS",
+        "schema":"nxt-staffing/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","disposition":"created","operation_kind":"suggestion-generate","request_id":"request-generate-progress","operation_id":"staffing-event-generation-progress","state":"IN_PROGRESS",
         "record":{"record_kind":"GENERATION_IN_PROGRESS","suggestion_id":"generation-progress-1","service_date":"2026-10-06","basis":{"roster":1,"exception_set":3,"effective_plan":0,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"retry_of":null,"provenance":[]}
       }}
     },
     {
       "name":"suggestion-issued","method":"POST","route_template":"/api/v1/staffing/suggestions",
-      "request":{"schema":"nxt-staffing-suggestion-generate/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","request_id":"request-generate-success","operator":"manager-1","service_date":"2026-10-06","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"retry_of":null},
+      "request":{"schema":"nxt-staffing-suggestion-generate/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","request_id":"request-generate-success","operator":"manager-1","service_date":"2026-10-06","expected_revisions":{"roster":1,"exception_set":3,"effective_plan":0},"retry_of":null},
       "http_status":202,
       "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
-        "schema":"nxt-staffing/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","disposition":"created","operation_kind":"suggestion-generate","request_id":"request-generate-success","operation_id":"staffing-event-generation-success","state":"SUCCEEDED",
+        "schema":"nxt-staffing/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","disposition":"created","operation_kind":"suggestion-generate","request_id":"request-generate-success","operation_id":"staffing-event-generation-success","state":"SUCCEEDED",
         "record":{
           "record_kind":"SUGGESTION_ISSUED","suggestion_id":"generation-success-1","service_date":"2026-10-06","basis":{"roster":1,"exception_set":3,"effective_plan":0,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"retry_of":null,
           "provenance":[{"attempt_index":0,"provider":"KIMI","region":"CN","route_role":"PRIMARY","route_id":"cn-kimi-v1","model_id":"moonshot-v1-128k","failure_code":null,"retryable":false,"security_failure":false,"provider_request_id":"provider-request-1","finish_reason":"stop","input_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","output_digest":"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd","input_tokens":620,"output_tokens":210}],

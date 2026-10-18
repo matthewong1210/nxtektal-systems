@@ -254,7 +254,7 @@ type FrozenTypeSurface = [
 const REPOSITORY_ROOT = join(EXAMPLES_DIR, "..", "..", "..", "..", "..");
 const LOCKSTEP_MANIFEST = join(REPOSITORY_ROOT, "simulation", "docs", "contracts", "staffing-v1", "lockstep.json");
 const PYTHON_REVISION_MODULE = join(REPOSITORY_ROOT, "simulation", "scripts", "staffing_contract_revision.py");
-const STAFFING_CONTRACT_FINGERPRINT = "979c879acf34061f909002d4cf3022fc1bf08fe5a5e51da93cb3984d6f9d0583";
+const STAFFING_CONTRACT_FINGERPRINT = "aa1e80f7396418b0012e0017b3cafefb366b9876c40264db1c029d9c9153fde0";
 const CANDIDATE_KEYS = [
   "action_window_end_at", "actionability", "candidate_index", "coverage_gaps", "operational_warnings",
   "operational_warnings_local", "operations", "rationale", "rationale_local", "rejection_codes",

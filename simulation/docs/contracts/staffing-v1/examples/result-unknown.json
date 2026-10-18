@@ -7,7 +7,7 @@
       "route_template":"/api/v1/staffing/requests/{operation_kind}/{request_id}",
       "http_status":200,
       "body":{"schema":"nxt-site-agent/api/v0","disclaimer":"SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA","data":{
-        "schema":"nxt-staffing/v1","contract_revision":"0aa08a12af79cdce103b7f11057cac6c2b39b37a54bf054bbfb2a247e910bb1f","disposition":"duplicate","operation_kind":"suggestion-generate","request_id":"request-result-unknown","operation_id":"staffing-event-result-unknown","state":"RESULT_UNKNOWN",
+        "schema":"nxt-staffing/v1","contract_revision":"c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f","disposition":"duplicate","operation_kind":"suggestion-generate","request_id":"request-result-unknown","operation_id":"staffing-event-result-unknown","state":"RESULT_UNKNOWN",
         "record":{"record_kind":"GENERATION_INTERRUPTED","suggestion_id":"generation-result-unknown","service_date":"2026-10-06","basis":{"roster":1,"exception_set":3,"effective_plan":0,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"retry_of":null,"provenance":[],"failure_code":"RESULT_UNKNOWN"}
       }}
     }

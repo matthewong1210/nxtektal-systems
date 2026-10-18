@@ -89,6 +89,9 @@ An accepted plan remains `CURRENT` when a newly recorded exception is merely
 overlaid after acceptance. Cancelling or correcting an exception that was in the
 accepted basis makes the plan `REVIEW_REQUIRED`. Replacing the applicable roster
 makes the plan `NO_PLAN`; with no accepted or modified plan it is also `NO_PLAN`.
+A retired plan keeps its revision counter: the date snapshot then carries
+`effective_plan: null` while `revisions.effective_plan` still reports that
+counter as the next accept basis.
 
 ## Time and DST rules
 
