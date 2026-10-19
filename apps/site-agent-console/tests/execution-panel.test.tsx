@@ -348,21 +348,21 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     const next = html.indexOf('data-testid="execution-record-card"', start + 1);
     return html.slice(start, next === -1 ? undefined : next);
   };
-  const RUNNING_ID = "63910eea19b879c2f1c205d813f180c4b615b65beea794294853c7075ca0f869";
-  const SUCCEEDED_ID = "9111fd9532221e029bc2f63dfcee6b16c5a21d3ea9fda02c7697c1c4a8bc8e60";
+  const RUNNING_ID = "3827c11c0ff52f418ab6d14323056ebb34fc02859fe96446cc62705a5415596d";
+  const SUCCEEDED_ID = "067c9521d311af87200748481a09acb14daadc414ac79c0868d834805bda5ba9";
 
   it("passes the frozen witness through the real parser with its exact replay digest, ACTIVE session, clock and two records", async () => {
     const { continuousTwoTaskWitness } = await import("./execution-fixtures");
     const witness = continuousTwoTaskWitness();
-    expect(witness.replay_digest).toBe("81f38ffa86cf76e5890acef8b2ab26daa95cf61eb357d7555aa028608d5c4d5a");
+    expect(witness.replay_digest).toBe("c80c80f2899f1dc5e5c5fcf92174cfdf7eaeb19acafa7ecc297dc2d6e3b09b49");
     expect(witness.session_state).toBe("ACTIVE");
     expect(witness.now_sim_t_s).toBe(31800);
     expect(witness.session_id).toBe("collection-execution-session-v3");
     // Preserve the service array order (its execution-ID order, as frozen in
     // the witness); do not sort records by lifecycle state.
     expect(witness.executions.map((row) => [row.execution_id, row.state, row.stage, row.raw_quantity.balls, row.unload_quantity.balls])).toEqual([
-      [RUNNING_ID, "RUNNING", "RAW_COLLECTED_TO_ROBOT", 296, 0],
       [SUCCEEDED_ID, "SUCCEEDED", "TERMINAL", 600, 600],
+      [RUNNING_ID, "RUNNING", "RAW_COLLECTED_TO_ROBOT", 296, 0],
     ]);
   });
 
@@ -371,7 +371,7 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     const witness = continuousTwoTaskWitness();
     const html = clean(render(view(witness)));
     expect(cardOrder(html)).toEqual(witness.executions.map((row) => row.execution_id));
-    expect(cardOrder(html)).toEqual([RUNNING_ID, SUCCEEDED_ID]);
+    expect(cardOrder(html)).toEqual([SUCCEEDED_ID, RUNNING_ID]);
     expect((html.match(/class="dispatch-record exec-record"/g) ?? []).length).toBe(2);
     const running = cardHtml(html, RUNNING_ID);
     expect(running).toContain("task_51b158a10d9deba0b1aae545");
@@ -411,10 +411,10 @@ describe("continuous V4: the backend-generated two-task witness, read directly a
     const earlier = parseCollectionExecutions(continuousTwoTaskPendingData());
     const witness = continuousTwoTaskWitness();
     expect(earlier.executions.map((row) => row.execution_id)).toEqual(witness.executions.map((row) => row.execution_id));
-    expect(earlier.executions.map((row) => row.state)).toEqual(["PENDING", "SUCCEEDED"]);
+    expect(earlier.executions.map((row) => row.state)).toEqual(["SUCCEEDED", "PENDING"]);
     expect(earlier.session_state).toBe("ACTIVE");
     expect(earlier.now_sim_t_s).toBe(31260);
-    expect(earlier.executions[1]).toEqual(witness.executions[1]); // the terminal record is byte-for-byte the witness's
+    expect(earlier.executions[0]).toEqual(witness.executions[0]); // the terminal record is byte-for-byte the witness's
     const html = clean(render(view(earlier)));
     expect(cardOrder(html)).toEqual(witness.executions.map((row) => row.execution_id));
     expect(cardHtml(html, RUNNING_ID)).toContain("Not started yet · waiting for a policy slot");

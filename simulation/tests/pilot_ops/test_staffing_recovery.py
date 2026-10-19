@@ -18,6 +18,7 @@ import pytest
 
 from nxt_pilot_ops.serialization import canonical_json, stable_digest, to_primitive
 from nxt_pilot_ops.staffing.contracts import (
+    AppendEventDecision,
     PROMPT_TEMPLATE_VERSION,
     AttemptFinishedEvidence,
     AttemptRouteEvidence,
@@ -32,9 +33,11 @@ from nxt_pilot_ops.staffing.contracts import (
     ManagerCommittedProjection,
     ResultEvidence,
     RosterCommittedProjection,
+    RosterImportedPayload,
     StaffingError,
 )
 from nxt_pilot_ops.staffing.ledger import EventCommit, StaffingLedger
+from nxt_pilot_ops.staffing.roster import validate_roster_import
 
 from .staffing_fixtures import roster_import_request
 
@@ -1492,6 +1495,87 @@ def _exception_request(*, request_id="exception-request-1", expected_revision=0)
         "operator": "course-manager",
         "note": "called ahead",
     }
+
+
+def test_roster_import_that_invalidates_an_active_exception_is_refused_before_append(
+    tmp_path,
+) -> None:
+    ledger, operations = _open_operations(tmp_path / "ledger")
+    operations.import_roster(roster_import_request(), recorded_at=NOW)
+    recorded = operations.record_exception(_exception_request(), recorded_at=NOW)
+    assert type(recorded) is CommittedReceipt
+    before = ledger.verify()
+
+    stripped = roster_import_request()
+    stripped["request_id"] = "roster-002"
+    stripped["expected_roster_revision"] = 1
+    stripped["regular_assignments"] = []
+    with pytest.raises(StaffingError) as refused:
+        operations.import_roster(stripped, recorded_at=NOW)
+    assert refused.value.code == "unknown_staff_or_shift"
+
+    # Nothing was appended or bound, and the service date is still readable
+    # against the existing roster with its exception intact.
+    assert ledger.verify() == before
+    projection = operations.date_projection(date(2026, 10, 5))
+    assert projection.roster_revision == 1
+    assert len(projection.exceptions) == 1
+
+    # The same request ID with a compatible roster is a fresh admission.
+    compatible = roster_import_request()
+    compatible["request_id"] = "roster-002"
+    compatible["expected_roster_revision"] = 1
+    compatible["source_ref"] = "weekly-v2.csv"
+    admitted = operations.import_roster(compatible, recorded_at=NOW)
+    assert type(admitted) is CommittedReceipt
+    projection = operations.date_projection(date(2026, 10, 5))
+    assert projection.roster_revision == 2
+    assert len(projection.exceptions) == 1
+
+
+def test_ledger_holding_a_pre_guard_stripping_import_recovers_through_a_compatible_import(
+    tmp_path,
+) -> None:
+    ledger, operations = _open_operations(tmp_path / "ledger")
+    operations.import_roster(roster_import_request(), recorded_at=NOW)
+    operations.record_exception(_exception_request(), recorded_at=NOW)
+
+    # A stripping roster that was admitted before the guard existed: append the
+    # event directly, bypassing import_roster, as a legacy ledger would hold it.
+    stripped = roster_import_request()
+    stripped["request_id"] = "roster-legacy"
+    stripped["expected_roster_revision"] = 1
+    stripped["regular_assignments"] = []
+    legacy_roster = validate_roster_import(
+        stripped, site_id=SITE_ID, deployment_id=DEPLOYMENT_ID, site_timezone="Asia/Shanghai"
+    )
+
+    def legacy(state):
+        payload = RosterImportedPayload(
+            "roster-legacy", "d" * 64, legacy_roster.revision, legacy_roster.roster_digest,
+            legacy_roster, "course-manager", "legacy.csv",
+        )
+        return AppendEventDecision(
+            operations._new_event(state.history, "roster_imported", payload, NOW)
+        )
+
+    ledger.append_via(legacy)
+
+    # The guard is admission-only: that service date reads exactly as before.
+    with pytest.raises(StaffingError) as unreadable:
+        operations.date_projection(date(2026, 10, 5))
+    assert unreadable.value.code == "unknown_staff_or_shift"
+
+    # Recovery: a roster that restores the shift passes the guard, and the date
+    # reads again at revision 3 with the exception intact.
+    restored = roster_import_request()
+    restored["request_id"] = "roster-restore"
+    restored["expected_roster_revision"] = 2
+    restored["source_ref"] = "restore.csv"
+    assert type(operations.import_roster(restored, recorded_at=NOW)) is CommittedReceipt
+    projection = operations.date_projection(date(2026, 10, 5))
+    assert projection.roster_revision == 3
+    assert len(projection.exceptions) == 1
 
 
 def test_exception_record_and_cancel_use_locked_revision_cas(tmp_path) -> None:

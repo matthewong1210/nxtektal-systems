@@ -29,6 +29,7 @@ from nxt_pilot_ops.staffing.plans import (
     effective_plan_state,
     roster_revisions,
     validate_active_exceptions_for_roster,
+    validate_roster_replacement,
 )
 from nxt_pilot_ops.staffing.roster import materialize_service_day, validate_roster_import
 
@@ -249,6 +250,49 @@ def test_active_exception_incompatible_with_replacement_roster_fails_closed():
     with pytest.raises(StaffingError) as caught:
         build_staffing_basis(history, SERVICE_DATE)
     assert caught.value.code == "unknown_staff_or_shift"
+
+
+def test_roster_replacement_is_refused_at_admission_when_it_invalidates_an_active_exception():
+    roster = _roster()
+    exception = normalize_exception(_exception_request(), roster=roster)
+    history = StaffingHistory((_roster_event(roster), _record(exception, 2, 1)))
+
+    def replacement(**changes):
+        payload = roster_import_request()
+        payload["request_id"] = "roster-2"
+        payload["expected_roster_revision"] = 1
+        payload.update(changes)
+        return _roster(payload)
+
+    # The worker's shift disappears: the same code the read path would raise.
+    with pytest.raises(StaffingError) as missing:
+        validate_roster_replacement(history, replacement(regular_assignments=[]))
+    assert missing.value.code == "unknown_staff_or_shift"
+
+    # The shift now starts after the recorded LATE interval begins.
+    shortened = roster_import_request()["regular_assignments"]
+    shortened[0]["start_local"] = "09:30"
+    with pytest.raises(StaffingError) as outside:
+        validate_roster_replacement(history, replacement(regular_assignments=shortened))
+    assert outside.value.code == "invalid_exception_time"
+
+    # A replacement that governs only later dates leaves the exception's date
+    # to the earlier roster and is not checked against it.
+    later = replacement(effective_from_local_date="2026-10-12", regular_assignments=[])
+    assert validate_roster_replacement(history, later) == ()
+
+    # A compatible replacement is admitted and reports the checked date.
+    assert validate_roster_replacement(history, replacement()) == (SERVICE_DATE,)
+    # Cancelled exceptions no longer constrain a replacement.
+    cancelled = _event(
+        "exception_cancelled",
+        ExceptionCancelledPayload(
+            "cancel-3", "c" * 64, exception.exception_id, 2, exception, "course-manager", None
+        ),
+        3,
+    )
+    history = StaffingHistory((_roster_event(roster), _record(exception, 2, 1), cancelled))
+    assert validate_roster_replacement(history, replacement(regular_assignments=[])) == ()
 
 
 def test_changed_shift_that_no_longer_contains_exception_fails_closed():

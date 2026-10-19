@@ -5380,6 +5380,49 @@ def test_roster_replacement_after_an_accepted_plan_keeps_reads_open_and_refuses_
         api.close()
 
 
+def test_roster_import_that_strips_an_on_leave_worker_shift_is_refused_and_reads_stay_open(
+    tmp_path: Path,
+) -> None:
+    events: list[dict[str, object]] = []
+    api, ledger, worker, transport = flow_api(tmp_path, [], events.append)
+    try:
+        api.route("POST", "/api/v1/staffing/roster-imports", flow_roster("roster-1", 0))
+        leave = api.route("POST", "/api/v1/staffing/exceptions", flow_leave("leave-1", roster=1, exception_set=0))
+        assert leave["record"]["exception_set_revision"] == 1
+        before = ledger.verify()
+
+        # The replacement drops the on-leave worker's shift: an explicit 400
+        # before anything is written, not a later unreadable module.
+        stripped = flow_roster("roster-2", 1)
+        stripped["regular_assignments"] = [
+            row for row in stripped["regular_assignments"] if row["staff_id"] != "staff-001"
+        ]
+        with pytest.raises(SiteAgentError) as refused:
+            api.route("POST", "/api/v1/staffing/roster-imports", stripped)
+        assert refused.value.code == "staffing_invalid_request"
+        assert ledger.verify() == before
+        with pytest.raises(SiteAgentError) as unbound:
+            api.route("GET", "/api/v1/staffing/requests/roster-import/roster-2", {})
+        assert unbound.value.code == "staffing_request_not_found"
+
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        assert snapshot["revisions"] == {"roster": 1, "exception_set": 1, "effective_plan": 0}
+        assert snapshot["roster"]["revision"] == 1
+        assert [row["staff_id"] for row in snapshot["active_exceptions"]] == ["staff-001"]
+        summary = api.route("GET", "/api/v1/staffing", {})
+        assert summary["revisions"] == snapshot["revisions"]
+
+        # A replacement that keeps the worker's shift is admitted as revision 2.
+        kept = api.route("POST", "/api/v1/staffing/roster-imports", flow_roster_with_reserve("roster-2", 1))
+        assert kept["state"] == "COMMITTED"
+        assert kept["record"]["roster_revision"] == 2
+        snapshot = api.route("GET", f"/api/v1/staffing/dates/{FLOW_SERVICE_DATE}", {})
+        assert snapshot["revisions"] == {"roster": 2, "exception_set": 1, "effective_plan": 0}
+        assert events == []
+    finally:
+        api.close()
+
+
 def test_diagnostics_sink_failures_never_block_the_terminal(tmp_path: Path) -> None:
     def broken_sink(event):
         raise RuntimeError("sink offline")

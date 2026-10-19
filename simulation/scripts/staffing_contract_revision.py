@@ -55,7 +55,7 @@ from pathlib import Path
 import re
 import sys
 
-STAFFING_CONTRACT_REVISION = "c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f"
+STAFFING_CONTRACT_REVISION = "c7efc1a14b955573f8472ea86fab2351ba392bd5c0cf5744ab37f102e9c2bf3e"
 
 LOCKSTEP_MANIFEST = "simulation/docs/contracts/staffing-v1/lockstep.json"
 CONTRACT_DIRECTORY = "simulation/docs/contracts/staffing-v1"

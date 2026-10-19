@@ -81,7 +81,12 @@ from .exceptions import (
     parse_exception_correction_request,
 )
 from .ledger import EventCommit, StaffingLedger
-from .plans import build_staffing_basis, effective_plan_state, roster_revisions
+from .plans import (
+    build_staffing_basis,
+    effective_plan_state,
+    roster_revisions,
+    validate_roster_replacement,
+)
 from .review import (
     action_window_end,
     is_expired,
@@ -682,6 +687,11 @@ class StaffingOperations:
                 raise StaffingError("STALE_ROSTER_REVISION", "expected_roster_revision")
             if roster.revision != current_revision + 1:
                 raise StaffingError("STALE_ROSTER_REVISION", "expected_roster_revision")
+            # Admission, not replay: a replacement that would leave an active
+            # exception without its worker's shift (or outside it) on a date it
+            # governs is refused here, before any append, with the same rule
+            # the read path applies.
+            validate_roster_replacement(history, roster)
             event_payload = RosterImportedPayload(
                 request_id,
                 authoritative_digest,

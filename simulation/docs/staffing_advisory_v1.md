@@ -155,6 +155,17 @@ half-open intervals and a correction that shrinks or moves its own record do
 not conflict. Replay keeps its own non-overlap validation as defense in depth.
 The composition root maps the conflict to HTTP 409 `staffing_exception_overlap`.
 
+A roster import is admitted only if every service date it would govern keeps
+its active exceptions resolvable: each such date is materialized against the
+incoming roster under the append lock and checked with the read path's rule,
+so a replacement that would leave an active exception without its worker's
+shift, or outside that shift, is refused before any append with the same
+`unknown_staff_or_shift` / `invalid_exception_time` error (HTTP 400
+`staffing_invalid_request`). The existing roster, exceptions, and plan stay
+readable; the manager cancels or corrects the exception first, or imports a
+roster that keeps the shift. Dates the new roster does not govern are not
+checked against it.
+
 ## Generation reservation and provider wire
 
 The generation schema is `nxt-staffing-suggestion-generate/v1`; its exact
@@ -544,3 +555,29 @@ typecheck, lint, 899 vitest tests, static build, loopback smoke, and `npm audit 
 passed. No `nxt_*` source changed, so the engine fingerprint and the V3/V4 witnesses are
 unchanged; the local demo and persistent ledger were not touched. The examples carry the
 regenerated revision and both contract fingerprint pins moved with it.
+
+After the roster-admission fix (a roster import that would leave an active exception without
+its worker's shift, or outside it, on a service date it governs is refused under the append lock
+before any append; 2026-10-19, all-extras locked environment), the staffing contract-revision,
+wire-contract, composition, API, review-wire, plan, recovery, roster, exception, and boundary
+files (`tests/site_agent/test_staffing_contract_revision.py`,
+`tests/pilot_ops/test_staffing_wire_contract.py`, `tests/site_agent/test_staffing_composition.py`,
+`tests/site_agent/test_staffing_api.py`, `tests/site_agent/test_staffing_review_wire.py`,
+`tests/pilot_ops/test_staffing_plans.py`, `tests/pilot_ops/test_staffing_recovery.py`,
+`tests/pilot_ops/test_staffing_roster.py`, `tests/pilot_ops/test_staffing_exceptions.py`,
+`tests/pilot_ops/test_boundaries.py`) passed 621 tests,
+`scripts/staffing_contract_revision.py --check` reported no problems, the full Python suite
+reported 5115 passed and 11 skipped, after which the legacy-ledger recovery test was added and its
+recovery and plan files re-ran green (177 tests) (the mosquitto-dependent Edge Task integration cases are the skips),
+`scripts/validate_configs.py` reported no errors, `uv lock --check` was current, and the console
+typecheck, lint, 899 vitest tests, static build, loopback smoke, and `npm audit --omit=dev`
+passed. The V3 and V4 witnesses were regenerated through their authoritative flows (22
+regenerate-mode passes, then 29 read-only passes and the console's two witness consumers, whose
+frozen identities, replay digest, and array order follow the regenerated witness) because
+`nxt_pilot_ops/staffing/plans.py` and `operations.py` changed and the engine fingerprint hashes
+every `nxt_*` source file; the engine digest moved from `637da890…` to `1213e6aa…`. An
+order-insensitive structural comparison showed only identity and digest leaves moved (80 leaves
+in the two-task witness, whose two executions now arrive in the opposite service order, and 42
+in the normal-loop witness). The v1 ledger fixture replays unchanged, the local demo and
+persistent ledger were not touched, and the examples carry the regenerated revision with both
+contract fingerprint pins.

@@ -1,6 +1,6 @@
 {
   "schema": "nxt-staffing-lockstep/v1",
-  "contract_revision": "c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f",
+  "contract_revision": "c7efc1a14b955573f8472ea86fab2351ba392bd5c0cf5744ab37f102e9c2bf3e",
   "sources": {
     "files": [
       "apps/site-agent-console/components/StaffingPanel.tsx",

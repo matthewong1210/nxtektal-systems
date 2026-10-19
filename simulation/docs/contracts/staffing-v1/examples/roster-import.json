@@ -7,7 +7,7 @@
       "route_template": "/api/v1/staffing/roster-imports",
       "request": {
         "schema": "nxt-staffing-roster-import/v1",
-        "contract_revision": "c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f",
+        "contract_revision": "c7efc1a14b955573f8472ea86fab2351ba392bd5c0cf5744ab37f102e9c2bf3e",
         "request_id": "request-roster-1",
         "operator": "manager-1",
         "expected_roster_revision": 0,
@@ -37,7 +37,7 @@
         "disclaimer": "SIMULATED PILOT SCENARIO — NOT LIVE CUSTOMER DATA",
         "data": {
           "schema": "nxt-staffing/v1",
-          "contract_revision": "c0a14bd7ad688b62684832721ce4eb414c8a80cede60ccc067a0410f2e971f1f",
+          "contract_revision": "c7efc1a14b955573f8472ea86fab2351ba392bd5c0cf5744ab37f102e9c2bf3e",
           "disposition": "created",
           "operation_kind": "roster-import",
           "request_id": "request-roster-1",

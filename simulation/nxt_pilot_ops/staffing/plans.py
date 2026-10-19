@@ -17,6 +17,7 @@ from .contracts import (
     EffectivePlanState,
     ExceptionCancelledPayload,
     ExceptionCorrectedPayload,
+    ExceptionRecordedPayload,
     ManagerResponseCommittedPayload,
     PROMPT_TEMPLATE_VERSION,
     SUPPORTED_PROMPT_TEMPLATE_VERSIONS,
@@ -553,6 +554,46 @@ def validate_active_exceptions_for_roster(
         ):
             raise StaffingError("invalid_exception_time", "outside selected roster shift")
     return ordered
+
+
+def validate_roster_replacement(
+    history: StaffingHistory, roster: RosterRevision
+) -> tuple[date, ...]:
+    """Fail closed before a roster import that would invalidate an active exception.
+
+    The incoming revision is the highest, so it governs every service date it
+    applies to. Each such date that carries active exceptions is materialized
+    against the incoming roster and checked with the read path's own rule, so
+    a replacement that would make a service date unreadable is refused before
+    anything is appended. Returns the service dates that were checked.
+    """
+
+    if type(roster) is not RosterRevision:
+        raise _invalid("roster")
+    events = _history_events(history)
+    candidates: set[date] = set()
+    for event in events:
+        payload = event.payload
+        if event.event_type == "exception_recorded":
+            if type(payload) is not ExceptionRecordedPayload:
+                raise _invalid("exception payload")
+            candidates.add(payload.service_date)
+        elif event.event_type == "exception_corrected":
+            if type(payload) is not ExceptionCorrectedPayload:
+                raise _invalid("correction payload")
+            candidates.add(payload.replacement_exception.service_date)
+    checked: list[date] = []
+    for service_date in sorted(candidates):
+        if not roster.applies_to(service_date):
+            continue
+        active = active_exceptions(events, service_date)
+        if not active:
+            continue
+        validate_active_exceptions_for_roster(
+            active, materialize_service_day(roster, service_date)
+        )
+        checked.append(service_date)
+    return tuple(checked)
 
 
 def build_staffing_basis(
